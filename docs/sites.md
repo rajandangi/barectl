@@ -51,9 +51,13 @@ A plain PHP site has a **Readiness path** on its Runtime page, `/` by default. A
 
 A non-default path is written as a `vars readiness_path` entry in the site's own Caddy file, which Caddy applies to every request. It holds no Barectl marker, and discovery reconstructs it from that file alone. Changing it is one **Site** change through the review and confirm screen; the review names the previous and new paths, and the run includes a real request before it succeeds. Create PHP site, a PHP change and a later catalog update use the same check. Laravel sites keep their own `/up` readiness check during Deploy and Roll back.
 
+## PHP settings
+
+A site's Runtime page also holds its **PHP settings**. The form edits the pool tunables the [supported configuration grammar](site-conventions.md#supported-configuration-grammar) already recognizes: the process manager, its children and spare counts, the idle, slow-request and request timeouts, and the memory, upload and post limits. Values outside those bounds are refused before a review is queued and again when the review is prepared. The review is one **Site** change naming the previous and new values. Applying rewrites only the site's own pool file, validates the candidate, and sends a graceful reload to the site's own master, so requests already running finish and no other site's master is touched. The site page then reports the reloaded values from server evidence. A fresh controller reconstructs them from the same pool file; nothing is stored in the controller as authority.
+
 ## Site pages
 
-Each site has **Overview**, **Runtime**, **Deployments** and **Activity** pages at `/servers/<pk>/sites/<identifier>/<section>/`. Overview shows the observed names, account, convention conformity, the HTTPS setting and the certificate state ([HTTPS](tls.md#certificate-state)) with the collection time. Runtime offers [PHP selection](runtimes.md#site-php-selection) and [Node selection](runtimes.md#site-node-selection) for the site. Deployments lists the Laravel releases discovery reconstructed from the server. Activity lists the changes this controller recorded for the identifier; it is history, not proof of the current site.
+Each site has **Overview**, **Runtime**, **Deployments** and **Activity** pages at `/servers/<pk>/sites/<identifier>/<section>/`. Overview shows the observed names, account, convention conformity, the HTTPS setting and the certificate state ([HTTPS](tls.md#certificate-state)) with the collection time. Runtime offers [PHP selection](runtimes.md#site-php-selection), [PHP settings](#php-settings) and [Node selection](runtimes.md#site-node-selection) for the site. Deployments lists the Laravel releases discovery reconstructed from the server. Activity lists the changes this controller recorded for the identifier; it is history, not proof of the current site.
 
 ## Creating a WordPress site
 

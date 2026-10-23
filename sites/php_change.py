@@ -88,9 +88,9 @@ def valid_php_service(value: object) -> bool:
         and re.fullmatch(r"[0-9a-f]{32}", invocation) is not None
         and valid_module_set(value.get("extensions"))
         and isinstance(children, list)
-        and len(children) == 2
+        and len(children) <= 64
         and all(type(child) is int and child > 0 for child in children)
-        and len(set(children)) == 2
+        and len(set(children)) == len(children)
         and isinstance(value.get("load"), dict)
         and isinstance(value.get("protections"), dict)
     )

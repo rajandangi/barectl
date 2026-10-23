@@ -26,7 +26,7 @@ from sites.bodies.admission import (
     haproxy_state,
     persist_proxy_state,
 )
-from sites.bodies.pool import supported_pool
+from sites.bodies.pool import SitePool, parse_pool, render_pool_settings, supported_pool
 from sites.bodies.pool_boundary import safe_pool_boundary
 from sites.bodies.site_fpm import RetainedEntry, sfp_file, sfp_retained_shape, site_fpm_evidence
 from sites.names import readiness_directive, readiness_ok, readiness_path, request
@@ -59,6 +59,7 @@ class SiteRecord(TypedDict):
     https: bool
     readiness: str
     certificate: dict[str, object] | None
+    pool: dict[str, object] | None
     account: list[object] | None
     file: str
     state: str
@@ -895,7 +896,17 @@ def retained_php_shape(settings: SimpleNamespace, *, active: bool) -> str:
     observed = php_runtime_entries(settings)
     if observed is None:
         return "unsupported"
-    return sfp_retained_shape(site_fpm_files(settings), observed, active)
+    expected = site_fpm_files(settings)
+    pool = site_pool_path(settings.identifier, settings.runtime)
+    try:
+        tuned = pathlib.Path(pool).read_text()
+    except OSError:
+        pass
+    else:
+        if parse_pool(settings.identifier, settings.runtime, tuned) is None:
+            return "unsupported"
+        expected[pool] = tuned
+    return sfp_retained_shape(expected, observed, active)
 
 
 def serving_shape(settings: SimpleNamespace, *, protections: bool = True) -> tuple[str, str]:
@@ -1047,6 +1058,7 @@ def partial_sites(
                 "https": False,
                 "readiness": "/",
                 "certificate": None,
+                "pool": None,
                 "account": attributes,
                 "file": f"/etc/caddy/sites/{identifier}.caddy",
                 "state": state,
@@ -1063,6 +1075,17 @@ def site_runtime_state(
     settings: SimpleNamespace, attributes: list[object] | None, *, protections: bool = True
 ) -> tuple[str, str]:
     return site_shape(settings, attributes, protections=protections)
+
+
+def site_pool_record(settings: SimpleNamespace) -> SitePool | None:
+    path = pathlib.Path(site_pool_path(settings.identifier, settings.runtime))
+    if not settings.runtime or not safe(str(path)):
+        return None
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    return parse_pool(settings.identifier, settings.runtime, text)
 
 
 def native_directories(entry: str) -> list[str]:
@@ -1200,6 +1223,7 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
     elif not supported:
         state = "unsupported"
         problem = CADDY_OUTSIDE
+    pool = site_pool_record(settings) if state == "complete" else None
     return {
         "identifier": settings.identifier,
         "names": settings.names,
@@ -1208,6 +1232,7 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
         "https": https,
         "readiness": settings.readiness,
         "certificate": certificate_state(list(settings.names), https),
+        "pool": pool.document() if pool is not None else None,
         "account": attributes,
         "file": str(path),
         "state": state,
@@ -1560,9 +1585,9 @@ def current_bytes(path: pathlib.Path) -> str | None:
     return path.read_text() if path.exists() else None
 
 
-def replace_caddy(path: pathlib.Path, value: str, expected: str | None) -> None:
+def replace_site_file(path: pathlib.Path, value: str, expected: str | None) -> None:
     if current_bytes(path) != expected or not safe(str(path.parent), directory=True):
-        raise ValueError("The Caddy preimage changed before publication.")
+        raise ValueError("The reviewed preimage changed before publication.")
     if expected is None:
         write_new(str(path), value, 0o644)
         return
@@ -1576,10 +1601,14 @@ def replace_caddy(path: pathlib.Path, value: str, expected: str | None) -> None:
             os.fsync(output.fileno())
             os.fchmod(output.fileno(), 0o644)
         if current_bytes(path) != expected or not safe(str(path.parent), directory=True):
-            raise ValueError("The Caddy preimage changed during staging.")
+            raise ValueError("The reviewed preimage changed during staging.")
         os.replace(temporary, path)
     finally:
         pathlib.Path(temporary).unlink(missing_ok=True)
+
+
+def replace_caddy(path: pathlib.Path, value: str, expected: str | None) -> None:
+    replace_site_file(path, value, expected)
 
 
 def reload_caddy() -> None:
@@ -1757,19 +1786,31 @@ def site_fpm_read(settings: SimpleNamespace) -> dict[str, object] | None:
         tuned = pathlib.Path(pool).read_text()
     except OSError:
         return None
-    if not supported_pool(settings.identifier, settings.runtime, tuned):
+    selected = parse_pool(settings.identifier, settings.runtime, tuned)
+    if selected is None:
         return None
     expected[pool] = tuned
     fcgi = os.path.realpath("/nix/var/nix/profiles/barectl/fcgi")
     if fcgi not in KNOWN_FCGI.get(os.uname().machine, ()):
         return None
+    minimum, maximum = pool_child_range(selected)
     return site_fpm_evidence(
         settings.identifier,
         settings.runtime,
         expected,
         KNOWN_PHP.get(os.uname().machine, {}).get(settings.runtime, ()),
         fcgi,
+        minimum,
+        maximum,
     )
+
+
+def pool_child_range(pool: SitePool) -> tuple[int, int]:
+    if pool.process_manager == "static":
+        return pool.max_children, pool.max_children
+    if pool.process_manager == "dynamic" and pool.min_spare_servers is not None:
+        return pool.min_spare_servers, pool.max_children
+    return 0, pool.max_children
 
 
 def wait_site_fpm(settings: SimpleNamespace) -> dict[str, object]:
@@ -2099,3 +2140,120 @@ def set_site_readiness(document: dict[str, object]) -> None:
             "partial" if changed else "refused",
             "site_readiness" if changed else "evidence",
         )
+
+
+def reload_site_fpm(settings: SimpleNamespace) -> None:
+    """Ask one site's own master to reload its pool and wait for the completed load."""
+    unit = php_site_unit(settings.identifier, settings.runtime)
+    command = ["systemctl", "show", unit, "--property=ActiveState,MainPID,InvocationID"]
+    before = unit_properties(run(command, check=False))
+    pid = before.get("MainPID", "")
+    if before.get("ActiveState") != "active" or not pid.isdecimal() or int(pid) <= 0:
+        raise ValueError("The site's own PHP master is not running.")
+    os.kill(int(pid), signal.SIGUSR2)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if site_fpm_read(settings) is not None:
+            after = unit_properties(run(command, check=False))
+            if after.get("MainPID") != pid or after.get("InvocationID") != before.get(
+                "InvocationID"
+            ):
+                raise ValueError("The site's PHP master was replaced instead of reloaded.")
+            return
+        time.sleep(0.5)
+    raise ValueError("The site's PHP master did not complete its reload.")
+
+
+def set_site_pool(document: dict[str, object]) -> None:
+    """Rewrite one site's bounded pool settings and reload only its own master."""
+    try:
+        descriptor = open_site_lock(str(document.get("identifier", "")))
+    except BlockingIOError:
+        result("lock_busy")
+        return
+    except OSError, ValueError:
+        result("refused", "unsafe_lock")
+        return
+    try:
+        pool_locked_change(document, descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def pool_locked_change(document: dict[str, object], descriptor: int) -> None:  # noqa: C901 - reviewed stages
+    identifier = str(document.get("identifier", ""))
+    pool = SitePool.from_document(document.get("pool"))
+    stage("preflight")
+    changed = False
+    path: pathlib.Path | None = None
+    preimage: str | None = None
+    candidate: str | None = None
+    settings: SimpleNamespace | None = None
+    try:
+        if pool is None:
+            result("refused", "evidence")
+            return
+        before = native_state("observed", "", protections=False)
+        if before["digest"] != document.get("precondition_digest"):
+            result("refused", "evidence")
+            return
+        site = next(
+            (row for row in before["sites"] if row["identifier"] == identifier),
+            None,
+        )
+        if site is None or site["state"] != "complete" or site["pool"] is None:
+            result("refused", "evidence")
+            return
+        settings = setting(
+            identifier,
+            site["names"],
+            site["runtime"],
+            https=site["https"],
+            readiness=site["readiness"],
+        )
+        path = pathlib.Path(site_pool_path(settings.identifier, settings.runtime))
+        preimage = current_bytes(path)
+        if preimage is None:
+            result("refused", "evidence")
+            return
+        candidate = render_pool_settings(preimage, pool)
+        account = pwd.getpwnam(settings.account)
+        validate_pool_candidate(settings, account.pw_uid, candidate)
+        if not same_site_lock(descriptor, identifier):
+            result("refused", "evidence")
+            return
+        if native_state("observed", "", protections=False)["digest"] != before["digest"]:
+            result("refused", "evidence")
+            return
+        stage("pool")
+        replace_site_file(path, candidate, preimage)
+        changed = True
+        stage("reload")
+        reload_site_fpm(settings)
+        stage("verify")
+        after = native_state("observed", "", protections=False)
+        current = next(
+            (item for item in after["sites"] if item["identifier"] == identifier),
+            None,
+        )
+        if (
+            current is None
+            or current["state"] != "complete"
+            or SitePool.from_document(current["pool"]) != pool
+        ):
+            raise ValueError("The reloaded pool did not verify.")
+        result("succeeded")
+    except ValueError, OSError, KeyError, subprocess.TimeoutExpired:
+        if (
+            changed
+            and path is not None
+            and preimage is not None
+            and candidate is not None
+            and settings is not None
+        ):
+            try:
+                replace_site_file(path, preimage, candidate)
+                reload_site_fpm(settings)
+            except ValueError, OSError, KeyError, subprocess.TimeoutExpired:
+                pass
+        result("partial" if changed else "refused", "site_pool" if changed else "evidence")

@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from sites.bodies.pool import SitePool
+
 INVALID_INPUTS = "Barectl refused invalid preparation inputs. Prepare a new review."
 
 
@@ -15,6 +17,7 @@ class InputShape(StrEnum):
     LARAVEL_CREATE = "laravel_create"
     SITE_RUNTIME = "site_runtime"
     SITE_READINESS = "site_readiness"
+    SITE_POOL = "site_pool"
     SITE_DATABASE = "site_database"
     LARAVEL_DEPLOY = "laravel_deploy"
     LARAVEL_ROLLBACK = "laravel_rollback"
@@ -39,6 +42,8 @@ class PreparationInputs:
     https: bool = False
     # The site's readiness path, for the one kind that changes it; empty otherwise.
     readiness: str = ""
+    # A site pool's reviewed tunables, for the one kind that changes them.
+    pool: SitePool | None = None
     # A database engine request that installs Git in the same reviewed transaction.
     git: bool = False
     # A Create Laravel site request: the repository locator, its branch or tag, and the
@@ -89,6 +94,12 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:
+        if self.pool is not None:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "pool": self.pool.document(),
+            }
         if self.settings_changes:
             return self._settings_document()
         if self.repository:
@@ -351,6 +362,23 @@ def _site_readiness_inputs(value: dict[str, object], choices: tuple[str, ...]) -
     return PreparationInputs("", identifier, readiness=path)
 
 
+def _site_pool_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import request
+
+    if set(value) != {"version", "identifier", "pool"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, pool = value["identifier"], SitePool.from_document(value["pool"])
+    if not isinstance(identifier, str) or pool is None or not pool.valid_change():
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, pool=pool)
+
+
 def _database_engine_inputs(
     value: dict[str, object], choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -494,6 +522,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.LARAVEL_CREATE: _laravel_create_inputs,
     InputShape.SITE_RUNTIME: _runtime_inputs,
     InputShape.SITE_READINESS: _site_readiness_inputs,
+    InputShape.SITE_POOL: _site_pool_inputs,
     InputShape.SITE_DATABASE: _site_database_inputs,
     InputShape.DATABASE_ENGINE: _database_engine_inputs,
     InputShape.LARAVEL_DEPLOY: lambda value, _choices: _laravel_deploy_inputs(value),

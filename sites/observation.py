@@ -18,6 +18,7 @@ from runtimes.observation import with_bounded
 
 from .bodies.common import PHP_TRANSITION_INCOMPLETE as PHP_TRANSITION_INCOMPLETE
 from .bodies.common import NativeState
+from .bodies.pool import SitePool, valid_pool_document
 from .configuration import (
     CADDY_TEMPLATE,
     MAINTENANCE_TEMPLATE,
@@ -95,7 +96,11 @@ COMMON_SOURCE: Final = with_bounded(
     importlib.resources.files("sites.bodies")
     .joinpath("common.py")
     .read_text()
-    .replace("from sites.bodies.pool import supported_pool\n", "")
+    .replace(
+        "from sites.bodies.pool import SitePool, parse_pool, render_pool_settings, "
+        "supported_pool\n",
+        "",
+    )
     .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
     .replace(
         "from sites.names import readiness_directive, readiness_ok, readiness_path, request\n",
@@ -364,10 +369,12 @@ def valid_site(site: object) -> bool:
         "names",
         "account",
     }
-    optional = {"application", "application_version", "application_problem"}
+    optional = {"application", "application_version", "application_problem", "pool"}
     if not isinstance(site, dict) or not required <= set(site) <= required | optional:
         return False
     if not _valid_application(site) or not _valid_site_scalars(site):
+        return False
+    if site.get("pool") is not None and not valid_pool_document(site["pool"]):
         return False
     return _valid_names(site["names"]) and _valid_account(site["account"])
 
@@ -492,6 +499,7 @@ def observed_site(site: dict[str, object]) -> ObservedSite:
         application=str(site.get("application", "plain")),
         application_version=str(site.get("application_version", "")),
         application_problem=str(site.get("application_problem", "")),
+        pool=SitePool.from_document(site.get("pool")),
     )
 
 

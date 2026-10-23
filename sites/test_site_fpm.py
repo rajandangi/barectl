@@ -83,6 +83,7 @@ class SiteFpmInventoryTests(TestCase):
         with patch("sites.bodies.site_fpm.pwd.getpwnam") as user:
             user.return_value.pw_uid = user.return_value.pw_gid = 1201
             self.assertIsNotNone(sfp_classify("alpha", 100, [master, *children]))
+            self.assertIsNotNone(sfp_classify("alpha", 100, [master], 0, 2))
             for extra in (
                 self.process(103, 101, "php script.php"),
                 self.process(103, 1, "php-fpm: pool alpha"),

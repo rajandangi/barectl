@@ -1,0 +1,83 @@
+{% load static %}
+<section class="barectl-card" aria-labelledby="site-php-settings-heading">
+  <h2 id="site-php-settings-heading">PHP settings</h2>
+  {% if site_pool %}
+    <p>
+      These limits apply to this site's own PHP master. A change rewrites only this site's
+      pool and reloads its master after running requests finish; no other site is restarted.
+    </p>
+    {% if site_pool_can_prepare %}
+      <form method="post"
+            action="{% url 'site_pool_prepare' server.pk identifier %}">
+        {% csrf_token %}
+        {% if site_pool_form.non_field_errors %}
+          <div class="usa-error-message" role="alert">{{ site_pool_form.non_field_errors }}</div>
+        {% endif %}
+        <div class="usa-form-group">
+          <label class="usa-label"
+                 for="{{ site_pool_form.process_manager.id_for_label }}">Process manager</label>
+          {{ site_pool_form.process_manager }}
+        </div>
+        <div class="usa-form-group">
+          <label class="usa-label"
+                 for="{{ site_pool_form.max_children.id_for_label }}">Maximum child processes</label>
+          <div class="usa-hint"
+               id="{{ site_pool_form.max_children.id_for_label }}_hint">1 to 64.</div>
+          {{ site_pool_form.max_children }}
+          {{ site_pool_form.max_children.errors }}
+        </div>
+        <fieldset class="usa-fieldset">
+          <legend class="usa-legend">Dynamic process manager</legend>
+          <p class="usa-hint">These counts apply only to the dynamic process manager.</p>
+          {% for field in site_pool_form %}
+            {% if field.name == "start_servers" or field.name == "min_spare_servers" or field.name == "max_spare_servers" %}
+              <div class="usa-form-group">
+                <label class="usa-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {{ field.errors }}
+              </div>
+            {% endif %}
+          {% endfor %}
+        </fieldset>
+        <fieldset class="usa-fieldset">
+          <legend class="usa-legend">Timeouts</legend>
+          <p class="usa-hint">Each timeout is 1 to 300 seconds, or blank to leave it unset.</p>
+          {% for field in site_pool_form %}
+            {% if field.name == "process_idle_timeout" or field.name == "slowlog_timeout" or field.name == "terminate_timeout" %}
+              <div class="usa-form-group">
+                <label class="usa-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {{ field.errors }}
+              </div>
+            {% endif %}
+          {% endfor %}
+        </fieldset>
+        <fieldset class="usa-fieldset">
+          <legend class="usa-legend">Limits</legend>
+          <p class="usa-hint">
+            Memory is 16 to 1024 MB. Upload and post limits are 1 to 256 MB. A blank limit
+            leaves PHP's own setting in place.
+          </p>
+          {% for field in site_pool_form %}
+            {% if field.name == "memory_limit" or field.name == "upload_max_filesize" or field.name == "post_max_size" %}
+              <div class="usa-form-group">
+                <label class="usa-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {{ field.errors }}
+              </div>
+            {% endif %}
+          {% endfor %}
+        </fieldset>
+        <button class="usa-button" type="submit">Review PHP settings</button>
+      </form>
+    {% elif blocking %}
+      {% include "operations/_blocking_operation.html" with after="Prepare the PHP settings after it finishes." %}
+    {% else %}
+      <p class="barectl-note">
+        PHP settings are unavailable until a fresh observation confirms this site is managed.
+      </p>
+    {% endif %}
+  {% else %}
+    <p class="barectl-note">The site's PHP pool settings were not observed.</p>
+  {% endif %}
+</section>

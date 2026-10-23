@@ -31,6 +31,7 @@ from servers.views import (
 from sites.deploy_views import prepare_deploy, prepare_rollback, save_deploy_settings
 from sites.node_views import prepare_node
 from sites.php_views import prepare_php
+from sites.pool_views import prepare_pool
 from sites.readiness_views import prepare_readiness
 from sites.views import (
     server_http_site_prepare,
@@ -51,6 +52,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/runtime/node/prepare/",
         prepare_node,
         name="site_node_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/runtime/php-settings/prepare/",
+        prepare_pool,
+        name="site_pool_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/readiness/prepare/",

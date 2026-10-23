@@ -274,6 +274,64 @@ else:
                     "/hello.txt",
                 )
 
+    def test_site_php_settings_reload_only_its_own_master_and_reconstruct(self) -> None:
+        from discovery.observations import collect
+        from operations.inputs import PreparationInputs
+        from sites.bodies.pool import SitePool
+        from sites.pool_change import SET_SITE_POOL
+
+        from .change_testing import apply_change
+
+        selected = SitePool(
+            process_manager="static",
+            max_children=4,
+            slowlog_timeout=5,
+            terminate_timeout=120,
+            memory_limit=256,
+            upload_max_filesize=32,
+            post_max_size=32,
+        )
+        masters = (
+            "systemctl show php-fpm-site-php84@s4alpha.service php-fpm@php84.service "
+            "-p MainPID -p InvocationID"
+        )
+        before = self.native(masters)
+        apply_change(self, SET_SITE_POOL, PreparationInputs("", "s4alpha", pool=selected))
+        self.assertEqual(self.native(masters), before)
+        with self.shell() as fresh:
+            observed = collect(fresh).sites.value
+            self.assertEqual(observed[0].pool, selected)
+            repeated = SET_SITE_POOL.review(
+                SET_SITE_POOL.inspect(fresh, PreparationInputs("", "s4alpha", pool=selected)),
+                PreparationInputs("", "s4alpha", pool=selected),
+            )
+            self.assertTrue(repeated.no_changes, repeated.refusals)
+        pool = self.native("cat /etc/php-fpm/sites/s4alpha/php84/pools/s4alpha.conf")
+        self.assertIn("pm.max_children = 4\n", pool)
+        self.assertIn("request_terminate_timeout = 120s\n", pool)
+        self.assertIn("php_admin_value[memory_limit] = 256M\n", pool)
+
+    def test_site_pool_settings_then_a_php_switch_uses_the_new_child_count(self) -> None:
+        from operations.inputs import PreparationInputs
+        from sites.bodies.pool import SitePool
+        from sites.php_change import SET_SITE_PHP
+        from sites.pool_change import SET_SITE_POOL
+
+        from .change_testing import apply_change
+
+        pool = SitePool(
+            process_manager="static",
+            max_children=4,
+            slowlog_timeout=5,
+            terminate_timeout=120,
+            memory_limit=256,
+            upload_max_filesize=32,
+            post_max_size=32,
+        )
+        apply_change(self, SET_SITE_POOL, PreparationInputs("", "s4alpha", pool=pool))
+        for runtime in ("php85", "php84"):
+            apply_change(self, SET_SITE_PHP, PreparationInputs(runtime, "s4alpha"))
+
     def test_site_specific_pool_setting_reports_the_site_without_faulting_its_master(self) -> None:
         from runtimes import observation as runtime_observation
         from runtimes.catalog import architecture_of

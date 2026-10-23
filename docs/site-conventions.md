@@ -76,6 +76,8 @@ Discovery reads the site file through `caddy adapt` and compares the adapted JSO
 
 Every other pool setting, and every other file above, must equal the convention. These are reconstruction bounds, not workload sizing. A resource with another setting is [Outside supported settings](../GLOSSARY.md): discovery reports it once against its site and blocks only the changes that depend on it. An unsafe pool identity, socket, include or OPcache override blocks that site's PHP changes.
 
+An operator changes the bounded pool tunables from the site's **PHP settings** form ([sites](sites.md#php-settings)). The apply validates the whole candidate pool, rewrites only that site's pool file, and sends `SIGUSR2` to the site's own master so running requests finish. Discovery recognizes the resulting reload from the master's journal and accepts the changed files, so the observed values survive a fresh controller.
+
 A site's readiness path is another supported setting in the Caddy file. The default `/` is implied by the absence of the directive. Another path is one `vars readiness_path "<path>"` entry, an absolute path without a query string, fragment or `.`/`..` segment; Caddy applies it to every request. Any other `vars` use is outside the convention.
 
 ## Reconstruction
