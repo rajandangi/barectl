@@ -64,7 +64,9 @@ Linux user over the local socket — MariaDB `unix_socket` or PostgreSQL `peer` 
 database password exists anywhere and no `AS` mapping is created
 ([ADR 0010](adr/0010-use-local-site-identities-for-database-access.md)). A plain PHP site
 adds its own database from **Site Settings > Database**, which shows the connection details.
-A Laravel site consumes the same convention from its own Create site change (#382).
+A Laravel site consumes the same convention from its own Create site change (#382). Removing
+a site drops this database and principal as part of its reviewed removal
+([removing a site](sites.md#removing-a-site)).
 
 **Add site database** is one reviewed change. Its review reads the site's native state and
 the engine's catalog, then refuses unless the site is complete, exactly one engine is

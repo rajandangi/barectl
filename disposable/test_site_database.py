@@ -209,6 +209,58 @@ class SiteDatabaseMariaDB(SiteDatabaseCase):
             operations_engine._sites_digest(fresh, draft)
             self.checkpoint("site-database-26.04", fresh)
 
+    def test_4_removes_the_site_and_keeps_another_site_serving(self) -> None:
+        from sites import change as sites_change
+        from sites import remove as remove_kind
+
+        other = "sdbside"
+        other_domain = other + ".example.com"
+        apply_change(
+            self,
+            sites_change.CREATE_SITE,
+            PreparationInputs("php84", other, (other_domain,)),
+            timeout=120,
+        )
+        self.assertIn(other, self.native("cat /var/www/sdbside/current/public/index.php"))
+        review = apply_change(
+            self,
+            remove_kind.REMOVE,
+            PreparationInputs("", IDENTIFIER),
+            timeout=120,
+        )
+        self.assertEqual(review.document["confirmation"], DOMAIN)
+        self.assertNotIn(
+            IDENTIFIER,
+            self.native(
+                "curl --fail --silent -H 'Host: sdbalpha.example.com' http://127.0.0.1/ || true"
+            ),
+        )
+        self.assertEqual(
+            self.native(
+                "test ! -e /etc/caddy/sites/sdbalpha.caddy && test ! -e /var/www/sdbalpha "
+                "&& test ! -e /etc/haproxy/sites/sdbalpha.cfg "
+                "&& test ! -e /etc/php-fpm/sites/sdbalpha "
+                "&& echo gone || echo remains"
+            ).strip(),
+            "gone",
+        )
+        self.assertEqual(self.native("getent passwd sdbalpha || echo absent").strip(), "absent")
+        self.assertEqual(self.native("getent passwd pdbalpha || echo absent").strip(), "absent")
+        self.assertEqual(
+            self.native(
+                f"{MYSQL} -N -B -e "  # noqa: S608 - fixed test names
+                + shlex.quote(
+                    "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='sdbalpha';"
+                    "SELECT COUNT(*) FROM mysql.global_priv WHERE User='sdbalpha'"
+                )
+            ).split(),
+            ["0", "0"],
+        )
+        self.assertIn(
+            other,
+            self.native(f"curl --fail --silent -H 'Host: {other_domain}' http://127.0.0.1/"),
+        )
+
 
 @tag(SCENARIO_TAG)
 class SiteDatabasePostgreSQL(SiteDatabaseCase):

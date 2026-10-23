@@ -21,6 +21,14 @@ class ChangeApplyForm(forms.Form):
     )
 
 
+class ChangeConfirmationForm(forms.Form):
+    """The exact value a destructive kind's review asks the operator to type."""
+
+    confirmation = forms.CharField(
+        error_messages={"required": "Type the value shown on the review to apply this change."},
+    )
+
+
 class AcknowledgeForm(forms.Form):
     understood = forms.BooleanField(
         label=(

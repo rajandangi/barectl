@@ -19,6 +19,7 @@ class InputShape(StrEnum):
     SITE_READINESS = "site_readiness"
     SITE_POOL = "site_pool"
     SITE_DATABASE = "site_database"
+    SITE_REMOVE = "site_remove"
     LARAVEL_DEPLOY = "laravel_deploy"
     LARAVEL_ROLLBACK = "laravel_rollback"
     DATABASE_ENGINE = "database_engine"
@@ -44,6 +45,8 @@ class PreparationInputs:
     readiness: str = ""
     # A site pool's reviewed tunables, for the one kind that changes them.
     pool: SitePool | None = None
+    # The primary domain a site-removal preparation uses when the server no longer names it.
+    primary: str = ""
     # A database engine request that installs Git in the same reviewed transaction.
     git: bool = False
     # A Create Laravel site request: the repository locator, its branch or tag, and the
@@ -108,7 +111,7 @@ class PreparationInputs:
             return self._wordpress_document()
         return self._other_document()
 
-    def _other_document(self) -> dict[str, object]:
+    def _other_document(self) -> dict[str, object]:  # noqa: C901 - every other shape
         if self.release:
             return {"version": 1, "identifier": self.identifier, "release": self.release}
         if self.readiness:
@@ -126,6 +129,8 @@ class PreparationInputs:
         if self.identifier and not self.names:
             if not self.selection:
                 value: dict[str, object] = {"version": 1, "identifier": self.identifier}
+                if self.primary:
+                    value["primary"] = self.primary
                 if not self.migrations:
                     value["migrations"] = False
                 return value
@@ -408,6 +413,24 @@ def _site_database_inputs(value: dict[str, object], choices: tuple[str, ...]) ->
     return PreparationInputs("", identifier)
 
 
+def _site_remove_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    """A site removal names its identifier and, when known, its primary domain fallback."""
+    from sites.names import canonical_name, valid_identifier
+
+    if set(value) not in (
+        {"version", "identifier"},
+        {"version", "identifier", "primary"},
+    ):
+        raise ValueError(INVALID_INPUTS)
+    identifier = value["identifier"]
+    if not isinstance(identifier, str) or not valid_identifier(identifier):
+        raise ValueError(INVALID_INPUTS)
+    primary = value.get("primary", "")
+    if not isinstance(primary, str) or (primary and canonical_name(primary)[1]):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, primary=primary)
+
+
 def _laravel_deploy_inputs(value: dict[str, object]) -> PreparationInputs:
     from sites.names import request
 
@@ -524,6 +547,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.SITE_READINESS: _site_readiness_inputs,
     InputShape.SITE_POOL: _site_pool_inputs,
     InputShape.SITE_DATABASE: _site_database_inputs,
+    InputShape.SITE_REMOVE: _site_remove_inputs,
     InputShape.DATABASE_ENGINE: _database_engine_inputs,
     InputShape.LARAVEL_DEPLOY: lambda value, _choices: _laravel_deploy_inputs(value),
     InputShape.LARAVEL_ROLLBACK: lambda value, _choices: _laravel_rollback_inputs(value),

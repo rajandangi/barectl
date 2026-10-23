@@ -55,9 +55,31 @@ A non-default path is written as a `vars readiness_path` entry in the site's own
 
 A site's Runtime page also holds its **PHP settings**. The form edits the pool tunables the [supported configuration grammar](site-conventions.md#supported-configuration-grammar) already recognizes: the process manager, its children and spare counts, the idle, slow-request and request timeouts, and the memory, upload and post limits. Values outside those bounds are refused before a review is queued and again when the review is prepared. The review is one **Site** change naming the previous and new values. Applying rewrites only the site's own pool file, validates the candidate, and sends a graceful reload to the site's own master, so requests already running finish and no other site's master is touched. The site page then reports the reloaded values from server evidence. A fresh controller reconstructs them from the same pool file; nothing is stored in the controller as authority.
 
+## Removing a site
+
+Open the site's **Settings** section and use **Remove site**. The page states plainly that
+the site's files and database data are destroyed and that no backup exists before Phase D.
+**Prepare removal review** queues a preparation and changes nothing on the server.
+
+The review lists everything that will be deleted: the Caddy site file, the site's HAProxy
+and PHP-FPM configuration and runtime directories, its `haproxy-site@` and
+`php-fpm-site-<runtime>@` services, its database and principal, Caddy's stored certificate
+for its names, the site directory with every release and private file, and the site and
+proxy Linux accounts. It also names the other sites that keep serving while Caddy reloads
+its whole configuration. It is Destructive consent, and applying it requires typing the
+site's primary domain exactly; a request without that value changes nothing.
+
+Applying is one run: it rechecks the reviewed inventory under the native lock, publishes
+the maintenance gate, validates the remaining Caddy tree, removes the site file and reloads
+Caddy, stops and disables the site's services, removes its FPM and HAProxy configuration,
+drops the database and principal, removes the stored certificate, deletes the site
+directory and its accounts, and verifies that nothing remains while the remaining sites
+serve. A failure reports **partly applied**; a fresh review names only what remains and
+finishes it. The database and all application data are not recoverable after the run.
+
 ## Site pages
 
-Each site has **Overview**, **Runtime**, **Deployments** and **Activity** pages at `/servers/<pk>/sites/<identifier>/<section>/`. Overview shows the observed names, account, convention conformity, the HTTPS setting and the certificate state ([HTTPS](tls.md#certificate-state)) with the collection time. Runtime offers [PHP selection](runtimes.md#site-php-selection), [PHP settings](#php-settings) and [Node selection](runtimes.md#site-node-selection) for the site. Deployments lists the Laravel releases discovery reconstructed from the server. Activity lists the changes this controller recorded for the identifier; it is history, not proof of the current site.
+Each site has **Overview**, **Runtime**, **Deployments**, **Database**, **Settings** and **Activity** pages at `/servers/<pk>/sites/<identifier>/<section>/`. Overview shows the observed names, account, convention conformity, the HTTPS setting and the certificate state ([HTTPS](tls.md#certificate-state)) with the collection time. Runtime offers [PHP selection](runtimes.md#site-php-selection), [PHP settings](#php-settings) and [Node selection](runtimes.md#site-node-selection) for the site. Deployments lists the Laravel releases discovery reconstructed from the server. Activity lists the changes this controller recorded for the identifier; it is history, not proof of the current site.
 
 ## Creating a WordPress site
 
@@ -96,4 +118,4 @@ A review of a site that already exists in this form proposes no changes. A fresh
 
 **Deploy settings** on the same page hold this controller's per-site switches. Turning **Run pending migrations during Deploy** off makes a Deploy report the migrations it finds in the run's journal and leave them unrun. The switch is Barectl's own behavior and lives in Barectl's database ([ADR 0039](adr/0039-keep-per-site-deploy-switches-on-the-controller.md)); a fresh controller starts from the default, migrations run, and every review states the state it will apply.
 
-The Deploy native body is written and the offline fixtures it needs (a Composer mirror, a Git server and an ACME server) exist; a scenario that deploys a Laravel site end to end is [Phase B](https://github.com/rajandangi/barectl/issues/259). Barectl still does not delete sites, rename them or change their names ([roadmap](../ROADMAP.md)).
+The Deploy native body is written and the offline fixtures it needs (a Composer mirror, a Git server and an ACME server) exist; a scenario that deploys a Laravel site end to end is [Phase B](https://github.com/rajandangi/barectl/issues/259). Barectl removes sites from **Settings**, and still does not rename them or change their names ([roadmap](../ROADMAP.md)).

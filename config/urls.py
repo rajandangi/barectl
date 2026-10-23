@@ -33,6 +33,7 @@ from sites.node_views import prepare_node
 from sites.php_views import prepare_php
 from sites.pool_views import prepare_pool
 from sites.readiness_views import prepare_readiness
+from sites.remove_views import prepare_remove
 from sites.views import (
     server_http_site_prepare,
     server_laravel_site_prepare,
@@ -151,6 +152,17 @@ urlpatterns = [
         site_detail,
         {"section": "database"},
         name="site_database",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/settings/",
+        site_detail,
+        {"section": "settings"},
+        name="site_settings",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/settings/remove/prepare/",
+        prepare_remove,
+        name="site_remove_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/environment/",

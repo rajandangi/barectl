@@ -15,9 +15,11 @@ class SitesConfig(AppConfig):
         from .php_change import SET_SITE_PHP
         from .pool_change import SET_SITE_POOL
         from .readiness_change import SET_SITE_READINESS
+        from .remove import REMOVE as REMOVE_SITE
 
         register_kind(CREATE_SITE)
         register_kind(SET_SITE_NODE)
         register_kind(SET_SITE_PHP)
         register_kind(SET_SITE_POOL)
         register_kind(SET_SITE_READINESS)
+        register_kind(REMOVE_SITE)

@@ -193,6 +193,27 @@ def steps_of(engine: str) -> tuple[str, ...]:
     return MARIADB_STEPS if engine == MARIADB else STEPS
 
 
+def drop_statements(engine: str, name: str) -> tuple[Statement, ...]:
+    """The reviewed statements that remove a site's binding and its data (Phase B #385).
+
+    The database is dropped first and the principal second, so a PostgreSQL principal
+    never owns a remaining database. Only the convention's exact name is addressed.
+    """
+    if IDENTIFIER.fullmatch(name.removeprefix("s")) is None:
+        raise ValueError("Not a site principal.")
+    if engine == MARIADB:
+        return (
+            Statement("database", "", f"DROP DATABASE IF EXISTS `{name}`"),
+            Statement("principal", "", f"DROP USER IF EXISTS `{name}`@`localhost`"),
+        )
+    if engine == POSTGRESQL:
+        return (
+            Statement("database", "postgres", f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'),
+            Statement("principal", "postgres", f'DROP ROLE IF EXISTS "{name}"'),
+        )
+    raise ValueError("Unknown database engine.")
+
+
 def _mariadb_catalog_sql(name: str) -> str:
     grantee = f"CONCAT(QUOTE('{name}'), '@', QUOTE('localhost'))"
     return (
