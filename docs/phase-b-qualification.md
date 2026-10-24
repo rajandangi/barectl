@@ -46,18 +46,18 @@ browser tests and native lifecycle scenarios run concurrently and each stage is 
 | Stage | Measured | Target | Limit | Result |
 | --- | --- | --- | --- | --- |
 | Controller fast tests, 931 tests (`--parallel`) | 21.8 s alone, 48 s inside the build | 90 s | | Meets the target |
-| Fast snapshot validators, 3 items | 39 s alone, 70 s inside the build | 60 s | | Meets the target alone; the joint stage misses it under the build's four-way contention (see below) |
+| Fast snapshot validators, 3 items | 39 s alone, 70 s inside the build | (part of the joint stage) | | The 60 s target is the joint stage; the validators have no separate target |
 | Browser tests | 56 s inside the build | | | |
 | Native lifecycle scenarios, 65 of 65 passed, 8 lanes | 280 s | 300 s | 900 s | Within the target |
 | Longest native item | 102.1 s (`LaravelDeployMariaDB`) | | 180 s | Within the item limit |
 | Full local build, wall time | 280 s | 300 s | 900 s | Meets the target |
 
-The [test time budget](quality.md#test-time-budget) measures the joint fast stage with the
-fast gate and the validators side by side. Inside the full build both run beside the browser
-suite and eight native lanes on 14 CPUs, so the same work takes 48 s and 70 s. Run alone on
-this host the fast gate takes 21.8 s for 931 tests and the validators take 39 s for 3 items,
-both well within their own targets; the joint 60 s target is missed only in the contended
-build. The Phase A record reports the same effect. An earlier build of the same code took
+The [test time budget](quality.md#test-time-budget) measures one joint fast stage with the
+fast gate and the validators side by side, and gives it a 60 s target. Inside the full build
+both run beside the browser suite and eight native lanes on 14 CPUs, so the same work takes
+more; the table above reports each of them. Run alone on this host the fast gate takes 27.3 s
+for 932 tests and the validators take 39 s for 3 items. The joint 60 s target is missed only in
+the contended build, where the two jobs overlap with everything else. The Phase A record reports the same effect. An earlier build of the same code took
 271 s with the same 65 scenarios, so the wall time varies by about 10 s between runs.
 
 Native item times vary more than the total, because exclusive scenarios wait for the lane and
@@ -127,7 +127,10 @@ What the Phase B classes assert:
   `/var/www/<id>/logs`, `/etc/caddy` or the journal, discovery reports core 7.1.3 without running
   PHP, a repeated review proposes nothing, and a reset password and core verification each
   report the documented outcome. A later test edits an extra constant with a second canary,
-  proves the fixed block stays byte-identical and the value never leaks.
+  proves the fixed block stays byte-identical and the value never leaks, and the last test
+  removes the WordPress site through the reviewed removal and checks its Caddy file,
+  directory, FPM and HAProxy configuration, accounts, database, principal and certificate are
+  gone while the host no longer serves it.
 - `LaravelCreateMariaDB` creates a Laravel site with a private repository over SSH, a deploy key
   and an exactly matched host-key fingerprint; it checks the private `.env`, the `APP_KEY`, the
   repository and branch, that a fresh controller reads the `.env` key names (never a value) and
@@ -136,10 +139,11 @@ What the Phase B classes assert:
 - `LaravelDeployMariaDB` pushes a reviewed commit, deploys it, checks the exact commit, the
   build, the shared `.env`/`storage`/`bootstrap/cache` links, the release modes, the pending
   migration run once behind the gate, the switch, readiness over the private socket and over
-  Caddy's HTTPS, that the site serves the new code and that `APP_KEY` is unchanged; then a
-  Deploy with migrations off reports them and runs none, Roll back reactivates a retained release
-  with the "not reversed" wording, a further Deploy prunes exactly the releases its review named,
-  and a full passive discovery runs no PHP, Composer, Git or Artisan (canary wrappers).
+  Caddy's HTTPS, that the site serves the new code and that `APP_KEY` is unchanged; then an
+  environment save rebuilds the cached configuration the Deploy built, a Deploy with migrations
+  off reports them and runs none, Roll back reactivates a retained release with the "not
+  reversed" wording, a further Deploy prunes exactly the releases its review named, and a full
+  passive discovery runs no PHP, Composer, Git or Artisan (canary wrappers).
 - `LaravelDeployOutcomes` refuses URL credentials, an unsafe branch, a submodule, an LFS filter
   and a repository hook at review; a forged apply without the migration acknowledgement cannot
   build a body; a broken `composer.json` fails before the switch with the old release serving and
@@ -183,10 +187,10 @@ Two clauses cannot be one run, and the record says so plainly:
 | --- | --- |
 | WordPress on MariaDB created over HTTPS from a local ACME server | `WordPressCreateMariaDB` (home, login and REST over Pebble-issued HTTPS) |
 | Laravel on MariaDB and on PostgreSQL created | `LaravelCreateMariaDB`, `LaravelDeployPostgreSQL` |
-| Deployed twice, once with a migration | `LaravelDeployMariaDB` (first Deploy runs the migration; second Deploy with migrations off; a further Deploy prunes) |
+| Deployed twice, once with a migration | `LaravelDeployMariaDB` (first Deploy runs the migration; second Deploy with migrations off; a further Deploy prunes), with an environment save between them that rebuilds the cached configuration |
 | Rolled back | `LaravelDeployMariaDB` Roll back over a retained release |
-| Reconfigured with a secret | `LaravelCreateMariaDB` and `WordPressCreateMariaDB` settings tests, each with its own canary |
-| One site removed | `SiteDatabaseMariaDB`, which removes a site through the reviewed change while another keeps serving |
+| Reconfigured with a secret | `LaravelDeployMariaDB` edits a deployed site's environment, and `LaravelCreateMariaDB` and `WordPressCreateMariaDB` edit theirs, each with its own canary |
+| One site removed | `WordPressCreateMariaDB` removes the WordPress site through the reviewed change and checks every resource is gone; `SiteDatabaseMariaDB` removes a plain site while another keeps serving |
 | No routine SSH | Every create, deploy, roll back, settings change and removal above is applied through the change engine by the product's own preparation and native body; the harness uses SSH only to inspect the server and push the fixture commit |
 | Secret canaries never outside their private files | [Secret canaries](#secret-canaries) |
 | A fresh controller reconstructs everything; repeated reviews propose nothing | `FreshControllerReconstruction`, `HttpsSite`, `DatabaseEngineMariaDB`/`PostgreSQL`, `SiteDatabaseMariaDB`/`PostgreSQL`, `WordPressCreateMariaDB`, `LaravelCreateMariaDB`, `LaravelReleaseReconstruction`; each row also asserts a repeated review proposes no changes |
@@ -283,7 +287,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 59. Roll back to a retained release with a review that says nothing is reversed | `laravel/test_change.py::RollbackReviewTests`; native `LaravelDeployMariaDB` |
 | 60. Each deploy keeps the newest five releases and names the removed ones | `laravel/test_change.py::DeployReviewTests` (prune set); native `LaravelDeployMariaDB` final Deploy |
 | 61. A Deploy is refused before any change when the disk lacks the space the review states | `laravel/test_change.py::test_a_deploy_is_refused_before_any_change_when_the_disk_lacks_space` |
-| 62. Each release's commit, time and state listed under Settings > Deployments | `sites/test_deploy_pages.py`; native `LaravelReleaseReconstruction` |
+| 62. Each release's commit, time and state listed under Settings > Deployments | `sites/test_deploy_pages.py` checks the release, commit, created time, status and serving columns; native `LaravelReleaseReconstruction` |
 | 63. `.env`, storage and logs live outside releases and are shared | Native `LaravelDeployMariaDB` follows the shared links and checks the release modes |
 | 64. Laravel's logs rotate daily and keep 14 days | `laravel/test_configuration.py::EnvironmentTests` and the create review's `.env`; native `LaravelCreateMariaDB` |
 | 65. A CI-created release in the same layout is discovered and listed | Native `LaravelReleaseReconstruction` |
@@ -299,7 +303,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 70. WordPress extra named constants in its private configuration | `wordpress/test_settings.py`; native `WordPressCreateMariaDB` third test |
 | 71. A typed secret is unreadable after a worker restart or 10 minutes and cleared once sent | `operations/test_confidential.py`, `operations/test_secret_channel.py`; native `ConfidentialChannelLifecycle` |
 | 72. Secrets never in arguments, unit properties, the journal, run records, events, pages or responses, with known values scrubbed from stored output | Fast canaries in `operations/test_secret_channel.py`, `wordpress/test_actions.py`, `laravel/test_settings.py`, `wordpress/test_settings.py`; native canaries in `ConfidentialChannelLifecycle`, `WordPressCreateMariaDB`, `LaravelCreateMariaDB`, `LaravelDeployMariaDB` |
-| 73. Saving Laravel settings rebuilds the cached configuration | `laravel/test_settings.py::EnvironmentBodyTests` (rebuild when a cache is in use; partly applied if it fails) |
+| 73. Saving Laravel settings rebuilds the cached configuration | Native `LaravelDeployMariaDB`: after a Deploy built the cache, an environment save rewrites the private `.env` and the body's `config` stage runs, with the site still answering 200; `laravel/bodies/settings.py` reports partly applied if the rebuild fails |
 | 74. Editing secrets needs "manage secrets" as well as site changes | `wordpress/test_actions.py`, `laravel/test_settings.py`, `operations` permission tests; the browser permission journeys |
 | 75. Secrets are write-only in the dashboard | `sites/test_settings_pages.py`, `wordpress/test_settings.py`, `laravel/test_settings.py`; a full collection stores key names and digests only |
 
@@ -308,7 +312,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | Story | Evidence |
 | --- | --- |
 | 76. Change memory limit, upload size, worker count and timeouts within the bounds | `sites/test_pool_settings.py` (15 tests); native `HttpSiteNativeBehavior` sets four children, switches PHP both ways and reconstructs the values |
-| 77. Remove a site by typing its domain, with a review listing everything deleted | `sites/test_remove.py` (16 tests, including the forged apply and partial removal); native `SiteDatabaseMariaDB` removes a site while another keeps serving |
+| 77. Remove a site by typing its domain, with a review listing everything deleted | `sites/test_remove.py` (16 tests, including the forged apply and partial removal); native `SiteDatabaseMariaDB` removes a plain site while another keeps serving, and `WordPressCreateMariaDB` removes the WordPress site with its file, directory, configs, accounts, database, principal and certificate |
 | 78. Remove a PHP version that no site and no server default uses | `runtimes/test_remove.py`; native `CatalogRuntimeUpdate` |
 | 79. "Update available" for PHP, Caddy and HAProxy with the affected sites named | `runtimes/test_update.py`; native `CatalogRuntimeUpdate` |
 | 80. A PHP update applied through the request-preserving switch | Native `CatalogRuntimeUpdate` measures zero refused requests through Caddy during the update |
@@ -321,7 +325,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 82. Every Phase B change recovers through #179 Journey 7 | **Partly qualified.** The engine's Check outcome is one path and is proven for Deploy failures; the browser Journey 7 is [#370](https://github.com/rajandangi/barectl/issues/370), still open, and no Phase B change has a browser recovery journey |
 | 83. A fresh controller reconstructs certificates, engines, databases and users, applications, releases and `current`, settings keys and deploy keys | Native `FreshControllerReconstruction`, `HttpsSite`, `DatabaseEngineMariaDB`/`PostgreSQL`, `SiteDatabaseMariaDB`/`PostgreSQL`, `WordPressCreateMariaDB`, `LaravelCreateMariaDB`, `LaravelReleaseReconstruction` |
 | 84. A hand-made resource that follows the convention is managed like Barectl's, and anything else is reported once | `sites/test_target_discovery.py::RecordedJudgeByShapeTests`, `sites/test_target_configuration.py`, native `JudgeByShape`, `HttpSiteReconstruction`, `LaravelReleaseReconstruction` |
-| 85. A viewer sees sites, certificates, deployments and settings keys without changing them | Viewer cases across `sites/test_*_pages.py`, `wordpress/test_actions.py`, `laravel/test_settings.py`, `sites/test_laravel_create.py` |
+| 85. A viewer sees sites, certificates, deployments and settings keys without changing them | `sites/test_settings_pages.py::test_a_viewer_reads_the_certificate_releases_and_settings_keys` (certificate, releases and key names, with SSH patched out); `sites/test_target_pages.py` viewer case; the viewer refusals in `sites/test_deploy_pages.py`, `sites/test_pool_settings.py`, `sites/test_remove.py` and `databases/*` |
 | 86. Every new journey works with a keyboard, a screen reader and a 320-pixel screen | **Partly qualified.** Browser journeys cover the three create forms, the WordPress password reset and phone-width recognition with keyboard and focus checks; Deploy, settings, database install and removal have no browser journey ([#447](https://github.com/rajandangi/barectl/issues/447)) |
 | 87. Opening any page makes no SSH connection | Page tests patch `discovery.ssh.connect` to fail (`sites/test_target_pages.py`, `sites/test_deploy_pages.py`, `sites/test_settings_pages.py`, `sites/test_remove.py`, `databases/test_site.py`, `wordpress/test_actions.py`), and the browser journeys do the same |
 
