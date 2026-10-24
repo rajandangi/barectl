@@ -22,7 +22,7 @@ that section says so, dependency lock entries for disclosed advisories.
 | Evidence | Where |
 | --- | --- |
 | Local fast suite, fast validators and native lifecycle scenarios, arm64 | `b534ffa` |
-| Hosted Checks and Native (4 shards), amd64 | The head of `qualify/387-phase-b` after this record (see [hosted runs](#hosted-runs)). |
+| Hosted Checks and Native (4 shards), amd64 | `9a554fd`, Checks run [40051602027](https://github.com/rajandangi/barectl/actions/runs/40051602027) and Native run [40051602025](https://github.com/rajandangi/barectl/actions/runs/40051602025) (see [hosted runs](#hosted-runs)). |
 
 ## Environments
 
@@ -77,26 +77,27 @@ against one prepared server.
 
 | Scenario | Class | Local arm64 | Hosted amd64 |
 | --- | --- | --- | --- |
-| S11 HTTPS and certificate state | `HttpsSite` | 16.6 s | 41.9 s |
-| S11 Database engine, MariaDB | `DatabaseEngineMariaDB` | 33.4 s | 64.3 s |
-| S11 Database engine, PostgreSQL | `DatabaseEnginePostgreSQL` | 23.8 s | 40.6 s |
-| S11 Site database, MariaDB | `SiteDatabaseMariaDB` | 31.7 s | 84.5 s |
-| S11 Site database, PostgreSQL | `SiteDatabasePostgreSQL` | 24.8 s | 66.3 s |
-| S12 WordPress lifecycle | `WordPressCreateMariaDB` | 44.3 s | 121.3 s |
-| S13 Laravel create | `LaravelCreateMariaDB` | 32.6 s | 79.1 s |
-| S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 67.4 s | 127.0 s |
-| S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 51.2 s | 124.4 s |
-| S13 Deploy boot failure | `LaravelDeployBootFailure` | 43.0 s | 71.1 s |
-| S13 CI release reconstruction | `LaravelReleaseReconstruction` | 12.8 s | 38.2 s |
-| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` | 31.1 s | 56.0 s |
-| S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 29.1 s | 48.7 s |
-| S15 Failed catalog update | `CatalogRuntimeUpdateFailure` | 15.3 s | 28.2 s |
-| S16 Confidential input channel | `ConfidentialChannelLifecycle` | 2.7 s | 3.6 s |
+| S11 HTTPS and certificate state | `HttpsSite` | 16.6 s | 36.8 s |
+| S11 Database engine, MariaDB | `DatabaseEngineMariaDB` | 33.4 s | 64.7 s |
+| S11 Database engine, PostgreSQL | `DatabaseEnginePostgreSQL` | 23.8 s | 39.6 s |
+| S11 Site database, MariaDB | `SiteDatabaseMariaDB` | 31.7 s | 77.9 s |
+| S11 Site database, PostgreSQL | `SiteDatabasePostgreSQL` | 24.8 s | 65.1 s |
+| S12 WordPress lifecycle | `WordPressCreateMariaDB` | 44.3 s | 124.4 s |
+| S13 Laravel create | `LaravelCreateMariaDB` | 32.6 s | 77.6 s |
+| S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 67.4 s | 120.6 s |
+| S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 51.2 s | 124.1 s |
+| S13 Deploy boot failure | `LaravelDeployBootFailure` | 43.0 s | 70.5 s |
+| S13 CI release reconstruction | `LaravelReleaseReconstruction` | 12.8 s | 38.4 s |
+| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` | 31.1 s | 56.1 s |
+| S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 29.1 s | 47.0 s |
+| S15 Failed catalog update | `CatalogRuntimeUpdateFailure` | 15.3 s | 22.6 s |
+| S16 Confidential input channel | `ConfidentialChannelLifecycle` | 2.7 s | 3.7 s |
 
 The Phase A scenarios S1 to S10 also run on this revision and all passed; their times are in
 the Phase A record. The hosted column is from the run named under [Hosted runs](#hosted-runs)
 and is kept for comparison rather than as this revision's measurement. The longest item is
-`LaravelDeployMariaDB` at 67.4 s locally and 127.0 s hosted, inside the 180 s item limit.
+`LaravelDeployMariaDB` at 67.4 s locally and `WordPressCreateMariaDB` at 124.4 s hosted, both
+inside the 180 s item limit.
 
 What the Phase B classes assert:
 
@@ -442,39 +443,39 @@ measured for memory or disk.
 
 ## Hosted runs
 
-`Checks` run [40045263588](https://github.com/rajandangi/barectl/actions/runs/40045263588) at
-`d4c2509`, all required jobs passed:
+`Checks` run [40051602027](https://github.com/rajandangi/barectl/actions/runs/40051602027) at
+`9a554fd`, all required jobs passed:
 
 | Job | Time | Result |
 | --- | --- | --- |
-| `check` | 1 m 59 s | Passed |
-| `browser` | 7 m 13 s | Passed |
-| `frontend` | 19 s | Passed |
-| `dependency-audit` | 32 s | Passed |
+| `check` | 1 m 58 s (the 932 fast tests took 84.4 s) | Passed; within the 90 s fast-gate target |
+| `browser` | 1 m 56 s (30 tests in 67.4 s) | Passed |
+| `frontend` | 18 s | Passed |
+| `dependency-audit` | 19 s | Passed |
 
-`Native` run [40045263585](https://github.com/rajandangi/barectl/actions/runs/40045263585),
+`Native` run [40051602025](https://github.com/rajandangi/barectl/actions/runs/40051602025),
 amd64, four shards of two lanes, all passed:
 
 | Shard | Job wall time | Reported by the runner |
 | --- | --- | --- |
-| 1 of 4 | 10 m 42 s | Fast validators 3 of 3 in 110 s; egress control refused as intended; lifecycle scenarios 17 of 17 in 489 s |
-| 2 of 4 | 7 m 4 s | 16 of 16 in 378 s |
-| 3 of 4 | 6 m 56 s | 16 of 16 in 370 s |
-| 4 of 4 | 6 m 19 s | 16 of 16 in 340 s |
-| Required `native` check | 3 s | Passed |
+| 1 of 4 | 10 m 32 s | Fast validators 3 of 3 in 105 s; egress control refused as intended; lifecycle scenarios 17 of 17 in 476 s |
+| 2 of 4 | 6 m 52 s | 16 of 16 in 365 s |
+| 3 of 4 | 6 m 38 s | 16 of 16 in 369 s |
+| 4 of 4 | 6 m 14 s | 16 of 16 in 346 s |
+| Required `native` check | 4 s | Passed |
 
 The shards restored the keyed L1 snapshot (`native-l1-Linux-X64-l1-3c576d91e2a6`), so the
 reported scenario times contain no S1 preparation. Every shard stays inside the 900 s hard
-limit and no item exceeds 180 s, but every shard exceeds the [test time budget](quality.md#test-time-budget)'s
-300 s target for one hosted shard; the longest is 489 s on shard 1, which also carries the
-validators and the egress control. The gap is tracked as [#449](https://github.com/rajandangi/barectl/issues/449);
-the local full build (280 s) is inside its own target.
+limit and no item exceeds 180 s, but every shard exceeds the
+[test time budget](quality.md#test-time-budget)'s 300 s target for one hosted shard; the
+longest is 476 s on shard 1, which also carries the validators and the egress control. The
+gap predates this branch (#441's run [39952707552](https://github.com/rajandangi/barectl/actions/runs/39952707552)
+reported 518 s and 499 s) and is tracked as [#449](https://github.com/rajandangi/barectl/issues/449).
+The local full build (218 s) is inside its own target.
 
-The first run on this branch (`3f52be1`, runs [40042339830](https://github.com/rajandangi/barectl/actions/runs/40042339830)
-and [40042340100](https://github.com/rajandangi/barectl/actions/runs/40042340100)) failed
-`dependency-audit` on advisories disclosed after the branch point: `filelock` 4.0.3 (three
-CVEs) and then, once that was fixed, `fast-uri` 3.1.8 and `zod` 4.6.5. Both lock updates are in
-this branch's history, and the audit passes at `d4c2509`. That run also missed the L1 cache on
-all shards (the last `Native` run on `main` predates the catalog-update change), so each shard
+Earlier runs on this branch failed `dependency-audit` on advisories disclosed after the branch
+point: `filelock` 4.0.3 (three CVEs) and then `fast-uri` 3.1.8 and `zod` 4.6.5. Both lock
+updates are in the branch's history. The first run (`3f52be1`) also missed the L1 cache on all
+shards, because the last `Native` run on `main` predates the catalog-update change; each shard
 prepared L1 through S1 and the shard times were 853 s, 573 s, 543 s and 573 s, still inside the
 900 s limit.
