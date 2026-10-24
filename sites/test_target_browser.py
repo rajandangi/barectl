@@ -39,7 +39,12 @@ class HttpSiteBrowserTests(BrowserTestCase):
         names.fill("second.example.com")
         expect(identifier).to_have_value("myshop")
         identifier.fill("apply")
-        form.get_by_label("PHP runtime", exact=True).select_option("php84")
+        php = form.get_by_label("PHP runtime", exact=True)
+        php.select_option("php85")
+        expect(
+            form.get_by_role("button", name="Step 1: install PHP 8.5", exact=True)
+        ).to_be_visible()
+        php.select_option("php84")
         button = form.get_by_role("button", name="Prepare HTTP site review", exact=True)
         button.focus()
         self.page.keyboard.press("Enter")
@@ -64,7 +69,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         from operations.services import read_changes
 
         server = Server.objects.get(name="Production")
-        record_http_sites(server)
+        record_http_sites(server, engine="mariadb")
         for codename in ("view_siteobservation", "view_changes", "change_site"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
@@ -135,6 +140,76 @@ class HttpSiteBrowserTests(BrowserTestCase):
                 "admin_email": "admin@example.com",
             },
         )
+
+    def test_operator_installs_a_missing_engine_first_and_keeps_the_create_answers(
+        self,
+    ) -> None:
+        from unittest import mock
+
+        from operations.services import read_changes
+        from sites.ui_testing import record_step_run
+
+        server = Server.objects.get(name="Production")
+        record_wordpress_sites(server, engine="")
+        for codename in ("view_siteobservation", "view_changes", "change_site", "manage_secrets"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        self.page.set_viewport_size({"width": 320, "height": 740})
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
+            form = self.page.locator("#wordpress-site-create")
+            expect(form.get_by_text("Step 1: install MariaDB on this server")).to_be_visible()
+            form.get_by_label("Primary domain", exact=True).fill("shop.example.com")
+            form.get_by_label("Site title", exact=True).fill("Shop")
+            form.get_by_label("Administrator username", exact=True).fill("shopadmin")
+            form.get_by_label("Administrator email", exact=True).fill("admin@example.com")
+            form.get_by_label("PHP runtime", exact=True).select_option("php84")
+            self.assertEqual(
+                self.page.evaluate(
+                    "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+                ),
+                0,
+            )
+            step = form.get_by_role("button", name="Step 1: install MariaDB", exact=True)
+            step.focus()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Install database engine: review", exact=True)
+            ).to_be_visible()
+        rows = read_changes(server).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].preparation.inputs, {"version": 1, "selection": "mariadb"})
+        run = record_step_run(rows[0].preparation)
+        # The worker's refresh observes MariaDB before the operator continues.
+        record_wordpress_sites(server)
+        self.page.goto(f"{self.live_server_url}/runs/{run.pk}/")
+        expect(self.page.get_by_text("Step 1 is complete.")).to_be_visible()
+        link = self.page.get_by_role("link", name="Continue creating the WordPress site")
+        link.focus()
+        self.page.keyboard.press("Enter")
+        form = self.page.locator("#wordpress-site-create")
+        expect(form.get_by_label("Primary domain", exact=True)).to_have_value("shop.example.com")
+        expect(form.get_by_label("Site title", exact=True)).to_have_value("Shop")
+        expect(form.get_by_label("Administrator email", exact=True)).to_have_value(
+            "admin@example.com"
+        )
+        expect(form.get_by_label("PHP runtime", exact=True)).to_have_value("php84")
+        self.assertEqual(
+            self.page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+        button = form.get_by_role("button", name="Prepare WordPress site review", exact=True)
+        button.focus()
+        self.page.keyboard.press("Enter")
+        expect(
+            self.page.get_by_role("heading", name="Create WordPress site: review", exact=True)
+        ).to_be_visible()
+        rows = read_changes(server).rows
+        self.assertEqual(rows[0].preparation.kind_slug, "create_wordpress_site")
+        self.assertEqual(rows[0].preparation.inputs["title"], "Shop")
+        self.assertEqual(rows[0].preparation.inputs["admin_email"], "admin@example.com")
 
     def test_operator_changes_domains_and_https_from_settings_with_a_keyboard(self) -> None:
         from unittest import mock

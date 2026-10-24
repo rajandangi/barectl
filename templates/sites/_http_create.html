@@ -14,8 +14,9 @@
   {% if http_site_observed_at %}
     <p class="usa-hint">Installed runtimes recorded <time datetime="{{ http_site_observed_at|date:'c' }}">{{ http_site_observed_at|date:'M j, Y, H:i:s T' }}</time>.</p>
   {% endif %}
-  {% if not http_site_versions %}
-    <p>No verified PHP runtimes are available in the current observation. Run discovery or add a runtime from Stack before creating a site.</p>
+  {% include "sites/_creation_continuation.html" with continuation=http_site_continuation prefix="http" %}
+  {% if not http_site_has_choices %}
+    <p>No PHP runtime is installed or offered in the current observation. Run discovery before creating a site.</p>
   {% elif not http_site_can_prepare %}
     <p>Resolve the server's findings or wait for its active operation to finish before preparing this review.</p>
   {% endif %}
@@ -54,6 +55,11 @@
     </details>
     <button class="usa-button"
             type="submit"
+            data-site-create-submit
+            data-site-create-label="Prepare HTTP site review"
             {% if not http_site_can_prepare %}disabled{% endif %}>Prepare HTTP site review</button>
+    {% if http_site_installable %}
+      {% include "sites/_php_install_hint.html" %}
+    {% endif %}
   </form>
 </section>

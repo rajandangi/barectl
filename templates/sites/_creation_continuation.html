@@ -1,0 +1,10 @@
+{% if continuation %}
+  <div class="usa-alert usa-alert--info usa-alert--slim"
+       id="{{ prefix }}-site-continuation">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">
+        <strong>Your answers are kept.</strong> {{ continuation.resume_note }}
+      </p>
+    </div>
+  </div>
+{% endif %}

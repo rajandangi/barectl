@@ -1,4 +1,5 @@
 import "./styles/main.scss";
+import "./site-create.ts";
 import "./site-identifier.ts";
 import "./secret-generate.ts";
 import htmx from "htmx.org";

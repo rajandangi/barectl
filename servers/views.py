@@ -365,11 +365,13 @@ def server_page(
     ) or http_site_form is not None
     context["target_host"] = target_host
     if section == "sites" and target_host:
+        from sites import continuation
         from sites.views import http_site_context, laravel_site_context, wordpress_site_context
 
-        context.update(http_site_context(server, http_site_form))
-        context.update(laravel_site_context(server, laravel_site_form))
-        context.update(wordpress_site_context(server, wordpress_site_form))
+        step = continuation.requested_step(request, server.pk)
+        context.update(http_site_context(server, http_site_form, step))
+        context.update(laravel_site_context(server, laravel_site_form, step))
+        context.update(wordpress_site_context(server, wordpress_site_form, step))
         context["http_site_permission"] = request.user.has_perms(PREPARE_PERMISSIONS)
     return render(request, "servers/detail.html", context, status=status)
 

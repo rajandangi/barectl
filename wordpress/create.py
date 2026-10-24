@@ -163,7 +163,7 @@ def _database_refusals(evidence: WordPressEvidence, identifier: str) -> list[str
         return [
             (
                 "This server has no database engine. Install MariaDB from Server Settings "
-                "before creating a WordPress site."
+                "or as Step 1 of Create site before creating a WordPress site."
             )
         ]
     if database.engine != binding.MARIADB:

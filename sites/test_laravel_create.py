@@ -77,7 +77,7 @@ class LaravelSiteTileTests(ControllerConfigTestCase):
         self.grant("view_server", "view_siteobservation", "view_changes", "change_site")
         self.client.force_login(self.user)
         self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        record_http_sites(self.server)
+        record_http_sites(self.server, engine="mariadb")
 
     def test_the_tile_asks_domain_repository_and_branch_with_the_identifier_under_more(
         self,
@@ -95,3 +95,4 @@ class LaravelSiteTileTests(ControllerConfigTestCase):
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
         self.assertNotContains(response, "Prepare Laravel site review")
+        self.assertNotContains(response, "Step 1: install MariaDB")

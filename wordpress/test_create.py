@@ -91,6 +91,14 @@ class WordPressSiteTileTests(ControllerConfigTestCase):
         self.assertContains(response, 'name="admin_email"')
         self.assertContains(response, "Prepare WordPress site review")
 
+    def test_a_missing_engine_is_offered_as_step_one(self) -> None:
+        record_wordpress_sites(self.server, engine="")
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            response = self.client.get(f"/servers/{self.server.pk}/sites/")
+        self.assertContains(response, "Step 1: install MariaDB on this server")
+        self.assertContains(response, "Step 1: install MariaDB")
+        self.assertNotContains(response, "Install a database engine from Server Settings first.")
+
     def test_postgresql_disables_the_tile_with_the_reason(self) -> None:
         record_wordpress_sites(self.server, engine="postgresql")
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):

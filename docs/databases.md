@@ -9,7 +9,9 @@ gets its own database and principal, both named `s<id>`, over the local socket
 
 Server **Settings > Database** shows whether the server has MariaDB, PostgreSQL or no
 engine, with the engine's version and how it is running, and offers **Install** for the
-engine it lacks. Installing is one reviewed change:
+engine it lacks. Create site offers the same reviewed install as Step 1 when a WordPress or
+Laravel host has no engine ([sites](sites.md#step-1-a-missing-runtime-or-database-engine)).
+Installing is one reviewed change:
 
 - The **review** simulates the installation with APT's own resolver against the server's
   configured sources and names every package at its exact version in the review document.

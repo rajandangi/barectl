@@ -141,6 +141,7 @@ if TYPE_CHECKING:
     from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
+    from sites.continuation import CreationStep
     from sites.forms import (
         HttpSiteForm,
         LaravelSiteForm,
@@ -289,6 +290,8 @@ if TYPE_CHECKING:
     )
     # The HTTP creation template renders this declared field by name.
     _http_site_field = HttpSiteForm.http_only
+    # The create form renders the Step 1 continuation note from the session step.
+    _creation_step = CreationStep.resume_note
     # The Stack page's runtime catalog template reads these fields.
     _shown_build = ShownBuild("", "", "", 0, 0)
     _runtime_catalog = (

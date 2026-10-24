@@ -2,6 +2,7 @@
 (docs/adr/0035-one-change-engine-with-effect-derived-consent.md)."""
 
 import json
+from typing import TYPE_CHECKING
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -26,8 +27,11 @@ from .forms import (
     SharedApplyForm,
 )
 from .inputs import InputShape
-from .models import MANAGE_SECRETS, VIEW_CHANGES, ChangeReview, Consent
+from .models import MANAGE_SECRETS, VIEW_CHANGES, ChangePreparation, ChangeReview, Consent
 from .presentation import ChangeView, RunView, change_view, run_view
+
+if TYPE_CHECKING:
+    from sites.continuation import StepBanner
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
@@ -144,8 +148,25 @@ def change_detail(request: HttpRequest, operation_id: int) -> HttpResponse:
         "shared_form": SharedApplyForm(),
         "kind_form": ChangeApplyForm(),
         "confirmation_form": ChangeConfirmationForm(),
+        "creation_banner": _creation_banner(request, row.preparation, view=None),
     }
     return render(request, "operations/change.html", context)
+
+
+def _creation_banner(
+    request: HttpRequest, preparation: ChangePreparation | None, *, view: RunView | None
+) -> StepBanner | None:
+    """docs/sites.md#step-1-a-missing-runtime-or-database-engine"""
+    from sites import continuation
+
+    if preparation is None or preparation.server_id is None:
+        return None
+    step = continuation.for_preparation(request, preparation.pk, preparation.server_id)
+    if step is None:
+        return None
+    if view is None:
+        return continuation.change_banner(step)
+    return continuation.run_banner(step, succeeded=view.succeeded, finished=not view.active)
 
 
 def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
@@ -271,6 +292,7 @@ def _run_context(request: HttpRequest, view: RunView) -> dict[str, object]:
         "can_check": view.reconciling,
         "can_acknowledge": view.reconciling and request.user.has_perms(permissions),
         "acknowledge_form": AcknowledgeForm(),
+        "creation_banner": _creation_banner(request, run.review.preparation, view=view),
     }
 
 

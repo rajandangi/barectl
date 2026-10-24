@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import Mapping
 from typing import override
@@ -7,6 +8,37 @@ from django import forms
 from laravel import configuration as laravel_configuration
 
 from . import names as site_names
+from .prerequisites import version_label
+
+
+def _install_label(entry: str, size: int) -> str:
+    megabytes = max(1, round(size / 1_000_000))
+    return f"{version_label(entry)} (installs first, about {megabytes} MB)"
+
+
+def _php_choices(
+    php_versions: tuple[str, ...], installable: tuple[tuple[str, int], ...]
+) -> list[tuple[str, str]]:
+    """Installed verified runtimes first, then catalog builds Step 1 can install."""
+    return [
+        ("", "Choose a PHP runtime"),
+        *((entry, f"{version_label(entry)} ({entry})") for entry in php_versions),
+        *((entry, _install_label(entry, size)) for entry, size in installable),
+    ]
+
+
+def _set_php_choices(
+    field: forms.Field,
+    php_versions: tuple[str, ...],
+    installable: tuple[tuple[str, int], ...],
+) -> None:
+    """Fill the select and tell the create page which choices it installs first."""
+    if isinstance(field, forms.ChoiceField):
+        field.choices = _php_choices(php_versions, installable)
+        field.widget.attrs["data-site-php"] = ""
+        field.widget.attrs["data-installable"] = json.dumps(
+            {entry: version_label(entry) for entry, _size in installable}
+        )
 
 
 class HttpSiteForm(forms.Form):
@@ -53,12 +85,10 @@ class HttpSiteForm(forms.Form):
         widget=forms.Select(attrs={"class": "usa-select"}),
         help_text=(
             "Choose an installed runtime whose master was verified in the recorded "
-            "observation. A fresh review checks it again."
+            "observation, or a version marked installs first. A fresh review checks it again."
         ),
         error_messages={
-            "required": (
-                "Choose an installed PHP runtime. Add one from Stack if none is available."
-            ),
+            "required": "Choose a PHP runtime.",
             "invalid_choice": (
                 "This PHP runtime is unavailable in the current recorded observation. "
                 "Refresh the observation and choose again."
@@ -80,15 +110,11 @@ class HttpSiteForm(forms.Form):
         data: Mapping[str, str] | None = None,
         *,
         php_versions: tuple[str, ...] = (),
-        initial: dict[str, str] | None = None,
+        installable: tuple[tuple[str, int], ...] = (),
+        initial: dict[str, object] | None = None,
     ) -> None:
         super().__init__(data, initial=initial, auto_id="id_http_site_%s")
-        field = self.fields["php_version"]
-        if isinstance(field, forms.ChoiceField):
-            field.choices = [
-                ("", "Choose a verified PHP runtime"),
-                *((entry, f"PHP {entry[3]}.{entry[4]} ({entry})") for entry in php_versions),
-            ]
+        _set_php_choices(self.fields["php_version"], php_versions, installable)
 
     @override
     def full_clean(self) -> None:
@@ -241,12 +267,11 @@ class LaravelSiteForm(forms.Form):
         widget=forms.Select(attrs={"class": "usa-select"}),
         help_text=(
             "Choose an installed runtime whose master was verified in the recorded "
-            "observation. Laravel 13 runs on PHP 8.4 and 8.5."
+            "observation, or a version marked installs first. Laravel 13 runs on PHP 8.4 "
+            "and 8.5."
         ),
         error_messages={
-            "required": (
-                "Choose an installed PHP runtime. Add one from Stack if none is available."
-            ),
+            "required": "Choose a PHP runtime.",
             "invalid_choice": (
                 "This PHP runtime is unavailable in the current recorded observation. "
                 "Refresh the observation and choose again."
@@ -282,15 +307,11 @@ class LaravelSiteForm(forms.Form):
         data: Mapping[str, str] | None = None,
         *,
         php_versions: tuple[str, ...] = (),
-        initial: dict[str, str] | None = None,
+        installable: tuple[tuple[str, int], ...] = (),
+        initial: dict[str, object] | None = None,
     ) -> None:
         super().__init__(data, initial=initial, auto_id="id_laravel_site_%s")
-        field = self.fields["php_version"]
-        if isinstance(field, forms.ChoiceField):
-            field.choices = [
-                ("", "Choose a verified PHP runtime"),
-                *((entry, f"PHP {entry[3]}.{entry[4]} ({entry})") for entry in php_versions),
-            ]
+        _set_php_choices(self.fields["php_version"], php_versions, installable)
 
     @override
     def full_clean(self) -> None:
@@ -436,12 +457,11 @@ class WordPressSiteForm(forms.Form):
         widget=forms.Select(attrs={"class": "usa-select"}),
         help_text=(
             "Choose an installed runtime whose master was verified in the recorded "
-            "observation. WordPress runs on PHP 8.4 and 8.5."
+            "observation, or a version marked installs first. WordPress runs on PHP 8.4 "
+            "and 8.5."
         ),
         error_messages={
-            "required": (
-                "Choose an installed PHP runtime. Add one from Stack if none is available."
-            ),
+            "required": "Choose a PHP runtime.",
             "invalid_choice": (
                 "This PHP runtime is unavailable in the current recorded observation. "
                 "Refresh the observation and choose again."
@@ -463,15 +483,11 @@ class WordPressSiteForm(forms.Form):
         data: Mapping[str, str] | None = None,
         *,
         php_versions: tuple[str, ...] = (),
-        initial: dict[str, str] | None = None,
+        installable: tuple[tuple[str, int], ...] = (),
+        initial: dict[str, object] | None = None,
     ) -> None:
         super().__init__(data, initial=initial, auto_id="id_wordpress_site_%s")
-        field = self.fields["php_version"]
-        if isinstance(field, forms.ChoiceField):
-            field.choices = [
-                ("", "Choose a verified PHP runtime"),
-                *((entry, f"PHP {entry[3]}.{entry[4]} ({entry})") for entry in php_versions),
-            ]
+        _set_php_choices(self.fields["php_version"], php_versions, installable)
 
     @override
     def full_clean(self) -> None:
