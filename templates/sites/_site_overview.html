@@ -1,5 +1,50 @@
 <section class="barectl-card" aria-labelledby="site-overview-heading">
   <h2 id="site-overview-heading">Observed site</h2>
+  {% if site_address %}
+    <p>
+      <a href="{{ site_address }}">{{ site_address }}</a>
+      {% if site_https %}
+        over HTTPS
+      {% else %}
+        over HTTP only
+      {% endif %}
+    </p>
+    {% if has_wordpress and site_wordpress_admin %}
+      <p>
+        <a class="usa-button" href="{{ site_wordpress_admin }}">Sign in to WordPress</a>
+      </p>
+    {% endif %}
+    {% if has_laravel %}
+      <h3>Deploy</h3>
+      {% if site_current_release %}
+        <p>
+          Current release <code>{{ site_current_release.name }}</code> at commit
+          <code>{{ site_current_release.commit }}</code>.
+        </p>
+      {% else %}
+        <p>Barectl has no current release evidence for this site yet.</p>
+      {% endif %}
+      {% if blocking %}
+        <p class="barectl-note">Wait for the active operation before preparing a Deploy.</p>
+      {% elif deploy_can_prepare %}
+        <form class="usa-form"
+              method="post"
+              action="{% url 'site_deploy_prepare' server.pk identifier %}">
+          {% csrf_token %}
+          <button class="usa-button" type="submit">Deploy</button>
+        </form>
+      {% else %}
+        <p class="barectl-note">
+          <a href="{% url 'site_deployments' server.pk identifier %}">Open Deployments</a>
+          to deploy or roll back once the site's current release is observed.
+        </p>
+      {% endif %}
+    {% elif not has_wordpress %}
+      <p class="barectl-note">
+        Barectl checks <code>{{ site_readiness_path }}</code> after a change.
+      </p>
+    {% endif %}
+  {% endif %}
   {% include "servers/_snapshot_freshness.html" with source=None %}
   <p class="barectl-note">
     {{ site.summary }} This describes the observed configuration, not live service or application health.

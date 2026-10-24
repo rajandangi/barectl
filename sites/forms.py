@@ -124,6 +124,54 @@ def _derive_identifier(domain: str) -> str:
     return value
 
 
+class SiteDomainsForm(forms.Form):
+    """Change a site's names and HTTPS setting (Phase B #442)."""
+
+    names = forms.CharField(
+        label="DNS names",
+        widget=forms.Textarea(
+            attrs={
+                "class": "usa-textarea",
+                "rows": 3,
+                "spellcheck": "false",
+                "data-site-names": "",
+            }
+        ),
+        max_length=2540,
+        help_text=(
+            f"Enter the primary domain first, followed by up to {site_names.MAX_NAMES - 1} "
+            "aliases, separated by spaces or new lines. Each name may have up to "
+            f"{site_names.MAX_NAME_OCTETS} characters. Use punycode for international names. "
+            "No wildcards or IP addresses."
+        ),
+        error_messages={"required": "Enter at least one DNS name."},
+    )
+    https = forms.BooleanField(
+        label="Serve over HTTPS",
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={"class": "usa-checkbox__input"}),
+        help_text=(
+            "Leave on to have Caddy issue and renew a certificate for every name. Turn it "
+            "off only for a test site before DNS points here."
+        ),
+    )
+
+    @override
+    def full_clean(self) -> None:
+        super().full_clean()
+        for name in self.errors:
+            if name in self.fields:
+                widget = self.fields[name].widget
+                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+
+    def clean_names(self) -> tuple[str, ...]:
+        try:
+            return site_names.names(self.cleaned_data["names"])
+        except site_names.InvalidInput as invalid:
+            raise forms.ValidationError(list(invalid.problems)) from None
+
+
 class LaravelSiteForm(forms.Form):
     """Create a Laravel site: its domain, its Git repository and a branch or tag."""
 

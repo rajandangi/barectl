@@ -12,6 +12,17 @@ The previous revision of this file qualified only the Laravel Deploy and Roll ba
 ([#259](https://github.com/rajandangi/barectl/issues/259)); it is superseded by this record,
 which keeps that evidence and covers the rest of Phase B.
 
+**Gap-closure revision (2026-10-24).** This revision implements Laravel's front-controller
+route and `/up` readiness ([#445](https://github.com/rajandangi/barectl/issues/445)), one
+reviewed Domains and HTTPS change with WordPress and Laravel alias redirects
+([#442](https://github.com/rajandangi/barectl/issues/442)), and the Overview address and next
+step ([#446](https://github.com/rajandangi/barectl/issues/446)). It also adds browser journeys
+for the new Domains and HTTPS settings and Overview. Still not implemented: Create site's
+Step 1 install link ([#443](https://github.com/rajandangi/barectl/issues/443)), the certificate
+contact email ([#444](https://github.com/rajandangi/barectl/issues/444)), the remaining browser
+journeys ([#447](https://github.com/rajandangi/barectl/issues/447)) and hosted shard balance
+([#449](https://github.com/rajandangi/barectl/issues/449)).
+
 ## Revisions
 
 Every local number in [Build budget](#build-budget) and [Scenarios](#scenarios) belongs to one
@@ -217,7 +228,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 4. Install a missing database engine as Step 1 and continue with the same answers | **Not qualified.** The tile is disabled with a reason that sends the operator to Server Settings ([#443](https://github.com/rajandangi/barectl/issues/443)) |
 | 5. Install a missing PHP version first and continue | **Not qualified.** Only installed runtimes are offered ([#443](https://github.com/rajandangi/barectl/issues/443)) |
 | 6. Confirm screen says in plain words what will be created | The review documents for all three platforms (`sites/test_target_configuration.py`, `wordpress/test_create.py::WordPressReviewTests`, `sites/test_laravel_create.py`); the shared confirm screen is [#364](https://github.com/rajandangi/barectl/issues/364) |
-| 7. Land on the new site's page with its HTTPS address and the next step | **Partly qualified.** The run page hands off to the site page and the site page shows HTTPS and the certificate, but Overview has no address link, WordPress sign-in link or Deploy action ([#446](https://github.com/rajandangi/barectl/issues/446)) |
+| 7. Land on the new site's page with its HTTPS address and the next step | Overview links the site's own address, a WordPress sign-in page, or a Laravel current release with **Deploy**, and a plain PHP site's readiness path (`sites/test_target_pages.py`, browser `test_overview_links_the_site_address_without_ssh`) |
 | 8. WordPress tile disabled on PostgreSQL with the reason | `wordpress/test_create.py::test_postgresql_disables_the_tile_with_the_reason` |
 | 9. Short name derived from the domain, editable under More options | `sites/test_names.py`, `wordpress/test_create.py::test_derives_the_identifier_from_the_primary_domain`, `sites/test_laravel_create.py::test_derives_the_identifier_from_the_primary_domain`, and the keyboard journey that keeps an edited identifier |
 
@@ -243,10 +254,10 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 20. Every new site served over HTTPS with a certificate Caddy issues and renews | Native `HttpsSite`; `WordPressCreateMariaDB` over Pebble |
 | 21. The review checks DNS from the server and warns without refusing | `sites/test_target_configuration.py::DnsWarningTests` (4 tests) and the create review's acknowledgement |
 | 22. Serve a site over HTTP only from More options | Browser `test_operator_prepares_the_real_registered_site_change_without_ssh`; native `HttpsSite` second site |
-| 23. Turn HTTPS on for an HTTP-only site from its settings | **Not qualified.** No Domains and HTTPS section or change kind ([#442](https://github.com/rajandangi/barectl/issues/442)) |
+| 23. Turn HTTPS on for an HTTP-only site from its settings | One reviewed Shared change (`sites/domains_change.py`), its review and refusals (`sites/test_domains.py`), the Settings section and prepare request, and the browser journey. Native `HttpsSite` adds an alias over HTTP; the HTTPS transition itself is covered by the fast review and renderer tests because the lane’s DNS fixture resolves only the fixture domain for ACME |
 | 24. The site page shows the certificate state read from the server | Issued with issuer and expiry natively (`HttpsSite`); HTTP-only natively; the waiting, failing and renewal-due wording is `discovery/test_presentation.py::test_the_certificate_state_is_worded_from_server_evidence`. The native probe's waiting and failing derivations have no fixture (see [Not qualified](#not-qualified)) |
 | 25. HTTP redirects to HTTPS while challenge requests keep working | Native `HttpsSite` (308 redirect; the issued certificate itself proves the challenge path answered) |
-| 26. Add and remove alias domains, with WordPress and Laravel aliases redirecting to the primary | **Not qualified.** Aliases are accepted at creation (up to ten names), but there is no change that adds or removes one and no alias redirect ([#442](https://github.com/rajandangi/barectl/issues/442)) |
+| 26. Add and remove alias domains, with WordPress and Laravel aliases redirecting to the primary | The same change adds and removes names; WordPress and Laravel files carry an alias redirect to the primary (`sites/test_target_configuration.py`, `sites/test_domains.py`), and native `HttpsSite` proves a plain PHP alias serves directly |
 | 27. Optional certificate contact email as a server setting | **Not qualified.** No setting and no `email` global option ([#444](https://github.com/rajandangi/barectl/issues/444)) |
 | 28. Public listeners limited to SSH, 80/tcp, 443/tcp and 443/udp | Native `HttpsSite` reads the listening set; foundation verification enforces it |
 | 29. Unknown host names answer 404 on HTTP and are refused on HTTPS | Native `HttpsSite` first and third tests |
@@ -278,7 +289,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 45. A read-only deploy key generated on the server, showing only its public half | Native `LaravelCreateMariaDB` reads the public half and checks the private half is 0600; `laravel/test_configuration.py::FingerprintTests` |
 | 46. The repository host key trusted only by an exactly pasted fingerprint | Native `LaravelCreateMariaDB` wrong-fingerprint refusal; `laravel/test_configuration.py::FingerprintTests` |
 | 47. The site has its database, a private `.env` with production defaults and one `APP_KEY` | Native `LaravelCreateMariaDB`; `laravel/test_configuration.py::EnvironmentTests` |
-| 48. The new site's completion offers Deploy | **Partly qualified.** Deploy is on the Deployments section; Overview offers no action ([#446](https://github.com/rajandangi/barectl/issues/446)) |
+| 48. The new site's completion offers Deploy | Overview shows the current release and a Deploy form that leads to the existing review; Deployments keeps the full list (`sites/test_target_pages.py`, browser Overview journey) |
 | 49. Deploy's review resolves the branch to an exact commit and shows it | `laravel/test_change.py::DeployReviewTests`; native `LaravelDeployMariaDB` deploys exactly the pushed commit |
 | 50. A moved branch deploys the reviewed commit or refuses | The apply fetches the reviewed commit and refuses when it is unavailable (`laravel/bodies`); native `LaravelDeployMariaDB` |
 | 51. Dependencies installed from the committed lock with the site's own Composer and PHP, with a platform check | Native `LaravelDeployMariaDB` (no dev packages, no `.git` under `vendor`, `--no-plugins --no-scripts`); `laravel/test_change.py` |
@@ -331,7 +342,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 83. A fresh controller reconstructs certificates, engines, databases and users, applications, releases and `current`, settings keys and deploy keys | Native `FreshControllerReconstruction`, `HttpsSite`, `DatabaseEngineMariaDB`/`PostgreSQL`, `SiteDatabaseMariaDB`/`PostgreSQL`, `WordPressCreateMariaDB`, `LaravelCreateMariaDB`, `LaravelReleaseReconstruction` |
 | 84. A hand-made resource that follows the convention is managed like Barectl's, and anything else is reported once | `sites/test_target_discovery.py::RecordedJudgeByShapeTests`, `sites/test_target_configuration.py`, native `JudgeByShape`, `HttpSiteReconstruction`, `LaravelReleaseReconstruction` |
 | 85. A viewer sees sites, certificates, deployments and settings keys without changing them | `sites/test_settings_pages.py::test_a_viewer_reads_the_certificate_releases_and_settings_keys` (certificate, releases and key names, with SSH patched out); `sites/test_target_pages.py` viewer case; the viewer refusals in `sites/test_deploy_pages.py`, `sites/test_pool_settings.py`, `sites/test_remove.py` and `databases/*` |
-| 86. Every new journey works with a keyboard, a screen reader and a 320-pixel screen | **Partly qualified.** Browser journeys cover the three create forms, the WordPress password reset and phone-width recognition with keyboard and focus checks; Deploy, settings, database install and removal have no browser journey ([#447](https://github.com/rajandangi/barectl/issues/447)) |
+| 86. Every new journey works with a keyboard, a screen reader and a 320-pixel screen | **Partly qualified.** Browser journeys cover the three create forms, the WordPress password reset, the new Domains and HTTPS change and the Overview address with keyboard, focus and 320-pixel checks; Deploy, the other settings forms, database install and removal still have request tests only ([#447](https://github.com/rajandangi/barectl/issues/447)) |
 | 87. Opening any page makes no SSH connection | Page tests patch `discovery.ssh.connect` to fail (`sites/test_target_pages.py`, `sites/test_deploy_pages.py`, `sites/test_settings_pages.py`, `sites/test_remove.py`, `databases/test_site.py`, `wordpress/test_actions.py`), and the browser journeys do the same |
 
 ### Maintainers
@@ -399,21 +410,11 @@ measured for memory or disk.
 
 ## Not qualified
 
-- **Server-side HTTPS and domain changes.** A site's names and HTTPS setting are fixed at
-  creation, and WordPress and Laravel aliases are served directly instead of redirecting to the
-  primary domain (stories 23 and 26, [#442](https://github.com/rajandangi/barectl/issues/442)).
 - **Certificate contact email.** There is no server setting (story 27,
   [#444](https://github.com/rajandangi/barectl/issues/444)).
 - **Step 1 of Create site.** A missing database engine or PHP version cannot be installed from
   inside the journey, so the operator leaves the form and loses the answers (stories 4 and 5,
   [#443](https://github.com/rajandangi/barectl/issues/443)).
-- **Laravel's front-controller fallback.** A Laravel site's route rewrites only `/` and proxies
-  `.php` paths, so application routes other than `/`, `/index.php/up` and static files return
-  404, and Deploy's readiness check uses `/index.php/up` (PATH_INFO) as a workaround
-  ([#445](https://github.com/rajandangi/barectl/issues/445)). The WordPress front controller is
-  implemented and proven.
-- **Overview next steps.** The site page has no HTTPS address link, WordPress sign-in link or
-  Deploy action (stories 7 and 48, [#446](https://github.com/rajandangi/barectl/issues/446)).
 - **The database engine's site count.** The panel does not show how many sites use the engine,
   because passive discovery reads no catalog and pages make no SSH call; removal still refuses
   and names the databases (story 18).

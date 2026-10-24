@@ -5,7 +5,13 @@ from django.test import SimpleTestCase
 from operations.engine import _failure
 from operations.models import Result
 
-from .configuration import SiteSettings, render_caddy, render_pool
+from .configuration import (
+    SiteSettings,
+    render_caddy,
+    render_laravel_caddy,
+    render_pool,
+    render_wordpress_caddy,
+)
 from .names import readiness_ok, readiness_path
 
 
@@ -27,7 +33,28 @@ class TargetConfigurationTests(SimpleTestCase):
         self.assertIn("listen.group = pshop\n", pool)
         self.assertIn("listen.mode = 0660\n", pool)
 
-    def test_an_http_only_site_uses_explicit_http_addresses(self) -> None:
+    def test_a_laravel_site_reaches_its_front_controller_and_denies_private_paths(self) -> None:
+        settings = SiteSettings("shop", ("shop.example.com",), "php84")
+        caddy = render_laravel_caddy(settings)
+        # Every path that is not a file reaches index.php, with the original URI kept for
+        # Laravel's router (Phase B #445).
+        self.assertIn(
+            "        try_files {path}index.php {path}/index.php {path} /index.php?{query}\n",
+            caddy,
+        )
+        self.assertIn("        vars original_uri {http.request.uri}\n", caddy)
+        self.assertIn("            header_up X-Forwarded-Uri {vars.original_uri}\n", caddy)
+        self.assertIn("        respond @private 404\n", caddy)
+        for denied in ("/storage/*", "/vendor/*", "/bootstrap/cache/*"):
+            self.assertIn(denied, caddy)
+        self.assertIn("@config path_regexp config", caddy)
+        # The plain and WordPress forms keep their own routes.
+        self.assertNotIn(
+            "try_files {path}index.php {path}/index.php {path} /index.php?{query}",
+            render_caddy(settings),
+        )
+        self.assertIn("try_files {path}index.php", render_wordpress_caddy(settings))
+
         settings = SiteSettings("shop", ("shop.example.com", "www.example.com"), "php84", False)
         caddy = render_caddy(settings)
         self.assertIn("http://shop.example.com, http://www.example.com {", caddy)

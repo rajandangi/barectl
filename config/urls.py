@@ -29,6 +29,7 @@ from servers.views import (
     site_detail,
 )
 from sites.deploy_views import prepare_deploy, prepare_rollback, save_deploy_settings
+from sites.domains_views import prepare_domains
 from sites.node_views import prepare_node
 from sites.php_views import prepare_php
 from sites.pool_views import prepare_pool
@@ -158,6 +159,11 @@ urlpatterns = [
         site_detail,
         {"section": "settings"},
         name="site_settings",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/settings/domains/prepare/",
+        prepare_domains,
+        name="site_domains_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/settings/remove/prepare/",

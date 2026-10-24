@@ -143,11 +143,13 @@ WORDPRESS_TEMPLATE = """{addresses} {{
     @config path_regexp config (?i)(^|/)wp-config\\.php(/|$)
     @uploads path_regexp uploads (?i)^/wp-content/uploads/.*\\.(php[0-9]*|phtml|phar)(/|$)
     @php path_regexp php \\.php(/|$)
+    @alias expression {{http.request.host}} != "{primary}"
     route {{
         respond @hidden 404
         respond @wellknownhidden 404
         respond @config 404
         respond @uploads 404
+        redir @alias {scheme}://{primary}{{uri}} permanent
         vars original_uri {{http.request.uri}}
         try_files {{path}}index.php {{path}}/index.php {{path}} /index.php?{{query}}
         reverse_proxy @php unix/{settings.proxy_socket} {{
@@ -178,7 +180,77 @@ WORDPRESS_TEMPLATE = """{addresses} {{
 
 def render_wordpress_caddy(settings: SiteSettings) -> str:
     addresses = ", ".join(site_address(settings, name) for name in settings.names)
-    return WORDPRESS_TEMPLATE.format(settings=settings, addresses=addresses)
+    return WORDPRESS_TEMPLATE.format(
+        settings=settings,
+        addresses=addresses,
+        primary=settings.names[0],
+        scheme="https" if settings.https else "http",
+    )
+
+
+# A Laravel site's route: every path that is not a file reaches the front controller, so
+# application routes and Laravel's ``/up`` health route work. The original path travels in
+# ``X-Forwarded-Uri`` for the same reason as WordPress (Phase B #445). Laravel's private
+# directories are denied explicitly even though they sit outside the public root, so a
+# future layout change cannot expose them.
+LARAVEL_TEMPLATE = """{addresses} {{
+    root * {settings.directory}/current/public
+    encode zstd gzip
+    @hidden {{
+        path_regexp hidden (^|/)\\.[^/]+
+        not path /.well-known/*
+    }}
+    @wellknownhidden {{
+        path_regexp wellknownhidden ^/\\.well-known/([^/]+/)*\\.[^/]+
+    }}
+    @private path /storage/* /vendor/* /bootstrap/cache/*
+    @config path_regexp config (?i)(^|/)\\.env(/|$)
+    @php path_regexp php \\.php(/|$)
+    @index path /
+    @alias expression {{http.request.host}} != "{primary}"
+    route {{
+        respond @hidden 404
+        respond @wellknownhidden 404
+        respond @private 404
+        respond @config 404
+        redir @alias {scheme}://{primary}{{uri}} permanent
+        vars original_uri {{http.request.uri}}
+        rewrite @index /index.php
+        try_files {{path}}index.php {{path}}/index.php {{path}} /index.php?{{query}}
+        reverse_proxy @php unix/{settings.proxy_socket} {{
+            header_up X-Forwarded-Uri {{vars.original_uri}}
+        }}
+        file_server
+    }}
+    log {{
+        output file {settings.directory}/logs/access.json {{
+            roll_size 20MiB
+            roll_keep 5
+            roll_keep_for 14d
+        }}
+        format filter {{
+            wrap json
+            fields {{
+                request>uri query {{
+                    replace key REDACTED
+                    replace token REDACTED
+                    replace signature REDACTED
+                }}
+            }}
+        }}
+    }}
+}}
+"""
+
+
+def render_laravel_caddy(settings: SiteSettings) -> str:
+    addresses = ", ".join(site_address(settings, name) for name in settings.names)
+    return LARAVEL_TEMPLATE.format(
+        settings=settings,
+        addresses=addresses,
+        primary=settings.names[0],
+        scheme="https" if settings.https else "http",
+    )
 
 
 # A site's maintenance form: visitors get 503 while Caddy's automatic HTTPS challenge path

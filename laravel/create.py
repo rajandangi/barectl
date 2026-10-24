@@ -33,7 +33,7 @@ from operations.models import ChangeReview
 from runtimes import observation as runtime_observation
 from runtimes.catalog import Architecture, architecture_of
 from sites import change as site_change
-from sites.configuration import PHP_RUNTIMES, SiteSettings, render_caddy, render_pool
+from sites.configuration import PHP_RUNTIMES, SiteSettings, render_laravel_caddy, render_pool
 
 from . import observation
 from .configuration import (
@@ -69,11 +69,11 @@ BODY_SOURCE: Final = (
     )
     .replace(
         "from sites.bodies.common import (\n"
-        "    caddy_file,\n"
         "    configure_pool,\n"
         "    create_account,\n"
         "    create_layout,\n"
         "    identity_name_exists,\n"
+        "    laravel_caddy_file,\n"
         "    pool_file,\n"
         "    publish_caddy,\n"
         "    result,\n"
@@ -247,7 +247,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             disk_digest=native["disk_digest"],
             identity=identity,
             proxy_identity=native["next_proxy_id"],
-            caddy=render_caddy(settings),
+            caddy=render_laravel_caddy(settings),
             pool=render_pool(settings),
             membership={settings.runtime: list(current)},
         )
@@ -410,7 +410,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
         or document.get("body_sha256") != BODY_SHA256
         or document.get("repository") != repository_locator(inputs.repository)
         or document.get("branch") != repository_ref(inputs.branch)
-        or document.get("caddy") != render_caddy(settings)
+        or document.get("caddy") != render_laravel_caddy(settings)
         or document.get("pool") != render_pool(settings)
         or document.get("runtime_arguments")
         != list(runtime_observation.read_arguments(inputs.selection, architecture))

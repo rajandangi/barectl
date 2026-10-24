@@ -21,6 +21,7 @@ from .bodies.common import NativeState
 from .bodies.pool import SitePool, valid_pool_document
 from .configuration import (
     CADDY_TEMPLATE,
+    LARAVEL_TEMPLATE,
     MAINTENANCE_TEMPLATE,
     POOL_TEMPLATE,
     WORDPRESS_TEMPLATE,
@@ -133,6 +134,7 @@ COMMON_SOURCE: Final = with_bounded(
         'CADDY_WORDPRESS_TEMPLATE = ""',
         "CADDY_WORDPRESS_TEMPLATE = " + repr(WORDPRESS_TEMPLATE),
     )
+    .replace('CADDY_LARAVEL_TEMPLATE = ""', "CADDY_LARAVEL_TEMPLATE = " + repr(LARAVEL_TEMPLATE))
     .replace('POOL_TEMPLATE = ""', "POOL_TEMPLATE = " + repr(POOL_TEMPLATE))
     .replace(
         "KNOWN_FCGI: dict[str, tuple[str, ...]] = {}",
@@ -374,12 +376,27 @@ def valid_site(site: object) -> bool:
         "names",
         "account",
     }
-    optional = {"application", "application_version", "application_problem", "pool"}
+    optional = {
+        "application",
+        "application_version",
+        "application_problem",
+        "pool",
+        "serving_form",
+    }
     if not isinstance(site, dict) or not required <= set(site) <= required | optional:
         return False
     if not _valid_application(site) or not _valid_site_scalars(site):
         return False
     if site.get("pool") is not None and not valid_pool_document(site["pool"]):
+        return False
+    if site.get("serving_form", "plain") not in (
+        "plain",
+        "wordpress",
+        "laravel",
+        "maintenance",
+        "partial",
+        "unsupported",
+    ):
         return False
     return _valid_names(site["names"]) and _valid_account(site["account"])
 

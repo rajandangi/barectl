@@ -469,6 +469,44 @@ def _site_activity_context(
     )
 
 
+def _site_overview_context(
+    request: HttpRequest,
+    server: Server,
+    state: DiscoveryState,
+    page: SitePage,
+    identifier: str,
+    context: dict[str, object],
+) -> None:
+    """The Overview's address and next step, from stored observations only (Phase B #446)."""
+    site = page.site
+    if site is None or not site.domains:
+        return
+    scheme = "https" if site.https else "http"
+    primary = site.domains[0]
+    context["site_address"] = f"{scheme}://{primary}"
+    context["site_primary"] = primary
+    context["site_https"] = site.https
+    context["site_readiness_path"] = site.readiness
+    if context.get("has_wordpress"):
+        context["site_wordpress_admin"] = f"{scheme}://{primary}/wp-admin/"
+    if not context.get("has_laravel"):
+        return
+    from discovery.presentation import present_releases
+    from sites.deploy_views import deploy_context
+
+    context.update(deploy_context(server, identifier, request.user))
+    releases = (
+        present_releases(state.snapshot.collected.releases, identifier)
+        if state.snapshot is not None
+        else ()
+    )
+    context["releases"] = releases
+    context["site_current_release"] = next(
+        (release for release in releases if release.current), None
+    )
+    context["blocking"] = blocking_operation(state.other_operation)
+
+
 def site_page_response(
     request: HttpRequest,
     pk: int,
@@ -520,10 +558,14 @@ def site_page_response(
 
         context.update(database_context_for_site(server, identifier, request.user))
     if target_site and section == "settings":
+        from sites.domains_views import context_for_site as domains_context_for_site
         from sites.remove_views import context_for_site as remove_context_for_site
 
+        context.update(domains_context_for_site(server, identifier, request.user))
         context.update(remove_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
+    if target_site and section == "overview":
+        _site_overview_context(request, server, state, page, identifier, context)
     if target_site and section == "deployments":
         from discovery.presentation import present_releases
         from sites.deploy_views import deploy_context

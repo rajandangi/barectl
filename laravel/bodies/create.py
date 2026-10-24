@@ -31,11 +31,11 @@ from laravel.bodies.common import (
     user_command,
 )
 from sites.bodies.common import (
-    caddy_file,
     configure_pool,
     create_account,
     create_layout,
     identity_name_exists,
+    laravel_caddy_file,
     pool_file,
     publish_caddy,
     result,
@@ -262,7 +262,7 @@ def _create_preflight(document: dict[str, object], settings: SimpleNamespace) ->
     ):
         return "evidence"
     try:
-        validate_candidate(settings.identifier, caddy_file(settings))
+        validate_candidate(settings.identifier, laravel_caddy_file(settings))
         validate_pool_candidate(settings, identity, pool_file(settings))
     except ValueError, OSError, subprocess.TimeoutExpired:
         return "evidence"
@@ -295,7 +295,7 @@ def create_laravel(document: dict[str, object]) -> None:
         stage("pool")
         configure_pool(settings, account, int(str(document["proxy_identity"])))
         stage("caddy")
-        if not publish_caddy(settings.identifier, caddy_file(settings), None):
+        if not publish_caddy(settings.identifier, laravel_caddy_file(settings), None):
             result("partial", "site_caddy")
             return
         stage("laravel")

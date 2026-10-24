@@ -390,14 +390,14 @@ class LaravelDeployCase(ScenarioTestCase):
                     ),
                     "socket: "
                     + self.native(
-                        "for p in /index.php/up /index.php /; do printf '%s=' \"$p\"; "
+                        "for p in /up /index.php /; do printf '%s=' \"$p\"; "
                         f"curl -s -o /dev/null -w '%{{http_code}}\\n' --unix-socket "
                         f"/run/haproxy/{self.identity}/http.sock -H 'Host: {self.domain}' "
                         f"http://{self.domain}$p; done"
                     ),
                     "https: "
                     + self.native(
-                        "for p in /index.php/up /index.php /; do printf '%s=' \"$p\"; "
+                        "for p in /up /index.php /; do printf '%s=' \"$p\"; "
                         f"curl -s -k -o /dev/null -w '%{{http_code}}\\n' "
                         f"--resolve {self.domain}:443:127.0.0.1 https://{self.domain}$p; done"
                     ),
@@ -660,6 +660,9 @@ class LaravelDeployMariaDB(LaravelDeployCase):
         # deploy is not gated afterwards.
         self.assertEqual(self.readiness(), {"socket": 200, "https": 200})
         self.assertIn(_GOOD_VIEW.strip(), self.https_body())
+        # The file denies the private paths the Laravel convention keeps outside public.
+        self.assertEqual(self.https_status("/.env"), 404)
+        self.assertEqual(self.https_status("/storage/framework/sessions"), 404)
         # The deploy did not rotate APP_KEY.
         self.assertEqual(self.app_key(), app_key)
 
@@ -893,7 +896,7 @@ class LaravelDeployBootFailure(LaravelDeployCase):
         self.assert_failed(line, "partial", "laravel_readiness", unit)
         # Visitors never reach the release whose /up failed; the gate answers 503.
         self.assertEqual(self.https_status(), 503)
-        self.assertEqual(self.socket_status("/index.php/up"), 404)
+        self.assertEqual(self.socket_status("/up"), 404)
         # The run reports exactly which release is current, and the old code is not
         # reactivated automatically; the previous release is retained for a Roll back.
         self.assertEqual(self.current_release(), f"{broken}-{draft.document['token']}")

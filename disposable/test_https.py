@@ -17,6 +17,7 @@ from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 DOMAIN = "site.fixture.test"
 HTTP_DOMAIN = "s11beta.example.com"
+ALIAS_DOMAIN = "s11alias.example.com"
 
 
 @tag(SCENARIO_TAG)
@@ -158,6 +159,36 @@ class HttpsSite(ScenarioTestCase):
                 self.fail("The site's certificate evidence is missing.")
             self.assertFalse(site["https"])
             self.assertEqual(certificate["state"], "http")
+
+        # One reviewed change adds an alias; both names serve (Phase B #442). The lane's DNS
+        # fixture resolves only the fixture domain for HTTPS, so this stays HTTP and the
+        # HTTPS transition is covered by the fast review tests.
+        from sites import domains_change
+
+        apply_change(
+            self,
+            domains_change.SET_SITE_DOMAINS,
+            PreparationInputs(
+                identifier="s11beta",
+                names=(HTTP_DOMAIN, ALIAS_DOMAIN),
+                https=False,
+                domains=True,
+            ),
+            timeout=60,
+        )
+        for name in (HTTP_DOMAIN, ALIAS_DOMAIN):
+            served = self.native(
+                f"curl --silent --show-error --fail -H 'Host: {name}' http://127.0.0.1/"
+            )
+            self.assertIn("s11beta", served)
+        with self.shell() as shell:
+            value = observation.read(shell, "s11beta", "php84", site_only=True)
+            if value is None:
+                self.fail("The changed site could not be read.")
+            site = next(row for row in value["sites"] if row["identifier"] == "s11beta")
+            self.assertFalse(site["https"])
+            self.assertEqual(site["names"], [HTTP_DOMAIN, ALIAS_DOMAIN])
+            self.assertEqual(site["serving_form"], "plain")
 
     def test_3_the_main_configuration_keeps_the_unknown_host_catch_all(self) -> None:
         self.install_acme()

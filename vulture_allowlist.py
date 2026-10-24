@@ -137,7 +137,7 @@ if TYPE_CHECKING:
     from servers.testing import ControllerConfigTestCase
     from servers.tests import InventoryTests
     from sites.apps import SitesConfig
-    from sites.bodies.common import membership
+    from sites.bodies.common import SiteRecord, membership
     from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
@@ -329,6 +329,8 @@ if TYPE_CHECKING:
     # The server page reads the snapshot's presentation from its discovery state, and the
     # Sites section each site's domains, PHP version, facts and state.
     _site = ShownSite("", (), "", SiteState.MANAGED, "", "", "", (), ())
+    # The native site record carries its serving form for the domains change.
+    _site_record = SiteRecord.serving_form
     _presentation = (
         DiscoveryState.presentation,
         DiscoveryState.hosting_guidance,

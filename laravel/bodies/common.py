@@ -15,6 +15,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Final
@@ -557,9 +558,9 @@ def request_readiness(
     """Send ``GET /up`` to the site's own address and return its HTTP status, or 0.
 
     Through the private HAProxy socket while a maintenance gate keeps visitors out, or
-    through Caddy over the primary name. The request uses the front controller with a
-    ``PATH_INFO`` path, the only transport form HAProxy's FastCGI application maps to
-    ``index.php``; the application still routes ``/up``. The body is never read.
+    through Caddy over the primary name. The Laravel site's front controller rewrites the
+    path to ``index.php``; the original path travels in ``X-Forwarded-Uri``, the same
+    convention WordPress uses. The body is never read.
     """
     import http.client
     import socket
@@ -569,8 +570,11 @@ def request_readiness(
         "Host": host,
         "X-Forwarded-Proto": "https",
         "X-Forwarded-Host": host,
-        "X-Forwarded-Uri": "/index.php/up",
+        "X-Forwarded-Uri": "/up",
     }
+    # HAProxy's FastCGI application maps the PATH_INFO form to index.php; the same form
+    # works through Caddy's front controller after its rewrite (Phase B #259).
+    path = "/index.php/up"
     connection: http.client.HTTPConnection
     try:
         if socket_path:
@@ -583,7 +587,7 @@ def request_readiness(
             connection = http.client.HTTPSConnection(host, timeout=5)
         else:
             connection = http.client.HTTPConnection(host, 80, timeout=5)
-        connection.request("GET", "/index.php/up", headers=headers)
+        connection.request("GET", path, headers=headers)
         status = connection.getresponse().status
         connection.close()
         return int(status)
@@ -1003,7 +1007,11 @@ def _activate(
         if problem:
             return problem
         gate = False
-    if request_readiness(settings) != 200:
+    deadline = time.monotonic() + 15
+    status = request_readiness(settings)
+    while status != 200 and time.monotonic() < deadline:
+        time.sleep(0.5)
+        status = request_readiness(settings)
         if not gate:
             _attempt(lambda: _publish(settings, document), "laravel_gate")
         return ("partial", "laravel_readiness")

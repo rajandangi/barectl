@@ -20,7 +20,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of
 from sites.bodies.common import NativeState, SiteRecord
-from sites.configuration import SiteSettings, render_caddy
+from sites.configuration import SiteSettings, render_laravel_caddy
 
 from . import observation
 from .configuration import GATE_TEMPLATE, RETAINED_RELEASES, repository_locator, repository_ref
@@ -262,7 +262,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         if evidence.disk_available and evidence.disk_available < required:
             refusals.append("The server lacks the free space this deploy needs.")
         try:
-            caddy = render_caddy(
+            caddy = render_laravel_caddy(
                 SiteSettings(inputs.identifier, tuple(names), runtime, https=bool(site["https"]))
             )
         except ValueError:

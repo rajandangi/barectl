@@ -215,6 +215,10 @@ class ShownSite:
     complete: bool = False
     # Inaccessible or unsupported evidence, not drift from the convention.
     unread: bool = False
+    # The site's own serving facts, for the Overview's address and next step (Phase B #446).
+    https: bool = False
+    readiness: str = "/"
+    application: str = "plain"
 
 
 @dataclass(frozen=True)
@@ -245,6 +249,9 @@ def _site(site: ObservedSite) -> ShownSite:
         _site_facts(site),
         complete=site.state == SiteState.MANAGED and site.outcome == ObservationOutcome.OBSERVED,
         unread=unread,
+        https=site.https,
+        readiness=site.readiness,
+        application=site.application,
     )
 
 

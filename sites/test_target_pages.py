@@ -6,7 +6,7 @@ from django.test import SimpleTestCase
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 from sites.forms import HttpSiteForm
-from sites.ui_testing import record_http_sites
+from sites.ui_testing import record_http_sites, record_site_settings
 
 
 class HttpSiteFormTests(SimpleTestCase):
@@ -44,6 +44,47 @@ class HttpSitePageTests(ControllerConfigTestCase):
         # rendering its card.
         self.assertContains(response, ">Database</a>")
         self.assertNotContains(response, 'id="site-database-heading"')
+
+    def test_overview_links_the_https_address_and_the_readiness_path(self) -> None:
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+        self.assertContains(response, 'href="http://alpha.example.com"')
+        self.assertContains(response, "Barectl checks <code>/</code>")
+
+    def test_a_wordpress_overview_links_the_sign_in_page(self) -> None:
+        record_site_settings(self.server, identifier="alpha", application="wordpress", https=True)
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+        self.assertContains(response, 'href="https://alpha.example.com"')
+        self.assertContains(response, 'href="https://alpha.example.com/wp-admin/"')
+        self.assertContains(response, "Sign in to WordPress")
+
+    def test_a_laravel_overview_offers_the_current_release_and_deploy(self) -> None:
+        from discovery.models import SiteState
+        from discovery.snapshot import ObservedRelease, ObservedSetting
+
+        record_site_settings(
+            self.server,
+            identifier="alpha",
+            application="laravel",
+            https=True,
+            releases=(
+                ObservedRelease(
+                    "alpha",
+                    "abc123def456-0123456789abcdef",
+                    "abc123def456",
+                    1_700_000_000,
+                    SiteState.MANAGED,
+                    True,
+                ),
+            ),
+            settings=(ObservedSetting("alpha", "laravel", "APP_ENV", "a" * 64, "production"),),
+        )
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+        self.assertContains(response, "Current release")
+        self.assertContains(response, "abc123def456")
+        self.assertContains(response, "Deploy")
 
     def test_overview_summary_ends_with_one_period(self) -> None:
         response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
