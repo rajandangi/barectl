@@ -65,9 +65,9 @@ for each other: `LaravelDeployMariaDB` measured 102.1 s, 66.2 s, 67.4 s and 77.4
 builds, and `DatabaseEngineMariaDB` 70.6 s, 35.4 s, 33.4 s and 48.2 s. The longest item stays
 inside the 180 s limit.
 
-The hosted shards are reported separately in [Hosted runs](#hosted-runs): every shard exceeds
-the 300 s target for one hosted shard while staying inside the 900 s limit, tracked as
-[#449](https://github.com/rajandangi/barectl/issues/449).
+The hosted shards are reported separately in [Hosted runs](#hosted-runs): three of the four
+exceed the 300 s target for one hosted shard (one met it) while all stay inside the 900 s
+limit, tracked as [#449](https://github.com/rajandangi/barectl/issues/449).
 
 ## Scenarios
 
@@ -441,10 +441,10 @@ measured for memory or disk.
   the refusals and the settings rebuild still run on every build.
 - **One engine plus three sites on 1 GiB, and code pickup without refused requests.** See
   [Qualification items](#qualification-items).
-- **Hosted shard time.** Every hosted `Native` shard exceeds the 300 s target for one shard
-  (340 s to 489 s of scenario time at `d4c2509`) while inside the 900 s limit
-  ([#449](https://github.com/rajandangi/barectl/issues/449)). The local full build is inside its
-  target.
+- **Hosted shard time.** Three hosted `Native` shards exceed the 300 s target for one shard
+  (360 s to 499 s of scenario time at `e9d8c44`; shard 4 met it at 286 s) while all stay inside
+  the 900 s limit ([#449](https://github.com/rajandangi/barectl/issues/449)). The local full
+  build is inside its target.
 - **No real VM and no real DNS.** Every server is the pinned container image; the lane's resolver
   answers for the fixture names, so DNS warnings are proven by unit tests and the fixture, not by
   a public name. No certificate is issued by a public authority.
