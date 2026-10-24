@@ -54,6 +54,13 @@ class TargetConfigurationTests(SimpleTestCase):
             render_caddy(settings),
         )
         self.assertIn("try_files {path}index.php", render_wordpress_caddy(settings))
+        # A single-name file keeps the form written before domains could change, so it
+        # remains recognized after an upgrade.
+        self.assertNotIn("@alias", render_wordpress_caddy(settings))
+        self.assertNotIn("@alias", render_laravel_caddy(settings))
+        multi = SiteSettings("shop", ("shop.example.com", "www.example.com"), "php84")
+        self.assertIn("@alias expression", render_wordpress_caddy(multi))
+        self.assertIn("@alias expression", render_laravel_caddy(multi))
 
         settings = SiteSettings("shop", ("shop.example.com", "www.example.com"), "php84", False)
         caddy = render_caddy(settings)

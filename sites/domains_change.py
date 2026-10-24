@@ -106,7 +106,13 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     current_names = tuple(str(name) for name in site["names"]) if site is not None else ()
     current_https = bool(site["https"]) if site is not None else False
     settings = (
-        SiteSettings(inputs.identifier, inputs.names, site["runtime"], https=inputs.https)
+        SiteSettings(
+            inputs.identifier,
+            inputs.names,
+            site["runtime"],
+            https=inputs.https,
+            readiness=str(site["readiness"]),
+        )
         if site is not None and inputs.names
         else None
     )
@@ -149,6 +155,8 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             *([{"label": "DNS warning", "value": "\n".join(dns_findings)}] if dns_findings else []),
         ],
     }
+    if dns_findings:
+        document["acknowledgement"] = " ".join(dns_findings)
     affected = (
         tuple(
             sorted(

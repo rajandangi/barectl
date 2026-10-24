@@ -25,10 +25,18 @@ def evidence(
     dns: dict[str, object] | None = None,
 ) -> DomainsEvidence:
     native: dict[str, object] = {
+        "version": 1,
         "digest": "a" * 64,
+        "disk_digest": "b" * 64,
         "boot": "00000000-0000-0000-0000-000000000000",
         "uptime": 1,
-        "current_sites": ["alpha", "beta"],
+        "current_sites": [],
+        "evidence": {},
+        "next_id": 4002,
+        "next_proxy_id": 4003,
+        "validation": "not_requested",
+        "pool_validation": "not_requested",
+        "master_present": True,
         "sites": [
             {
                 "identifier": "alpha",
@@ -43,6 +51,10 @@ def evidence(
                 "state": state,
                 "problem": "",
                 "serving_form": form,
+                "pool": None,
+                "application": "plain",
+                "application_version": "",
+                "application_problem": "",
             },
             {
                 "identifier": "beta",
@@ -57,6 +69,10 @@ def evidence(
                 "state": "complete",
                 "problem": "",
                 "serving_form": "plain",
+                "pool": None,
+                "application": "plain",
+                "application_version": "",
+                "application_problem": "",
             },
         ],
     }
@@ -158,6 +174,7 @@ class DomainsReviewTests(SimpleTestCase):
         )
         self.assertTrue(draft.eligible, draft.refusals)
         self.assertIn("does not resolve", str(draft.document["details"]))
+        self.assertIn("does not resolve", str(draft.document["acknowledgement"]))
 
     def test_a_forged_document_is_refused_before_apply(self) -> None:
         draft = review(evidence(), inputs())

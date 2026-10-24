@@ -143,14 +143,12 @@ WORDPRESS_TEMPLATE = """{addresses} {{
     @config path_regexp config (?i)(^|/)wp-config\\.php(/|$)
     @uploads path_regexp uploads (?i)^/wp-content/uploads/.*\\.(php[0-9]*|phtml|phar)(/|$)
     @php path_regexp php \\.php(/|$)
-    @alias expression {{http.request.host}} != "{primary}"
-    route {{
+{alias_matcher}    route {{
         respond @hidden 404
         respond @wellknownhidden 404
         respond @config 404
         respond @uploads 404
-        redir @alias {scheme}://{primary}{{uri}} permanent
-        vars original_uri {{http.request.uri}}
+{alias_redirect}        vars original_uri {{http.request.uri}}
         try_files {{path}}index.php {{path}}/index.php {{path}} /index.php?{{query}}
         reverse_proxy @php unix/{settings.proxy_socket} {{
             header_up X-Forwarded-Uri {{vars.original_uri}}
@@ -178,13 +176,30 @@ WORDPRESS_TEMPLATE = """{addresses} {{
 """
 
 
+def _alias_directives(settings: SiteSettings) -> tuple[str, str]:
+    """Alias redirect lines, or empty strings for a single-name site.
+
+    A single-name file is byte-compatible with the form written before domains could be
+    changed; only a site with aliases gains the redirect.
+    """
+    if len(settings.names) < 2:
+        return "", ""
+    primary = settings.names[0]
+    scheme = "https" if settings.https else "http"
+    return (
+        f'    @alias expression {{http.request.host}} != "{primary}"\n',
+        f"        redir @alias {scheme}://{primary}{{uri}} permanent\n",
+    )
+
+
 def render_wordpress_caddy(settings: SiteSettings) -> str:
     addresses = ", ".join(site_address(settings, name) for name in settings.names)
+    alias_matcher, alias_redirect = _alias_directives(settings)
     return WORDPRESS_TEMPLATE.format(
         settings=settings,
         addresses=addresses,
-        primary=settings.names[0],
-        scheme="https" if settings.https else "http",
+        alias_matcher=alias_matcher,
+        alias_redirect=alias_redirect,
     )
 
 
@@ -207,14 +222,12 @@ LARAVEL_TEMPLATE = """{addresses} {{
     @config path_regexp config (?i)(^|/)\\.env(/|$)
     @php path_regexp php \\.php(/|$)
     @index path /
-    @alias expression {{http.request.host}} != "{primary}"
-    route {{
+{alias_matcher}    route {{
         respond @hidden 404
         respond @wellknownhidden 404
         respond @private 404
         respond @config 404
-        redir @alias {scheme}://{primary}{{uri}} permanent
-        vars original_uri {{http.request.uri}}
+{alias_redirect}        vars original_uri {{http.request.uri}}
         rewrite @index /index.php
         try_files {{path}}index.php {{path}}/index.php {{path}} /index.php?{{query}}
         reverse_proxy @php unix/{settings.proxy_socket} {{
@@ -245,11 +258,12 @@ LARAVEL_TEMPLATE = """{addresses} {{
 
 def render_laravel_caddy(settings: SiteSettings) -> str:
     addresses = ", ".join(site_address(settings, name) for name in settings.names)
+    alias_matcher, alias_redirect = _alias_directives(settings)
     return LARAVEL_TEMPLATE.format(
         settings=settings,
         addresses=addresses,
-        primary=settings.names[0],
-        scheme="https" if settings.https else "http",
+        alias_matcher=alias_matcher,
+        alias_redirect=alias_redirect,
     )
 
 

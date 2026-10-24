@@ -199,6 +199,10 @@ class HttpSiteBrowserTests(BrowserTestCase):
             expect(address).to_be_visible()
             expect(address).to_have_attribute("href", "http://alpha.example.com")
         self.assert_theme_and_components_initialized()
+        self.page.set_viewport_size({"width": 320, "height": 812})
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
         self.assertEqual(self.console_errors, [])
 
     def test_operator_resets_a_wordpress_password_through_the_confidential_channel(

@@ -29,7 +29,7 @@ The site file's route is otherwise unchanged from [the site convention](site-con
 
 ## Changing names and HTTPS
 
-A site's **Settings > Domains and HTTPS** section shows its names and whether HTTPS is on, and prepares one reviewed change. The change republishes the site's Caddy file with the new names and scheme, validates the whole Caddy tree, reloads Caddy and checks every name: the primary name answers, and a WordPress or Laravel alias redirects to the primary domain in the same file. A plain PHP site answers every name directly. The change is **Shared** because Caddy reloads for every site, and the review names the affected sites.
+A site's **Settings > Domains and HTTPS** section shows its names and whether HTTPS is on, and prepares one reviewed change. The change republishes the site's Caddy file with the new names and scheme, validates the whole Caddy tree, reloads Caddy and checks every name: the primary name answers, and a WordPress or Laravel alias redirects to the primary domain in the same file. A plain PHP site answers every name directly. The change is **Shared** because Caddy reloads for every site, and the review names the affected sites. A DNS name that does not resolve to the server is warned about and must be acknowledged; it never refuses the change.
 
 Discovery reconstructs the names, the scheme and the serving form from the site file alone. A name that does not resolve to the server is a warning in the review, never a refusal. The site's certificate follows Caddy's automatic HTTPS for every name in the file.
 

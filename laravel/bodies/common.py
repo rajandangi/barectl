@@ -1012,6 +1012,7 @@ def _activate(
     while status != 200 and time.monotonic() < deadline:
         time.sleep(0.5)
         status = request_readiness(settings)
+    if status != 200:
         if not gate:
             _attempt(lambda: _publish(settings, document), "laravel_gate")
         return ("partial", "laravel_readiness")

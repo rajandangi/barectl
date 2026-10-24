@@ -108,7 +108,7 @@ Applying creates, in one run:
 5. The site's database and principal, both `s<id>`, over the local socket, composed from the site-database convention (ADR 0010).
 6. A first release, `releases/bootstrap-<token>`, whose Git metadata carries the reviewed repository and branch, with `current` switched to it. It serves a placeholder until the first Deploy; the site is a recognized Laravel application, so **Deploy** is offered on its Overview and Deployments pages.
 
-A Laravel site's Caddy file is the front-controller form: every path that is not a file reaches `index.php` with the original URI in `X-Forwarded-Uri`, so application routes and the `/up` health route work. The file denies `.env`, `.git`, `storage`, `vendor` and `bootstrap/cache`. Deploy's readiness check sends `GET /up` at the private HAProxy socket while the gate is up, then through Caddy over HTTPS.
+A Laravel site's Caddy file is the front-controller form: every path that is not a file reaches `index.php` with the original URI in `X-Forwarded-Uri`, so application routes and the `/up` health route work. The file denies `.env`, `.git`, `storage`, `vendor` and `bootstrap/cache`. Deploy's readiness check asks the application for `/up` through the private HAProxy socket's PATH_INFO form while the gate is up, then through Caddy over HTTPS.
 
 A review of a site that already exists in this form proposes no changes. A fresh controller reconstructs the site, its repository and branch, its `.env` key names and server-computed digests (never a secret value) and the deploy key's public half from the server alone. The Environment section edits only reviewed keys ([settings](settings.md)).
 
