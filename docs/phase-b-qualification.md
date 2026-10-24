@@ -14,15 +14,15 @@ which keeps that evidence and covers the rest of Phase B.
 
 ## Revisions
 
-Every number in [Build budget](#build-budget) and [Scenarios](#scenarios) belongs to one code
-revision, `1010e8b` on `qualify/387-phase-b`. The hosted figures belong to `d4c2509`, which
-differs from it only in two dependency lock entries for disclosed advisories and in this
-record's own commits.
+Every local number in [Build budget](#build-budget) and [Scenarios](#scenarios) belongs to one
+code revision, `b534ffa` on `qualify/387-phase-b`. The hosted figures belong to the revision
+named under [Hosted runs](#hosted-runs), which differs from it only in documentation and, where
+that section says so, dependency lock entries for disclosed advisories.
 
 | Evidence | Where |
 | --- | --- |
-| Local fast suite, fast validators and native lifecycle scenarios, arm64 | `1010e8b` |
-| Hosted Checks and Native (4 shards), amd64 | `d4c2509`, Checks run [40045263588](https://github.com/rajandangi/barectl/actions/runs/40045263588) and Native run [40045263585](https://github.com/rajandangi/barectl/actions/runs/40045263585) (see [hosted runs](#hosted-runs)). |
+| Local fast suite, fast validators and native lifecycle scenarios, arm64 | `b534ffa` |
+| Hosted Checks and Native (4 shards), amd64 | The head of `qualify/387-phase-b` after this record (see [hosted runs](#hosted-runs)). |
 
 ## Environments
 
@@ -40,29 +40,29 @@ name no mirror serves.
 
 ## Build budget
 
-`docker/disposable-server/build.sh` at `1010e8b`: the fast gate, fast snapshot validators,
+`docker/disposable-server/build.sh` at `b534ffa`: the fast gate, fast snapshot validators,
 browser tests and native lifecycle scenarios run concurrently and each stage is timed.
 
 | Stage | Measured | Target | Limit | Result |
 | --- | --- | --- | --- | --- |
-| Controller fast tests, 931 tests (`--parallel`) | 21.8 s alone, 48 s inside the build | 90 s | | Meets the target |
-| Fast snapshot validators, 3 items | 39 s alone, 70 s inside the build | (part of the joint stage) | | The 60 s target is the joint stage; the validators have no separate target |
-| Browser tests | 56 s inside the build | | | |
-| Native lifecycle scenarios, 65 of 65 passed, 8 lanes | 280 s | 300 s | 900 s | Within the target |
-| Longest native item | 102.1 s (`LaravelDeployMariaDB`) | | 180 s | Within the item limit |
-| Full local build, wall time | 280 s | 300 s | 900 s | Meets the target |
+| Controller fast tests, 932 tests (`--parallel`) | 27.3 s alone, 45 s inside the build | 90 s | | Meets the target |
+| Fast snapshot validators, 3 items | 39 s alone, 60 s inside the build | (part of the joint stage) | | The 60 s target is the joint stage; the validators have no separate target |
+| Joint fast stage, as the build measures it | 60 s | 60 s | | Meets the target |
+| Browser tests | 53 s inside the build | | | |
+| Native lifecycle scenarios, 65 of 65 passed, 8 lanes | 218 s | 300 s | 900 s | Within the target |
+| Longest native item | 67.4 s (`LaravelDeployMariaDB`) | | 180 s | Within the item limit |
+| Full local build, wall time | 218 s | 300 s | 900 s | Meets the target |
 
 The [test time budget](quality.md#test-time-budget) measures one joint fast stage with the
-fast gate and the validators side by side, and gives it a 60 s target. Inside the full build
-both run beside the browser suite and eight native lanes on 14 CPUs, so the same work takes
-more; the table above reports each of them. Run alone on this host the fast gate takes 27.3 s
-for 932 tests and the validators take 39 s for 3 items. The joint 60 s target is missed only in
-the contended build, where the two jobs overlap with everything else. The Phase A record reports the same effect. An earlier build of the same code took
-271 s with the same 65 scenarios, so the wall time varies by about 10 s between runs.
+fast gate and the validators side by side, and gives it a 60 s target. This build met it. An
+earlier build of the same code on a colder image cache took 280 s, with the joint stage at
+70 s and the fast gate at 48 s inside the build; the warm run above is this revision's
+measurement. Run alone on this host the fast gate takes 27.3 s for 932 tests and the
+validators take 39 s for 3 items.
 
 Native item times vary more than the total, because exclusive scenarios wait for the lane and
-for each other: `LaravelDeployMariaDB` took 66.2 s in the earlier run of the same revision and
-102.1 s in this one, and `DatabaseEngineMariaDB` 70.6 s and 35.4 s. The longest item stays well
+for each other: across four builds of this revision `LaravelDeployMariaDB` took 102.1 s, 66.2 s
+and 67.4 s, and `DatabaseEngineMariaDB` 70.6 s, 35.4 s and 33.4 s. The longest item stays well
 inside the 180 s limit.
 
 The hosted shards are reported separately in [Hosted runs](#hosted-runs): every shard exceeds
@@ -77,25 +77,26 @@ against one prepared server.
 
 | Scenario | Class | Local arm64 | Hosted amd64 |
 | --- | --- | --- | --- |
-| S11 HTTPS and certificate state | `HttpsSite` | 26.7 s | 41.9 s |
-| S11 Database engine, MariaDB | `DatabaseEngineMariaDB` | 35.4 s | 64.3 s |
-| S11 Database engine, PostgreSQL | `DatabaseEnginePostgreSQL` | 25.1 s | 40.6 s |
-| S11 Site database, MariaDB | `SiteDatabaseMariaDB` | 32.2 s | 84.5 s |
-| S11 Site database, PostgreSQL | `SiteDatabasePostgreSQL` | 24.7 s | 66.3 s |
-| S12 WordPress lifecycle | `WordPressCreateMariaDB` | 39.6 s | 121.3 s |
-| S13 Laravel create | `LaravelCreateMariaDB` | 61.7 s | 79.1 s |
-| S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 102.1 s | 127.0 s |
-| S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 94.5 s | 124.4 s |
-| S13 Deploy boot failure | `LaravelDeployBootFailure` | 68.6 s | 71.1 s |
-| S13 CI release reconstruction | `LaravelReleaseReconstruction` | 23.9 s | 38.2 s |
-| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` | 58.6 s | 56.0 s |
-| S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 29.7 s | 48.7 s |
-| S15 Failed catalog update | `CatalogRuntimeUpdateFailure` | 16.2 s | 28.2 s |
-| S16 Confidential input channel | `ConfidentialChannelLifecycle` | 2.5 s | 3.6 s |
+| S11 HTTPS and certificate state | `HttpsSite` | 16.6 s | 41.9 s |
+| S11 Database engine, MariaDB | `DatabaseEngineMariaDB` | 33.4 s | 64.3 s |
+| S11 Database engine, PostgreSQL | `DatabaseEnginePostgreSQL` | 23.8 s | 40.6 s |
+| S11 Site database, MariaDB | `SiteDatabaseMariaDB` | 31.7 s | 84.5 s |
+| S11 Site database, PostgreSQL | `SiteDatabasePostgreSQL` | 24.8 s | 66.3 s |
+| S12 WordPress lifecycle | `WordPressCreateMariaDB` | 44.3 s | 121.3 s |
+| S13 Laravel create | `LaravelCreateMariaDB` | 32.6 s | 79.1 s |
+| S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 67.4 s | 127.0 s |
+| S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 51.2 s | 124.4 s |
+| S13 Deploy boot failure | `LaravelDeployBootFailure` | 43.0 s | 71.1 s |
+| S13 CI release reconstruction | `LaravelReleaseReconstruction` | 12.8 s | 38.2 s |
+| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` | 31.1 s | 56.0 s |
+| S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 29.1 s | 48.7 s |
+| S15 Failed catalog update | `CatalogRuntimeUpdateFailure` | 15.3 s | 28.2 s |
+| S16 Confidential input channel | `ConfidentialChannelLifecycle` | 2.7 s | 3.6 s |
 
-The Phase A scenarios S1 to S10 also run on this revision and all passed; their times are in the
-Phase A record. The longest item is `LaravelDeployMariaDB` at 102.1 s locally and 127.0 s hosted,
-inside the 180 s item limit.
+The Phase A scenarios S1 to S10 also run on this revision and all passed; their times are in
+the Phase A record. The hosted column is from the run named under [Hosted runs](#hosted-runs)
+and is kept for comparison rather than as this revision's measurement. The longest item is
+`LaravelDeployMariaDB` at 67.4 s locally and 127.0 s hosted, inside the 180 s item limit.
 
 What the Phase B classes assert:
 
@@ -139,7 +140,8 @@ What the Phase B classes assert:
 - `LaravelDeployMariaDB` pushes a reviewed commit, deploys it, checks the exact commit, the
   build, the shared `.env`/`storage`/`bootstrap/cache` links, the release modes, the pending
   migration run once behind the gate, the switch, readiness over the private socket and over
-  Caddy's HTTPS, that the site serves the new code and that `APP_KEY` is unchanged; then an
+  Caddy's HTTPS, that the site serves the new code (the test waits out PHP's revalidation
+  window) and that `APP_KEY` is unchanged; then an
   environment save rebuilds the cached configuration the Deploy built, a Deploy with migrations
   off reports them and runs none, Roll back reactivates a retained release with the "not
   reversed" wording, a further Deploy prunes exactly the releases its review named, and a full
@@ -374,7 +376,7 @@ The specification's open native qualification items, decided but not blockers:
 | --- | --- |
 | MariaDB `unix_socket` through PHP's `mysqli` as the site user under Nix PHP | Proven by `SiteDatabaseMariaDB`: the binding is ready only when the site's own PHP master connects through its driver as the site user and can read only its own database. `SiteDatabasePostgreSQL` does the same through `pdo_pgsql` |
 | Memory and disk of MariaDB or PostgreSQL plus three sites on a 1 GiB limit | **Not qualified.** No Phase B scenario measures an engine plus three sites under a 1 GiB limit; `RuntimeSmallHost` measures the foundation and two runtimes only |
-| Code pickup after a `current` switch without refused requests | **Not qualified.** `LaravelDeployMariaDB` still waits five seconds after the switch for PHP's revalidation window; every deploy that switches code uses the maintenance window |
+| Code pickup after a `current` switch without refused requests | **Not qualified.** The body waits five seconds after the switch for PHP's revalidation window, and the scenarios then wait up to 30 s for the switched release's code. During that window the site can still answer with the previous release, so the readiness check may observe the old release rather than the new one; every deploy that switches code uses the maintenance window |
 | UMask behaviour for WordPress self-updates | **Not qualified.** Self-updates as the site user are implemented but not exercised on a server |
 | Whether ZeroSSL fallback engages without a contact email | **Not applicable yet**: there is no contact-email setting ([#444](https://github.com/rajandangi/barectl/issues/444)), and Caddy's default issuer choice is unmodified |
 
