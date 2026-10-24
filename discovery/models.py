@@ -97,6 +97,9 @@ class DiscoverySnapshot(models.Model):
     host_foundation = models.TextField(blank=True)
     host_evidence = models.TextField(blank=True)
     host_profiles = models.TextField(blank=True)
+    # Caddy's optional certificate contact email, read from the main configuration.
+    certificate_email = models.CharField(max_length=254, blank=True, default="")
+    certificate_email_state = models.CharField(max_length=12, blank=True, default="")
     runtime_warning = models.TextField(blank=True)
     default_runtime_observed = models.BooleanField(default=False)
     default_php = models.CharField(max_length=16, blank=True)

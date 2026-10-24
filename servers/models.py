@@ -37,6 +37,9 @@ class Server(models.Model):
     credential_file_identity = models.CharField(max_length=128, blank=True)
     connection_revision = models.PositiveIntegerField(default=0)
     registration_revision = models.PositiveIntegerField(default=0)
+    # The certificate contact email this controller last requested, as a local fallback
+    # before discovery reads Caddy's main configuration (docs/tls.md).
+    certificate_email = models.CharField(max_length=254, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

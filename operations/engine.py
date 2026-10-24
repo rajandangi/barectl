@@ -383,6 +383,11 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "checksum service could not be reached or WP-CLI could not read the site. Nothing "
         "on the server changed. Check the server's network access and prepare a new review."
     ),
+    "certificate_email": (
+        "Barectl could not publish, reload and verify the reviewed certificate contact "
+        "email. The previous main configuration was restored where it had been replaced. "
+        "Check the run's journal on the server, then prepare a new review."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -635,6 +640,7 @@ RESULT_REASONS: Final = frozenset(
         "wordpress_password_unverified",
         "wordpress_checksums",
         "wordpress_checksums_unavailable",
+        "certificate_email",
     }
 )
 

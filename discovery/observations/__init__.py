@@ -23,6 +23,7 @@ from ..snapshot import (
     OsRelease,
 )
 from ..ssh import RemoteShell
+from . import caddy_email
 from .components import _collect_web_stack
 from .probes import _Failed, _read_file, _run
 from .standing import collect as collect_standing
@@ -88,6 +89,9 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     release_observation, settings_observation = _hosting_inventories(
         shell, standing, sites=sites, releases=releases
     )
+    certificate_email, certificate_email_state = "", ""
+    if sites and standing.standing == Standing.TARGET_STACK:
+        certificate_email_state, certificate_email = caddy_email.read(shell)
     return CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -102,6 +106,8 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         runtime_defaults=defaults,
         releases=release_observation,
         settings=settings_observation,
+        certificate_email=certificate_email,
+        certificate_email_state=certificate_email_state,
     )
 
 

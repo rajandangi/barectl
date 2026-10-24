@@ -1,4 +1,53 @@
-{# The Database setting (docs/dashboard-workflows.md, #179 Server Settings). #}
+{# Server Settings: HTTPS and the database (docs/dashboard-workflows.md, #179). #}
+<section class="margin-top-4" aria-labelledby="settings-certificate-heading">
+  <h2 id="settings-certificate-heading">HTTPS</h2>
+  {% if certificate_email_panel.observed %}
+    <dl class="barectl-facts barectl-card">
+      <div>
+        <dt>Certificate contact email</dt>
+        <dd>
+          {% if certificate_email_panel.state == "set" %}
+            <a href="mailto:{{ certificate_email_panel.email }}">{{ certificate_email_panel.email }}</a>
+          {% elif certificate_email_panel.state == "absent" %}
+            Not set. Caddy requests certificates without a contact address.
+          {% else %}
+            {{ certificate_email_panel.state|capfirst }}
+          {% endif %}
+        </dd>
+      </div>
+    </dl>
+    <p class="barectl-note">
+      Read from the server's main Caddy configuration. Caddy's automatic HTTPS issues and renews every site's certificate; the address is optional and is only used for certificate authority notices.
+    </p>
+    {% if certificate_email_problem %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">{{ certificate_email_problem }}</p>
+        </div>
+      </div>
+    {% endif %}
+    {% if certificate_email_panel.can_prepare %}
+      <form method="post"
+            action="{% url 'certificate_email_prepare' server.pk %}"
+            class="usa-form">
+        {% csrf_token %}
+        <label class="usa-label"
+               for="{{ certificate_email_form.email.id_for_label }}">{{ certificate_email_form.email.label }}</label>
+        <div class="usa-hint"
+             id="{{ certificate_email_form.email.id_for_label }}-hint">{{ certificate_email_form.email.help_text }}</div>
+        {{ certificate_email_form.email }}
+        <button type="submit" class="usa-button margin-top-2">Prepare review</button>
+      </form>
+    {% endif %}
+  {% else %}
+    <p>The certificate contact email has not been observed yet. Run discovery to read it from the server.</p>
+    {% if certificate_email_panel.saved %}
+      <p class="barectl-note">
+        Last requested on this controller: {{ certificate_email_panel.saved }}. This is not the server's current setting; run discovery to read it from the server.
+      </p>
+    {% endif %}
+  {% endif %}
+</section>
 <section class="margin-top-4" aria-labelledby="settings-database-heading">
   <h2 id="settings-database-heading">Database</h2>
   {% if database_panel %}

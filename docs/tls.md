@@ -20,7 +20,13 @@ http://shop.example.com, http://www.example.com {
 }
 ```
 
-Caddy places its host-matched HTTP-to-HTTPS redirect routes before the shared `:80` catch-all, so unknown host names still answer 404 on HTTP and are refused on HTTPS (`strict_sni_host on`). The ACME challenge path is answered before the redirect, so issuance keeps working while HTTP requests redirect. The main configuration leaves automatic HTTPS on; it sets `admin` and `servers { strict_sni_host on }`, and imports the site files.
+Caddy places its host-matched HTTP-to-HTTPS redirect routes before the shared `:80` catch-all, so unknown host names still answer 404 on HTTP and are refused on HTTPS (`strict_sni_host on`). The ACME challenge path is answered before the redirect, so issuance keeps working while HTTP requests redirect. The main configuration leaves automatic HTTPS on; it sets `admin`, the optional certificate contact email and `servers { strict_sni_host on }`, and imports the site files.
+
+## Certificate contact email
+
+Server **Settings > HTTPS** shows the optional certificate contact email and prepares one Shared change to set or clear it. The address is the one Caddy global `email` option: it is only for certificate authority notices, and leaving it empty publishes the main configuration with no `email` line, as every earlier foundation did. The create-site journey never asks for it. The controller keeps the last requested address only as a reminder until discovery reads the server; the rendered main configuration is the setting.
+
+The review names the previous and new address and the whole candidate main configuration. Applying republishes `/etc/caddy/Caddyfile` with only that line changed, so options an operator added through ordinary administration stay byte-identical. It validates the candidate with the pinned Caddy binary, replaces the file atomically, reloads Caddy and proves the running configuration equals the file; a failed reload or verification restores the previous file. Discovery reads the same rendered file, so a fresh controller shows the setting without a Barectl marker. A missing or unreadable main configuration, or a global block with more than one `email` line, is reported and blocks the change rather than being guessed.
 
 A host built before this change has `auto_https off` in its main configuration: discovery reads that as an older foundation, so the host reports **Incomplete foundation** and **Set up server** rewrites the main configuration and restarts Caddy. No site is recreated, and the earlier file is only replaced, never kept as a Barectl record.
 

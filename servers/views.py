@@ -341,9 +341,11 @@ def server_page(
     _overview_section(request, state, section, context)
     _stack_section(request, state, section, context)
     if section == "settings":
+        from bootstrap.certificate_email_views import context_for_server
         from databases import engine as database_engine
         from databases.presentation import panel
 
+        context.update(context_for_server(server, request.user, state))
         context["database_panel"] = (
             panel(state.snapshot.collected) if state.snapshot is not None else None
         )

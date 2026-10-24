@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from django.db.migrations import Migration
 
     from bootstrap.apps import BootstrapConfig
+    from bootstrap.certificate_email_views import CertificateEmailForm
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
     from dashboard.checks import check_built_assets
@@ -288,6 +289,7 @@ if TYPE_CHECKING:
         HttpSiteForm.clean_names,
         SiteReadinessForm.clean_readiness,
     )
+    _certificate_email_form = (CertificateEmailForm.clean_email,)
     # The HTTP creation template renders this declared field by name.
     _http_site_field = HttpSiteForm.http_only
     # The create form renders the Step 1 continuation note from the session step.

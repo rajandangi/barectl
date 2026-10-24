@@ -62,6 +62,12 @@ class RecordedHostStandingTests(TestCase):
                 if standing is None:
                     self.fail(f"The transcript of {state} did not produce host standing.")
                 self.assertEqual(standing.standing, expected_standing)
+                if expected_standing == Standing.TARGET_STACK:
+                    # Every recorded foundation has no certificate contact email line.
+                    self.assertEqual(snapshot.certificate_email_state, "absent")
+                    self.assertEqual(snapshot.certificate_email, "")
+                else:
+                    self.assertEqual(snapshot.certificate_email_state, "")
                 for fragment in reason_fragments:
                     self.assertTrue(
                         any(fragment in reason for reason in standing.reasons),
