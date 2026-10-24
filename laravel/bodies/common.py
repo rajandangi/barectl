@@ -15,7 +15,6 @@ import re
 import stat
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Final
@@ -25,6 +24,7 @@ from sites.bodies.common import (
     current_bytes,
     open_site_lock,
     reload_caddy,
+    reload_site_fpm,
     replace_caddy,
     result,
     safe,
@@ -986,12 +986,15 @@ def _activate(
     problem = _attempt(lambda: switch_current(settings, name), "laravel_readiness")
     if problem:
         return problem
-    # The switch changes the same resolved script path, so the serving master still holds
-    # the previous release's compiled scripts: PHP's default opcache.file_update_protection
-    # and opcache.revalidate_freq both defer recompiling a changed script for two seconds.
-    # Wait that window out, or the readiness check would answer for the release the master
-    # still has cached.
-    time.sleep(5)
+    # The switch changes a symlink, but a serving worker keeps its OPcache and realpath
+    # caches, so it can keep answering with the previous release (Phase B #450). Reload the
+    # site's own master gracefully before the readiness check: the master re-execs, fresh
+    # workers resolve the new release, and requests already running finish under
+    # ``process_control_timeout``.
+    stage("reload")
+    problem = _attempt(lambda: reload_site_fpm(settings), "laravel_readiness")
+    if problem:
+        return problem
     stage("readiness")
     if gate:
         if request_readiness(settings, socket_path=str(settings.proxy_socket)) != 200:

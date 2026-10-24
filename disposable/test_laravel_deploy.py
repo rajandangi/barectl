@@ -24,7 +24,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 from sites.observation import python_command
 
-from . import mirror, quarantine
+from . import mirror
 from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
@@ -457,16 +457,6 @@ class LaravelDeployCase(ScenarioTestCase):
             f"{self.domain}:443:127.0.0.1 https://{self.domain}{path}"
         )
 
-    def await_code(self, text: str, *, via: str = "https", timeout: float = 30) -> None:
-        """Wait for the switched release's code, as PHP's revalidation window passes."""
-        read = self.socket_body if via == "socket" else self.https_body
-        body = read()
-        end = time.monotonic() + timeout
-        while text not in body and time.monotonic() < end:
-            time.sleep(0.5)
-            body = read()
-        self.assertIn(text, body)
-
     def socket_status(self, path: str = "/") -> int:
         return int(
             self.native(
@@ -669,7 +659,7 @@ class LaravelDeployMariaDB(LaravelDeployCase):
         # Readiness answers 200 over the site's own socket and over Caddy's HTTPS, and the
         # deploy is not gated afterwards.
         self.assertEqual(self.readiness(), {"socket": 200, "https": 200})
-        self.await_code(_GOOD_VIEW.strip())
+        self.assertIn(_GOOD_VIEW.strip(), self.https_body())
         # The deploy did not rotate APP_KEY.
         self.assertEqual(self.app_key(), app_key)
 
@@ -842,7 +832,7 @@ class LaravelDeployOutcomes(LaravelDeployCase):
         self.assert_failed(line, "partial", "laravel_composer")
         self.assertEqual(self.current_release(), current)
         self.assertEqual(self.https_status(), 200)
-        self.await_code(_GOOD_VIEW.strip())
+        self.assertIn(_GOOD_VIEW.strip(), self.https_body())
 
         # -- A failed migration keeps the gate and the old release -----------------------
         composer_json = self.native(f"cat {release}/composer.json")
@@ -857,7 +847,7 @@ class LaravelDeployOutcomes(LaravelDeployCase):
         self.assert_failed(line, "partial", "laravel_migrations")
         self.assertEqual(self.current_release(), current)
         self.assertEqual(self.https_status(), 503, "The maintenance gate is not up.")
-        self.await_code(_GOOD_VIEW.strip(), via="socket")
+        self.assertIn(_GOOD_VIEW.strip(), self.socket_body())
         self.assertNotIn("2026_10_19_000003_broken", self.migration_names())
         self.assertEqual(
             self.native(f"test -d {self.base()}/releases/{broken}-*/; echo $?").strip(), "0"
@@ -870,7 +860,6 @@ class LaravelDeployOutcomes(LaravelDeployCase):
 
 
 @tag(SCENARIO_TAG)
-@quarantine.quarantine(450, owner="rajandangi", since="2026-10-24")
 class LaravelDeployBootFailure(LaravelDeployCase):
     """A release whose ``/up`` does not answer is never opened to visitors."""
 
@@ -918,7 +907,6 @@ class LaravelDeployBootFailure(LaravelDeployCase):
 
 
 @tag(SCENARIO_TAG)
-@quarantine.quarantine(450, owner="rajandangi", since="2026-10-24")
 class LaravelDeployPostgreSQL(LaravelDeployCase):
     """One Deploy on PostgreSQL (issue #259's ninth criterion)."""
 
@@ -950,5 +938,5 @@ class LaravelDeployPostgreSQL(LaravelDeployCase):
         self.assertEqual(self.current_release(), f"{commit}-{draft.document['token']}")
         self.assertEqual(self.readiness(), {"socket": 200, "https": 200})
         self.assertEqual(self.migration_count("2026_10_19_000001_create_fixture_widgets"), 1)
-        self.await_code(_GOOD_VIEW.strip())
+        self.assertIn(_GOOD_VIEW.strip(), self.https_body())
         self.assertEqual(self.app_key(), app_key)

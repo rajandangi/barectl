@@ -308,6 +308,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             "gate",
             "migrations",
             "switch",
+            "reload",
             "readiness",
             "prune",
         ),

@@ -26,6 +26,7 @@ LARAVEL_IMPORT: Final = (
     "    current_bytes,\n"
     "    open_site_lock,\n"
     "    reload_caddy,\n"
+    "    reload_site_fpm,\n"
     "    replace_caddy,\n"
     "    result,\n"
     "    safe,\n"
