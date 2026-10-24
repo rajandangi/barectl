@@ -16,6 +16,7 @@ from discovery.snapshot import (
     Package,
     ServiceUnit,
     SiteAccount,
+    SiteCertificate,
     WebStackComponentObservation,
     save_snapshot,
 )
@@ -151,6 +152,7 @@ def record_site_settings(
     identifier: str = "alpha",
     application: str = "laravel",
     settings: tuple[ObservedSetting, ...] = (),
+    certificate: SiteCertificate | None = None,
 ) -> None:
     """A target host with one site whose private settings the dashboard may show."""
     sites = (
@@ -162,6 +164,8 @@ def record_site_settings(
             SiteState.MANAGED,
             ObservationOutcome.OBSERVED,
             file=f"/etc/caddy/sites/{identifier}.caddy",
+            https=certificate is not None,
+            certificate=certificate,
             application=application,
             application_version="7.1.3" if application == "wordpress" else "",
         ),

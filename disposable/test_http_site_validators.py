@@ -17,6 +17,19 @@ class HttpSiteValidators(ScenarioTestCase):
     prefix = "v338"
     validator = True
 
+    def stable_state(self, command: str) -> str:
+        """The command's output without systemd's transient credential mounts.
+
+        systemd mounts and unmounts ``/run/credentials`` entries for units that start
+        while a validation runs, so those lines change without the validator creating
+        anything. Everything else must be byte-identical before and after.
+        """
+        return "\n".join(
+            line
+            for line in self.native(command).splitlines()
+            if not (len(line.split()) > 4 and line.split()[4].startswith("/run/credentials/"))
+        )
+
     def test_http_renderer_validates_as_the_caddy_service_identity(self) -> None:
         settings = SiteSettings(
             "v338render",
@@ -121,9 +134,8 @@ print(settings.identifier)
 
     def test_exact_future_log_path_validation_never_creates_live_site_resources(self) -> None:
         settings = SiteSettings("v338new", ("v338new.example.com",), "php84")
-        before = self.native(
-            "cat /proc/1/mountinfo; find /run -maxdepth 1 -name 'site-candidate-*'"
-        )
+        command = "cat /proc/1/mountinfo; find /run -maxdepth 1 -name 'site-candidate-*'"
+        before = self.stable_state(command)
         self.native("test ! -e /var/www/v338new")
         source = (
             observation.COMMON_SOURCE
@@ -133,10 +145,7 @@ print(settings.identifier)
             observation.python_command(source, (settings.identifier, render_caddy(settings)))
         )
         self.native("test ! -e /var/www/v338new")
-        self.assertEqual(
-            self.native("cat /proc/1/mountinfo; find /run -maxdepth 1 -name 'site-candidate-*'"),
-            before,
-        )
+        self.assertEqual(self.stable_state(command), before)
 
     def test_unavailable_mount_privilege_refuses_and_removes_scratch_artifacts(self) -> None:
         settings = SiteSettings("v338limit", ("v338limit.example.com",), "php84")
@@ -195,14 +204,14 @@ else:
 print('refused-without-live-mutation')
 """
             )
-            before_mounts = self.native("cat /proc/1/mountinfo")
+            before_mounts = self.stable_state("cat /proc/1/mountinfo")
             self.assertEqual(
                 self.native(
                     observation.python_command(source, (settings.identifier, settings.runtime))
                 ).strip(),
                 "refused-without-live-mutation",
             )
-            self.assertEqual(self.native("cat /proc/1/mountinfo"), before_mounts)
+            self.assertEqual(self.stable_state("cat /proc/1/mountinfo"), before_mounts)
             self.native("test -z \"$(find /run -maxdepth 1 -name 'site-pool-candidate-*')\"")
 
     def test_changed_preimage_and_unsafe_directory_refuse_before_persistent_mutation(self) -> None:

@@ -1,9 +1,9 @@
 # Database engines and site databases
 
 Barectl installs and removes one **database engine per server** — MariaDB or PostgreSQL,
-never both — from the server's configured Ubuntu archive. Site databases themselves (the
-`s<id>` principal the site's applications sign in as) are [Phase B's next slice
-(#379)](https://github.com/rajandangi/barectl/issues/379).
+never both — from the server's configured Ubuntu archive. Each WordPress and Laravel site
+gets its own database and principal, both named `s<id>`, over the local socket
+([site databases](#site-databases-implemented-379)).
 
 ## Install a database engine (implemented, #378)
 

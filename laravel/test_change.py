@@ -6,6 +6,7 @@ import stat
 import subprocess
 import tempfile
 import types
+from dataclasses import replace
 from datetime import timedelta
 from typing import cast, override
 from unittest import mock
@@ -169,6 +170,13 @@ class DeployReviewTests(SimpleTestCase):
         draft = change.review(self.evidence(), inputs)
         self.assertFalse(draft.document["migrations"])
         self.assertIn("Off", str(draft.document["details"]))
+
+    def test_a_deploy_is_refused_before_any_change_when_the_disk_lacks_space(self) -> None:
+        evidence = replace(self.evidence(), disk_available=256 * 1024 * 1024)
+        draft = change.review(evidence, PreparationInputs("", "s4alpha"))
+        self.assertFalse(draft.eligible)
+        self.assertIn("The server lacks the free space this deploy needs.", draft.refusals)
+        self.assertEqual(draft.effects, ())
 
     def test_the_body_round_trips_a_reviewed_document(self) -> None:
         draft = change.review(self.evidence(), PreparationInputs("", "s4alpha"))
