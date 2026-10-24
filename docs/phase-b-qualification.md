@@ -71,9 +71,12 @@ the 300 s target for one hosted shard while staying inside the 900 s limit, trac
 
 ## Scenarios
 
-Phase B adds fifteen native scenario classes to the Phase A set. Each row lists the class and the
-time this build took; a class that holds several test methods runs them in one exclusive item
-against one prepared server.
+Phase B adds fifteen native scenario classes to the Phase A set. Each row lists the class and
+the time this build took; a class that holds several test methods runs them in one exclusive
+item against one prepared server. Two classes are quarantined for
+[#450](https://github.com/rajandangi/barectl/issues/450): the required check skips them and the
+weekly job runs them with `BARECTL_RUN_QUARANTINED`. Their times below are from the last run
+that executed them, before the quarantine; every other row is from this build.
 
 | Scenario | Class | Local arm64 | Hosted amd64 |
 | --- | --- | --- | --- |
@@ -86,9 +89,9 @@ against one prepared server.
 | S13 Laravel create | `LaravelCreateMariaDB` | 32.6 s | 77.6 s |
 | S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 67.4 s | 120.6 s |
 | S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 51.2 s | 124.1 s |
-| S13 Deploy boot failure | `LaravelDeployBootFailure` | 43.0 s | 70.5 s |
+| S13 Deploy boot failure | `LaravelDeployBootFailure` (quarantined, [#450](https://github.com/rajandangi/barectl/issues/450)) | 43.0 s | 70.5 s |
 | S13 CI release reconstruction | `LaravelReleaseReconstruction` | 12.8 s | 38.4 s |
-| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` | 31.1 s | 56.1 s |
+| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` (quarantined, [#450](https://github.com/rajandangi/barectl/issues/450)) | 31.1 s | 56.1 s |
 | S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 29.1 s | 47.0 s |
 | S15 Failed catalog update | `CatalogRuntimeUpdateFailure` | 15.3 s | 22.6 s |
 | S16 Confidential input channel | `ConfidentialChannelLifecycle` | 2.7 s | 3.7 s |
@@ -284,8 +287,8 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 53. Pending migrations run once before the new code serves behind a maintenance page, and no gate when none are pending | Native `LaravelDeployMariaDB` (migration recorded once behind the gate; second Deploy with migrations off) |
 | 54. The confirm screen acknowledges that migrations may change data, that roll back does not reverse them and that no backup exists | `laravel/test_change.py::AcknowledgementTests`; native `LaravelDeployOutcomes` forged apply |
 | 55. A per-site switch turns migrations off, reporting them unrun | `sites/test_deploy_pages.py`; native `LaravelDeployMariaDB` (the run's journal names the pending migration and runs none) |
-| 56. The release is switched in only after the caches are built and `/up` answers 200, keeping the gate if it does not | Native `LaravelDeployMariaDB` (readiness over the socket and over HTTPS) and `LaravelDeployBootFailure` |
-| 57. A failed or interrupted Deploy says which release is serving, whether the gate is up, and the safe next action | Native `LaravelDeployOutcomes` and `LaravelDeployBootFailure`; `Check what happened` reads the original unit |
+| 56. The release is switched in only after the caches are built and `/up` answers 200, keeping the gate if it does not | Native `LaravelDeployMariaDB` (readiness over the socket and over HTTPS) and `LaravelDeployBootFailure` (quarantined, [#450](https://github.com/rajandangi/barectl/issues/450), because readiness can still be answered by the previous release) |
+| 57. A failed or interrupted Deploy says which release is serving, whether the gate is up, and the safe next action | Native `LaravelDeployOutcomes`; `LaravelDeployBootFailure` is quarantined for the same reason as story 56; `Check what happened` reads the original unit |
 | 58. A failed migration keeps the gate and the data, never retried or rolled back | Native `LaravelDeployOutcomes` (one attempt, gate 503, old release serving, migration unrecorded) |
 | 59. Roll back to a retained release with a review that says nothing is reversed | `laravel/test_change.py::RollbackReviewTests`; native `LaravelDeployMariaDB` |
 | 60. Each deploy keeps the newest five releases and names the removed ones | `laravel/test_change.py::DeployReviewTests` (prune set); native `LaravelDeployMariaDB` final Deploy |
@@ -346,7 +349,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | --- | --- |
 | 91. A site's own database user can dump and re-import its own database and nothing else | Native `SiteDatabaseMariaDB` and `SiteDatabasePostgreSQL` (dump, drop and import a view, trigger, routine and event/function; another database refused) |
 | 92. A plain PHP site is confirmed to serve, using a readiness path defaulting to `/` | `sites/test_target_configuration.py::ReadinessReviewTests`; native `HttpSiteNativeBehavior` and `HttpsSite` |
-| 93. Deploy checks `/up` on the new release while the gate still answers visitors, and opens the site only after it passes | Native `LaravelDeployMariaDB` and `LaravelDeployBootFailure` |
+| 93. Deploy checks `/up` on the new release while the gate still answers visitors, and opens the site only after it passes | Native `LaravelDeployMariaDB`; `LaravelDeployBootFailure` is quarantined for the same reason as story 56 |
 
 ## Secret canaries
 
@@ -377,7 +380,7 @@ The specification's open native qualification items, decided but not blockers:
 | --- | --- |
 | MariaDB `unix_socket` through PHP's `mysqli` as the site user under Nix PHP | Proven by `SiteDatabaseMariaDB`: the binding is ready only when the site's own PHP master connects through its driver as the site user and can read only its own database. `SiteDatabasePostgreSQL` does the same through `pdo_pgsql` |
 | Memory and disk of MariaDB or PostgreSQL plus three sites on a 1 GiB limit | **Not qualified.** No Phase B scenario measures an engine plus three sites under a 1 GiB limit; `RuntimeSmallHost` measures the foundation and two runtimes only |
-| Code pickup after a `current` switch without refused requests | **Not qualified.** The body waits five seconds after the switch for PHP's revalidation window, and the scenarios then wait up to 30 s for the switched release's code. During that window the site can still answer with the previous release, so the readiness check may observe the old release rather than the new one; every deploy that switches code uses the maintenance window |
+| Code pickup after a `current` switch without refused requests | **Not qualified.** After the switch, a site worker can answer with the previous release until its OPcache and realpath caches see the new symlink target; the body waits five seconds and the tests wait up to 30 s for the code, but the readiness check itself can still be answered by the old release. `LaravelDeployBootFailure` and `LaravelDeployPostgreSQL` failed intermittently on this and are quarantined as [#450](https://github.com/rajandangi/barectl/issues/450); every deploy that switches code uses the maintenance window |
 | UMask behaviour for WordPress self-updates | **Not qualified.** Self-updates as the site user are implemented but not exercised on a server |
 | Whether ZeroSSL fallback engages without a contact email | **Not applicable yet**: there is no contact-email setting ([#444](https://github.com/rajandangi/barectl/issues/444)), and Caddy's default issuer choice is unmodified |
 
@@ -431,6 +434,12 @@ measured for memory or disk.
   directories under `vendor`, not by reading the build's argv. The readiness ordering is asserted
   by the body's stage order and the two failure fixtures, not by a live interleaving. Pruning is
   proven with synthesised retained releases as well as natively.
+- **Deploy readiness can observe the previous release.** A switched release's workers can keep
+  answering with the previous code until PHP's OPcache and realpath caches see the new symlink
+  target, so the readiness probe can pass on the old release. The boot-failure and PostgreSQL
+  Deploy scenarios failed intermittently on this and are quarantined
+  ([#450](https://github.com/rajandangi/barectl/issues/450)); the MariaDB lifecycle, Roll back,
+  the refusals and the settings rebuild still run on every build.
 - **One engine plus three sites on 1 GiB, and code pickup without refused requests.** See
   [Qualification items](#qualification-items).
 - **Hosted shard time.** Every hosted `Native` shard exceeds the 300 s target for one shard

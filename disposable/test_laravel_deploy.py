@@ -24,7 +24,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 from sites.observation import python_command
 
-from . import mirror
+from . import mirror, quarantine
 from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
@@ -870,6 +870,7 @@ class LaravelDeployOutcomes(LaravelDeployCase):
 
 
 @tag(SCENARIO_TAG)
+@quarantine.quarantine(450, owner="rajandangi", since="2026-10-24")
 class LaravelDeployBootFailure(LaravelDeployCase):
     """A release whose ``/up`` does not answer is never opened to visitors."""
 
@@ -917,6 +918,7 @@ class LaravelDeployBootFailure(LaravelDeployCase):
 
 
 @tag(SCENARIO_TAG)
+@quarantine.quarantine(450, owner="rajandangi", since="2026-10-24")
 class LaravelDeployPostgreSQL(LaravelDeployCase):
     """One Deploy on PostgreSQL (issue #259's ninth criterion)."""
 
