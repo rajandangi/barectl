@@ -15,13 +15,13 @@ which keeps that evidence and covers the rest of Phase B.
 ## Revisions
 
 Every local number in [Build budget](#build-budget) and [Scenarios](#scenarios) belongs to one
-code revision, `2dc9aa3` on `qualify/387-phase-b`. The hosted figures belong to the revision
+code revision, `5be4abc` on `fix/450-deploy-readiness`. The hosted figures belong to the revision
 named under [Hosted runs](#hosted-runs), which differs from it only in documentation and, where
 that section says so, dependency lock entries for disclosed advisories.
 
 | Evidence | Where |
 | --- | --- |
-| Local fast suite, fast validators and native lifecycle scenarios, arm64 | `2dc9aa3` |
+| Local fast suite, fast validators and native lifecycle scenarios, arm64 | `5be4abc` |
 | Hosted Checks and Native (4 shards), amd64 | `e9d8c44`, Checks run [40054358921](https://github.com/rajandangi/barectl/actions/runs/40054358921) and Native run [40054359053](https://github.com/rajandangi/barectl/actions/runs/40054359053) (see [hosted runs](#hosted-runs)). |
 
 ## Environments
@@ -40,30 +40,32 @@ name no mirror serves.
 
 ## Build budget
 
-`docker/disposable-server/build.sh` at `2dc9aa3`: the fast gate, fast snapshot validators,
+`docker/disposable-server/build.sh` at `5be4abc`: the fast gate, fast snapshot validators,
 browser tests and native lifecycle scenarios run concurrently and each stage is timed.
 
 | Stage | Measured | Target | Limit | Result |
 | --- | --- | --- | --- | --- |
-| Controller fast tests, 932 tests (`--parallel`) | 22.6 s alone, 56 s inside the build | 90 s | | Meets the target |
-| Fast snapshot validators, 3 items | 39 s alone, 78 s inside the build | (part of the joint stage) | | The 60 s target is the joint stage; the validators have no separate target |
-| Joint fast stage, as the build measures it | 78 s | 60 s | | Missed in this build; met at 60 s in a warm run of the same code |
-| Browser tests | 60 s inside the build | | | |
-| Native lifecycle scenarios, 63 of 63 passed, 2 quarantined, 8 lanes | 233 s | 300 s | 900 s | Within the target |
-| Longest native item | 77.4 s (`LaravelDeployMariaDB`) | | 180 s | Within the item limit |
-| Full local build, wall time | 233 s | 300 s | 900 s | Meets the target |
+| Controller fast tests, 932 tests (`--parallel`) | 19.4 s alone, 42 s inside the build | 90 s | | Meets the target |
+| Fast snapshot validators, 3 items | 39 s alone, 67 s inside the build | (part of the joint stage) | | The 60 s target is the joint stage; the validators have no separate target |
+| Joint fast stage, as the build measures it | 67 s | 60 s | | Missed by 7 s in this build; met at 60 s in an earlier run |
+| Browser tests | 54 s inside the build | | | |
+| Native lifecycle scenarios, 65 of 65 passed, 8 lanes | 241 s | 300 s | 900 s | Within the target |
+| Longest native item | 50.5 s (`WordPressCreateMariaDB`) | | 180 s | Within the item limit |
+| Full local build, wall time | 241 s | 300 s | 900 s | Meets the target |
 
 The [test time budget](quality.md#test-time-budget) measures one joint fast stage with the
 fast gate and the validators side by side, and gives it a 60 s target. Builds of this code on
-this host have measured 60 s, 70 s and 78 s for that stage, with the fast gate at 22.6 s to
-27.3 s alone and the validators at 39 s alone; the four stages share 14 CPUs, so the joint
+this host have measured 60 s, 67 s, 70 s and 78 s for that stage, with the fast gate at 19.4 s
+to 27.3 s alone and the validators at 39 s alone; the four stages share 14 CPUs, so the joint
 figure moves with what else is running and the 60 s target is met on a warm run but not on
-every one. The full build itself measured 218 s to 280 s, inside its 300 s target each time.
+every one. A build measured during an unrelated project's container run on the same host took
+444 s with load averages above 100; it is excluded as host contention, not suite time. The fair
+builds measured 218 s to 280 s, inside the 300 s target each time.
 
 Native item times vary more than the total, because exclusive scenarios wait for the lane and
-for each other: `LaravelDeployMariaDB` measured 102.1 s, 66.2 s, 67.4 s and 77.4 s across four
-builds, and `DatabaseEngineMariaDB` 70.6 s, 35.4 s, 33.4 s and 48.2 s. The longest item stays
-inside the 180 s limit.
+for each other: `LaravelDeployMariaDB` measured 102.1 s, 77.4 s, 67.4 s, 66.2 s and 49.3 s
+across five builds; the last three builds follow the graceful reload that replaced the
+five-second wait. `WordPressCreateMariaDB` is now the longest item at 50.5 s.
 
 The hosted shards are reported separately in [Hosted runs](#hosted-runs): three of the four
 exceed the 300 s target for one hosted shard (one met it) while all stay inside the 900 s
@@ -77,26 +79,27 @@ item against one prepared server.
 
 | Scenario | Class | Local arm64 | Hosted amd64 |
 | --- | --- | --- | --- |
-| S11 HTTPS and certificate state | `HttpsSite` | 21.0 s | 40.6 s |
-| S11 Database engine, MariaDB | `DatabaseEngineMariaDB` | 48.2 s | 60.6 s |
-| S11 Database engine, PostgreSQL | `DatabaseEnginePostgreSQL` | 29.7 s | 43.3 s |
-| S11 Site database, MariaDB | `SiteDatabaseMariaDB` | 31.7 s | 72.9 s |
-| S11 Site database, PostgreSQL | `SiteDatabasePostgreSQL` | 23.6 s | 66.5 s |
-| S12 WordPress lifecycle | `WordPressCreateMariaDB` | 41.6 s | 132.0 s |
-| S13 Laravel create | `LaravelCreateMariaDB` | 40.9 s | 74.7 s |
-| S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 77.4 s | 134.0 s |
-| S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 64.7 s | 123.8 s |
-| S13 Deploy boot failure | `LaravelDeployBootFailure` | 43.0 s | 70.5 s |
-| S13 CI release reconstruction | `LaravelReleaseReconstruction` | 19.2 s | 37.8 s |
-| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` | 31.1 s | 56.1 s |
-| S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 39.0 s | 55.3 s |
+| S11 HTTPS and certificate state | `HttpsSite` | 16.4 s | 40.6 s |
+| S11 Database engine, MariaDB | `DatabaseEngineMariaDB` | 35.6 s | 60.6 s |
+| S11 Database engine, PostgreSQL | `DatabaseEnginePostgreSQL` | 25.6 s | 43.3 s |
+| S11 Site database, MariaDB | `SiteDatabaseMariaDB` | 37.6 s | 72.9 s |
+| S11 Site database, PostgreSQL | `SiteDatabasePostgreSQL` | 28.9 s | 66.5 s |
+| S12 WordPress lifecycle | `WordPressCreateMariaDB` | 50.5 s | 132.0 s |
+| S13 Laravel create | `LaravelCreateMariaDB` | 32.1 s | 74.7 s |
+| S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 49.3 s | 134.0 s |
+| S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 49.8 s | 123.8 s |
+| S13 Deploy boot failure | `LaravelDeployBootFailure` | 33.8 s | 70.5 s |
+| S13 CI release reconstruction | `LaravelReleaseReconstruction` | 13.6 s | 37.8 s |
+| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` | 27.0 s | 56.1 s |
+| S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 30.2 s | 55.3 s |
 | S15 Failed catalog update | `CatalogRuntimeUpdateFailure` | 17.5 s | 27.7 s |
-| S16 Confidential input channel | `ConfidentialChannelLifecycle` | 2.4 s | 3.5 s |
+| S16 Confidential input channel | `ConfidentialChannelLifecycle` | 3.3 s | 3.5 s |
 
 The Phase A scenarios S1 to S10 also run on this revision and all passed; their times are in
 the Phase A record. The hosted column is from the run named under [Hosted runs](#hosted-runs)
 and is kept for comparison rather than as this revision's measurement. The longest item is
-`LaravelDeployMariaDB` at 77.4 s locally and 134.0 s hosted, both inside the 180 s item limit.
+`WordPressCreateMariaDB` at 50.5 s locally and `LaravelDeployMariaDB` at 134.0 s hosted, both
+inside the 180 s item limit.
 
 What the Phase B classes assert:
 
@@ -453,7 +456,7 @@ measured for memory or disk.
 | `dependency-audit` | 19 s | Passed |
 
 `Native` run [40054359053](https://github.com/rajandangi/barectl/actions/runs/40054359053),
-amd64, four shards of two lanes, all passed (the two quarantined classes are skipped):
+amd64, four shards of two lanes, all passed:
 
 | Shard | Job wall time | Reported by the runner |
 | --- | --- | --- |
@@ -474,8 +477,9 @@ full build (233 s) is inside its own target.
 
 Earlier runs on this branch failed `dependency-audit` on advisories disclosed after the branch
 point: `filelock` 4.0.3 (three CVEs) and then `fast-uri` 3.1.8 and `zod` 4.6.5. Both lock
-updates are in the branch's history. Before the quarantine, shard 1 failed
-`LaravelDeployBootFailure` with `succeeded/: expected partial/laravel_readiness`, and an
-earlier run (`3f52be1`) missed the L1 cache on all shards (the last `Native` run on `main`
+updates are in the branch's history. While [#450](https://github.com/rajandangi/barectl/issues/450)
+was open, shard 1 failed `LaravelDeployBootFailure` with
+`succeeded/: expected partial/laravel_readiness`; the scenarios are no longer quarantined after
+that fix. An earlier run (`3f52be1`) missed the L1 cache on all shards (the last `Native` run on `main`
 predates the catalog-update change), so each shard prepared L1 through S1 with shard times of
 853 s, 573 s, 543 s and 573 s, still inside the 900 s limit.
