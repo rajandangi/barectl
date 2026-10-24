@@ -11,6 +11,7 @@ class SitesConfig(AppConfig):
         from operations.engine import register_kind
 
         from .change import CREATE_SITE
+        from .domains_change import SET_SITE_DOMAINS
         from .node_change import SET_SITE_NODE
         from .php_change import SET_SITE_PHP
         from .pool_change import SET_SITE_POOL
@@ -18,6 +19,7 @@ class SitesConfig(AppConfig):
         from .remove import REMOVE as REMOVE_SITE
 
         register_kind(CREATE_SITE)
+        register_kind(SET_SITE_DOMAINS)
         register_kind(SET_SITE_NODE)
         register_kind(SET_SITE_PHP)
         register_kind(SET_SITE_POOL)

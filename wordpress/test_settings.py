@@ -130,6 +130,7 @@ def native(application: str = "wordpress") -> NativeState:
                 "application": application,
                 "application_version": "7.1.3",
                 "application_problem": "",
+                "serving_form": ("wordpress" if application.startswith("wordpress") else "plain"),
             }
         ],
         "current_sites": ["shop"],

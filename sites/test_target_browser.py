@@ -136,6 +136,71 @@ class HttpSiteBrowserTests(BrowserTestCase):
             },
         )
 
+    def test_operator_changes_domains_and_https_from_settings_with_a_keyboard(self) -> None:
+        from unittest import mock
+
+        from operations.services import read_changes
+
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/settings/")
+            expect(
+                self.page.get_by_role("heading", name="Domains and HTTPS", exact=True)
+            ).to_be_visible()
+            names = self.page.get_by_label("DNS names", exact=True)
+            names.fill("alpha.example.com www.example.com")
+            https = self.page.get_by_label("Serve over HTTPS", exact=True)
+            expect(https).not_to_be_checked()
+            https.check()
+            expect(https).to_be_checked()
+            button = self.page.get_by_role(
+                "button", name="Prepare domains and HTTPS review", exact=True
+            )
+            button.focus()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role(
+                    "heading", name="Change domains and HTTPS: review", exact=True
+                )
+            ).to_be_visible()
+        rows = read_changes(server).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            rows[0].preparation.inputs,
+            {
+                "version": 1,
+                "identifier": "alpha",
+                "names": ["alpha.example.com", "www.example.com"],
+                "https": True,
+            },
+        )
+        self.assert_theme_and_components_initialized()
+        self.page.set_viewport_size({"width": 320, "height": 812})
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+        self.assertEqual(self.console_errors, [])
+
+    def test_overview_links_the_site_address_without_ssh(self) -> None:
+        from unittest import mock
+
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/overview/")
+            address = self.page.get_by_role("link", name="http://alpha.example.com")
+            expect(address).to_be_visible()
+            expect(address).to_have_attribute("href", "http://alpha.example.com")
+        self.assert_theme_and_components_initialized()
+        self.assertEqual(self.console_errors, [])
+
     def test_operator_resets_a_wordpress_password_through_the_confidential_channel(
         self,
     ) -> None:

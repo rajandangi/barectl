@@ -17,7 +17,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of
 from sites.bodies.common import NativeState, SiteRecord
-from sites.configuration import SiteSettings, render_caddy
+from sites.configuration import SiteSettings, render_laravel_caddy
 
 from . import observation
 from .change import releases_of
@@ -170,7 +170,7 @@ def _rollback_document(
     runtime: str,
 ) -> dict[str, object]:
     try:
-        caddy = render_caddy(
+        caddy = render_laravel_caddy(
             SiteSettings(inputs.identifier, names, runtime, https=bool(site["https"]))
         )
     except ValueError:

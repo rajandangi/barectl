@@ -329,6 +329,7 @@ if TYPE_CHECKING:
     # The server page reads the snapshot's presentation from its discovery state, and the
     # Sites section each site's domains, PHP version, facts and state.
     _site = ShownSite("", (), "", SiteState.MANAGED, "", "", "", (), ())
+    # The native site record carries its serving form for the domains change.
     _presentation = (
         DiscoveryState.presentation,
         DiscoveryState.hosting_guidance,

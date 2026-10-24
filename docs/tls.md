@@ -20,11 +20,18 @@ http://shop.example.com, http://www.example.com {
 }
 ```
 
-Caddy places its host-matched HTTP-to-HTTPS redirect routes before the shared `:80` catch-all, so unknown host names still answer 404 on HTTP and are refused on HTTPS (`strict_sni_host on`). The ACME challenge path is answered before the redirect, so issuance keeps working while HTTP requests redirect. The main configuration leaves automatic HTTPS on; it sets only `admin` and `servers { strict_sni_host on }`, and imports the site files.
+Caddy places its host-matched HTTP-to-HTTPS redirect routes before the shared `:80` catch-all, so unknown host names still answer 404 on HTTP and are refused on HTTPS (`strict_sni_host on`). The ACME challenge path is answered before the redirect, so issuance keeps working while HTTP requests redirect. The main configuration leaves automatic HTTPS on; it sets `admin` and `servers { strict_sni_host on }`, and imports the site files.
 
 A host built before this change has `auto_https off` in its main configuration: discovery reads that as an older foundation, so the host reports **Incomplete foundation** and **Set up server** rewrites the main configuration and restarts Caddy. No site is recreated, and the earlier file is only replaced, never kept as a Barectl record.
 
 The site file's route is otherwise unchanged from [the site convention](site-conventions.md#serving): the deny rules, the front-controller rewrite, the private HAProxy socket and the JSON access log.
+
+
+## Changing names and HTTPS
+
+A site's **Settings > Domains and HTTPS** section shows its names and whether HTTPS is on, and prepares one reviewed change. The change republishes the site's Caddy file with the new names and scheme, validates the whole Caddy tree, reloads Caddy and checks every name: the primary name answers, and a WordPress or Laravel alias redirects to the primary domain in the same file. A plain PHP site answers every name directly. The change is **Shared** because Caddy reloads for every site, and the review names the affected sites. A DNS name that does not resolve to the server is warned about and must be acknowledged; it never refuses the change.
+
+Discovery reconstructs the names, the scheme and the serving form from the site file alone. A name that does not resolve to the server is a warning in the review, never a refusal. The site's certificate follows Caddy's automatic HTTPS for every name in the file.
 
 ## Certificate state
 

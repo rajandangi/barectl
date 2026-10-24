@@ -17,6 +17,7 @@ class InputShape(StrEnum):
     LARAVEL_CREATE = "laravel_create"
     SITE_RUNTIME = "site_runtime"
     SITE_READINESS = "site_readiness"
+    SITE_DOMAINS = "site_domains"
     SITE_POOL = "site_pool"
     SITE_DATABASE = "site_database"
     SITE_REMOVE = "site_remove"
@@ -43,6 +44,8 @@ class PreparationInputs:
     https: bool = False
     # The site's readiness path, for the one kind that changes it; empty otherwise.
     readiness: str = ""
+    # A domains-and-HTTPS change: the site keeps its identifier, names and scheme change.
+    domains: bool = False
     # A site pool's reviewed tunables, for the one kind that changes them.
     pool: SitePool | None = None
     # The primary domain a site-removal preparation uses when the server no longer names it.
@@ -112,6 +115,13 @@ class PreparationInputs:
         return self._other_document()
 
     def _other_document(self) -> dict[str, object]:  # noqa: C901 - every other shape
+        if self.domains:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "names": list(self.names),
+                "https": self.https,
+            }
         if self.release:
             return {"version": 1, "identifier": self.identifier, "release": self.release}
         if self.readiness:
@@ -183,6 +193,30 @@ def _selection_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Pre
     if not isinstance(selection, str) or selection not in choices:
         raise ValueError(INVALID_INPUTS)
     return PreparationInputs(selection)
+
+
+def _domains_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import request
+
+    if set(value) != {"version", "identifier", "names", "https"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, names, https = value["identifier"], value["names"], value["https"]
+    if (
+        not isinstance(identifier, str)
+        or not isinstance(names, list)
+        or not all(isinstance(name, str) for name in names)
+        or type(https) is not bool
+    ):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, canonical_names = request(identifier, " ".join(names))
+    except ValueError as error:
+        raise ValueError(INVALID_INPUTS) from error
+    if canonical != identifier or list(canonical_names) != names:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(
+        identifier=identifier, names=canonical_names, https=https, domains=True
+    )
 
 
 def _site_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
@@ -545,6 +579,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.LARAVEL_CREATE: _laravel_create_inputs,
     InputShape.SITE_RUNTIME: _runtime_inputs,
     InputShape.SITE_READINESS: _site_readiness_inputs,
+    InputShape.SITE_DOMAINS: _domains_inputs,
     InputShape.SITE_POOL: _site_pool_inputs,
     InputShape.SITE_DATABASE: _site_database_inputs,
     InputShape.SITE_REMOVE: _site_remove_inputs,

@@ -153,6 +153,8 @@ def record_site_settings(
     application: str = "laravel",
     settings: tuple[ObservedSetting, ...] = (),
     certificate: SiteCertificate | None = None,
+    releases: tuple[ObservedRelease, ...] = (),
+    https: bool | None = None,
 ) -> None:
     """A target host with one site whose private settings the dashboard may show."""
     sites = (
@@ -164,7 +166,7 @@ def record_site_settings(
             SiteState.MANAGED,
             ObservationOutcome.OBSERVED,
             file=f"/etc/caddy/sites/{identifier}.caddy",
-            https=certificate is not None,
+            https=(certificate is not None) if https is None else https,
             certificate=certificate,
             application=application,
             application_version="7.1.3" if application == "wordpress" else "",
@@ -189,6 +191,12 @@ def record_site_settings(
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
         runtimes=runtimes,
         settings=Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", settings),
+        releases=Observation(
+            ObservationOutcome.OBSERVED,
+            ("/var/www",),
+            "",
+            releases,
+        ),
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
     save_snapshot(attempt, collected, timezone.now())

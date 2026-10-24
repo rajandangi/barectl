@@ -67,6 +67,7 @@ class SiteRecord(TypedDict):
     application: str
     application_version: str
     application_problem: str
+    serving_form: str
 
 
 class NativeState(TypedDict):
@@ -97,6 +98,7 @@ class SiteNodeState(TypedDict):
 CADDY_TEMPLATE = ""
 CADDY_MAINTENANCE_TEMPLATE = ""
 CADDY_WORDPRESS_TEMPLATE = ""
+CADDY_LARAVEL_TEMPLATE = ""
 POOL_TEMPLATE = ""
 KNOWN_CADDY: dict[str, tuple[str, ...]] = {}
 KNOWN_PHP: dict[str, dict[str, tuple[str, ...]]] = {}
@@ -173,10 +175,35 @@ def caddy_file(settings: SimpleNamespace) -> str:
     )
 
 
-def wordpress_caddy_file(settings: SimpleNamespace) -> str:
+def alias_directives(settings: SimpleNamespace, *, enabled: bool = True) -> tuple[str, str]:
+    """The alias redirect lines, or empty strings for a single-name site."""
+    if not enabled or len(settings.names) < 2:
+        return "", ""
+    primary = settings.names[0]
+    scheme = "https" if settings.https else "http"
+    return (
+        f'    @alias expression {{http.request.host}} != "{primary}"\n',
+        f"        redir @alias {scheme}://{primary}{{uri}} permanent\n",
+    )
+
+
+def wordpress_caddy_file(settings: SimpleNamespace, *, aliases: bool = True) -> str:
+    alias_matcher, alias_redirect = alias_directives(settings, enabled=aliases)
     return CADDY_WORDPRESS_TEMPLATE.format(
         settings=settings,
         addresses=", ".join(site_address(settings, n) for n in settings.names),
+        alias_matcher=alias_matcher,
+        alias_redirect=alias_redirect,
+    )
+
+
+def laravel_caddy_file(settings: SimpleNamespace, *, aliases: bool = True) -> str:
+    alias_matcher, alias_redirect = alias_directives(settings, enabled=aliases)
+    return CADDY_LARAVEL_TEMPLATE.format(
+        settings=settings,
+        addresses=", ".join(site_address(settings, n) for n in settings.names),
+        alias_matcher=alias_matcher,
+        alias_redirect=alias_redirect,
     )
 
 
@@ -1066,6 +1093,7 @@ def partial_sites(
                 "application": application,
                 "application_version": application_version,
                 "application_problem": application_problem,
+                "serving_form": "maintenance" if runtime else "partial",
             }
         )
     return rows
@@ -1186,14 +1214,35 @@ def wordpress_application(identifier: str) -> tuple[str, str, str]:
     return ("wordpress" if not problem else "wordpress_partial"), version, problem
 
 
-def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteRecord:
+def native_site_record(  # noqa: C901 - one record per recognized serving form
+    path: pathlib.Path, *, protections: bool = True
+) -> SiteRecord:
     original = adapt(path.read_text())
     settings = extract(path.stem, original)
     https = bool(settings.https)
+    form = "plain"
     supported = original == adapt(caddy_file(settings))
     if not supported:
         supported = original == adapt(wordpress_caddy_file(settings))
+        form = "wordpress"
+    if not supported:
+        supported = original == adapt(laravel_caddy_file(settings))
+        form = "laravel"
+    if not supported:
+        supported = original == adapt(wordpress_caddy_file(settings, aliases=False)) or (
+            original == adapt(laravel_caddy_file(settings, aliases=False))
+        )
+        if supported:
+            form = (
+                "wordpress"
+                if original == adapt(wordpress_caddy_file(settings, aliases=False))
+                else "laravel"
+            )
     gated = not supported and original == adapt(maintenance_file(settings))
+    if gated:
+        form = "maintenance"
+    elif not supported:
+        form = "unsupported"
     attributes = site_account(settings.identifier)
     try:
         proxy = haproxy_state(settings)
@@ -1240,6 +1289,7 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
         "application": application,
         "application_version": application_version,
         "application_problem": application_problem,
+        "serving_form": form,
     }
 
 
@@ -2078,6 +2128,159 @@ def verify_argv(settings: SimpleNamespace, hostname: str) -> list[str]:
         "Host: " + hostname,
         "http://127.0.0.1/index.php",
     ]
+
+
+def domains_caddy_file(settings: SimpleNamespace, form: str) -> str:
+    """The site's Caddy file in the recognized form a domains change republishes."""
+    if form == "plain":
+        return caddy_file(settings)
+    if form == "wordpress":
+        return wordpress_caddy_file(settings)
+    if form == "laravel":
+        return laravel_caddy_file(settings)
+    raise ValueError("The site's serving form cannot be republished.")
+
+
+def domain_probe(settings: SimpleNamespace, name: str, path: str = "/") -> tuple[int, str]:
+    """The status and redirect target for one of the site's names, or ``(0, "")``."""
+    argv = [
+        "/usr/bin/curl",
+        "--silent",
+        "--show-error",
+        "--insecure",
+        "--max-time",
+        "10",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}\t%{redirect_url}",
+    ]
+    if settings.https:
+        argv += ["--resolve", f"{name}:443:127.0.0.1", f"https://{name}{path}"]
+    else:
+        argv += ["-H", "Host: " + name, f"http://127.0.0.1{path}"]
+    try:
+        output = run(argv, check=False).strip()
+    except OSError, ValueError, subprocess.TimeoutExpired:
+        return (0, "")
+    status, _, target = output.partition("\t")
+    return (int(status) if status.isdigit() else 0, target)
+
+
+def verify_domains(settings: SimpleNamespace, form: str) -> None:
+    """The primary name serves and every alias redirects to it where the form requires it.
+
+    An HTTPS name may wait for Caddy to issue its certificate, so failures are retried in
+    the same bounded window a create uses. A plain PHP site serves every name directly;
+    WordPress and Laravel aliases redirect to the primary domain (Phase B #442).
+    """
+    aliases_redirect = form in ("wordpress", "laravel") and len(settings.names) > 1
+    prefix = ("https://" if settings.https else "http://") + settings.names[0]
+    path = "/up" if form == "laravel" else settings.readiness if form == "plain" else "/"
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            for index, name in enumerate(settings.names):
+                status, target = domain_probe(settings, name, path)
+                if index and aliases_redirect:
+                    if status not in (301, 302, 307, 308) or not target.startswith(prefix):
+                        raise ValueError("A site alias did not redirect to the primary domain.")
+                elif (status >= 500 or status == 0) if form == "plain" else status != 200:
+                    raise ValueError("The site did not answer its own address.")
+            return
+        except ValueError, OSError, subprocess.TimeoutExpired:
+            if not settings.https or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
+
+
+def set_site_domains(document: dict[str, object]) -> None:  # noqa: C901 - reviewed stages
+    """Publish a site's new names and HTTPS setting, then prove every name answers."""
+    identifier = str(document.get("identifier", ""))
+    names = document.get("names")
+    https = document.get("https")
+    form = document.get("form")
+    try:
+        descriptor = open_site_lock(identifier)
+    except BlockingIOError:
+        result("lock_busy")
+        return
+    except OSError, ValueError:
+        result("refused", "unsafe_lock")
+        return
+    changed = False
+    try:
+        if (
+            not isinstance(names, list)
+            or not names
+            or not all(isinstance(name, str) for name in names)
+            or type(https) is not bool
+            or form not in ("plain", "wordpress", "laravel")
+        ):
+            result("refused", "evidence")
+            return
+        stage("preflight")
+        before = native_state("observed", "", protections=False)
+        if before["digest"] != document.get("precondition_digest"):
+            result("refused", "evidence")
+            return
+        site = next(
+            (candidate for candidate in before["sites"] if candidate["identifier"] == identifier),
+            None,
+        )
+        if (
+            site is None
+            or site["state"] != "complete"
+            or site["serving_form"] != form
+            or site["names"] != document.get("previous_names")
+            or site["https"] is not document.get("previous_https")
+        ):
+            result("refused", "evidence")
+            return
+        settings = setting(
+            identifier,
+            names,
+            site["runtime"],
+            https=https,
+            readiness=site["readiness"],
+        )
+        candidate = domains_caddy_file(settings, form)
+        if candidate != document.get("caddy"):
+            result("refused", "evidence")
+            return
+        live = pathlib.Path(f"/etc/caddy/sites/{identifier}.caddy")
+        preimage = current_bytes(live)
+        if preimage is None:
+            result("refused", "evidence")
+            return
+        stage("caddy")
+        if not publish_caddy(identifier, candidate, preimage):
+            result("refused", "site_domains")
+            return
+        changed = True
+        stage("verify")
+        after = native_state("observed", "", protections=False)
+        current = next(
+            (row for row in after["sites"] if row["identifier"] == identifier),
+            None,
+        )
+        if (
+            current is None
+            or current["state"] != "complete"
+            or current["serving_form"] != form
+            or current["names"] != names
+            or current["https"] is not https
+        ):
+            raise ValueError("The published names and HTTPS setting did not verify.")
+        verify_domains(settings, form)
+        result("succeeded")
+    except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+        sys.stderr.write(
+            "Domains change stopped (" + type(error).__name__ + "): " + str(error)[:500] + "\n"
+        )
+        result("partial" if changed else "refused", "site_domains" if changed else "evidence")
+    finally:
+        os.close(descriptor)
 
 
 def set_site_readiness(document: dict[str, object]) -> None:
