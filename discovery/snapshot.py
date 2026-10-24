@@ -192,6 +192,9 @@ class CollectedSnapshot:
     settings: Observation[tuple[ObservedSetting, ...]] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
     )
+    # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
+    certificate_email: str = ""
+    certificate_email_state: str = ""
 
     @property
     def capacity(self) -> tuple[Observation[object], ...]:
@@ -287,6 +290,8 @@ def save_snapshot(
             if collected.standing
             else ""
         ),
+        certificate_email=collected.certificate_email,
+        certificate_email_state=collected.certificate_email_state,
     )
     RuntimeObservation.objects.bulk_create(
         RuntimeObservation(
@@ -575,6 +580,8 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             if row.host_standing
             else None
         ),
+        certificate_email=row.certificate_email,
+        certificate_email_state=row.certificate_email_state,
     )
     return Snapshot(collected, row.collected_at, ssh_alias, row.pk)
 

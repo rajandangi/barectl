@@ -1,6 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
+from bootstrap.certificate_email_views import prepare_certificate_email
 from dashboard.forms import SignInForm
 from databases.site_views import prepare_site_database
 from databases.views import database_prepare
@@ -94,6 +95,11 @@ urlpatterns = [
         "servers/<int:pk>/settings/database/prepare/",
         database_prepare,
         name="database_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/certificate-email/prepare/",
+        prepare_certificate_email,
+        name="certificate_email_prepare",
     ),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),

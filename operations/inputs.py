@@ -28,6 +28,7 @@ class InputShape(StrEnum):
     WORDPRESS_CORE = "wordpress_core"
     LARAVEL_ENVIRONMENT = "laravel_environment"
     WORDPRESS_SETTINGS = "wordpress_settings"
+    CERTIFICATE_EMAIL = "certificate_email"
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,8 @@ class PreparationInputs:
     # A settings review's changed keys and whether each is set or removed. Values never
     # enter the preparation: they travel only through the confidential channel.
     settings_changes: tuple[tuple[str, str], ...] = ()
+    # A certificate contact email change: the optional address, or "" to remove the line.
+    certificate_email: str | None = None
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -100,6 +103,8 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:
+        if self.certificate_email is not None:
+            return {"version": 1, "email": self.certificate_email}
         if self.pool is not None:
             return {
                 "version": 1,
@@ -573,6 +578,19 @@ def _laravel_rollback_inputs(value: dict[str, object]) -> PreparationInputs:
     return PreparationInputs("", identifier, (), release)
 
 
+def _certificate_email_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from bootstrap.certificate_email import valid_email
+
+    if set(value) != {"version", "email"}:
+        raise ValueError(INVALID_INPUTS)
+    email = value["email"]
+    if not isinstance(email, str) or not valid_email(email):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(certificate_email=email)
+
+
 _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], PreparationInputs]] = {
     InputShape.SITE_CREATE: _site_inputs,
     InputShape.WORDPRESS_CREATE: _wordpress_create_inputs,
@@ -590,4 +608,5 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.WORDPRESS_CORE: _wordpress_core_inputs,
     InputShape.LARAVEL_ENVIRONMENT: _settings_inputs,
     InputShape.WORDPRESS_SETTINGS: _settings_inputs,
+    InputShape.CERTIFICATE_EMAIL: _certificate_email_inputs,
 }

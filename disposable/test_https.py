@@ -7,6 +7,7 @@ fresh controller reconstructs. A second, HTTP-only site proves the opt-out. The 
 resolves the fixture domain to the server itself, so the review's DNS check agrees.
 """
 
+import json
 import os
 import shlex
 
@@ -33,11 +34,38 @@ class HttpsSite(ScenarioTestCase):
             "\tadmin unix//run/caddy/admin.sock|0600\n"
             f"\tacme_ca https://{acme_host}:14000/dir\n"
             "\tacme_ca_root /etc/caddy/pebble.minica.pem\n"
-            "\temail fixture@barectl.test\n"
             "\tservers {\n\t\tstrict_sni_host on\n\t}\n"
             "}\n"
             "import sites/*.caddy\n"
             ":80 {\n\trespond 404\n}\n"
+        )
+
+    def adapted_emails(self) -> set[str]:
+        value = json.loads(
+            self.native(
+                "/nix/var/nix/profiles/barectl/caddy/bin/caddy adapt "
+                "--config /etc/caddy/Caddyfile --adapter caddyfile"
+            )
+        )
+        return {
+            str(issuer["email"])
+            for policy in value.get("apps", {})
+            .get("tls", {})
+            .get("automation", {})
+            .get("policies", [])
+            for issuer in policy.get("issuers", [])
+            if "email" in issuer
+        }
+
+    def reissue(self) -> str:
+        """Obtain the fixture name's certificate afresh after Caddy's storage is cleared."""
+        self.native("rm -rf /var/lib/caddy/.local/share/caddy/certificates")
+        self.native("systemctl restart caddy.service")
+        return self.native(
+            "for attempt in $(seq 1 30); do "
+            "if curl --silent --show-error --fail --max-time 10 --insecure "
+            f"--resolve {DOMAIN}:443:127.0.0.1 https://{DOMAIN}/; then exit 0; fi; "
+            "sleep 2; done; exit 1"
         )
 
     def install_acme(self) -> None:
@@ -137,6 +165,35 @@ class HttpsSite(ScenarioTestCase):
                 self.assertEqual(observed.certificate.state, "issued")
             repeated = change.review(change.inspect(shell, inputs), inputs)
             self.assertTrue(repeated.no_changes, repeated.refusals)
+
+        # The optional certificate contact email is a Server Setting. It never gates site
+        # creation, and Caddy keeps issuing with and without it (Phase B #444).
+        from bootstrap.certificate_email import SET_CERTIFICATE_EMAIL
+
+        self.assertEqual(self.adapted_emails(), set())
+        apply_change(
+            self,
+            SET_CERTIFICATE_EMAIL,
+            PreparationInputs(certificate_email="ops@fixture.test"),
+        )
+        self.assertEqual(self.adapted_emails(), {"ops@fixture.test"})
+        # Discovery reads the rendered main configuration, so a fresh controller sees the
+        # setting without a Barectl marker.
+        with self.shell() as shell:
+            discovered = collect(shell)
+        self.assertEqual(discovered.certificate_email_state, "set")
+        self.assertEqual(discovered.certificate_email, "ops@fixture.test")
+        # The fixture's own ACME settings survive the publication of the main configuration.
+        self.assertIn("acme_ca", self.native("cat /etc/caddy/Caddyfile"))
+        self.assertIn("s11alpha", self.reissue())
+        apply_change(self, SET_CERTIFICATE_EMAIL, PreparationInputs(certificate_email=""))
+        self.assertEqual(self.adapted_emails(), set())
+        with self.shell() as shell:
+            discovered = collect(shell)
+        self.assertEqual(discovered.certificate_email_state, "absent")
+        self.assertEqual(discovered.certificate_email, "")
+        self.assertIn("acme_ca", self.native("cat /etc/caddy/Caddyfile"))
+        self.assertIn("s11alpha", self.reissue())
 
     def test_2_an_http_only_site_opts_out_and_serves_on_http(self) -> None:
         from operations.inputs import PreparationInputs

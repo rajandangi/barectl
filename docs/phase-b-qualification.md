@@ -19,10 +19,10 @@ reviewed Domains and HTTPS change with WordPress and Laravel alias redirects
 step ([#446](https://github.com/rajandangi/barectl/issues/446)), and Create site's Step 1
 install of a missing database engine or PHP runtime ([#443](https://github.com/rajandangi/barectl/issues/443)).
 It also adds browser journeys for the new Domains and HTTPS settings, Overview and the
-WordPress Step 1 round trip. Still not implemented: the certificate
-contact email ([#444](https://github.com/rajandangi/barectl/issues/444)), the remaining browser
-journeys ([#447](https://github.com/rajandangi/barectl/issues/447)) and hosted shard balance
-([#449](https://github.com/rajandangi/barectl/issues/449)).
+WordPress Step 1 round trip. [#444](https://github.com/rajandangi/barectl/issues/444) adds
+the optional certificate contact email after this record was gathered. Still not implemented:
+the remaining browser journeys ([#447](https://github.com/rajandangi/barectl/issues/447)) and
+hosted shard balance ([#449](https://github.com/rajandangi/barectl/issues/449)).
 
 ## Revisions
 
@@ -259,7 +259,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 24. The site page shows the certificate state read from the server | Issued with issuer and expiry natively (`HttpsSite`); HTTP-only natively; the waiting, failing and renewal-due wording is `discovery/test_presentation.py::test_the_certificate_state_is_worded_from_server_evidence`. The native probe's waiting and failing derivations have no fixture (see [Not qualified](#not-qualified)) |
 | 25. HTTP redirects to HTTPS while challenge requests keep working | Native `HttpsSite` (308 redirect; the issued certificate itself proves the challenge path answered) |
 | 26. Add and remove alias domains, with WordPress and Laravel aliases redirecting to the primary | The same change adds and removes names; WordPress and Laravel files carry an alias redirect to the primary (`sites/test_target_configuration.py`, `sites/test_domains.py`), and native `HttpsSite` proves a plain PHP alias serves directly |
-| 27. Optional certificate contact email as a server setting | **Not qualified.** No setting and no `email` global option ([#444](https://github.com/rajandangi/barectl/issues/444)) |
+| 27. Optional certificate contact email as a server setting | Implemented after this record: one Shared change (`bootstrap/certificate_email.py`) with its review and renderer, the Server Settings field and prepare request (`bootstrap/test_certificate_email.py`), and native `HttpsSite` sets and clears the address, proves discovery reads the rendered file and proves Caddy reissues with and without it. A full Phase B qualification run at the revision that ships it records it ([#444](https://github.com/rajandangi/barectl/issues/444)) |
 | 28. Public listeners limited to SSH, 80/tcp, 443/tcp and 443/udp | Native `HttpsSite` reads the listening set; foundation verification enforces it |
 | 29. Unknown host names answer 404 on HTTP and are refused on HTTPS | Native `HttpsSite` first and third tests |
 
@@ -393,7 +393,7 @@ The specification's open native qualification items, decided but not blockers:
 | Memory and disk of MariaDB or PostgreSQL plus three sites on a 1 GiB limit | **Not qualified.** No Phase B scenario measures an engine plus three sites under a 1 GiB limit; `RuntimeSmallHost` measures the foundation and two runtimes only |
 | Code pickup after a `current` switch without refused requests | **Partly qualified.** Deploy and Roll back reload the site's own PHP-FPM master gracefully after the switch, so readiness observes the switched release and in-flight requests finish under `process_control_timeout`; three consecutive native runs of all four Deploy scenarios pass. A Deploy without the maintenance gate is not implemented, so its no-refused-requests property is unproven and every deploy that switches code still uses the window |
 | UMask behaviour for WordPress self-updates | **Not qualified.** Self-updates as the site user are implemented but not exercised on a server |
-| Whether ZeroSSL fallback engages without a contact email | **Not applicable yet**: there is no contact-email setting ([#444](https://github.com/rajandangi/barectl/issues/444)), and Caddy's default issuer choice is unmodified |
+| Whether ZeroSSL fallback engages without a contact email | **Not qualified.** The optional setting now exists ([#444](https://github.com/rajandangi/barectl/issues/444)), and native `HttpsSite` proves issuance with and without an address against the lane's ACME server; Caddy's public issuer fallback itself is unmodified and unexercised |
 
 Defects the scenarios found and this revision fixes: see the previous record's list (pruning,
 preflight ordering, fetched-release branch loss, the gate dropping a site's HTTPS listener, the
@@ -411,8 +411,6 @@ measured for memory or disk.
 
 ## Not qualified
 
-- **Certificate contact email.** There is no server setting (story 27,
-  [#444](https://github.com/rajandangi/barectl/issues/444)).
 - **The database engine's site count.** The panel does not show how many sites use the engine,
   because passive discovery reads no catalog and pages make no SSH call; removal still refuses
   and names the databases (story 18).

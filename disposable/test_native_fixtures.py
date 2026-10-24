@@ -113,7 +113,6 @@ class NativeFixtures(ScenarioTestCase):
             "\tadmin unix//run/caddy/admin.sock|0600\n"
             f"\tacme_ca https://{host}:14000/dir\n"
             "\tacme_ca_root /etc/caddy/pebble.minica.pem\n"
-            "\temail fixture@barectl.test\n"
             "\tservers {\n\t\tstrict_sni_host on\n\t}\n"
             "}\n"
             "import sites/*.caddy\n"
