@@ -8,7 +8,7 @@ Status: design confirmed by the operator, including the Barectl theme requiremen
 - The custom dashboard owns all operator workflows. Django admin is not installed and must not be used as a fallback.
 - Use Django authentication behind the custom sign-in interface.
 - Keep the Barectl login separate from server users and permissions. Each device has a local application database by default; SSH determines server access. Planned optional remote database support can share application records without requiring a hosted Barectl service.
-- Reviewed server setup, runtimes and PHP site creation over HTTP are implemented. HTTPS, databases and application deployment are later phases.
+- Reviewed server setup, runtimes, PHP site creation over HTTPS, the database engine and site databases, WordPress and Laravel creation, Laravel Deploy and Roll back, environment and WordPress settings, site removal and catalog updates are implemented. Automation (Phase C) and backups (Phase D) are later phases.
 - Create the initial operator account and recover passwords using terminal commands on the controller host. Public registration and email-based recovery are not offered.
 - Use the controller host's SSH agent or approved key files for authentication. Do not upload private keys through the browser or store SSH secrets in the application database. A hosted installation uses credentials available on that host, not on the browser user's laptop.
 - Run discovery after the first verified connection, then on explicit Refresh requests. Display the collection time. Scheduled discovery is outside this milestone.

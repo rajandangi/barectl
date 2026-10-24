@@ -95,3 +95,25 @@ class SettingsPageTests(ControllerConfigTestCase):
         self.wordpress()
         response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/environment/")
         self.assertEqual(response.status_code, 404)
+
+    def test_a_viewer_reads_the_certificate_releases_and_settings_keys(self) -> None:
+        from discovery.snapshot import SiteCertificate
+
+        from .ui_testing import record_laravel_releases
+
+        self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
+        record_site_settings(
+            self.server,
+            application="laravel",
+            certificate=SiteCertificate("issued", "CN=Pebble", 1_800_000_000),
+            settings=(ObservedSetting("alpha", "laravel", "APP_ENV", DIGEST, "production"),),
+        )
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            overview = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+            environment = self.client.get(f"/servers/{self.server.pk}/sites/alpha/environment/")
+        self.assertContains(overview, "Issued by CN=Pebble")
+        self.assertContains(environment, "APP_ENV")
+        self.assertContains(environment, "production")
+        record_laravel_releases(self.server)
+        deployments = self.client.get(f"/servers/{self.server.pk}/sites/alpha/deployments/")
+        self.assertContains(deployments, f"{0:040x}")

@@ -663,6 +663,28 @@ class LaravelDeployMariaDB(LaravelDeployCase):
         # The deploy did not rotate APP_KEY.
         self.assertEqual(self.app_key(), app_key)
 
+        # -- A settings save rebuilds the cached configuration the deploy built --------
+        from laravel import settings as environment
+
+        cache = f"{self.base()}/current/bootstrap/cache/config.php"
+        self.assertEqual(self.native(f"test -f {cache}; echo $?").strip(), "0")
+        apply_change(
+            self,
+            environment.EDIT_ENVIRONMENT,
+            PreparationInputs("", self.identity, settings_changes=(("APP_LOCALE", "set"),)),
+            timeout=90,
+            secret=json.dumps({"values": {"APP_LOCALE": "de"}}).encode(),
+        )
+        self.assertIn("APP_LOCALE=de", self.native(f"cat {self.base()}/private/laravel.env"))
+        self.assertIn(
+            "barectl-stage config",
+            self.native(
+                "journalctl --since '-2 min' --no-pager -o cat "
+                "| grep -F 'barectl-stage config' || true"
+            ),
+        )
+        self.assertEqual(self.https_status(), 200)
+
         # -- Deploy 2: the migrations switch is off ------------------------------------
         commit_two = self.push(
             {"database/migrations/2026_10_19_000002_create_fixture_notes.php": _MIGRATION_TWO},

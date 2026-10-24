@@ -30,7 +30,7 @@
 
 ### Removed
 
-- The Nginx, Certbot, APT PHP, third-party PHP source, database, TLS and WordPress workflows, their discovery and their native suites. `main` has no HTTPS, WordPress or database workflows until Phase B ([#341](https://github.com/rajandangi/barectl/issues/341)). Servers set up by earlier builds are reported as Not manageable.
+- The Nginx, Certbot, APT PHP, third-party PHP source, database, TLS and WordPress workflows, their discovery and their native suites, deleted at the Phase A exit ([#341](https://github.com/rajandangi/barectl/issues/341)); Phase B builds the HTTPS, database, WordPress and Laravel workflows on the target stack. Servers set up by earlier builds are reported as Not manageable.
 - Ubuntu 24.04 support: a server on Ubuntu 24.04 is reported as an unsupported release ([#345](https://github.com/rajandangi/barectl/issues/345)).
 - Earlier database migrations: rebuild the local database with `migrate` on an empty database.
 

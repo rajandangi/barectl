@@ -339,6 +339,60 @@ class WordPressCreateMariaDB(WordPressCreateCase):
         self.assertNotIn("MAIL_HOST", removed)
         self.assertEqual(removed.splitlines()[:fixed_count], fixed)
 
+    def test_4_removes_the_wordpress_site_and_its_resources(self) -> None:
+        from databases import binding
+        from sites import remove as remove_kind
+
+        base = f"/var/www/{IDENTIFIER}"
+        self.assertEqual(
+            self.native(f"test -f {base}/current/public/wp-includes/version.php; echo $?").strip(),
+            "0",
+        )
+        review = apply_change(
+            self, remove_kind.REMOVE, PreparationInputs("", IDENTIFIER), timeout=120
+        )
+        self.assertEqual(review.document["confirmation"], DOMAIN)
+        self.assertNotIn(
+            "WordPress",
+            self.native(
+                f"curl --fail --silent --max-time 10 -H 'Host: {DOMAIN}' http://127.0.0.1/ || true"
+            ),
+        )
+        self.assertEqual(
+            self.native(
+                f"test ! -e /etc/caddy/sites/{IDENTIFIER}.caddy && test ! -e {base} "
+                f"&& test ! -e /etc/haproxy/sites/{IDENTIFIER}.cfg "
+                f"&& test ! -e /etc/php-fpm/sites/{IDENTIFIER} && echo gone || echo remains"
+            ).strip(),
+            "gone",
+        )
+        self.assertEqual(
+            self.native(f"getent passwd s{IDENTIFIER} || echo absent").strip(), "absent"
+        )
+        self.assertEqual(
+            self.native(f"getent passwd p{IDENTIFIER} || echo absent").strip(), "absent"
+        )
+        principal = binding.name_of(IDENTIFIER)
+        query = (
+            "SELECT COUNT(*) FROM information_schema.SCHEMATA "  # noqa: S608 - fixed names
+            f"WHERE SCHEMA_NAME='{principal}';"
+            "SELECT COUNT(*) FROM mysql.global_priv "
+            f"WHERE User='{principal}'"
+        )
+        self.assertEqual(
+            self.native(
+                "mariadb --no-defaults --protocol=socket --socket="
+                + binding.MARIADB_SOCKET
+                + " -N -B -e "
+                + shlex.quote(query)
+            ).split(),
+            ["0", "0"],
+        )
+        self.assertEqual(
+            self.native(f"find /var/lib/caddy -name {shlex.quote(DOMAIN + '*')} | wc -l").strip(),
+            "0",
+        )
+
         # A Barectl-owned name is refused before anything changes.
         from wordpress import settings as reviewed
 

@@ -28,6 +28,12 @@ class SiteDeployPageTests(ControllerConfigTestCase):
         self.assertIn("Deployments", body)
         self.assertIn("Current", body)
         self.assertIn(f"{0:040x}", body)
+        # Each release's commit, creation time, state and whether it is serving.
+        for heading in ("Release", "Commit", "Created", "Status", "Serving"):
+            self.assertIn(heading, body)
+        self.assertIn("Managed", body)
+        self.assertIn("Retained", body)
+        self.assertIn("2023-11-14 22:13 UTC", body)
 
     def test_deploy_prepare_queues_only_the_versioned_identifier(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):
