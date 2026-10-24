@@ -15,14 +15,14 @@ which keeps that evidence and covers the rest of Phase B.
 ## Revisions
 
 Every local number in [Build budget](#build-budget) and [Scenarios](#scenarios) belongs to one
-code revision, `2dc9aa3` on `qualify/387-phase-b`. The hosted figures belong to the revision
+code revision, `5be4abc` on `fix/450-deploy-readiness`. The hosted figures belong to the revision
 named under [Hosted runs](#hosted-runs), which differs from it only in documentation and, where
 that section says so, dependency lock entries for disclosed advisories.
 
 | Evidence | Where |
 | --- | --- |
-| Local fast suite, fast validators and native lifecycle scenarios, arm64 | `2dc9aa3` |
-| Hosted Checks and Native (4 shards), amd64 | `e9d8c44`, Checks run [40054358921](https://github.com/rajandangi/barectl/actions/runs/40054358921) and Native run [40054359053](https://github.com/rajandangi/barectl/actions/runs/40054359053) (see [hosted runs](#hosted-runs)). |
+| Local fast suite, fast validators and native lifecycle scenarios, arm64 | `5be4abc` |
+| Hosted Checks and Native (4 shards), amd64 | `9f42ba8`, Checks run [40066132997](https://github.com/rajandangi/barectl/actions/runs/40066132997) and Native run [40066133079](https://github.com/rajandangi/barectl/actions/runs/40066133079) (see [hosted runs](#hosted-runs)). |
 
 ## Environments
 
@@ -40,30 +40,32 @@ name no mirror serves.
 
 ## Build budget
 
-`docker/disposable-server/build.sh` at `2dc9aa3`: the fast gate, fast snapshot validators,
+`docker/disposable-server/build.sh` at `5be4abc`: the fast gate, fast snapshot validators,
 browser tests and native lifecycle scenarios run concurrently and each stage is timed.
 
 | Stage | Measured | Target | Limit | Result |
 | --- | --- | --- | --- | --- |
-| Controller fast tests, 932 tests (`--parallel`) | 22.6 s alone, 56 s inside the build | 90 s | | Meets the target |
-| Fast snapshot validators, 3 items | 39 s alone, 78 s inside the build | (part of the joint stage) | | The 60 s target is the joint stage; the validators have no separate target |
-| Joint fast stage, as the build measures it | 78 s | 60 s | | Missed in this build; met at 60 s in a warm run of the same code |
-| Browser tests | 60 s inside the build | | | |
-| Native lifecycle scenarios, 63 of 63 passed, 2 quarantined, 8 lanes | 233 s | 300 s | 900 s | Within the target |
-| Longest native item | 77.4 s (`LaravelDeployMariaDB`) | | 180 s | Within the item limit |
-| Full local build, wall time | 233 s | 300 s | 900 s | Meets the target |
+| Controller fast tests, 932 tests (`--parallel`) | 19.4 s alone, 42 s inside the build | 90 s | | Meets the target |
+| Fast snapshot validators, 3 items | 39 s alone, 67 s inside the build | (part of the joint stage) | | The 60 s target is the joint stage; the validators have no separate target |
+| Joint fast stage, as the build measures it | 67 s | 60 s | | Missed by 7 s in this build; met at 60 s in an earlier run |
+| Browser tests | 54 s inside the build | | | |
+| Native lifecycle scenarios, 65 of 65 passed, 8 lanes | 241 s | 300 s | 900 s | Within the target |
+| Longest native item | 50.5 s (`WordPressCreateMariaDB`) | | 180 s | Within the item limit |
+| Full local build, wall time | 241 s | 300 s | 900 s | Meets the target |
 
 The [test time budget](quality.md#test-time-budget) measures one joint fast stage with the
 fast gate and the validators side by side, and gives it a 60 s target. Builds of this code on
-this host have measured 60 s, 70 s and 78 s for that stage, with the fast gate at 22.6 s to
-27.3 s alone and the validators at 39 s alone; the four stages share 14 CPUs, so the joint
+this host have measured 60 s, 67 s, 70 s and 78 s for that stage, with the fast gate at 19.4 s
+to 27.3 s alone and the validators at 39 s alone; the four stages share 14 CPUs, so the joint
 figure moves with what else is running and the 60 s target is met on a warm run but not on
-every one. The full build itself measured 218 s to 280 s, inside its 300 s target each time.
+every one. A build measured during an unrelated project's container run on the same host took
+444 s with load averages above 100; it is excluded as host contention, not suite time. The fair
+builds measured 218 s to 280 s, inside the 300 s target each time.
 
 Native item times vary more than the total, because exclusive scenarios wait for the lane and
-for each other: `LaravelDeployMariaDB` measured 102.1 s, 66.2 s, 67.4 s and 77.4 s across four
-builds, and `DatabaseEngineMariaDB` 70.6 s, 35.4 s, 33.4 s and 48.2 s. The longest item stays
-inside the 180 s limit.
+for each other: `LaravelDeployMariaDB` measured 102.1 s, 77.4 s, 67.4 s, 66.2 s and 49.3 s
+across five builds; the last three builds follow the graceful reload that replaced the
+five-second wait. `WordPressCreateMariaDB` is now the longest item at 50.5 s.
 
 The hosted shards are reported separately in [Hosted runs](#hosted-runs): three of the four
 exceed the 300 s target for one hosted shard (one met it) while all stay inside the 900 s
@@ -73,33 +75,31 @@ limit, tracked as [#449](https://github.com/rajandangi/barectl/issues/449).
 
 Phase B adds fifteen native scenario classes to the Phase A set. Each row lists the class and
 the time this build took; a class that holds several test methods runs them in one exclusive
-item against one prepared server. Two classes are quarantined for
-[#450](https://github.com/rajandangi/barectl/issues/450): the required check skips them and the
-weekly job runs them with `BARECTL_RUN_QUARANTINED`. Their times below are from the last run
-that executed them, before the quarantine; every other row is from this build.
+item against one prepared server.
 
 | Scenario | Class | Local arm64 | Hosted amd64 |
 | --- | --- | --- | --- |
-| S11 HTTPS and certificate state | `HttpsSite` | 21.0 s | 40.6 s |
-| S11 Database engine, MariaDB | `DatabaseEngineMariaDB` | 48.2 s | 60.6 s |
-| S11 Database engine, PostgreSQL | `DatabaseEnginePostgreSQL` | 29.7 s | 43.3 s |
-| S11 Site database, MariaDB | `SiteDatabaseMariaDB` | 31.7 s | 72.9 s |
-| S11 Site database, PostgreSQL | `SiteDatabasePostgreSQL` | 23.6 s | 66.5 s |
-| S12 WordPress lifecycle | `WordPressCreateMariaDB` | 41.6 s | 132.0 s |
-| S13 Laravel create | `LaravelCreateMariaDB` | 40.9 s | 74.7 s |
-| S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 77.4 s | 134.0 s |
-| S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 64.7 s | 123.8 s |
-| S13 Deploy boot failure | `LaravelDeployBootFailure` (quarantined, [#450](https://github.com/rajandangi/barectl/issues/450)) | 43.0 s | 70.5 s |
-| S13 CI release reconstruction | `LaravelReleaseReconstruction` | 19.2 s | 37.8 s |
-| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` (quarantined, [#450](https://github.com/rajandangi/barectl/issues/450)) | 31.1 s | 56.1 s |
-| S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 39.0 s | 55.3 s |
-| S15 Failed catalog update | `CatalogRuntimeUpdateFailure` | 17.5 s | 27.7 s |
-| S16 Confidential input channel | `ConfidentialChannelLifecycle` | 2.4 s | 3.5 s |
+| S11 HTTPS and certificate state | `HttpsSite` | 16.4 s | 37.6 s |
+| S11 Database engine, MariaDB | `DatabaseEngineMariaDB` | 35.6 s | 67.7 s |
+| S11 Database engine, PostgreSQL | `DatabaseEnginePostgreSQL` | 25.6 s | 42.4 s |
+| S11 Site database, MariaDB | `SiteDatabaseMariaDB` | 37.6 s | 79.2 s |
+| S11 Site database, PostgreSQL | `SiteDatabasePostgreSQL` | 28.9 s | 59.6 s |
+| S12 WordPress lifecycle | `WordPressCreateMariaDB` | 50.5 s | 135.1 s |
+| S13 Laravel create | `LaravelCreateMariaDB` | 32.1 s | 86.0 s |
+| S13 Laravel Deploy and Roll back | `LaravelDeployMariaDB` | 49.3 s | 105.8 s |
+| S13 Deploy refusals and failures | `LaravelDeployOutcomes` | 49.8 s | 110.9 s |
+| S13 Deploy boot failure | `LaravelDeployBootFailure` | 33.8 s | 66.3 s |
+| S13 CI release reconstruction | `LaravelReleaseReconstruction` | 13.6 s | 40.3 s |
+| S14 Laravel on PostgreSQL | `LaravelDeployPostgreSQL` | 27.0 s | 56.8 s |
+| S15 Catalog update and runtime removal | `CatalogRuntimeUpdate` | 30.2 s | 51.5 s |
+| S15 Failed catalog update | `CatalogRuntimeUpdateFailure` | 17.5 s | 25.6 s |
+| S16 Confidential input channel | `ConfidentialChannelLifecycle` | 3.3 s | 2.9 s |
 
 The Phase A scenarios S1 to S10 also run on this revision and all passed; their times are in
 the Phase A record. The hosted column is from the run named under [Hosted runs](#hosted-runs)
 and is kept for comparison rather than as this revision's measurement. The longest item is
-`LaravelDeployMariaDB` at 77.4 s locally and 134.0 s hosted, both inside the 180 s item limit.
+`WordPressCreateMariaDB` at 50.5 s locally and 135.1 s hosted, both inside the 180 s item
+limit.
 
 What the Phase B classes assert:
 
@@ -143,8 +143,8 @@ What the Phase B classes assert:
 - `LaravelDeployMariaDB` pushes a reviewed commit, deploys it, checks the exact commit, the
   build, the shared `.env`/`storage`/`bootstrap/cache` links, the release modes, the pending
   migration run once behind the gate, the switch, readiness over the private socket and over
-  Caddy's HTTPS, that the site serves the new code (the test waits out PHP's revalidation
-  window) and that `APP_KEY` is unchanged; then an
+  Caddy's HTTPS, that the site serves the new code immediately after the master's graceful
+  reload and that `APP_KEY` is unchanged; then an
   environment save rebuilds the cached configuration the Deploy built, a Deploy with migrations
   off reports them and runs none, Roll back reactivates a retained release with the "not
   reversed" wording, a further Deploy prunes exactly the releases its review named, and a full
@@ -286,8 +286,8 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 53. Pending migrations run once before the new code serves behind a maintenance page, and no gate when none are pending | Native `LaravelDeployMariaDB` (migration recorded once behind the gate; second Deploy with migrations off) |
 | 54. The confirm screen acknowledges that migrations may change data, that roll back does not reverse them and that no backup exists | `laravel/test_change.py::AcknowledgementTests`; native `LaravelDeployOutcomes` forged apply |
 | 55. A per-site switch turns migrations off, reporting them unrun | `sites/test_deploy_pages.py`; native `LaravelDeployMariaDB` (the run's journal names the pending migration and runs none) |
-| 56. The release is switched in only after the caches are built and `/up` answers 200, keeping the gate if it does not | Native `LaravelDeployMariaDB` (readiness over the socket and over HTTPS) and `LaravelDeployBootFailure` (quarantined, [#450](https://github.com/rajandangi/barectl/issues/450), because readiness can still be answered by the previous release) |
-| 57. A failed or interrupted Deploy says which release is serving, whether the gate is up, and the safe next action | Native `LaravelDeployOutcomes`; `LaravelDeployBootFailure` is quarantined for the same reason as story 56; `Check what happened` reads the original unit |
+| 56. The release is switched in only after the caches are built and `/up` answers 200, keeping the gate if it does not | Native `LaravelDeployMariaDB` (readiness over the socket and over HTTPS after the master's graceful reload) and `LaravelDeployBootFailure` (the gate stays up and `laravel_readiness` is reported) |
+| 57. A failed or interrupted Deploy says which release is serving, whether the gate is up, and the safe next action | Native `LaravelDeployOutcomes` and `LaravelDeployBootFailure`; `Check what happened` reads the original unit |
 | 58. A failed migration keeps the gate and the data, never retried or rolled back | Native `LaravelDeployOutcomes` (one attempt, gate 503, old release serving, migration unrecorded) |
 | 59. Roll back to a retained release with a review that says nothing is reversed | `laravel/test_change.py::RollbackReviewTests`; native `LaravelDeployMariaDB` |
 | 60. Each deploy keeps the newest five releases and names the removed ones | `laravel/test_change.py::DeployReviewTests` (prune set); native `LaravelDeployMariaDB` final Deploy |
@@ -348,7 +348,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | --- | --- |
 | 91. A site's own database user can dump and re-import its own database and nothing else | Native `SiteDatabaseMariaDB` and `SiteDatabasePostgreSQL` (dump, drop and import a view, trigger, routine and event/function; another database refused) |
 | 92. A plain PHP site is confirmed to serve, using a readiness path defaulting to `/` | `sites/test_target_configuration.py::ReadinessReviewTests`; native `HttpSiteNativeBehavior` and `HttpsSite` |
-| 93. Deploy checks `/up` on the new release while the gate still answers visitors, and opens the site only after it passes | Native `LaravelDeployMariaDB`; `LaravelDeployBootFailure` is quarantined for the same reason as story 56 |
+| 93. Deploy checks `/up` on the new release while the gate still answers visitors, and opens the site only after it passes | Native `LaravelDeployMariaDB` and `LaravelDeployBootFailure` |
 
 ## Secret canaries
 
@@ -379,7 +379,7 @@ The specification's open native qualification items, decided but not blockers:
 | --- | --- |
 | MariaDB `unix_socket` through PHP's `mysqli` as the site user under Nix PHP | Proven by `SiteDatabaseMariaDB`: the binding is ready only when the site's own PHP master connects through its driver as the site user and can read only its own database. `SiteDatabasePostgreSQL` does the same through `pdo_pgsql` |
 | Memory and disk of MariaDB or PostgreSQL plus three sites on a 1 GiB limit | **Not qualified.** No Phase B scenario measures an engine plus three sites under a 1 GiB limit; `RuntimeSmallHost` measures the foundation and two runtimes only |
-| Code pickup after a `current` switch without refused requests | **Not qualified.** After the switch, a site worker can answer with the previous release until its OPcache and realpath caches see the new symlink target; the body waits five seconds and the tests wait up to 30 s for the code, but the readiness check itself can still be answered by the old release. `LaravelDeployBootFailure` and `LaravelDeployPostgreSQL` failed intermittently on this and are quarantined as [#450](https://github.com/rajandangi/barectl/issues/450); every deploy that switches code uses the maintenance window |
+| Code pickup after a `current` switch without refused requests | **Partly qualified.** Deploy and Roll back reload the site's own PHP-FPM master gracefully after the switch, so readiness observes the switched release and in-flight requests finish under `process_control_timeout`; three consecutive native runs of all four Deploy scenarios pass. A Deploy without the maintenance gate is not implemented, so its no-refused-requests property is unproven and every deploy that switches code still uses the window |
 | UMask behaviour for WordPress self-updates | **Not qualified.** Self-updates as the site user are implemented but not exercised on a server |
 | Whether ZeroSSL fallback engages without a contact email | **Not applicable yet**: there is no contact-email setting ([#444](https://github.com/rajandangi/barectl/issues/444)), and Caddy's default issuer choice is unmodified |
 
@@ -433,12 +433,6 @@ measured for memory or disk.
   directories under `vendor`, not by reading the build's argv. The readiness ordering is asserted
   by the body's stage order and the two failure fixtures, not by a live interleaving. Pruning is
   proven with synthesised retained releases as well as natively.
-- **Deploy readiness can observe the previous release.** A switched release's workers can keep
-  answering with the previous code until PHP's OPcache and realpath caches see the new symlink
-  target, so the readiness probe can pass on the old release. The boot-failure and PostgreSQL
-  Deploy scenarios failed intermittently on this and are quarantined
-  ([#450](https://github.com/rajandangi/barectl/issues/450)); the MariaDB lifecycle, Roll back,
-  the refusals and the settings rebuild still run on every build.
 - **One engine plus three sites on 1 GiB, and code pickup without refused requests.** See
   [Qualification items](#qualification-items).
 - **Hosted shard time.** Three hosted `Native` shards exceed the 300 s target for one shard
@@ -451,40 +445,42 @@ measured for memory or disk.
 
 ## Hosted runs
 
-`Checks` run [40054358921](https://github.com/rajandangi/barectl/actions/runs/40054358921) at
-`e9d8c44`, all required jobs passed:
+`Checks` run [40066132997](https://github.com/rajandangi/barectl/actions/runs/40066132997) at
+`9f42ba8`, all required jobs passed:
 
 | Job | Time | Result |
 | --- | --- | --- |
-| `check` | 1 m 58 s (the 932 fast tests took 83.1 s) | Passed; within the 90 s fast-gate target |
-| `browser` | 1 m 58 s (30 tests in 66.9 s) | Passed |
-| `frontend` | 16 s | Passed |
-| `dependency-audit` | 19 s | Passed |
+| `check` | 1 m 41 s | Passed |
+| `browser` | 1 m 48 s | Passed |
+| `frontend` | 20 s | Passed |
+| `dependency-audit` | 18 s | Passed |
 
-`Native` run [40054359053](https://github.com/rajandangi/barectl/actions/runs/40054359053),
-amd64, four shards of two lanes, all passed (the two quarantined classes are skipped):
+`Native` run [40066133079](https://github.com/rajandangi/barectl/actions/runs/40066133079),
+amd64, four shards of two lanes, all passed:
 
 | Shard | Job wall time | Reported by the runner |
 | --- | --- | --- |
-| 1 of 4 | 10 m 55 s | Fast validators 3 of 3 in 107 s; egress control refused as intended; lifecycle scenarios 16 of 16 in 499 s |
-| 2 of 4 | 7 m 14 s | 16 of 16 in 387 s |
-| 3 of 4 | 6 m 51 s | 16 of 16 in 360 s |
-| 4 of 4 | 5 m 21 s | 15 of 15 in 286 s |
-| Required `native` check | 2 s | Passed |
+| 1 of 4 | 11 m 9 s | Fast validators 3 of 3 in 104 s; egress control refused as intended; lifecycle scenarios 17 of 17 in 515 s |
+| 2 of 4 | 7 m 12 s | 16 of 16 in 381 s |
+| 3 of 4 | 6 m 57 s | 16 of 16 in 389 s |
+| 4 of 4 | 6 m 31 s | 16 of 16 in 361 s |
+| Required `native` check | 3 s | Passed |
 
-The shards restored the keyed L1 snapshot, so the reported scenario times contain no S1
-preparation. Every shard stays inside the 900 s hard limit, and no item exceeds 180 s; shard 4
-met the [test time budget](quality.md#test-time-budget)'s 300 s target while the other three
-did not (499 s, 387 s and 360 s of scenario time, with shard 1 also carrying the validators and
-the egress control). The gap predates this branch (#441's run
-[39952707552](https://github.com/rajandangi/barectl/actions/runs/39952707552) reported 518 s and
-499 s) and is tracked as [#449](https://github.com/rajandangi/barectl/issues/449). The local
-full build (233 s) is inside its own target.
+The shards restored the keyed L1 snapshot (`native-l1-Linux-X64-l1-6dcac7a6c2d8`), so the
+reported scenario times contain no S1 preparation. Every shard stays inside the 900 s hard
+limit and no item exceeds 180 s, but all four exceed the
+[test time budget](quality.md#test-time-budget)'s 300 s target for one hosted shard; the longest
+is 515 s on shard 1, which also carries the validators and the egress control. The gap is
+tracked as [#449](https://github.com/rajandangi/barectl/issues/449); the local full build
+(241 s) is inside its own target.
 
-Earlier runs on this branch failed `dependency-audit` on advisories disclosed after the branch
-point: `filelock` 4.0.3 (three CVEs) and then `fast-uri` 3.1.8 and `zod` 4.6.5. Both lock
-updates are in the branch's history. Before the quarantine, shard 1 failed
-`LaravelDeployBootFailure` with `succeeded/: expected partial/laravel_readiness`, and an
-earlier run (`3f52be1`) missed the L1 cache on all shards (the last `Native` run on `main`
-predates the catalog-update change), so each shard prepared L1 through S1 with shard times of
-853 s, 573 s, 543 s and 573 s, still inside the 900 s limit.
+The previous run on this branch (`757baaf`, run
+[40065117754](https://github.com/rajandangi/barectl/actions/runs/40065117754)) missed the L1
+snapshot on every shard, because the fix changes the Laravel body that the engine payload and
+the L1 key hash; it prepared L1 through S1 and measured 407 s to 512 s, still inside the limit.
+Earlier runs on the qualification branch failed `dependency-audit` on advisories disclosed after
+the branch point: `filelock` 4.0.3 (three CVEs) and then `fast-uri` 3.1.8 and `zod` 4.6.5; both
+lock updates are in the main history. While
+[#450](https://github.com/rajandangi/barectl/issues/450) was open, shard 1 failed
+`LaravelDeployBootFailure` with `succeeded/: expected partial/laravel_readiness`; this run
+proves it unquarantined.

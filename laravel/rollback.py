@@ -127,7 +127,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         SLUG,
         f"Roll back {inputs.identifier} to {inputs.release}.",
         effects=effects,
-        stages=("preflight", "gate", "switch", "readiness"),
+        stages=("preflight", "gate", "switch", "reload", "readiness"),
         postconditions=(
             "The site's current release is the chosen retained release.",
             "The site answers its readiness check over its own address.",
