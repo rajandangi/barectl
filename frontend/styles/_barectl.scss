@@ -94,8 +94,13 @@ body {
   gap: units(2);
   margin-bottom: units(3);
 
+  > div {
+    min-width: 0;
+  }
+
   h1 {
     margin: units(1) 0 0;
+    overflow-wrap: anywhere;
   }
 
   .usa-button {

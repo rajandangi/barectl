@@ -89,7 +89,7 @@
         {% endif %}
         {% if review.effects %}
           <h3>Effects</h3>
-          <ul class="usa-list">
+          <ul class="usa-list barectl-reviewed-effects">
             {% for scope, text in review.effects %}
               <li><strong>{{ scope }}.</strong> {{ text }}</li>
             {% endfor %}

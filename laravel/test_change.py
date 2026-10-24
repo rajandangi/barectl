@@ -19,6 +19,7 @@ from bootstrap.standing import Standing
 from laravel import change, observation, rollback
 from laravel.bodies import common as native
 from laravel.configuration import ROLLBACK_ACKNOWLEDGEMENT
+from laravel.review_testing import BOOT, REPOSITORY, laravel_row, releases_in, site_record
 from operations import lifecycle, services
 from operations.consent import Scope
 from operations.engine import BodyContext
@@ -26,61 +27,6 @@ from operations.forms import ChangeApplyForm
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from operations.models import ChangeReview, Consent
 from runtimes.catalog import Architecture
-from sites.bodies.common import SiteRecord
-
-REPOSITORY = "https://github.com/example/app.git"
-BOOT = "00000000-0000-0000-0000-000000000000"
-
-
-def release(index: int, *, created: int | None = None) -> dict[str, object]:
-    commit = f"{index:040x}"
-    return {
-        "name": f"{commit}-{'a' * 16}",
-        "commit": commit,
-        "created": created if created is not None else 1000 - index,
-        "state": "complete",
-        "repository": REPOSITORY,
-        "branch": "main",
-    }
-
-
-def releases_in(row: dict[str, object]) -> list[dict[str, object]]:
-    return cast(list[dict[str, object]], row["releases"])
-
-
-def laravel_row(identifier: str = "s4alpha", count: int = 7) -> dict[str, object]:
-    releases = [release(index) for index in range(count)]
-    return {
-        "identifier": identifier,
-        "application": "laravel",
-        "current": releases[0]["name"],
-        "repository": REPOSITORY,
-        "branch": "main",
-        "php_requirement": "",
-        "repository_problem": "",
-        "releases": releases,
-        "shared": {"environment": True, "storage": True, "cache": True},
-        "environment": ["APP_ENV", "APP_KEY"],
-        "deploy_key": "",
-        "host_keys": False,
-        "problem": "",
-    }
-
-
-def site_record(identifier: str = "s4alpha") -> SiteRecord:
-    site: dict[str, object] = {
-        "identifier": identifier,
-        "names": [f"{identifier}.example.com"],
-        "runtime": "php84",
-        "node_runtime": "",
-        "https": True,
-        "readiness": "/",
-        "account": [4000, 4000, f"/var/www/{identifier}", "/usr/sbin/nologin", [4000]],
-        "file": f"/etc/caddy/sites/{identifier}.caddy",
-        "state": "complete",
-        "problem": "",
-    }
-    return cast(SiteRecord, site)
 
 
 class DeployReviewTests(SimpleTestCase):

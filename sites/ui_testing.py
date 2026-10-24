@@ -22,7 +22,14 @@ from discovery.snapshot import (
 )
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import ReviewDraft, save_review
-from operations.models import ChangePreparation, ChangeRun, RemoteOperation, Result, Verification
+from operations.models import (
+    ChangePreparation,
+    ChangeReview,
+    ChangeRun,
+    RemoteOperation,
+    Result,
+    Verification,
+)
 from runtimes.observation import RuntimeObservation
 from servers.models import Server
 from sites.bodies.common import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
@@ -318,3 +325,51 @@ def record_wordpress_sites(
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
     save_snapshot(attempt, collected, timezone.now())
+
+
+def record_review(preparation: ChangePreparation, draft: ReviewDraft) -> ChangeReview:
+    """A finished preparation and the review the worker would publish for it."""
+    RemoteOperation.objects.filter(pk=preparation.pk).update(
+        status=RemoteOperation.Status.SUCCEEDED
+    )
+    return save_review(
+        preparation,
+        draft,
+        host_key="ssh-ed25519 key",
+        collected_at=timezone.now(),
+        sites_digest="",
+    )
+
+
+def _recorded_inputs(preparation: ChangePreparation) -> dict[str, object]:
+    value = preparation.inputs
+    return value if isinstance(value, dict) else {}
+
+
+def record_deploy_review(preparation: ChangePreparation) -> ChangeReview:
+    from laravel.review_testing import deploy_draft
+
+    inputs = _recorded_inputs(preparation)
+    return record_review(
+        preparation,
+        deploy_draft(
+            str(inputs.get("identifier", "")),
+            migrations=bool(inputs.get("migrations", True)),
+        ),
+    )
+
+
+def record_rollback_review(preparation: ChangePreparation) -> ChangeReview:
+    from laravel.review_testing import rollback_draft
+
+    inputs = _recorded_inputs(preparation)
+    return record_review(
+        preparation,
+        rollback_draft(str(inputs.get("identifier", "")), str(inputs.get("release", ""))),
+    )
+
+
+def record_removal_review(preparation: ChangePreparation) -> ChangeReview:
+    from sites.removal_testing import removal_draft
+
+    return record_review(preparation, removal_draft())
