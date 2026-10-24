@@ -10,11 +10,21 @@ Open the server's **Sites** section, or the global **Sites** page, and use **Cre
 
 - **DNS names**: the primary domain first, then up to nine aliases, separated by spaces or new lines.
 - **Site identifier**: derived from the primary domain and editable; see [names](#names).
-- **PHP runtime**: an installed runtime whose master the current observation verified, `php84` or `php85`. The form preselects the server's default PHP when the current observation verifies it ([server defaults](runtime-defaults.md)). Add a runtime from **Stack** first if none is listed ([runtimes](runtimes.md)).
+- **PHP runtime**: an installed runtime whose master the current observation verified, `php84` or `php85`, or a catalog version marked *installs first*. The form preselects the server's default PHP when the current observation verifies it ([server defaults](runtime-defaults.md)). Choosing an uninstalled version prepares [Step 1](#step-1-a-missing-runtime-or-database-engine) instead of refusing.
 
 **More options** holds **Serve over HTTP only**, off by default. Leave it off to serve the site over HTTPS with a certificate [Caddy issues and renews](tls.md); turn it on only for a test site before DNS points here.
 
 **Prepare HTTP site review** queues a preparation and changes nothing on the server. Invalid input is refused before anything is queued, with each problem next to its field and the entered values kept.
+
+## Step 1: a missing runtime or database engine
+
+Create site never sends the operator to another section to prepare the server. A missing PHP runtime, or the database engine WordPress and Laravel need, is offered as Step 1 in the same form:
+
+- **PHP**: the runtime select lists the catalog PHP builds this server can still install, marked *installs first* with their download size. A build whose profile already exists but is not verified is not offered. The button names that step, **Step 1: install PHP 8.5**, before the form is sent; choosing it queues the existing **Add runtime** review before the site review, and the review page names the step too.
+- **Database**: a WordPress host with no engine shows **Step 1: install MariaDB**, because WordPress needs MariaDB. A Laravel host with no engine shows Step 1 for MariaDB and PostgreSQL and the operator chooses one. The step queues the existing **Install database engine** review; no new kind or execution path is added. WordPress on PostgreSQL, more than one engine, or an engine Outside supported settings keeps the tile disabled with its reason.
+- **Order**: when both are missing, the database engine is Step 1 and the runtime is offered again after the operator continues. Each step is prepared and applied on its own review.
+
+The step's review says which step it is. After it applies, its run page offers **Continue creating the WordPress site** (or the platform's name) and returns to the create form with the operator's answers: names, identifier, title, administrator details, repository, branch, runtime and HTTPS choice. The answers are kept in this controller's session for presentation only; the site review validates everything again and nothing about them enters the change record. A step that did not complete offers the same return so the operator can try again without retyping.
 
 ## Names
 
@@ -85,7 +95,7 @@ Each site has **Overview**, **Runtime**, **Deployments**, **Database**, **Settin
 
 ## Creating a WordPress site
 
-Open the server's **Sites** section and use **Create WordPress site**. It asks for the site's **Primary domain**, **Site title**, **Administrator username** and **Administrator email**, and the PHP runtime; **More options** holds the **Site identifier** and **Serve over HTTP only**. PostgreSQL servers show the tile disabled with the reason that WordPress needs MariaDB.
+Open the server's **Sites** section and use **Create WordPress site**. It asks for the site's **Primary domain**, **Site title**, **Administrator username** and **Administrator email**, and the PHP runtime; **More options** holds the **Site identifier** and **Serve over HTTP only**. PostgreSQL servers show the tile disabled with the reason that WordPress needs MariaDB. A host with no database engine offers **Step 1: install MariaDB** in the same form and keeps the answers for the site review after the engine applies ([Step 1](#step-1-a-missing-runtime-or-database-engine)).
 
 **Prepare WordPress site review** queues a preparation and changes nothing on the server. The review shows the pinned core release with its size and SHA-256, the site's MariaDB binding, the private configuration path and its permissions, the HTTPS setting and the administrator details. The administrator password is asked for on the confirm screen, not here: it is sent only over the confidential channel and is never stored ([ADR 0032](adr/0032-keep-secrets-in-private-native-files.md)). The review offers a browser-generated value.
 
@@ -93,7 +103,7 @@ Applying creates the site as a plain PHP site, creates its MariaDB binding, down
 
 ## Creating a Laravel site
 
-Open the server's **Sites** section and use **Create Laravel site**. It asks for the site's **Primary domain**, its **Repository** and its **Branch or tag** (default `main`); **More options** holds the **Site identifier** and **Serve over HTTP only**. The server's database engine is never asked for: a Laravel site needs one, and the review names the engine the server already runs.
+Open the server's **Sites** section and use **Create Laravel site**. It asks for the site's **Primary domain**, its **Repository** and its **Branch or tag** (default `main`); **More options** holds the **Site identifier** and **Serve over HTTP only**. The server's database engine is never asked for in the site form: a Laravel site needs one, and the review names the engine the server already runs. A host with no engine offers **Step 1: install MariaDB** or **Step 1: install PostgreSQL** on the same form, then returns to the site form with the answers kept ([Step 1](#step-1-a-missing-runtime-or-database-engine)).
 
 The **Repository** is a credential-free `https://` URL or an SSH locator such as `git@github.com:acme/shop.git`. A public HTTPS repository needs no credentials; an SSH repository gets an ed25519 **deploy key** generated on the server as the site user, and only its public half is shown so no private key leaves the server. Paste the repository host's host key fingerprint from your Git host's documentation into **Repository host key fingerprint** ([GitHub's SSH key fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)); the review reads the host key the server presents and trusts it only when its fingerprint matches exactly ([ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md)). A mismatch refuses the review. The review also refuses credentials in a URL, an unsafe reference or Git option, and any transport other than a plain `https://` URL or a fixed `user@host:path` SSH locator.
 

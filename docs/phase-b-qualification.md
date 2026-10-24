@@ -15,10 +15,11 @@ which keeps that evidence and covers the rest of Phase B.
 **Gap-closure revision (2026-10-24).** This revision implements Laravel's front-controller
 route and `/up` readiness ([#445](https://github.com/rajandangi/barectl/issues/445)), one
 reviewed Domains and HTTPS change with WordPress and Laravel alias redirects
-([#442](https://github.com/rajandangi/barectl/issues/442)), and the Overview address and next
-step ([#446](https://github.com/rajandangi/barectl/issues/446)). It also adds browser journeys
-for the new Domains and HTTPS settings and Overview. Still not implemented: Create site's
-Step 1 install link ([#443](https://github.com/rajandangi/barectl/issues/443)), the certificate
+([#442](https://github.com/rajandangi/barectl/issues/442)), the Overview address and next
+step ([#446](https://github.com/rajandangi/barectl/issues/446)), and Create site's Step 1
+install of a missing database engine or PHP runtime ([#443](https://github.com/rajandangi/barectl/issues/443)).
+It also adds browser journeys for the new Domains and HTTPS settings, Overview and the
+WordPress Step 1 round trip. Still not implemented: the certificate
 contact email ([#444](https://github.com/rajandangi/barectl/issues/444)), the remaining browser
 journeys ([#447](https://github.com/rajandangi/barectl/issues/447)) and hosted shard balance
 ([#449](https://github.com/rajandangi/barectl/issues/449)).
@@ -225,8 +226,8 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 1. PHP, WordPress and Laravel offered as platforms | `sites/test_target_pages.py`, `wordpress/test_create.py::WordPressSiteTileTests`, `sites/test_laravel_create.py`, and the three create journeys in `sites/test_target_browser.py` |
 | 2. Only the fields each platform needs, default PHP preselected | `sites/test_default_preselection.py` (3 tests); the browser create journeys submit exactly the documented fields |
 | 3. Never asked about the web server or the database engine | The three forms and their prepared inputs hold no server or engine field (`sites/test_target_pages.py`, `wordpress/test_create.py`, `sites/test_laravel_create.py`, browser create journeys) |
-| 4. Install a missing database engine as Step 1 and continue with the same answers | **Not qualified.** The tile is disabled with a reason that sends the operator to Server Settings ([#443](https://github.com/rajandangi/barectl/issues/443)) |
-| 5. Install a missing PHP version first and continue | **Not qualified.** Only installed runtimes are offered ([#443](https://github.com/rajandangi/barectl/issues/443)) |
+| 4. Install a missing database engine as Step 1 and continue with the same answers | The create form offers **Step 1: install MariaDB** (WordPress) or MariaDB/PostgreSQL (Laravel), queues the existing `install_database_engine` kind, and its finished run returns to the prefilled form (`sites/test_creation_steps.py`; browser `test_operator_installs_a_missing_engine_first_and_keeps_the_create_answers`) |
+| 5. Install a missing PHP version first and continue | The runtime select lists catalog PHP builds as *installs first*, queues the existing `add_runtime` kind, and returns to the same answers (`sites/test_creation_steps.py`, `sites/test_target_pages.py`); the browser journey uses an installed runtime |
 | 6. Confirm screen says in plain words what will be created | The review documents for all three platforms (`sites/test_target_configuration.py`, `wordpress/test_create.py::WordPressReviewTests`, `sites/test_laravel_create.py`); the shared confirm screen is [#364](https://github.com/rajandangi/barectl/issues/364) |
 | 7. Land on the new site's page with its HTTPS address and the next step | Overview links the site's own address, a WordPress sign-in page, or a Laravel current release with **Deploy**, and a plain PHP site's readiness path (`sites/test_target_pages.py`, browser `test_overview_links_the_site_address_without_ssh`) |
 | 8. WordPress tile disabled on PostgreSQL with the reason | `wordpress/test_create.py::test_postgresql_disables_the_tile_with_the_reason` |
@@ -412,9 +413,6 @@ measured for memory or disk.
 
 - **Certificate contact email.** There is no server setting (story 27,
   [#444](https://github.com/rajandangi/barectl/issues/444)).
-- **Step 1 of Create site.** A missing database engine or PHP version cannot be installed from
-  inside the journey, so the operator leaves the form and loses the answers (stories 4 and 5,
-  [#443](https://github.com/rajandangi/barectl/issues/443)).
 - **The database engine's site count.** The panel does not show how many sites use the engine,
   because passive discovery reads no catalog and pages make no SSH call; removal still refuses
   and names the databases (story 18).

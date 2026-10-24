@@ -3,6 +3,21 @@
          aria-labelledby="run-status-heading"
          {% if run.polling %}hx-get="{% url 'run_status' run.run.pk %}?shown={{ run.token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h2 id="run-status-heading">{{ run.outcome }}</h2>
+  {% if creation_banner %}
+    <div class="usa-alert usa-alert--info usa-alert--slim" id="creation-step">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          <strong>{{ creation_banner.title }}</strong> {{ creation_banner.note }}
+        </p>
+        {% if creation_banner.continue_url %}
+          <p>
+            <a class="usa-button"
+               href="{{ creation_banner.continue_url }}">{{ creation_banner.continue_label }}</a>
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
   {% if run.unknown %}
     <div class="usa-alert usa-alert--error" id="outcome-unknown">
       <div class="usa-alert__body">

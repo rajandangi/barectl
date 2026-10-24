@@ -13,6 +13,15 @@
       <h1>{{ change.kind_label }}: review</h1>
     </div>
   </div>
+  {% if creation_banner %}
+    <div class="usa-alert usa-alert--info usa-alert--slim" id="creation-step">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          <strong>{{ creation_banner.title }}</strong> {{ creation_banner.note }}
+        </p>
+      </div>
+    </div>
+  {% endif %}
   <section class="barectl-card" aria-labelledby="change-status-heading">
     <h2 id="change-status-heading">{{ change.outcome }}</h2>
     {% if change.active %}

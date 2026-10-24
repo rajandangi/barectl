@@ -14,9 +14,24 @@
   {% if laravel_site_observed_at %}
     <p class="usa-hint">Installed runtimes recorded <time datetime="{{ laravel_site_observed_at|date:'c' }}">{{ laravel_site_observed_at|date:'M j, Y, H:i:s T' }}</time>.</p>
   {% endif %}
-  {% if not laravel_site_versions %}
-    <p>No verified PHP runtimes are available in the current observation. Run discovery or add a runtime from Stack before creating a site.</p>
-  {% elif not laravel_site_can_prepare %}
+  {% if laravel_site_reason %}
+    <p id="laravel-site-reason">{{ laravel_site_reason }}</p>
+  {% endif %}
+  {% include "sites/_creation_continuation.html" with continuation=laravel_site_continuation prefix="laravel" %}
+  {% if laravel_site_step %}
+    <div class="usa-alert usa-alert--info usa-alert--slim"
+         id="laravel-site-step">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          <strong>Step 1: install a database engine on this server.</strong>
+          Laravel needs a database engine and this server has none. Enter the site's details and choose MariaDB or PostgreSQL; Barectl reviews the install first, then returns you here with your answers.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+  {% if not laravel_site_has_choices %}
+    <p>No PHP runtime is installed or offered in the current observation. Run discovery before creating a site.</p>
+  {% elif not laravel_site_can_prepare and not laravel_site_reason %}
     <p>Resolve the server's findings or wait for its active operation to finish before preparing this review.</p>
   {% endif %}
   <form class="usa-form"
@@ -63,8 +78,23 @@
         </div>
       {% endwith %}
     </details>
-    <button class="usa-button"
-            type="submit"
-            {% if not laravel_site_can_prepare %}disabled{% endif %}>Prepare Laravel site review</button>
+    {% if laravel_site_step %}
+      {% for engine, label in laravel_site_step.engines %}
+        <button class="usa-button"
+                type="submit"
+                name="step"
+                value="engine:{{ engine }}"
+                {% if not laravel_site_can_prepare %}disabled{% endif %}>Step 1: install {{ label }}</button>
+      {% endfor %}
+    {% else %}
+      <button class="usa-button"
+              type="submit"
+              data-site-create-submit
+              data-site-create-label="Prepare Laravel site review"
+              {% if not laravel_site_can_prepare %}disabled{% endif %}>Prepare Laravel site review</button>
+    {% endif %}
+    {% if laravel_site_installable %}
+      {% include "sites/_php_install_hint.html" %}
+    {% endif %}
   </form>
 </section>

@@ -17,8 +17,20 @@
   {% if wordpress_site_reason %}
     <p id="wordpress-site-reason">{{ wordpress_site_reason }}</p>
   {% endif %}
-  {% if not wordpress_site_versions %}
-    <p>No verified PHP runtimes are available in the current observation. Run discovery or add a runtime from Stack before creating a site.</p>
+  {% include "sites/_creation_continuation.html" with continuation=wordpress_site_continuation prefix="wordpress" %}
+  {% if wordpress_site_step %}
+    <div class="usa-alert usa-alert--info usa-alert--slim"
+         id="wordpress-site-step">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          <strong>Step 1: install {{ wordpress_site_step.label }} on this server.</strong>
+          WordPress needs MariaDB and this server has no database engine. Enter the site's details and choose Step 1; Barectl reviews the install first, then returns you here with your answers.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+  {% if not wordpress_site_has_choices %}
+    <p>No PHP runtime is installed or offered in the current observation. Run discovery before creating a site.</p>
   {% elif not wordpress_site_can_prepare and not wordpress_site_reason %}
     <p>Resolve the server's findings or wait for its active operation to finish before preparing this review.</p>
   {% endif %}
@@ -66,8 +78,21 @@
         </div>
       {% endwith %}
     </details>
-    <button class="usa-button"
-            type="submit"
-            {% if not wordpress_site_can_prepare %}disabled{% endif %}>Prepare WordPress site review</button>
+    {% if wordpress_site_step %}
+      <button class="usa-button"
+              type="submit"
+              name="step"
+              value="engine:{{ wordpress_site_step.engine }}"
+              {% if not wordpress_site_can_prepare %}disabled{% endif %}>Step 1: install {{ wordpress_site_step.label }}</button>
+    {% else %}
+      <button class="usa-button"
+              type="submit"
+              data-site-create-submit
+              data-site-create-label="Prepare WordPress site review"
+              {% if not wordpress_site_can_prepare %}disabled{% endif %}>Prepare WordPress site review</button>
+    {% endif %}
+    {% if wordpress_site_installable %}
+      {% include "sites/_php_install_hint.html" %}
+    {% endif %}
   </form>
 </section>

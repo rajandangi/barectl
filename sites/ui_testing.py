@@ -20,14 +20,41 @@ from discovery.snapshot import (
     WebStackComponentObservation,
     save_snapshot,
 )
+from operations.consent import DeclaredEffect, Scope
+from operations.engine import ReviewDraft, save_review
+from operations.models import ChangePreparation, ChangeRun, RemoteOperation, Result, Verification
 from runtimes.observation import RuntimeObservation
 from servers.models import Server
 from sites.bodies.common import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
 from sites.bodies.pool import SitePool
 from sites.observation import PHP_TRANSITION_INCOMPLETE
 
+BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
 
-def record_http_sites(server: Server, *, problem: str = "") -> None:
+
+def _engine_component(engine_name: str) -> WebStackComponentObservation:
+    spec = database_observation.specs()[engine_name]
+    return WebStackComponentObservation(
+        spec.component,
+        Observation(
+            ObservationOutcome.OBSERVED,
+            ("dpkg-query",),
+            "",
+            (Package(spec.versioned, "1.0"),),
+        ),
+        Observation(
+            ObservationOutcome.OBSERVED,
+            ("systemctl",),
+            "",
+            (ServiceUnit(spec.units[0], "loaded", "active", "running", "enabled"),),
+        ),
+    )
+
+
+def record_http_sites(
+    server: Server, *, problem: str = "", engine: str = "", installed_php: bool = True
+) -> None:
+    """A target host whose observed sites can receive a Create site review."""
     sites = tuple(
         ObservedSite(
             identifier,
@@ -42,21 +69,24 @@ def record_http_sites(server: Server, *, problem: str = "") -> None:
         for identifier, uid in (("alpha", 1001), ("beta", 1002))
     )
     runtimes = (
-        RuntimeObservation(
-            "php84",
-            "/nix/store/observed-php",
-            "1",
-            "8.4.26",
-            ("opcache",),
-            "active",
-            (("opcache.validate_permission", "1"), ("expose_php", "0")),
-            problem,
-        ),
-        RuntimeObservation("php85", "", "", "8.5.11", (), "failed", (), "Master failed"),
-    )
+        (
+            RuntimeObservation(
+                "php84",
+                "/nix/store/observed-php",
+                "1",
+                "8.4.26",
+                ("opcache",),
+                "active",
+                (("opcache.validate_permission", "1"), ("expose_php", "0")),
+                problem,
+            ),
+        )
+        if installed_php
+        else ()
+    ) + (RuntimeObservation("php85", "", "", "8.5.11", (), "failed", (), "Master failed"),)
     collected = replace(
         COLLECTED,
-        components=(),
+        components=(_engine_component(engine),) if engine else (),
         sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
         runtimes=runtimes,
@@ -202,6 +232,38 @@ def record_site_settings(
     save_snapshot(attempt, collected, timezone.now())
 
 
+def record_step_run(preparation: ChangePreparation) -> ChangeRun:
+    """A finished Step 1 run, as the worker would record it after applying the review."""
+    RemoteOperation.objects.filter(pk=preparation.pk).update(
+        status=RemoteOperation.Status.SUCCEEDED
+    )
+    review = save_review(
+        preparation,
+        ReviewDraft(
+            kind=preparation.kind_slug,
+            intent="Install the missing prerequisite.",
+            effects=(DeclaredEffect(Scope.SERVER, "Install the prerequisite."),),
+            stages=("preflight", "install", "verify"),
+            boot_id=BOOT_ID,
+            uptime_centiseconds=500000,
+        ),
+        host_key="ssh-ed25519 key",
+        collected_at=timezone.now(),
+        sites_digest="",
+    )
+    return ChangeRun.objects.create(
+        server=preparation.server,
+        review=review,
+        requested_by=preparation.requested_by,
+        requested_by_name="operator",
+        server_name=preparation.server.name if preparation.server is not None else "Web",
+        unit_name="barectl-apply-" + "c" * 32 + ".service",
+        status=RemoteOperation.Status.SUCCEEDED,
+        execution=Result.SUCCEEDED,
+        verification=Verification.PASSED,
+    )
+
+
 def record_wordpress_sites(
     server: Server,
     *,
@@ -209,26 +271,9 @@ def record_wordpress_sites(
     application: str = "wordpress",
     version: str = "7.1.3",
     state: SiteState = SiteState.MANAGED,
+    installed_php: bool = True,
 ) -> None:
     """A target host whose site can receive a Create WordPress site review."""
-
-    def component(engine_name: str) -> WebStackComponentObservation:
-        spec = database_observation.specs()[engine_name]
-        return WebStackComponentObservation(
-            spec.component,
-            Observation(
-                ObservationOutcome.OBSERVED,
-                ("dpkg-query",),
-                "",
-                (Package(spec.versioned, "1.0"),),
-            ),
-            Observation(
-                ObservationOutcome.OBSERVED,
-                ("systemctl",),
-                "",
-                (ServiceUnit(spec.units[0], "loaded", "active", "running", "enabled"),),
-            ),
-        )
 
     sites = (
         ObservedSite(
@@ -249,14 +294,24 @@ def record_wordpress_sites(
         ),
     )
     runtimes = (
-        RuntimeObservation(
-            "php84", "/nix/store/observed-php84", "1", "8.4.26", ("opcache",), "active", (), ""
-        ),
-        RuntimeObservation("php85", "", "", "8.5.11", (), "failed", (), "Master failed"),
-    )
+        (
+            RuntimeObservation(
+                "php84",
+                "/nix/store/observed-php84",
+                "1",
+                "8.4.26",
+                ("opcache",),
+                "active",
+                (),
+                "",
+            ),
+        )
+        if installed_php
+        else ()
+    ) + (RuntimeObservation("php85", "", "", "8.5.11", (), "failed", (), "Master failed"),)
     collected = replace(
         COLLECTED,
-        components=(component(engine),) if engine else (),
+        components=(_engine_component(engine),) if engine else (),
         sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
         runtimes=runtimes,

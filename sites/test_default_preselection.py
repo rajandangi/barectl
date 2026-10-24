@@ -47,10 +47,11 @@ class DefaultPreselectionTests(ControllerConfigTestCase):
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
         self.assertContains(response, '<option value="php85" selected>')
 
-    def test_unverified_default_is_not_selected_or_offered(self) -> None:
+    def test_unverified_default_is_not_selected(self) -> None:
         self.default_snapshot(verified=False)
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
-        self.assertNotContains(response, '<option value="php85"')
+        self.assertNotContains(response, '<option value="php85" selected>')
+        self.assertContains(response, "PHP 8.5 (installs first")
 
     def test_failed_refresh_does_not_preselect_an_older_default(self) -> None:
         self.default_snapshot(verified=True)

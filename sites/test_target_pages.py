@@ -91,11 +91,12 @@ class HttpSitePageTests(ControllerConfigTestCase):
         self.assertContains(response, "Matches the supported site convention. This describes")
         self.assertNotContains(response, "..")
 
-    def test_server_sites_offers_only_verified_installed_runtimes(self) -> None:
+    def test_server_sites_offers_installed_and_installable_runtimes(self) -> None:
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
         self.assertContains(response, "Create HTTP site")
         self.assertContains(response, 'value="php84"')
-        self.assertNotContains(response, 'value="php85"')
+        self.assertContains(response, 'value="php85"')
+        self.assertContains(response, "PHP 8.5 (installs first")
         self.assertNotContains(response, "Prepare site plan")
 
     def test_global_sites_reads_observations_and_links_to_creation_without_ssh(self) -> None:
@@ -131,12 +132,12 @@ class HttpSitePageTests(ControllerConfigTestCase):
             },
         )
 
-    def test_an_unverified_runtime_is_refused_before_preparation(self) -> None:
+    def test_a_runtime_the_catalog_does_not_offer_is_refused_before_preparation(self) -> None:
         from operations.services import read_changes
 
         response = self.client.post(
             f"/servers/{self.server.pk}/sites/http/prepare/",
-            {"identifier": "shop", "names": "shop.example.com", "php_version": "php85"},
+            {"identifier": "shop", "names": "shop.example.com", "php_version": "php86"},
         )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(read_changes(self.server).rows, [])
