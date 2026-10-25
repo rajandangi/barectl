@@ -78,8 +78,15 @@ def context_for_site(
         and site.file == f"/etc/caddy/sites/{identifier}.caddy"
         and (site.state == SiteState.MANAGED or incomplete)
     )
+    others = tuple(choice for choice in choices if choice.entry != current)
+    back = next((choice for choice in others if choice.installed), others[0] if others else None)
     return {
         "php_runtime_incomplete": incomplete,
+        "php_switch_back": back.entry if back is not None else "",
+        "php_switch_back_label": back.version_label if back is not None else "",
+        "php_switch_back_number": (
+            prerequisites.number_label(back.entry) if back is not None else ""
+        ),
         "php_runtime_selection": current,
         "site_php_current": current,
         "site_php_current_label": prerequisites.number_label(current) if current else "",

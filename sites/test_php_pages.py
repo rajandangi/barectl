@@ -19,6 +19,7 @@ from servers.connections import saved_alias
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 
+from .observation import PHP_TRANSITION_INCOMPLETE
 from .php_change import SLUG
 from .ui_testing import record_http_sites, record_step_run
 
@@ -77,6 +78,51 @@ class SitePhpSettingsTests(ControllerConfigTestCase):
         record_http_sites(self.server)
         self.settings_url = f"/servers/{self.server.pk}/sites/alpha/settings/"
         self.url = f"/servers/{self.server.pk}/sites/alpha/runtime/php/prepare/"
+
+    def record_incomplete_switch(self) -> None:
+        record_php85_installed(self.server)
+        snapshot = current_snapshot(self.server)
+        if snapshot is None:
+            self.fail("No snapshot.")
+        observed = snapshot.collected.sites
+        sites = tuple(
+            replace(
+                site,
+                php_version="php85",
+                state=SiteState.PARTLY_APPLIED,
+                missing=(PHP_TRANSITION_INCOMPLETE,),
+            )
+            if site.identifier == "alpha"
+            else site
+            for site in observed.value
+        )
+        save_snapshot(
+            record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED),
+            replace(snapshot.collected, sites=replace(observed, value=sites)),
+            timezone.now(),
+        )
+
+    def test_an_incomplete_switch_offers_finish_or_stay_on_the_site_page(self) -> None:
+        self.record_incomplete_switch()
+        page = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
+        content = page.content.decode()
+        self.assertIn("from 8.4 to 8.5", content)
+        self.assertIn("did not finish.", content)
+        self.assertIn("Finish the switch", content)
+        self.assertIn("Stay on PHP 8.4", content)
+        for label, selection in (
+            ("Finish the switch", "php85"),
+            ("Stay on PHP 8.4", "php84"),
+        ):
+            with self.subTest(action=label):
+                response = self.client.post(self.url, {"selection": selection})
+                self.assertEqual(response.status_code, 302)
+                rows = read_changes(self.server).rows
+                self.assertEqual(rows[0].preparation.kind_slug, SLUG)
+                self.assertEqual(rows[0].preparation.inputs["selection"], selection)
+                RemoteOperation.objects.filter(pk=rows[0].preparation.pk).update(
+                    status=RemoteOperation.Status.SUCCEEDED
+                )
 
     def test_settings_shows_the_current_version_and_the_change_action_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):

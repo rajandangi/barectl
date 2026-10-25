@@ -563,6 +563,10 @@ def site_page_response(
     target_site = page.site is not None and page.site.file.startswith("/etc/caddy/sites/")
     context["target_site"] = target_site
     _target_site_context(page, state, section, context)
+    if target_site and section == "overview":
+        from sites.php_views import context_for_site as php_overview_context
+
+        context.update(php_overview_context(server, identifier, request.user))
     if target_site and section == "settings":
         from sites.domains_views import context_for_site as domains_context_for_site
         from sites.node_views import context_for_site
