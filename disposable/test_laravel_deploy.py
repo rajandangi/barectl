@@ -331,7 +331,7 @@ class LaravelDeployCase(ScenarioTestCase):
             lines.append(f"printf %s {shlex.quote(payload)} | base64 -d > {target}")
         lines.append(
             f"git add -A && git commit -qm {shlex.quote(message)} "
-            "&& git push --quiet origin main && git rev-parse HEAD"
+            "&& git push --force --quiet origin main && git rev-parse HEAD"
         )
         with self.shell() as shell:
             commit = shell.run("sh -c " + shlex.quote("; ".join(lines)))
