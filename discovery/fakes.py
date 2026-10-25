@@ -23,7 +23,8 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 from django_tasks_db.models import DBTaskResultQuerySet
 
-from operations import lifecycle
+from automation import observation as automation_observation
+from operations import lifecycle, native
 from operations.apt import PROCESS_COMMAND
 from operations.models import RemoteOperation
 from servers.models import Server
@@ -219,6 +220,9 @@ COLLECTED = CollectedSnapshot(
 
 
 _ROOT_LISTENER_READ = shlex.quote("ss -Hlnpt '( sport = :80 or sport = :443 )'")
+# The one bounded automation read a reviewed change uses to declare its fence (#395).
+_AUTOMATION_READ_COMMAND = automation_observation.read_command()
+_AUTOMATION_READ = shlex.quote(_AUTOMATION_READ_COMMAND)
 # The fixed command listing the sites a reviewed change reaches (sites/change.py).
 _MEMBERSHIP_READ = (
     "find /etc/caddy/sites -maxdepth 1 -type f -name '*.caddy' "
@@ -254,6 +258,8 @@ READ_ONLY = re.compile(
     # through the sudo authorization and execution pair.
     rf"|\A{re.escape(PROXY_INVENTORY_COMMAND)}\Z"
     rf"|\A{re.escape(_MEMBERSHIP_READ)}\Z"
+    rf"|\A{re.escape(_AUTOMATION_READ_COMMAND)}\Z"
+    rf"|\Asudo -n (-l )?/usr/bin/sh -c {_AUTOMATION_READ}\Z"
     rf"|\Asudo -n (-l )?/usr/bin/sh -c {re.escape(shlex.quote(PROXY_INVENTORY_COMMAND))}\Z"
     r"|\Aapt --version\Z"
     r"|\Adpkg --version\Z"
@@ -358,6 +364,12 @@ class FakeServer:
     def substituted(self) -> AbstractContextManager[object]:
         """Substitute this server for the SSH transport while the context is open."""
         return mock.patch.object(ssh, "connect", self.connect)
+
+    def answer_root(self, command: str, result: ssh.CommandResult) -> None:
+        """Answer one fixed root read as root and through the sudo authorization pair."""
+        argv = ["/usr/bin/sh", "-c", command]
+        for answer in (command, native.authorization(argv), native.privileged(argv, root=False)):
+            self.results[answer] = result
 
     @contextmanager
     def connect(self, target: ConnectionTarget) -> Iterator[ssh.RemoteShell]:

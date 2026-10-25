@@ -12,6 +12,7 @@ from typing import Final
 
 from automation.convention import (
     KILL_MODE,
+    WORKER_ROLES,
     account,
     digest,
     directives_map,
@@ -24,7 +25,6 @@ from automation.convention import (
 )
 
 ROLE_PREFIX: Final = "queue"
-WORKER_ROLES: Final = tuple(f"{ROLE_PREFIX}{process}" for process in range(1, 5))
 WORKER_ROLE: Final = re.compile(r"queue([1-4])\Z")
 QUEUE_NAME: Final = re.compile(r"[a-z0-9_-]{1,32}\Z")
 MAX_QUEUES: Final = 8

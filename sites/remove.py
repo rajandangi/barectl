@@ -18,6 +18,8 @@ import shlex
 from dataclasses import dataclass
 from typing import Final, cast
 
+from automation import fence
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from databases import binding, provision
 from discovery.root_read import run_root
@@ -56,7 +58,9 @@ _CORE_SOURCE: Final = re.sub(
 REMOVAL_SOURCE: Final = observation.COMMON_SOURCE + "\n" + _CORE_SOURCE
 READ_SOURCE: Final = REMOVAL_SOURCE + "\nprint(canonical(inventory(sys.argv[1])))\n"
 BODY_SOURCE: Final = (
-    REMOVAL_SOURCE.replace('BINDING_SOURCE = ""', "BINDING_SOURCE = " + repr(_BINDING_SOURCE))
+    AUTOMATION_SOURCE
+    + "\n"
+    + REMOVAL_SOURCE.replace('BINDING_SOURCE = ""', "BINDING_SOURCE = " + repr(_BINDING_SOURCE))
     + "\nraise SystemExit(main(sys.argv))\n"
 )
 BODY_BYTES: Final = (
@@ -346,8 +350,9 @@ def _effects(identifier: str, primary: str) -> tuple[DeclaredEffect, ...]:
             Scope.SITE,
             (
                 f"Delete site {primary}: its Caddy file, services, PHP-FPM, HAProxy and object "
-                "cache configuration, database and principal, stored certificate, directory "
-                "and accounts. The database and every site file are destroyed."
+                "cache configuration, database and principal, stored certificate, directory, "
+                "accounts and background work. The database and every site file are "
+                "destroyed, and its scheduled tasks are never started again."
             ),
             (identifier,),
             destroys_data=True,
@@ -410,6 +415,13 @@ def _details(
                         else f"p{inventory['identifier']}: absent"
                     ),
                 ]
+            ),
+        },
+        {
+            "label": "Background work",
+            "value": (
+                "Stopped first, then removed with its own files. A removal never starts a "
+                "site's scheduled tasks again."
             ),
         },
         {
@@ -523,6 +535,10 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa:
             ),
             "The remaining Caddy configuration validates and Caddy serves it.",
             "Every other site keeps its own Caddy file, services and data.",
+            (
+                "The site's scheduled tasks and background work are stopped and removed, "
+                "never started again."
+            ),
         ),
         refusals=tuple(refusals),
         boot_id=boot_id,
@@ -663,6 +679,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:  # no
     }
     payload = {
         **reviewed,
+        "automation_fence": fence.checked(document),
         "database": {
             **database,
             "statements": (

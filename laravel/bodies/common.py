@@ -18,7 +18,7 @@ import sys
 import time
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from sites.bodies.common import (
     canonical,
@@ -35,6 +35,10 @@ from sites.bodies.common import (
     site_address,
     stage,
 )
+
+if TYPE_CHECKING:
+    # Assembled into this body by automation/bodies/source.py (Phase C #395).
+    from automation.bodies.units import fence, restore
 
 RELEASE_NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 COMMIT_NAME: Final = re.compile(r"[0-9a-f]{7,40}")
@@ -979,7 +983,7 @@ def _migrations(
     return None
 
 
-def _activate(
+def _activate(  # noqa: C901 - one reviewed activation
     settings: SimpleNamespace,
     identifier: str,
     document: dict[str, object],
@@ -1016,6 +1020,10 @@ def _activate(
         if not gate:
             _attempt(lambda: _publish(settings, document), "laravel_gate")
         return ("partial", "laravel_readiness")
+    # Only now, on the new release, the new runtime and a proven readiness answer, does the
+    # site's background work start again (docs/adr/0036).
+    if not restore(document, identifier):
+        return ("partial", "automation_restore")
     stage("prune")
     problem = _attempt(
         lambda: prune(identifier, _strings(document.get("prune"))), "laravel_release"
@@ -1056,7 +1064,10 @@ def _deploy_release(
             return failure
     # Until a native scenario proves code pickup, every deploy that switches code runs
     # inside the maintenance window (Phase B #259), so the gate goes up before the
-    # migration step whether or not migrations run.
+    # migration step whether or not migrations run. The fence goes up with it: workers stop
+    # and boot activation is off while the gate is persistent (docs/adr/0036).
+    if not fence(document, identifier, gate=True):
+        return ("refused", "automation_fence")
     stage("gate")
     try:
         _publish_gate(settings, str(document["gate"]))
@@ -1117,6 +1128,8 @@ def _rollback_release(
     problem = _rollback_preflight(settings, identifier, document, descriptor)
     if problem:
         return ("refused", problem)
+    if not fence(document, identifier, gate=True):
+        return ("refused", "automation_fence")
     stage("gate")
     try:
         _publish_gate(settings, str(document["gate"]))

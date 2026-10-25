@@ -17,6 +17,7 @@ from automation.convention import (
     ROLE_WPCRON,
     ROLES,
     SITE_IDENTIFIER,
+    WORKER_ROLES,
     service_name,
     slice_file,
     slice_name,
@@ -52,6 +53,7 @@ SHOW_PROPERTIES = (
     "LastTriggerUSec",
     "NextElapseUSecRealtime",
     "ControlGroup",
+    "RefuseManualStart",
 )
 SHOW_NAMES = ("service", "timer")
 SITE_NAME = re.compile(
@@ -171,6 +173,8 @@ def _duplicate(
             "",
         ),
     }
+    for role in ROLES:
+        duplicates.setdefault(role, "")
     duplicates[ROLE_WPCRON] = duplicates[ROLE_WPCRON] or next(
         (found for text in supervisor if (found := supervisor_problem(text, identifier))), ""
     )
@@ -251,7 +255,18 @@ def _records() -> dict[str, object]:
             units, unreadable = [], list(ROLES)
         budget -= size
         roles: dict[str, dict[str, dict[str, str] | None]] = {}
+        present_roles = {
+            role
+            for role in ROLES
+            if any(
+                unit["name"].startswith(f"{service_name(identifier, role)[:-8]}-") for unit in units
+            )
+        }
         for role in ROLES:
+            if role in WORKER_ROLES and role not in present_roles:
+                # A WordPress or workerless site costs no extra systemctl calls.
+                roles[role] = {"service": None, "timer": None}
+                continue
             values: dict[str, dict[str, str] | None] = {}
             for kind in SHOW_NAMES:
                 name = (

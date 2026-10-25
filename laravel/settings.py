@@ -15,6 +15,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
@@ -49,7 +50,9 @@ def _without_automation_imports(text: str) -> str:
 
 
 BODY_SOURCE: Final = (
-    observation.LARAVEL_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + observation.LARAVEL_SOURCE
     + "\n"
     + importlib.resources.files("automation").joinpath("convention.py").read_text()
     + "\n"

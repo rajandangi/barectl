@@ -15,6 +15,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
@@ -31,7 +32,9 @@ from . import convention, observation
 SLUG: Final = "edit_wordpress_settings"
 LABEL: Final = "Edit WordPress settings"
 BODY_SOURCE: Final = (
-    site_observation.COMMON_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + site_observation.COMMON_SOURCE
     + "\n"
     + importlib.resources.files("wordpress").joinpath("convention.py").read_text()
     + "\n"

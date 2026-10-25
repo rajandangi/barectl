@@ -5,7 +5,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("discovery", "0013_discoverysnapshot_workers"),
+        ("discovery", "0016_discoverysnapshot_workers"),
         ("discovery", "0014_siteobservation_client"),
     ]
 

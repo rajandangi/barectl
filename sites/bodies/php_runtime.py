@@ -8,12 +8,16 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 import sites.bodies.admission as admission
 import sites.bodies.common as common
 from sites.bodies.site_fpm import site_fpm_idle
 from sites.serving import php_directory
+
+if TYPE_CHECKING:
+    # Assembled into this body by automation/bodies/source.py (Phase C #395).
+    from automation.bodies.units import fence, restore
 
 
 class PHPState(TypedDict):
@@ -350,6 +354,9 @@ def switch_php(document: dict[str, object]) -> None:
             return
         settings = php_settings(identifier, before, selected)
         source = "php85" if selected == "php84" else "php84"
+        if not fence(document, identifier):
+            common.result("refused", "automation_fence")
+            return
         changed = True
         source_evidence = start_target_php(settings, before, source)
         select_target_php(settings, before, source)
@@ -369,6 +376,9 @@ def switch_php(document: dict[str, object]) -> None:
         ):
             raise ValueError("The site runtime transition did not verify.")
         common.verify_readiness(php_settings(identifier, final, selected))
+        if not restore(document, identifier):
+            common.result("partial", "automation_restore")
+            return
         common.result("succeeded")
     except BlockingIOError:
         common.result("lock_busy")

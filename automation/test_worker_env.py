@@ -70,6 +70,14 @@ class EnvironmentBodyTests(SimpleTestCase):
             note("workers")
             return True, True
 
+        def fence(*_args: object) -> bool:
+            note("fence")
+            return True
+
+        def restore(*_args: object) -> bool:
+            note("restore")
+            return True
+
         document = {
             "identifier": "shop",
             "names": ["shop.example.com"],
@@ -89,6 +97,8 @@ class EnvironmentBodyTests(SimpleTestCase):
             directory="/var/www/shop",
         )
         with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(body, "fence", fence, create=True))
+            stack.enter_context(mock.patch.object(body, "restore", restore, create=True))
             for name, value in {
                 "setting": lambda *_args, **_kwargs: settings,
                 "site_account": lambda _identifier: [1001, 1001, "/var/www/shop", ""],
@@ -110,8 +120,12 @@ class EnvironmentBodyTests(SimpleTestCase):
             }.items():
                 stack.enter_context(mock.patch.object(body, name, value))
             body.edit_environment(document)
+        self.assertIn("fence", order, order)
         self.assertIn("config", order, order)
         self.assertIn("workers", order, order)
+        self.assertIn("restore", order, order)
+        self.assertLess(order.index("fence"), order.index("config"))
         self.assertLess(order.index("config"), order.index("workers"))
         self.assertLess(order.index("workers"), order.index("stage:verify"))
+        self.assertLess(order.index("restore"), order.index("result:succeeded:"))
         self.assertIn("result:succeeded:", order)

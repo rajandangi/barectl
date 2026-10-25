@@ -23,7 +23,7 @@ from automation.bodies.units import (
     disable_and_stop_service,
     enable_service,
     load_state,
-    publish,
+    publish_unit_file,
     reset_failed,
     restart_service,
     systemctl,
@@ -74,7 +74,7 @@ def publish_worker_units(identifier: str, definition: object, expected: dict[str
     for kind, name, text in render_worker_units(identifier, value):
         role = "slice" if kind == "slice" else role_of(name, identifier) or ""
         path = f"{SYSTEMD_DIRECTORY}/{name}"
-        publish(path, text, _reviewed_preimage(path, expected.get(role, "")))
+        publish_unit_file(path, text, _reviewed_preimage(path, expected.get(role, "")))
 
 
 def remove_worker_service(identifier: str, role: str, expected: str) -> None:

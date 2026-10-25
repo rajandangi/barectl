@@ -136,6 +136,11 @@ review document or consent level.
   **Cancel** returns to where it started.
 - A Shared review names the affected sites and requires the existing acknowledgement tick
   box. With no sites affected it says so. A Site review has one button.
+- A change that alters a site's code, schema, runtime, settings or files names **Pauses**
+  and **Starts again** in plain words, with the time the server was checked: which site's
+  scheduled tasks or queue workers stop for it, and which start again after it is checked.
+  A change that names no site says it touches no site's background work. A removal says
+  nothing starts again.
 - **Show details** is a closed accordion holding the full review: effects, stages, the
   connection and its revision, the admission deadline, digests, consent level, targets,
   kept resources, postconditions and refusals.
@@ -151,7 +156,9 @@ Every change links to its run. **Progress** is the default tab:
 - the plain-words title, the plain steps with the current one marked, polled as the run
   moves, with focus kept;
 - the result in one sentence and one next action: **Create site**, **Open the site**,
-  **Try again**, **Check what happened**, or **Open the server**.
+  **Try again**, **Check what happened**, or **Open the server**. A change whose background
+  work did not start again says so and keeps that work stopped until the operator turns it
+  back on from the site's **Scheduled tasks** section.
 
 **Logs** holds the stage names, the systemd unit, invocation, journal lines, consent
 level, the original connection and revision, and the audit record. A run continues on

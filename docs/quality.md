@@ -123,6 +123,8 @@ The fast layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)
 
 Each transcript is one JSON file per server state in `discovery/transcripts/<state>.json`, with the pins its server was built from. `docker/disposable-server/pins.json` holds the current pin set, which is the digest of the Ubuntu base image today; the Nix release, nixpkgs revision and catalog lock join it as they arrive. A fast test fails when any transcript was recorded with other pins, so moving a pin means recording again in the same change. Another fast test reads every transcript and fails if one holds the secret every recording seeds on its server or a command naming a secret location.
 
+A staged body and a fixed read share their source: `sites/bodies/common.py` is part of the site read's program, and `laravel/bodies/common.py` part of the Laravel read's. Editing either changes the recorded command, so record every state whose read embeds it again in the same change rather than patching a transcript ([automation](automation.md#fencing-site-changes) did this for #395).
+
 A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
 
 ```bash

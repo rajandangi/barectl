@@ -9,6 +9,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final, cast
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
@@ -28,7 +29,9 @@ READ_SOURCE: Final = (
     observation.COMMON_SOURCE + "\nprint(canonical(site_node_state(sys.argv[1])))\n"
 )
 BODY_SOURCE: Final = (
-    observation.COMMON_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + observation.COMMON_SOURCE
     + "\n"
     + importlib.resources.files("sites.bodies")
     .joinpath("node.py")

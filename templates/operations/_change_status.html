@@ -59,6 +59,39 @@
           </div>
         {% endif %}
         {% for sentence in change.plain.summary %}<p>{{ sentence }}</p>{% endfor %}
+        {% if review.fence %}
+          <div class="barectl-fence" id="what-pauses">
+            <h3>Background work</h3>
+            <dl class="barectl-facts">
+              <div>
+                <dt>Pauses</dt>
+                <dd>
+                  {% if review.fence.pauses %}
+                    {{ review.fence.pauses|join:', ' }}
+                  {% else %}
+                    Nothing. This change touches no site's background work.
+                  {% endif %}
+                </dd>
+              </div>
+              <div>
+                <dt>Starts again</dt>
+                <dd>
+                  {% if review.fence.resumes %}
+                    {{ review.fence.resumes|join:', ' }} after the change is checked.
+                  {% else %}
+                    Nothing. Any work that was paused stays stopped until you turn it back on.
+                  {% endif %}
+                </dd>
+              </div>
+              <div>
+                <dt>Checked</dt>
+                <dd>
+                  <time datetime="{{ review.review.collected_at|date:'c' }}">{{ review.review.collected_at|date:'M j, Y, H:i:s T' }}</time>
+                </dd>
+              </div>
+            </dl>
+          </div>
+        {% endif %}
         {% if review.shared %}
           <p>
             <strong>This change also touches these sites:</strong>
