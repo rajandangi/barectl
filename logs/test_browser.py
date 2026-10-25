@@ -1,6 +1,7 @@
 """Journey: a PHP error line from the site page in two activations (Phase C #389)."""
 
 import tempfile
+from time import sleep
 from typing import override
 
 from django.contrib.auth.models import Permission
@@ -9,6 +10,7 @@ from django.test import override_settings, tag
 from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
+from logs.models import LogRead
 from logs.read import LogLine, LogPage
 from logs.testing import record_background_site, record_log_site
 from servers.models import Server
@@ -66,6 +68,13 @@ class SiteLogsBrowserTests(BrowserTestCase):
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
+
+    def wait_for_reads(self, count: int) -> None:
+        for _ in range(100):
+            if LogRead.objects.filter(source="queue_workers").count() >= count:
+                return
+            sleep(0.1)
+        raise AssertionError("the live panel queued no read")
 
     def test_a_journal_live_view_stays_plain_and_reachable_at_phone_width(self) -> None:
         server = Server.objects.get(name="Production")

@@ -324,7 +324,10 @@ def _journal_cursor(cursor: str) -> tuple[str, str]:
 def _encode_journal(mode: str, cursor: str) -> str:
     if not cursor:
         return ""
-    return f"{mode}:{cursor}"[:200]
+    value = f"{mode}:{cursor}"
+    # A journal cursor is far shorter than this; a longer one would be cut by the row's
+    # bound and must not silently become a different location.
+    return value if len(value) <= 200 else ""
 
 
 def _fit_journal(page: dict[str, object]) -> dict[str, object]:
