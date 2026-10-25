@@ -16,6 +16,10 @@ PATHS = (
     "/var/lib/php-fpm/sites/alpha",
     "/run/php-fpm/sites/alpha",
     "/var/www/alpha",
+    "/etc/valkey/alpha.conf",
+    "/var/lib/valkey/alpha",
+    "/run/valkey/alpha",
+    "/etc/systemd/system/valkey-server@alpha.service.d",
 )
 DIGEST = "a" * 64
 
@@ -73,6 +77,7 @@ def evidence(
                 "haproxy-site@alpha.service": ["loaded", "active", "running"],
                 "php-fpm-site-php84@alpha.service": ["loaded", "active", "running"],
                 "php-fpm-site-php85@alpha.service": ["loaded", "inactive", "dead"],
+                "valkey-server@alpha.service": ["loaded", "active", "running"],
             },
             "other_sites": ["beta"],
             "caddy_matches": True,

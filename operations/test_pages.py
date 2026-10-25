@@ -174,6 +174,7 @@ class PlainWordTests(SimpleTestCase):
             "create_http_site",
             "set_site_php",
             "set_site_node",
+            "set_site_object_cache",
             "install_database_engine",
             "install_valkey",
             "create_wordpress_site",

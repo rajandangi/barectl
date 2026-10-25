@@ -61,3 +61,45 @@ class PreparedSitesLayerTests(SimpleTestCase):
             self.assertRaises(DockerError),
         ):
             images.ensure("L2")
+
+
+class PreparedCacheLayerTests(SimpleTestCase):
+    def test_the_prepared_cache_layer_key_follows_the_cache_bodies(self) -> None:
+        self.assertEqual(images.prepared_cache_inputs("aaaa"), images.prepared_cache_inputs("aaaa"))
+        self.assertNotEqual(
+            images.prepared_cache_inputs("aaaa"), images.prepared_cache_inputs("bbbb")
+        )
+
+    def test_the_prepared_cache_cache_key_names_the_l4_layer(self) -> None:
+        with mock.patch.object(images, "key", return_value="abcd1234"):
+            self.assertEqual(images.cache_key("L4"), "l4-abcd1234")
+
+    def test_an_unbuilt_l4_is_not_built_from_the_dockerfile(self) -> None:
+        with (
+            mock.patch.object(images, "key", return_value="abcd1234"),
+            mock.patch.object(images, "load", return_value=False),
+            self.assertRaises(DockerError),
+        ):
+            images.ensure("L4")
+
+
+class PreparedWordPressLayerTests(SimpleTestCase):
+    def test_the_prepared_wordpress_layer_key_follows_its_bodies(self) -> None:
+        self.assertEqual(
+            images.prepared_wordpress_inputs("aaaa"), images.prepared_wordpress_inputs("aaaa")
+        )
+        self.assertNotEqual(
+            images.prepared_wordpress_inputs("aaaa"), images.prepared_wordpress_inputs("bbbb")
+        )
+
+    def test_the_prepared_wordpress_cache_key_names_the_l3_layer(self) -> None:
+        with mock.patch.object(images, "key", return_value="abcd1234"):
+            self.assertEqual(images.cache_key("L3"), "l3-abcd1234")
+
+    def test_an_unbuilt_l3_is_not_built_from_the_dockerfile(self) -> None:
+        with (
+            mock.patch.object(images, "key", return_value="abcd1234"),
+            mock.patch.object(images, "load", return_value=False),
+            self.assertRaises(DockerError),
+        ):
+            images.ensure("L3")

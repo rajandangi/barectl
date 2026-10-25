@@ -586,9 +586,11 @@ def site_page_response(
     context["target_site"] = target_site
     _target_site_context(page, state, section, context)
     if target_site and section == "overview":
+        from cache.presentation import overview_context as cache_overview_context
         from sites.php_views import context_for_site as php_overview_context
 
         context.update(php_overview_context(server, identifier, request.user))
+        context.update(cache_overview_context(server, identifier, request.user))
     if target_site and section == "settings":
         from automation.views import context_for_site as automation_context_for_site
         from sites.domains_views import context_for_site as domains_context_for_site
@@ -610,6 +612,9 @@ def site_page_response(
             )
         )
         context.update(domains_context_for_site(server, identifier, request.user))
+        from cache.presentation import site_context as cache_context_for_site
+
+        context.update(cache_context_for_site(server, identifier, request.user))
         context.update(remove_context_for_site(server, identifier, request.user))
         context.update(automation_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)

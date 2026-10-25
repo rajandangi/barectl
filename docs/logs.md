@@ -139,16 +139,22 @@ re-record on the integration tree; do not hand-edit transcript JSON.
 - `logs/test_logs.py` proves the read operation, stored pages, 24-hour and next-read
   deletion, the permission explanation, the rotation review and body, and the presets.
 - `logs/test_browser.py` reaches a PHP error line from a site page in two activations.
-- `disposable/test_logs_validators.py` proves the rendered file passes `logrotate --debug`
-  and a broken directive does not.
-- A manual disposable-container check proved the rotation itself: root rotates
-  `php-error.log` in the `caddy:site 0750` directory, `create 0640 site site` recreates it
-  with the site's ownership, and a second forced run compresses `.1` to `.1.gz` under
-  `delaycompress`. The L0/L1 image carries no logrotate package today, and installing it in
-  a lifecycle scenario changes the host's observed standing (apt maintenance and the L2
-  prepared site's HAProxy); the automated end-to-end rotation scenario is therefore not
-  included, and this is recorded as unrun in `notes/handoff-389.md`. The mirror now carries
-  the `logrotate` package so the validator can install it.
+- `disposable/test_logs_validators.py` proves the rendered file passes `logrotate --debug`,
+  that a broken directive is rejected, and that the exact file, with its paths moved to a
+  scratch tree, rotates for real: root renames `php-error.log`, `delaycompress` compresses
+  `.1` to `.1.gz`, and `create 0640 site site` recreates it with the site's ownership. The
+  class installs `logrotate` from the fixture mirror through a private apt source, lists,
+  cache and extended states, stops the timer and cron daemon the install starts, restarts
+  the two PHP masters whose `ExecStart` runtime metadata dpkg's `daemon-reload` resets, and
+  removes its scratch tree, so the validator classes that follow in the same container see
+  the host unchanged.
+- A manual disposable-container check also proved the rotation in the live convention: root
+  rotates `php-error.log` in the `caddy:site 0750` directory. The L0/L1 image carries no
+  logrotate package today, and installing it in a lifecycle scenario changes the host's
+  observed standing (apt maintenance and the L2 prepared site's HAProxy); the automated
+  end-to-end rotation scenario in a site is therefore not included, and this is recorded as
+  unrun in `notes/handoff-389.md`. The mirror now carries the `logrotate` package so the
+  validator can install it.
 
 ## Later: journal sources
 

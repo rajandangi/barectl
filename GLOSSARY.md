@@ -144,6 +144,10 @@ _Avoid_: Redis, cache service
 A site's use of its own Valkey instance for application caching. Enabling it is a Site change; the server-wide Valkey install is its prerequisite.
 _Avoid_: Shared cache, Redis cache
 
+**Object cache instance**:
+The packaged `valkey-server@<identifier>` service that runs one site's cache as that site's Linux account, on a private Unix socket with no TCP, password or persistence, a reviewed memory limit and `allkeys-lru`. It stays outside the site's automation slice, and removing the site removes it.
+_Avoid_: Cache server, Redis instance
+
 ### Sites
 
 **Site**:

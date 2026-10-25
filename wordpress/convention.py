@@ -7,6 +7,7 @@ Nothing here runs PHP or reads a secret from the controller.
 
 import re
 import secrets
+import subprocess
 from typing import Final
 
 CORE_VERSION: Final = "7.1.3"
@@ -65,6 +66,10 @@ OWNED_VALUE: Final[dict[str, re.Pattern[str]]] = {
     "WP_REDIS_PREFIX": re.compile(r"[A-Za-z0-9_:-]{1,64}\Z"),
 }
 CONSTANT_KEY: Final = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
+# The one object cache Barectl wires into a WordPress site (Phase C #392). #356 reserved
+# every WP_REDIS_* name as Barectl-owned, so operator settings can never write them.
+CACHE_CONSTANTS: Final = ("WP_REDIS_SCHEME", "WP_REDIS_PATH", "WP_REDIS_PREFIX")
+REDIS_SCHEME: Final = "unix"
 CONSTANT_LINE: Final = re.compile(r"define\( '([A-Z][A-Z0-9_]{0,63})', '(.*)' \);\Z")
 MAX_CONSTANT_VALUE: Final = 2048
 SALT_VALUE: Final = re.compile(r"[\x21-\x26\x28-\x5b\x5d-\x7e]{32,128}\Z")
@@ -202,6 +207,76 @@ def render_constant(key: str, value: str) -> str:
     return f"define( '{key}', '{constant_value(value)}' );"
 
 
+def cache_prefix(identifier: str) -> str:
+    """The per-site key namespace the plugin applies to every cache key."""
+    _checked(identifier)
+    return f"s{identifier}:"
+
+
+def cache_socket(identifier: str) -> str:
+    """The site's private cache connection; ``cache.convention`` owns the same path."""
+    _checked(identifier)
+    return f"/run/valkey/{identifier}/valkey.sock"
+
+
+def cache_constant_values(identifier: str) -> tuple[tuple[str, str], ...]:
+    """The exact Barectl-owned values for one site's private configuration."""
+    return (
+        ("WP_REDIS_SCHEME", REDIS_SCHEME),
+        ("WP_REDIS_PATH", cache_socket(identifier)),
+        ("WP_REDIS_PREFIX", cache_prefix(identifier)),
+    )
+
+
+def cache_lines(identifier: str) -> tuple[str, ...]:
+    return tuple(
+        f"define( '{key}', '{constant_value(value)}' );"
+        for key, value in cache_constant_values(identifier)
+    )
+
+
+def _cache_line(line: str) -> tuple[str, str] | None:
+    parsed = parse_constant(line.rstrip("\r\n"))
+    if parsed is None or parsed[0] not in CACHE_CONSTANTS:
+        return None
+    return parsed
+
+
+def cache_wiring(text: str, identifier: str) -> str:
+    """``complete``, ``partial`` or empty: whether the three reserved lines are exact."""
+    expected = dict(cache_constant_values(identifier))
+    found: dict[str, str] = {}
+    for line in text.splitlines():
+        parsed = _cache_line(line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        if key in found:
+            return "partial"
+        found[key] = value
+    if not found:
+        return ""
+    if found != expected:
+        return "partial"
+    return "complete"
+
+
+def set_cache_constants(text: str, identifier: str, *, enabled: bool) -> str:
+    """Add or remove exactly the three reserved lines, leaving every other byte alone."""
+    if private_configuration_problem(text, identifier):
+        raise ValueError("The private WordPress configuration is outside the supported grammar.")
+    lines = text.splitlines(keepends=True)
+    fixed = len(_fixed_configuration_lines(identifier))
+    head, tail = lines[:fixed], lines[fixed:]
+    kept = [line for line in tail if _cache_line(line) is None]
+    if enabled:
+        kept = [line + "\n" for line in cache_lines(identifier)] + kept
+    output = "".join(head + kept)
+    if private_configuration_problem(output, identifier):
+        raise ValueError("The new configuration is outside the supported grammar.")
+    return output
+
+
 def parse_constant(line: str) -> tuple[str, str] | None:
     match = CONSTANT_LINE.fullmatch(line)
     if match is None:
@@ -220,7 +295,11 @@ def parse_constant(line: str) -> tuple[str, str] | None:
 
 
 def extra_constants(text: str, identifier: str) -> list[tuple[str, str]]:
-    """The operator's constants after the fixed Barectl block, in file order."""
+    """The operator's constants after the fixed Barectl block, in file order.
+
+    Barectl-owned cache lines are not operator constants: they are part of the fixed
+    grammar and are never shown as editable settings.
+    """
     lines = text.splitlines()
     fixed = _fixed_configuration_lines(identifier)
     if len(lines) < len(fixed) or _fixed_problem(lines, fixed):
@@ -231,7 +310,9 @@ def extra_constants(text: str, identifier: str) -> list[tuple[str, str]]:
         if parsed is None:
             return []
         if owned_constant(parsed[0]):
-            if owned_value_problem(parsed[0], parsed[1]):
+            if owned_value_problem(parsed[0], parsed[1]) or (
+                parsed[0] in CACHE_CONSTANTS and _cache_value_problem(parsed, identifier)
+            ):
                 return []
             continue
         if not valid_constant_key(parsed[0]):
@@ -252,6 +333,13 @@ def constant_details(text: str, identifier: str) -> list[dict[str, str]]:
         keys.add(key)
         rows.append({"key": key, "digest": hashlib.sha256(value.encode("utf-8")).hexdigest()})
     return rows
+
+
+def _cache_value_problem(parsed: tuple[str, str], identifier: str) -> str:
+    key, value = parsed
+    if dict(cache_constant_values(identifier)).get(key) != value:
+        return f"define( '{key}', … ) is outside the supported object cache wiring."
+    return ""
 
 
 def _constant_edits(changes: list[dict[str, object]]) -> dict[str, tuple[str, str]]:
@@ -292,7 +380,9 @@ def apply_constants(  # noqa: C901 - one pass over every line
                 "The private WordPress configuration is outside the supported grammar."
             )
         if owned_constant(parsed[0]):
-            if owned_value_problem(parsed[0], parsed[1]):
+            if owned_value_problem(parsed[0], parsed[1]) or (
+                parsed[0] in CACHE_CONSTANTS and _cache_value_problem(parsed, identifier)
+            ):
                 raise ValueError(
                     "The private WordPress configuration is outside the supported grammar."
                 )
@@ -341,6 +431,51 @@ def render_private_configuration(
 
 
 MARIADB_SOCKET: Final = "/run/mysqld/mysqld.sock"
+# The fixed writer both WordPress bodies use: a site-owned temporary file in the same
+# directory, fsynced and atomically replaced by the site account over standard input.
+WRITE_SCRIPT: Final = (
+    "import json,os,sys,tempfile\n"
+    "payload=json.load(sys.stdin)\n"
+    "path=payload['path']\n"
+    "text=payload['text']\n"
+    "directory=os.path.dirname(path)\n"
+    "fd,temp=tempfile.mkstemp(prefix='.barectl-',suffix='.tmp',dir=directory)\n"
+    "try:\n"
+    "    os.fchmod(fd,0o600)\n"
+    "    with os.fdopen(fd,'w',encoding='utf-8') as output:\n"
+    "        output.write(text)\n"
+    "        output.flush()\n"
+    "        os.fsync(output.fileno())\n"
+    "    os.replace(temp,path)\n"
+    "except BaseException:\n"
+    "    try: os.unlink(temp)\n"
+    "    except OSError: pass\n"
+    "    raise\n"
+)
+
+
+def write_as_site(account: str, path: str, text: str) -> None:
+    """Replace one site-owned file as that account, preserving its 0600 mode."""
+    import json
+
+    payload = json.dumps({"path": path, "text": text}).encode()
+    completed = subprocess.run(  # noqa: S603 - fixed argv as the site user
+        [
+            "/usr/sbin/runuser",
+            "-u",
+            account,
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            WRITE_SCRIPT,
+        ],
+        input=payload,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    if completed.returncode:
+        raise ValueError("The private WordPress configuration could not be written.")
 
 
 def _fixed_configuration_lines(identifier: str) -> list[str]:
@@ -379,7 +514,12 @@ def private_configuration_problem(text: str, identifier: str) -> str:
         if parsed is None:
             return f"The private WordPress configuration line {number} is not supported."
         if owned_constant(parsed[0]):
-            if owned_value_problem(parsed[0], parsed[1]):
+            if problem := (
+                owned_value_problem(parsed[0], parsed[1])
+                or (
+                    _cache_value_problem(parsed, identifier) if parsed[0] in CACHE_CONSTANTS else ""
+                )
+            ):
                 return f"The private WordPress configuration line {number} is not supported."
         elif not valid_constant_key(parsed[0]):
             return f"The private WordPress configuration line {number} is not supported."
