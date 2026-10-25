@@ -164,7 +164,9 @@ def _change_context(
         "apply_reason": (
             "Another computer is changing this server."
             if other is not None
-            else "" if can_apply or out_of_date else _apply_reason(request, view)
+            else ""
+            if can_apply or out_of_date
+            else _apply_reason(request, view)
         ),
         "can_prepare_again": _can_prepare_again(request, preparation),
         "shared_form": SharedApplyForm(),

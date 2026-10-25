@@ -165,9 +165,7 @@ class HostFoundation(ScenarioTestCase):
                         self.fail("No readiness observation after console confirmation.")
                     self.assertEqual(snapshot.collected.standing.standing, Standing.FRESH)
                     self.assertContains(self.client.get(f"/servers/{server.pk}/"), "Set up server")
-                    self.assertContains(
-                        self.client.get(f"/servers/{server.pk}/"), "Set up server"
-                    )
+                    self.assertContains(self.client.get(f"/servers/{server.pk}/"), "Set up server")
                     self.assertEqual(
                         self.client.post(
                             f"/servers/{server.pk}/changes/prepare/", {"kind": foundation.SLUG}

@@ -200,9 +200,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
         for section in ("", "settings/", "logs/", "activity/"):
             with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
                 self.assertEqual(
-                    self.client.get(
-                        f"/servers/{self.server.pk}/sites/alpha/{section}"
-                    ).status_code,
+                    self.client.get(f"/servers/{self.server.pk}/sites/alpha/{section}").status_code,
                     200,
                 )
 

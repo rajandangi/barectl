@@ -675,9 +675,7 @@ def site_create_continue(request: HttpRequest, pk: int) -> HttpResponse:
         raise PermissionDenied
     step = continuation.stored(request)
     if step is None or step.server_id != server.pk or step.platform != "http":
-        messages.error(
-            request, "Your answers are no longer kept. Start Create site again."
-        )
+        messages.error(request, "Your answers are no longer kept. Start Create site again.")
         return redirect("server_site_create", pk=pk)
     state = server_state(server)
     choices = prerequisites.php_choices(state)
