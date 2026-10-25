@@ -43,6 +43,7 @@ from sites.views import (
     server_http_site_prepare,
     server_laravel_site_prepare,
     server_wordpress_site_prepare,
+    site_create,
     site_list,
 )
 from wordpress.settings_views import prepare_settings as prepare_wordpress_settings
@@ -75,6 +76,12 @@ urlpatterns = [
         name="runtime_default_prepare",
     ),
     path("sites/", site_list, name="sites"),
+    path("sites/create/", site_create, name="site_create"),
+    path(
+        "servers/<int:pk>/sites/create/",
+        site_create,
+        name="server_site_create",
+    ),
     path("", server_list, name="servers"),
     path("activity/", activity, name="activity"),
     path("settings/", settings_page, name="settings"),

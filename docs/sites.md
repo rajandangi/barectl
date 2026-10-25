@@ -6,15 +6,14 @@ The same Sites page creates the Phase B platforms: [WordPress](#creating-a-wordp
 
 ## Creating a site
 
-Open the server's **Sites** section, or the global **Sites** page, and use **Create HTTP site**. Enter:
+Open the global **Sites** page or a server's **Sites** section and use **Create site**. From the global page Barectl first asks which server, lists only servers that are ready, and preselects the only one. The page then asks:
 
-- **DNS names**: the primary domain first, then up to nine aliases, separated by spaces or new lines.
-- **Site identifier**: derived from the primary domain and editable; see [names](#names).
-- **PHP runtime**: an installed runtime whose master the current observation verified, `php84` or `php85`, or a catalog version marked *installs first*. The form preselects the server's default PHP when the current observation verifies it ([server defaults](runtime-defaults.md)). Choosing an uninstalled version prepares [Step 1](#step-1-a-missing-runtime-or-database-engine) instead of refusing.
+- **Platform**: **PHP**, **WordPress** or **Laravel**. PHP opens this page's form; WordPress and Laravel continue to their own forms ([WordPress](#creating-a-wordpress-site), [Laravel](#creating-a-laravel-site)).
+- **PHP version**: one choice per PHP version this release offers, labelled by version. The server's default is preselected when the current observation verifies it ([server defaults](runtime-defaults.md)); otherwise the newest installed version, then the newest offered. A version this server does not have says **Installed first, adds about N MB** and prepares [Step 1](#step-1-a-missing-runtime-or-database-engine) instead of refusing.
+- **Domain**: the site's primary domain, with **Add another domain** for up to nine aliases.
+- **More options**: the site identifier, derived from the first domain and editable; see [names](#names). Node.js is selected from the site's Settings after the site is created.
 
-**More options** holds **Serve over HTTP only**, off by default. Leave it off to serve the site over HTTPS with a certificate [Caddy issues and renews](tls.md); turn it on only for a test site before DNS points here.
-
-**Prepare HTTP site review** queues a preparation and changes nothing on the server. Invalid input is refused before anything is queued, with each problem next to its field and the entered values kept.
+The site is served over HTTPS by default, with a certificate Caddy issues and renews. Barectl creates a site account, its folders and a placeholder page, and the confirm screen states that before anything changes. **Continue** queues a preparation and changes nothing on the server. Invalid input is refused before anything is queued, with each problem next to its field and the entered values kept. The old separate **Create HTTP site** card is retired.
 
 ## Step 1: a missing runtime or database engine
 

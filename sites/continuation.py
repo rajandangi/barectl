@@ -68,6 +68,9 @@ class CreationStep:
         return {key: value for key, value in self.answers.items() if key in fields}
 
     def continue_url(self) -> str:
+        if self.platform == "http":
+            base = reverse("server_site_create", args=[self.server_id])
+            return f"{base}?create={self.preparation_id}"
         base = reverse("server_sites", args=[self.server_id])
         return f"{base}?create={self.preparation_id}#{self.anchor}"
 

@@ -81,8 +81,8 @@ def php_choices(state: DiscoveryState) -> tuple[PhpChoice, ...]:
     offered = {build.entry: build for build in catalog.runtimes if build.entry in PHP_ENTRIES}
     choices = [PhpChoice(entry, True, 0) for entry in PHP_ENTRIES if entry in installed]
     choices.extend(
-        PhpChoice(entry, False, build.download_size)
-        for entry, build in offered.items()
+        PhpChoice(entry, False, offered[entry].download_size)
+        for entry in sorted(offered)
         if entry not in installed and entry not in present
     )
     return tuple(choices)
@@ -90,6 +90,25 @@ def php_choices(state: DiscoveryState) -> tuple[PhpChoice, ...]:
 
 def installable(choices: tuple[PhpChoice, ...]) -> tuple[tuple[str, int], ...]:
     return tuple((choice.entry, choice.download_size) for choice in choices if not choice.installed)
+
+
+def preselected(state: DiscoveryState, choices: tuple[PhpChoice, ...]) -> str:
+    """The PHP version Create site preselects: the server default, else the newest
+    installed, else the newest offered (docs/dashboard-workflows.md)."""
+    snapshot = state.snapshot
+    defaults = snapshot.collected.runtime_defaults if snapshot is not None else None
+    installed = [choice.entry for choice in choices if choice.installed]
+    if defaults is not None and not defaults.php_problem and defaults.php in installed:
+        return defaults.php
+    if installed:
+        return max(installed)
+    return max((choice.entry for choice in choices), default="")
+
+
+def download_label(size: int) -> str:
+    """The create page's wording for a version this server installs first."""
+    megabytes = max(1, round(size / 1_000_000))
+    return f"Installed first, adds about {megabytes} MB"
 
 
 def engine_step(state: DiscoveryState, platform: str) -> EngineStep:

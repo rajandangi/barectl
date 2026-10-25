@@ -1,7 +1,10 @@
 // docs/site-conventions.md: the identifier remains an operator choice.
 document.addEventListener("input", (event: Event) => {
   const names = event.target;
-  if (!(names instanceof HTMLTextAreaElement) || !names.hasAttribute("data-site-names")) {
+  if (
+    !(names instanceof HTMLTextAreaElement || names instanceof HTMLInputElement) ||
+    !names.hasAttribute("data-site-names")
+  ) {
     return;
   }
   const form = names.closest("form[data-site-create]");

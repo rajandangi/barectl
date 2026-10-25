@@ -91,20 +91,22 @@ class HttpSitePageTests(ControllerConfigTestCase):
         self.assertContains(response, "Matches the supported site convention. This describes")
         self.assertNotContains(response, "..")
 
-    def test_server_sites_offers_installed_and_installable_runtimes(self) -> None:
+    def test_server_sites_offers_the_create_page_and_its_php_versions(self) -> None:
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
-        self.assertContains(response, "Create HTTP site")
-        self.assertContains(response, 'value="php84"')
-        self.assertContains(response, 'value="php85"')
-        self.assertContains(response, "PHP 8.5 (installs first")
+        self.assertContains(response, "Create site")
+        self.assertNotContains(response, "Create HTTP site")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/create/")
+        self.assertContains(response, 'id="create-php-php84"')
+        self.assertContains(response, 'id="create-php-php85"')
+        self.assertContains(response, "Installed first, adds about")
         self.assertNotContains(response, "Prepare site plan")
 
     def test_global_sites_reads_observations_and_links_to_creation_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
             response = self.client.get("/sites/")
         self.assertContains(response, "alpha.example.com")
-        self.assertContains(response, f"/servers/{self.server.pk}/sites/#http-site-create")
-        self.assertContains(response, "Recorded observations")
+        self.assertContains(response, f"/servers/{self.server.pk}/sites/create/")
+        self.assertContains(response, "Create a site on Web")
 
     def test_preparation_queues_only_canonical_operator_inputs_and_opens_review(self) -> None:
         from operations.services import read_changes
@@ -148,7 +150,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
         response = self.client.post(f"/servers/{self.server.pk}/sites/http/prepare/", {})
         self.assertEqual(response.status_code, 403)
         self.assertNotContains(
-            self.client.get(f"/servers/{self.server.pk}/sites/"), "Prepare HTTP site review"
+            self.client.get(f"/servers/{self.server.pk}/sites/"), ">Create site</a>"
         )
 
     def test_activity_shows_this_devices_target_site_changes_only(self) -> None:
@@ -234,10 +236,11 @@ class HttpSitePageTests(ControllerConfigTestCase):
                 finally:
                     post_init.disconnect(correct_connection, sender=Server)
                 self.assertContains(response, "The server connection changed", status_code=409)
-                self.assertContains(
-                    response, "shop.example.com www.shop.example.com", status_code=409
-                )
+                self.assertContains(response, 'value="shop.example.com"', status_code=409)
+                self.assertContains(response, 'value="www.shop.example.com"', status_code=409)
                 self.assertContains(response, 'value="shop"', status_code=409)
-                self.assertContains(response, 'value="php84" selected', status_code=409)
+                self.assertRegex(
+                    response.content.decode(), r'id="create-php-php84"\s+value="php84"\s+checked'
+                )
                 self.assertContains(response, "disabled", status_code=409)
                 self.assertEqual(read_changes(self.server).rows, [])
