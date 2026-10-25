@@ -79,13 +79,13 @@
       {% endwith %}
     </details>
     {% if wordpress_site_step %}
-      <button class="usa-button"
+      <button class="usa-button usa-button--outline"
               type="submit"
               name="step"
               value="engine:{{ wordpress_site_step.engine }}"
               {% if not wordpress_site_can_prepare %}disabled{% endif %}>Step 1: install {{ wordpress_site_step.label }}</button>
     {% else %}
-      <button class="usa-button"
+      <button class="usa-button usa-button--outline"
               type="submit"
               data-site-create-submit
               data-site-create-label="Prepare WordPress site review"

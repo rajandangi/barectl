@@ -174,7 +174,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/create/laravel/")
             form = self.page.locator("#laravel-site-create")
             form.get_by_label("Primary domain", exact=True).fill("shop.example.com")
             form.get_by_label("Repository", exact=True).fill("https://github.com/acme/shop.git")
@@ -212,7 +212,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/create/wordpress/")
             form = self.page.locator("#wordpress-site-create")
             form.get_by_label("Primary domain", exact=True).fill("shop.example.com")
             form.get_by_label("Site title", exact=True).fill("Shop")
@@ -256,7 +256,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.sign_in()
         self.page.set_viewport_size({"width": 320, "height": 740})
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/create/wordpress/")
             form = self.page.locator("#wordpress-site-create")
             expect(form.get_by_text("Step 1: install MariaDB on this server")).to_be_visible()
             form.get_by_label("Primary domain", exact=True).fill("shop.example.com")

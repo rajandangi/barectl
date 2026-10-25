@@ -71,6 +71,9 @@ class CreationStep:
         if self.platform == "http":
             base = reverse("server_site_create", args=[self.server_id])
             return f"{base}?create={self.preparation_id}"
+        if self.platform in ("wordpress", "laravel"):
+            base = reverse("site_create_platform", args=[self.server_id, self.platform])
+            return f"{base}?create={self.preparation_id}"
         base = reverse("server_sites", args=[self.server_id])
         return f"{base}?create={self.preparation_id}#{self.anchor}"
 

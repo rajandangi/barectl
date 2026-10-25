@@ -2,7 +2,7 @@
 <section class="barectl-card" aria-labelledby="sites-heading">
   <h3 id="sites-heading">Sites</h3>
   {% if sites %}
-    {% include "servers/_snapshot_freshness.html" with source=sites.observation.source %}
+    {% include "servers/_snapshot_freshness.html" with source=None %}
     <p class="barectl-note">{{ sites.note }}</p>
     {% for site in sites.sites %}
       <article class="barectl-site"
@@ -16,7 +16,7 @@
             {% if site.domains %}<span class="barectl-site__identifier">{{ site.domains|join:", " }}</span>{% endif %}
           {% endif %}
         </h4>
-        <p class="barectl-note">{{ site.summary }}</p>
+        <p class="barectl-note">{{ site.verdict }}</p>
         {% if site.state == "not_following" and not site.unread %}
           <p class="barectl-note">
             <a href="https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md">Read the supported site convention</a> for exact files, account attributes, paths and permissions.
@@ -38,36 +38,13 @@
             </dd>
           </div>
         </dl>
-        {% if site.file and site.identifier %}
-          <p class="barectl-note">File <code>{{ site.file }}</code></p>
-        {% endif %}
-        {% if site.missing %}
-          <p class="barectl-note">Missing:</p>
-          <ul class="usa-list">
-            {% for path in site.missing %}<li><code>{{ path }}</code></li>{% endfor %}
-          </ul>
-        {% endif %}
         {% if site.identifier %}
           <p>
             <a href="{% url 'site_detail' server.pk site.identifier %}">Open site<span class="usa-sr-only"> {{ site.domains|join:", "|default:site.identifier }}</span></a>
           </p>
-          <details class="barectl-evidence">
-            <summary>Observed facts and evidence</summary>
-            <dl class="barectl-facts">
-              {% for fact in site.facts %}
-                <div>
-                  <dt>{{ fact.label }}</dt>
-                  <dd>
-                    {{ fact.text }}
-                  </dd>
-                </div>
-              {% endfor %}
-            </dl>
-          </details>
         {% endif %}
       </article>
     {% endfor %}
-    {% include "servers/_observation.html" with observation=sites.observation %}
   {% else %}
     <p>No site observations yet. Barectl reconstructs sites after it verifies the connection.</p>
   {% endif %}

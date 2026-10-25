@@ -16,7 +16,11 @@
     {% endif %}
     {% if site_address %}
       <p>
-        <a href="{{ site_address }}">{{ site_address }}</a>
+        {% if site.complete and not has_wordpress and not has_laravel %}
+          Served
+        {% else %}
+          <a href="{{ site_address }}">{{ site_address }}</a>
+        {% endif %}
         {% if site_https %}
           over HTTPS
         {% else %}
@@ -25,12 +29,6 @@
       </p>
     {% endif %}
     <dl class="barectl-facts">
-      <div>
-        <dt>Address</dt>
-        <dd>
-          {% if site_address %}<a href="{{ site_address }}">{{ site_primary }}</a>{% else %}Not observed{% endif %}
-        </dd>
-      </div>
       <div>
         <dt>Platform</dt>
         <dd>

@@ -80,14 +80,14 @@
     </details>
     {% if laravel_site_step %}
       {% for engine, label in laravel_site_step.engines %}
-        <button class="usa-button"
+        <button class="usa-button usa-button--outline"
                 type="submit"
                 name="step"
                 value="engine:{{ engine }}"
                 {% if not laravel_site_can_prepare %}disabled{% endif %}>Step 1: install {{ label }}</button>
       {% endfor %}
     {% else %}
-      <button class="usa-button"
+      <button class="usa-button usa-button--outline"
               type="submit"
               data-site-create-submit
               data-site-create-label="Prepare Laravel site review"

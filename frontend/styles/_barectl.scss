@@ -426,6 +426,27 @@ body {
 
 .barectl-layout__content {
   min-width: 0;
+
+  code,
+  dd {
+    overflow-wrap: anywhere;
+  }
+}
+
+.barectl-layout__nav .usa-sidenav {
+  margin: 0;
+  padding: 0;
+}
+
+// A long action label wraps inside its button instead of widening a narrow page.
+.barectl-layout__content .usa-button,
+#next-action .usa-button {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-left: 0;
+  white-space: normal;
+  text-align: left;
 }
 
 .barectl-break-all {
