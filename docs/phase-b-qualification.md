@@ -24,26 +24,28 @@ the optional certificate contact email after this record was gathered. [#447](ht
 added the remaining browser journeys: Deploy with its migration acknowledgement, Roll back
 from the release list, the environment and WordPress settings, PHP settings, the database
 engine install, site removal with its typed domain, and the HTTPS and certificate states.
-Still not implemented: hosted shard balance ([#449](https://github.com/rajandangi/barectl/issues/449)).
+[#449](https://github.com/rajandangi/barectl/issues/449) then balanced the hosted shards by
+recorded item time; [the balanced run](#the-balanced-run) records the eight shards' stops.
 
 ## Revisions
 
 Every local number in [Build budget](#build-budget) and [Scenarios](#scenarios) belongs to one
-code revision, `5be4abc` on `fix/450-deploy-readiness`. The hosted figures belong to the revision
-named under [Hosted runs](#hosted-runs), which differs from it only in documentation and, where
-that section says so, dependency lock entries for disclosed advisories.
+code revision, `5be4abc` on `fix/450-deploy-readiness`. The hosted figures belong to the
+revisions named under [Hosted runs](#hosted-runs); the balanced run was measured on a later
+revision, not on `5be4abc`, and that section names both.
 
 | Evidence | Where |
 | --- | --- |
 | Local fast suite, fast validators and native lifecycle scenarios, arm64 | `5be4abc` |
 | Hosted Checks and Native (4 shards), amd64 | `9f42ba8`, Checks run [40066132997](https://github.com/rajandangi/barectl/actions/runs/40066132997) and Native run [40066133079](https://github.com/rajandangi/barectl/actions/runs/40066133079) (see [hosted runs](#hosted-runs)). |
+| Hosted Checks and Native (8 shards, balanced), amd64 | `62c5465` on PR [#456](https://github.com/rajandangi/barectl/pull/456): Checks run [40148522221](https://github.com/rajandangi/barectl/actions/runs/40148522221) and Native run [40148522287](https://github.com/rajandangi/barectl/actions/runs/40148522287) (see [the balanced run](#the-balanced-run)). |
 
 ## Environments
 
 | Environment | Architecture | Host | Server image |
 | --- | --- | --- | --- |
 | Local full build | arm64 | Apple M4 Pro, 14 CPUs, 16 GiB Docker VM; 8 lanes by the runner's lane formula | Ubuntu 26.04 LTS by the digest in `docker/disposable-server/pins.json` |
-| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 4 shards of 2 lanes | The same image |
+| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 8 shards of 2 lanes | The same image |
 
 The lane serves the offline fixtures of [#375](https://github.com/rajandangi/barectl/issues/375):
 a Git host over HTTPS and SSH, a Pebble ACME server, the mirrored Ubuntu snapshot with MariaDB,
@@ -81,9 +83,16 @@ for each other: `LaravelDeployMariaDB` measured 102.1 s, 77.4 s, 67.4 s, 66.2 s 
 across five builds; the last three builds follow the graceful reload that replaced the
 five-second wait. `WordPressCreateMariaDB` is now the longest item at 50.5 s.
 
-The hosted shards are reported separately in [Hosted runs](#hosted-runs): three of the four
-exceed the 300 s target for one hosted shard (one met it) while all stay inside the 900 s
-limit, tracked as [#449](https://github.com/rajandangi/barectl/issues/449).
+The hosted shards are reported separately in [Hosted runs](#hosted-runs). The balanced
+eight-shard run stays inside the 300 s target for one hosted shard: shard 1, which carries
+the validators and the egress control, reports 204 s of native stages, and the other seven
+report 197 s to 267 s, all inside the 900 s limit. The earlier four-shard run exceeded the
+target on three shards and is kept below as the gap [#449](https://github.com/rajandangi/barectl/issues/449)
+closed.
+
+The 300 s shard target is the intended number: the [test time budget](quality.md#test-time-budget)
+is the single source of truth for test time and sets 300 s, superseding the 600 s shard target
+the Phase A record names.
 
 ## Scenarios
 
@@ -110,10 +119,10 @@ item against one prepared server.
 | S16 Confidential input channel | `ConfidentialChannelLifecycle` | 3.3 s | 2.9 s |
 
 The Phase A scenarios S1 to S10 also run on this revision and all passed; their times are in
-the Phase A record. The hosted column is from the run named under [Hosted runs](#hosted-runs)
-and is kept for comparison rather than as this revision's measurement. The longest item is
-`WordPressCreateMariaDB` at 50.5 s locally and 135.1 s hosted, both inside the 180 s item
-limit.
+the Phase A record. The hosted column is from the four-shard run named under
+[Hosted runs](#hosted-runs) and is kept for comparison rather than as this revision's
+measurement. The longest item is `WordPressCreateMariaDB` at 50.5 s locally and 137.3 s
+hosted on the balanced run, both inside the 180 s item limit.
 
 What the Phase B classes assert:
 
@@ -213,7 +222,7 @@ Two clauses cannot be one run, and the record says so plainly:
 | No routine SSH | Every create, deploy, roll back, settings change and removal above is applied through the change engine by the product's own preparation and native body; the harness uses SSH only to inspect the server and push the fixture commit |
 | Secret canaries never outside their private files | [Secret canaries](#secret-canaries) |
 | A fresh controller reconstructs everything; repeated reviews propose nothing | `FreshControllerReconstruction`, `HttpsSite`, `DatabaseEngineMariaDB`/`PostgreSQL`, `SiteDatabaseMariaDB`/`PostgreSQL`, `WordPressCreateMariaDB`, `LaravelCreateMariaDB`, `LaravelReleaseReconstruction`; each row also asserts a repeated review proposes no changes |
-| The full local build stays within ADR 0033's budget | [Build budget](#build-budget): 280 s against the 300 s target and 900 s limit. The hosted shard target is a separate budget line and is missed ([#449](https://github.com/rajandangi/barectl/issues/449)) |
+| The full local build stays within ADR 0033's budget | [Build budget](#build-budget): 280 s against the 300 s target and 900 s limit. The hosted shard target is a separate budget line and is met by the balanced eight-shard run, whose worst shard reports 267 s ([the balanced run](#the-balanced-run)) |
 
 ## User story audit
 
@@ -434,15 +443,56 @@ measured for memory or disk.
   proven with synthesised retained releases as well as natively.
 - **One engine plus three sites on 1 GiB, and code pickup without refused requests.** See
   [Qualification items](#qualification-items).
-- **Hosted shard time.** Three hosted `Native` shards exceed the 300 s target for one shard
-  (360 s to 499 s of scenario time at `e9d8c44`; shard 4 met it at 286 s) while all stay inside
-  the 900 s limit ([#449](https://github.com/rajandangi/barectl/issues/449)). The local full
-  build is inside its target.
 - **No real VM and no real DNS.** Every server is the pinned container image; the lane's resolver
   answers for the fixture names, so DNS warnings are proven by unit tests and the fixture, not by
   a public name. No certificate is issued by a public authority.
 
 ## Hosted runs
+
+### The balanced run
+
+`Checks` run [40148522221](https://github.com/rajandangi/barectl/actions/runs/40148522221) at
+`62c5465`, on PR [#456](https://github.com/rajandangi/barectl/pull/456), all required jobs
+passed:
+
+| Job | Time | Result |
+| --- | --- | --- |
+| `check` | 2 m 3 s | Passed |
+| `browser` | 2 m 5 s | Passed |
+| `frontend` | 17 s | Passed |
+| `dependency-audit` | 19 s | Passed |
+
+`Native` run [40148522287](https://github.com/rajandangi/barectl/actions/runs/40148522287),
+second attempt, amd64, eight shards of two lanes balanced by
+`disposable/shard_times.json`, all passed:
+
+| Shard | Job wall time | Reported by the runner |
+| --- | --- | --- |
+| 1 of 8 | 4 m 10 s | Fast validators 3 of 3 in 103 s; egress control refused as intended in 6 s; lifecycle scenarios 5 of 5 in 95 s; every native stage 204 s |
+| 2 of 8 | 4 m 58 s | 9 of 9 in 256 s |
+| 3 of 8 | 4 m 25 s | 8 of 8 in 230 s |
+| 4 of 8 | 4 m 22 s | 8 of 8 in 232 s |
+| 5 of 8 | 4 m 6 s | 8 of 8 in 211 s |
+| 6 of 8 | 5 m 2 s | 9 of 9 in 267 s |
+| 7 of 8 | 3 m 50 s | 9 of 9 in 197 s |
+| 8 of 8 | 4 m 42 s | 9 of 9 in 249 s |
+| Required `native` check | 3 s | Passed |
+
+The attempt restored the keyed L1 snapshot (`native-l1-Linux-X64-l1-d867293a9ca5`), so the
+reported times contain no S1 preparation. Every native stage of every shard is inside the
+[test time budget](quality.md#test-time-budget)'s 300 s target for one hosted shard, the worst
+at 267 s, and inside the 900 s limit; no item exceeds 180 s. Shard 1 reports 204 s because it
+also carries the validators and the egress control, which the balance reserves in its
+`disposable/shard_times.json` record.
+
+The first attempt of that run restored no cache: the mirror missed, so each shard generated its
+own fixture CA, no two shards shared a snapshot key, and every shard prepared L1 through S1. It
+passed, but measured 273 s to 386 s of lifecycle time and 217 s of validators on shard 1 — 322 s
+for shard 1's stages — inside the 900 s limit and over the 300 s target on seven of the eight
+shards. The recorded measurement is the warm attempt the budget names: as the budget's baseline
+does, the shard target is judged with the keyed L1 snapshot restored.
+
+### The four-shard run
 
 `Checks` run [40066132997](https://github.com/rajandangi/barectl/actions/runs/40066132997) at
 `9f42ba8`, all required jobs passed:
@@ -466,12 +516,12 @@ amd64, four shards of two lanes, all passed:
 | Required `native` check | 3 s | Passed |
 
 The shards restored the keyed L1 snapshot (`native-l1-Linux-X64-l1-6dcac7a6c2d8`), so the
-reported scenario times contain no S1 preparation. Every shard stays inside the 900 s hard
-limit and no item exceeds 180 s, but all four exceed the
+reported scenario times contain no S1 preparation. Every shard stayed inside the 900 s limit
+and no item exceeded 180 s, but the four-shard matrix exceeded the
 [test time budget](quality.md#test-time-budget)'s 300 s target for one hosted shard; the longest
-is 515 s on shard 1, which also carries the validators and the egress control. The gap is
-tracked as [#449](https://github.com/rajandangi/barectl/issues/449); the local full build
-(241 s) is inside its own target.
+was 515 s on shard 1, which also carried the validators and the egress control. That gap is
+[#449](https://github.com/rajandangi/barectl/issues/449), closed by
+[the balanced run](#the-balanced-run); the local full build (241 s) was inside its own target.
 
 The previous run on this branch (`757baaf`, run
 [40065117754](https://github.com/rajandangi/barectl/actions/runs/40065117754)) missed the L1
