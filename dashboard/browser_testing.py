@@ -207,6 +207,14 @@ class BrowserTestCase(LiveServerTestCase):
         # Scripts evaluated by the test can otherwise observe layout before stylesheets load.
         page.wait_for_load_state("load")
 
+    def many_servers(self, count: int = 11) -> None:
+        """Enough servers that the inventory offers its search field (#363)."""
+        existing = Server.objects.count()
+        Server.objects.bulk_create(
+            Server(name=f"Extra {index}", ssh_alias=f"extra-{index}.internal")
+            for index in range(max(0, count - existing))
+        )
+
     def css(self, selector: str, prop: str) -> str:
         value: str = self.page.locator(selector).first.evaluate(
             "(el, prop) => getComputedStyle(el).getPropertyValue(prop)", prop
