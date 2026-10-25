@@ -72,9 +72,16 @@ urlpatterns = [
         name="site_readiness_prepare",
     ),
     path(
-        "servers/<int:pk>/stack/defaults/<str:family>/prepare/",
+        "servers/<int:pk>/settings/defaults/<str:family>/prepare/",
         prepare_default,
         name="runtime_default_prepare",
+    ),
+    path(
+        "servers/<int:pk>/stack/defaults/<str:family>/prepare/",
+        RedirectView.as_view(
+            pattern_name="runtime_default_prepare", permanent=False, query_string=True
+        ),
+        name="runtime_default_prepare_legacy",
     ),
     path("sites/", site_list, name="sites"),
     path("sites/create/", site_create, name="site_create"),

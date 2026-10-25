@@ -292,9 +292,7 @@ def _advanced_section(
         snapshot = state.snapshot
         requested_tab = request.GET.get("tab", "web")
         stack_tab = (
-            requested_tab
-            if requested_tab in {"web", "services", "catalog", "php", "defaults"}
-            else "web"
+            requested_tab if requested_tab in {"web", "services", "catalog", "php"} else "web"
         )
         context["stack_tab"] = stack_tab
         standing = snapshot.collected.standing if snapshot else None
@@ -326,9 +324,6 @@ def _advanced_section(
             and standing is not None
             and standing.standing == Standing.TARGET_STACK
         )
-        from runtimes.defaults_views import context_for_server
-
-        context.update(context_for_server(state.server, request.user))
         runtime_rows = shown_runtimes(snapshot.collected) if snapshot else ()
         runtime_updates = shown_updates(snapshot.collected, runtime_rows) if snapshot else ()
         context["runtime_profiles"] = runtime_rows
@@ -372,8 +367,10 @@ def server_page(
         from bootstrap.certificate_email_views import context_for_server
         from databases import engine as database_engine
         from databases.presentation import panel
+        from runtimes.defaults_views import context_for_server as runtime_context_for_server
 
         context.update(context_for_server(server, request.user, state))
+        context.update(runtime_context_for_server(state, request.user))
         context["database_panel"] = (
             panel(state.snapshot.collected) if state.snapshot is not None else None
         )
