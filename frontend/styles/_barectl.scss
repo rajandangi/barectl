@@ -404,3 +404,75 @@ body {
 .barectl-section-navigation .usa-button-group {
   flex-flow: row wrap;
 }
+
+// A resource's sections sit in a USWDS side navigation beside the content on wide
+// screens and stack above it on narrow ones (docs/dashboard-workflows.md).
+.barectl-layout {
+  display: grid;
+  gap: units(3);
+
+  @include at-media("tablet") {
+    grid-template-columns: units("card") minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.barectl-layout__nav {
+  @include at-media("tablet") {
+    position: sticky;
+    top: units(2);
+  }
+}
+
+.barectl-main pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.barectl-main code {
+  overflow-wrap: anywhere;
+}
+
+.barectl-results,
+.usa-table-container--scrollable {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.barectl-layout__content {
+  min-width: 0;
+
+  code,
+  dd {
+    overflow-wrap: anywhere;
+  }
+}
+
+.barectl-layout__nav .usa-sidenav {
+  margin: 0;
+  padding: 0;
+}
+
+// A long action label wraps inside its button instead of widening a narrow page.
+.barectl-layout__content .usa-button,
+#next-action .usa-button {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-left: 0;
+  white-space: normal;
+  text-align: left;
+}
+
+.barectl-break-all {
+  overflow-wrap: anywhere;
+}
+
+// A run's plain steps mark the one the change reported last (docs/dashboard-workflows.md).
+.barectl-steps__current {
+  font-weight: font-weight("semibold");
+}
+
+.barectl-steps .usa-hint {
+  display: block;
+}

@@ -20,16 +20,34 @@ from discovery.presentation import VIEW_SITES, present_sites
 from operations import services as change_services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
+from operations.presentation import blocking_operation
+from runtimes.defaults import NODE_CHOICES
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
+from servers.page import (
+    CANNOT_BE_MANAGED,
+    CHECKING,
+    CONNECTION_FAILED,
+    NEEDS_SETUP,
+    NOT_CHECKED,
+    READY,
+    status_line,
+)
 
 from . import continuation, prerequisites
-from .forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
+from .forms import (
+    CREATE_PLATFORMS,
+    CreateSiteForm,
+    HttpSiteForm,
+    LaravelSiteForm,
+    WordPressSiteForm,
+)
 
 BUSY = (
     "Barectl is running another remote operation for this server. Prepare the site plan after "
     "it finishes."
 )
+CREATE_PLATFORM_VALUES = frozenset(value for value, _label in CREATE_PLATFORMS)
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
@@ -53,13 +71,7 @@ def _create_options(
     choices = prerequisites.php_choices(state)
     versions = tuple(choice.entry for choice in choices if choice.installed)
     installable = prerequisites.installable(choices)
-    snapshot = state.snapshot
-    defaults = snapshot.collected.runtime_defaults if snapshot is not None else None
-    initial: dict[str, object] = (
-        {"php_version": defaults.php}
-        if defaults is not None and not defaults.php_problem and defaults.php in versions
-        else {}
-    )
+    initial: dict[str, object] = {"php_version": prerequisites.preselected(state, choices)}
     if step is not None and step.platform == platform:
         initial = step.initial()
     return versions, installable, initial
@@ -98,6 +110,157 @@ def http_site_context(
         ),
         "http_site_continuation": step if step is not None and step.platform == "http" else None,
     }
+
+
+def create_site_context(
+    server: Server,
+    form: CreateSiteForm | None = None,
+    step: continuation.CreationStep | None = None,
+    *,
+    problem: str = "",
+    domain_values: list[str] | None = None,
+) -> dict[str, object]:
+    """The one Create site page: platform, PHP version, domains and More options."""
+    state = server_state(server)
+    snapshot = state.snapshot
+    choices = prerequisites.php_choices(state)
+    versions = tuple(choice.entry for choice in choices if choice.installed)
+    installable = prerequisites.installable(choices)
+    _versions, _installable, initial = _create_options(state, "http", step)
+    if form is None:
+        form = CreateSiteForm(php_versions=versions, installable=installable, initial=initial)
+    selected = str(form["php_version"].value() or "")
+    tiles = list(choices)
+    if selected and selected not in {choice.entry for choice in tiles}:
+        tiles.append(prerequisites.PhpChoice(selected, True, 0))
+    domains = (
+        list(domain_values) if domain_values is not None else str(initial.get("names", "")).split()
+    )
+    return {
+        "create_site_form": form,
+        "create_site_platforms": CREATE_PLATFORMS,
+        "create_site_selected_platform": str(form["platform"].value() or "php"),
+        "create_site_php_choices": tuple(
+            {
+                "entry": choice.entry,
+                "label": choice.version_label,
+                "installed": choice.installed,
+                "download": (
+                    "" if choice.installed else prerequisites.download_label(choice.download_size)
+                ),
+                "checked": choice.entry == selected,
+            }
+            for choice in tiles
+        ),
+        "create_site_has_choices": bool(tiles),
+        "create_site_can_prepare": _can_prepare(state, has_choices=bool(tiles), reason=""),
+        "create_site_observed_at": snapshot.collected_at if snapshot is not None else None,
+        "create_site_domains": domains or [""],
+        "create_site_identifier": str(form["identifier"].value() or ""),
+        "create_site_more_open": bool(form["identifier"].errors),
+        "create_site_continuation": (
+            step if step is not None and step.platform == "http" else None
+        ),
+        "create_site_problem": problem,
+        "create_site_node_choices": (
+            tuple(
+                row.entry
+                for row in snapshot.collected.runtimes
+                if row.entry in NODE_CHOICES and row.path and row.manageable
+            )
+            if snapshot is not None
+            else ()
+        ),
+    }
+
+
+_NOT_READY = {
+    NEEDS_SETUP: (
+        "This server is not set up yet. Set it up first, then create a site.",
+        "server_setup",
+    ),
+    CHECKING: (
+        "Barectl is checking this server. Create the site when the check finishes.",
+        "server_sites",
+    ),
+    CONNECTION_FAILED: (
+        "Barectl cannot reach this server. Check the connection first.",
+        "server_settings",
+    ),
+    NOT_CHECKED: (
+        "Barectl has not checked this server yet. Check the connection first.",
+        "server_settings",
+    ),
+    CANNOT_BE_MANAGED: (
+        "Barectl cannot manage this server, so it cannot create a site on it.",
+        "server_advanced",
+    ),
+}
+
+
+def _ready_servers() -> list[Server]:
+    """The servers whose last check found a target stack and no later doubt."""
+    return [
+        server
+        for server in Server.objects.order_by("name", "pk")
+        if status_line(server_state(server)) == READY
+    ]
+
+
+def _create_page(
+    request: HttpRequest,
+    server: Server,
+    form: CreateSiteForm | None = None,
+    *,
+    problem: str = "",
+    domain_values: list[str] | None = None,
+    status: int = 200,
+) -> HttpResponse:
+    state = server_state(server)
+    step = continuation.requested_step(request, server.pk)
+    context: dict[str, object] = {
+        "server": server,
+        "state": state,
+        "create_site_retained": form is not None,
+        **create_site_context(server, form, step, problem=problem, domain_values=domain_values),
+    }
+    line = status_line(state)
+    if line != READY:
+        text, route = _NOT_READY[line]
+        context["create_site_not_ready"] = text
+        context["create_site_not_ready_url"] = f"{reverse(route, args=[server.pk])}" + (
+            "#connection" if route in {"server_settings", "server_sites"} else ""
+        )
+    return render(request, "sites/create.html", context, status=status)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def site_create(request: HttpRequest, pk: int | None = None) -> HttpResponse:
+    """Create site, on the global Sites page or one server (docs/dashboard-workflows.md)."""
+    if pk is not None:
+        return _create_page(request, get_object_or_404(Server, pk=pk))
+    ready = _ready_servers()
+    requested = request.GET.get("server", "")
+    if requested.isdecimal():
+        chosen = next((server for server in ready if server.pk == int(requested)), None)
+        if chosen is not None:
+            return redirect("server_site_create", pk=chosen.pk)
+        messages.error(request, "Choose a server that is ready before creating a site.")
+    return render(
+        request,
+        "sites/create.html",
+        {
+            "choose_server": True,
+            "ready_servers": ready,
+            "selected_server": (
+                int(requested) if requested.isdecimal() else (ready[0].pk if ready else None)
+            ),
+            "create_site_has_choices": False,
+        },
+    )
 
 
 def laravel_site_context(
@@ -194,8 +357,16 @@ def _requested_step(
     return StepRequest(
         "add_runtime",
         missing.entry,
-        f"Step 1: install {missing.version_label} on this server",
-        f"Continue creating the {continuation.PLATFORM_LABELS[platform]}",
+        (
+            f"Step 1 of 2: add {missing.version_label} to this server"
+            if platform == "http"
+            else f"Step 1: install {missing.version_label} on this server"
+        ),
+        (
+            "Continue to create the site"
+            if platform == "http"
+            else f"Continue creating the {continuation.PLATFORM_LABELS[platform]}"
+        ),
     )
 
 
@@ -309,10 +480,8 @@ def _stale_wordpress_site(request: HttpRequest, pk: int, form: WordPressSiteForm
         )
         patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
         return response
-    from servers.views import server_page
-
     messages.error(request, problem)
-    return server_page(request, pk, "sites", wordpress_site_form=retained, status=409)
+    return site_create_platform_form(request, pk, "wordpress", retained)
 
 
 def _stale_laravel_site(request: HttpRequest, pk: int, form: LaravelSiteForm) -> HttpResponse:
@@ -347,45 +516,45 @@ def _stale_laravel_site(request: HttpRequest, pk: int, form: LaravelSiteForm) ->
         )
         patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
         return response
-    from servers.views import server_page
-
     messages.error(request, problem)
-    return server_page(request, pk, "sites", laravel_site_form=retained, status=409)
+    return site_create_platform_form(request, pk, "laravel", retained)
 
 
 def _stale_http_site(request: HttpRequest, pk: int, form: HttpSiteForm) -> HttpResponse:
     problem = (
         "The server connection changed. Reload this page and run discovery before "
-        "preparing a fresh site review. Nothing was queued."
+        "creating the site. Nothing was queued."
     )
-    retained = HttpSiteForm(
+    fresh = get_object_or_404(Server, pk=pk)
+    state = server_state(fresh)
+    choices = prerequisites.php_choices(state)
+    versions = tuple(choice.entry for choice in choices if choice.installed)
+    installable = prerequisites.installable(choices)
+    retained_version = form.cleaned_data["php_version"]
+    if retained_version not in versions and retained_version not in {
+        entry for entry, _size in installable
+    }:
+        versions = (*versions, retained_version)
+    retained = CreateSiteForm(
         {
+            "platform": "php",
             "identifier": form.cleaned_data["identifier"],
             "names": " ".join(form.cleaned_data["names"]),
-            "php_version": form.cleaned_data["php_version"],
+            "php_version": retained_version,
             "http_only": form.cleaned_data["http_only"],
         },
-        php_versions=(form.cleaned_data["php_version"],),
+        php_versions=versions,
+        installable=installable,
     )
-    if _is_fragment_request(request):
-        fresh = get_object_or_404(Server, pk=pk)
-        response = render(
-            request,
-            "sites/_http_create.html",
-            {
-                "server": fresh,
-                **http_site_context(fresh, retained),
-                "http_site_focus": True,
-                "http_site_problem": problem,
-            },
-            status=409,
-        )
-        patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
-        return response
-    from servers.views import server_page
-
     messages.error(request, problem)
-    return server_page(request, pk, "sites", http_site_form=retained, status=409)
+    return _create_page(
+        request,
+        fresh,
+        retained,
+        problem=problem,
+        domain_values=list(form.cleaned_data["names"]),
+        status=409,
+    )
 
 
 SiteForm = HttpSiteForm | LaravelSiteForm | WordPressSiteForm
@@ -436,33 +605,147 @@ def _finish_creation(
     return redirect(destination)
 
 
+def site_create_platform_form(
+    request: HttpRequest, pk: int, platform: str, form: WordPressSiteForm | LaravelSiteForm
+) -> HttpResponse:
+    """A refused platform submission, keeping the operator's answers."""
+    server = get_object_or_404(Server, pk=pk)
+    state = server_state(server)
+    context: dict[str, object] = {
+        "server": server,
+        "state": state,
+        "platform": platform,
+        "blocking": blocking_operation(state.other_operation),
+    }
+    can_prepare = request.user.has_perms(PREPARE_PERMISSIONS)
+    if platform == "wordpress":
+        if not isinstance(form, WordPressSiteForm):
+            raise Http404
+        context.update(wordpress_site_context(server, form))
+        context["wordpress_site_can_prepare"] = (
+            can_prepare and context["wordpress_site_can_prepare"]
+        )
+        context["wordpress_site_focus"] = True
+    else:
+        if not isinstance(form, LaravelSiteForm):
+            raise Http404
+        context.update(laravel_site_context(server, form))
+        context["laravel_site_can_prepare"] = can_prepare and context["laravel_site_can_prepare"]
+        context["laravel_site_focus"] = True
+    return render(request, "sites/create_platform.html", context, status=409)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(("servers.view_server", VIEW_SITES), raise_exception=True)
+def site_create_platform(request: HttpRequest, pk: int, platform: str) -> HttpResponse:
+    """The WordPress or Laravel form the Create site page leads to."""
+    if platform not in ("wordpress", "laravel"):
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    state = server_state(server)
+    context: dict[str, object] = {
+        "server": server,
+        "state": state,
+        "platform": platform,
+        "blocking": blocking_operation(state.other_operation),
+    }
+    step = continuation.requested_step(request, server.pk)
+    can_prepare = request.user.has_perms(PREPARE_PERMISSIONS)
+    if platform == "wordpress":
+        context.update(wordpress_site_context(server, step=step))
+        context["wordpress_site_can_prepare"] = (
+            can_prepare and context["wordpress_site_can_prepare"]
+        )
+    else:
+        context.update(laravel_site_context(server, step=step))
+        context["laravel_site_can_prepare"] = can_prepare and context["laravel_site_can_prepare"]
+    return render(request, "sites/create_platform.html", context)
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def site_create_continue(request: HttpRequest, pk: int) -> HttpResponse:
+    """Continue a Create site from Step 1's kept answers, preparing its review directly."""
+    server = get_object_or_404(Server, pk=pk)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    step = continuation.stored(request)
+    if step is None or step.server_id != server.pk or step.platform != "http":
+        messages.error(request, "Your answers are no longer kept. Start Create site again.")
+        return redirect("server_site_create", pk=pk)
+    state = server_state(server)
+    choices = prerequisites.php_choices(state)
+    form = CreateSiteForm(
+        {
+            "platform": "php",
+            "names": str(step.answers.get("names", "")),
+            "identifier": str(step.answers.get("identifier", "")),
+            "php_version": str(step.answers.get("php_version", "")),
+            "http_only": "on" if step.answers.get("http_only") else "",
+        },
+        php_versions=tuple(choice.entry for choice in choices if choice.installed),
+        installable=prerequisites.installable(choices),
+    )
+    if not form.is_valid():
+        return _create_page(request, server, form, status=409)
+    if not _can_prepare(state, has_choices=bool(choices), reason=""):
+        messages.warning(
+            request, "Run discovery and resolve the server's findings before creating a site."
+        )
+        return redirect("server_sites", pk=pk)
+    return _finish_creation(
+        request,
+        server,
+        user,
+        "http",
+        state,
+        form,
+        kind_slug="create_http_site",
+        inputs={
+            "version": 1,
+            "identifier": form.cleaned_data["identifier"],
+            "names": list(form.cleaned_data["names"]),
+            "selection": form.cleaned_data["php_version"],
+            "https": not form.cleaned_data["http_only"],
+        },
+    )
+
+
 @never_cache
 @require_POST
 @login_required
 @permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
 def server_http_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
+    """The Create site page's POST target; WordPress and Laravel lead to their own forms."""
     server = get_object_or_404(Server, pk=pk)
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
+    platform = request.POST.get("platform", "php")
+    if platform not in CREATE_PLATFORM_VALUES:
+        return _create_page(
+            request,
+            server,
+            problem="Choose PHP, WordPress or Laravel. Nothing was queued.",
+            status=422,
+        )
+    if platform == "wordpress":
+        return redirect("site_create_platform", pk=server.pk, platform="wordpress")
+    if platform == "laravel":
+        return redirect("site_create_platform", pk=server.pk, platform="laravel")
     state = server_state(server)
-    context = http_site_context(server, step=continuation.requested_step(request, pk))
-    versions, installable, _initial = _create_options(state, "http", None)
-    form = HttpSiteForm(request.POST, php_versions=versions, installable=installable)
+    choices = prerequisites.php_choices(state)
+    versions = tuple(choice.entry for choice in choices if choice.installed)
+    installable = prerequisites.installable(choices)
+    domains = request.POST.getlist("names")
+    form = CreateSiteForm(request.POST, php_versions=versions, installable=installable)
     if not form.is_valid():
-        from servers.views import server_page
-
-        if _is_fragment_request(request):
-            response = render(
-                request,
-                "sites/_http_create.html",
-                {"server": server, **http_site_context(server, form), "http_site_focus": True},
-                status=422,
-            )
-            patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
-            return response
-        return server_page(request, pk, "sites", http_site_form=form, status=422)
-    if not context["http_site_can_prepare"]:
+        return _create_page(request, server, form, domain_values=domains, status=422)
+    if not _can_prepare(state, has_choices=bool(choices), reason=""):
         messages.warning(
             request, "Run discovery and resolve the server's findings before creating a site."
         )
@@ -615,19 +898,20 @@ def server_wordpress_site_prepare(request: HttpRequest, pk: int) -> HttpResponse
 @permission_required(("servers.view_server", VIEW_SITES), raise_exception=True)
 def site_list(request: HttpRequest) -> HttpResponse:
     states = [server_state(server) for server in Server.objects.order_by("name", "pk")]
+    rows = [
+        {
+            "state": state,
+            "sites": present_sites(state.snapshot.collected.sites) if state.snapshot else None,
+            "ready": status_line(state) == READY,
+        }
+        for state in states
+    ]
     return render(
         request,
         "sites/list.html",
         {
-            "rows": [
-                {
-                    "state": state,
-                    "sites": present_sites(state.snapshot.collected.sites)
-                    if state.snapshot
-                    else None,
-                }
-                for state in states
-            ],
+            "rows": rows,
             "can_create_sites": request.user.has_perms(PREPARE_PERMISSIONS),
+            "has_ready_server": any(row["ready"] for row in rows),
         },
     )

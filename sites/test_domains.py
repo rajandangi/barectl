@@ -203,7 +203,7 @@ class DomainsPageTests(ControllerConfigTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Domains and HTTPS")
         self.assertContains(response, "alpha.example.com")
-        self.assertContains(response, "Prepare domains and HTTPS review")
+        self.assertContains(response, "Change domains and HTTPS")
 
     def test_the_prepare_request_queues_the_change_without_ssh(self) -> None:
         from operations.services import read_changes

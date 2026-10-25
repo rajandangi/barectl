@@ -109,9 +109,9 @@ class SettingsPageTests(ControllerConfigTestCase):
             settings=(ObservedSetting("alpha", "laravel", "APP_ENV", DIGEST, "production"),),
         )
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            overview = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+            logs = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
             environment = self.client.get(f"/servers/{self.server.pk}/sites/alpha/environment/")
-        self.assertContains(overview, "Issued by CN=Pebble")
+        self.assertContains(logs, "Issued by CN=Pebble")
         self.assertContains(environment, "APP_ENV")
         self.assertContains(environment, "production")
         record_laravel_releases(self.server)

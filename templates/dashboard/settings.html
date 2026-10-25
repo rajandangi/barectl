@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Settings · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <h1>Settings</h1>
+      <p class="barectl-note">This installation's account, keys and release. Nothing here changes a server.</p>
+    </div>
+  </div>
+  <section class="barectl-card" aria-labelledby="settings-account-heading">
+    <h2 id="settings-account-heading">Your account</h2>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Signed in as</dt>
+        <dd>
+          {{ user.get_username }}
+        </dd>
+      </div>
+    </dl>
+    <p>To change your password, run this on the computer that runs Barectl:</p>
+    <pre><code>python manage.py changepassword {{ user.get_username }}</code></pre>
+    <p class="barectl-note">
+      Barectl sign-in is separate from the Linux accounts and SSH access on your servers.
+    </p>
+  </section>
+  <section class="barectl-card" aria-labelledby="settings-keys-heading">
+    <h2 id="settings-keys-heading">Approved SSH keys</h2>
+    <p class="barectl-note">
+      These key files live on this computer. Barectl reads them to connect to your servers.
+    </p>
+    {% if keys %}
+      <dl class="barectl-facts">
+        {% for key in keys %}
+          <div>
+            <dt>{{ key.reference }}</dt>
+            <dd>
+              {% if key.problem %}
+                {{ key.problem }}
+              {% else %}
+                <code class="barectl-break-all">{{ key.public_key }}</code>
+              {% endif %}
+            </dd>
+          </div>
+        {% endfor %}
+      </dl>
+    {% else %}
+      <p>
+        No approved key files are configured. Add one on this computer and name it in
+        <code>BARECTL_SSH_APPROVED_KEYS</code>, or use this computer's SSH agent.
+      </p>
+    {% endif %}
+  </section>
+  <section class="barectl-card" aria-labelledby="settings-worker-heading">
+    <h2 id="settings-worker-heading">Background work</h2>
+    <p>
+      Barectl adds servers and changes them in a background worker, so a page never waits
+      on a server. Check that the worker is running when a change stays queued:
+    </p>
+    <pre><code>python manage.py db_worker</code></pre>
+    <p class="barectl-note">
+      This page cannot confirm whether the worker is running. A change that waits shows
+      how long it has waited on its own page.
+    </p>
+  </section>
+  <section class="barectl-card" aria-labelledby="settings-version-heading">
+    <h2 id="settings-version-heading">Barectl {{ barectl_version }}</h2>
+    <p>This release offers these runtimes for your servers:</p>
+    {% if catalog %}
+      <div class="usa-table-container--scrollable" tabindex="0">
+        <table class="usa-table">
+          <caption class="usa-sr-only">Runtimes offered by this Barectl release</caption>
+          <thead>
+            <tr>
+              <th scope="col">Runtime</th>
+              <th scope="col">Version</th>
+              <th scope="col">Processor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in catalog %}
+              <tr>
+                <th scope="row">{{ row.language }}</th>
+                <td>{{ row.version }}</td>
+                <td>{{ row.architecture }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p>The runtime catalog could not be read.</p>
+    {% endif %}
+  </section>
+{% endblock %}

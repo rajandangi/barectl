@@ -30,7 +30,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
 
     def test_runtime_page_uses_the_observed_master_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
         self.assertContains(response, "Diagnostic master state")
         self.assertContains(response, "Verified in this observation")
         # Each site has its own master, so another runtime's master failure is not this
@@ -47,14 +47,14 @@ class HttpSitePageTests(ControllerConfigTestCase):
 
     def test_overview_links_the_https_address_and_the_readiness_path(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, 'href="http://alpha.example.com"')
         self.assertContains(response, "Barectl checks <code>/</code>")
 
     def test_a_wordpress_overview_links_the_sign_in_page(self) -> None:
         record_site_settings(self.server, identifier="alpha", application="wordpress", https=True)
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, 'href="https://alpha.example.com"')
         self.assertContains(response, 'href="https://alpha.example.com/wp-admin/"')
         self.assertContains(response, "Sign in to WordPress")
@@ -81,30 +81,32 @@ class HttpSitePageTests(ControllerConfigTestCase):
             settings=(ObservedSetting("alpha", "laravel", "APP_ENV", "a" * 64, "production"),),
         )
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, "Current release")
         self.assertContains(response, "abc123def456")
         self.assertContains(response, "Deploy")
 
     def test_overview_summary_ends_with_one_period(self) -> None:
-        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, "Matches the supported site convention. This describes")
         self.assertNotContains(response, "..")
 
-    def test_server_sites_offers_installed_and_installable_runtimes(self) -> None:
+    def test_server_sites_offers_the_create_page_and_its_php_versions(self) -> None:
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
-        self.assertContains(response, "Create HTTP site")
-        self.assertContains(response, 'value="php84"')
-        self.assertContains(response, 'value="php85"')
-        self.assertContains(response, "PHP 8.5 (installs first")
+        self.assertContains(response, "Create site")
+        self.assertNotContains(response, "Create HTTP site")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/create/")
+        self.assertContains(response, 'id="create-php-php84"')
+        self.assertContains(response, 'id="create-php-php85"')
+        self.assertContains(response, "Installed first, adds about")
         self.assertNotContains(response, "Prepare site plan")
 
     def test_global_sites_reads_observations_and_links_to_creation_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
             response = self.client.get("/sites/")
         self.assertContains(response, "alpha.example.com")
-        self.assertContains(response, f"/servers/{self.server.pk}/sites/#http-site-create")
-        self.assertContains(response, "Recorded observations")
+        self.assertContains(response, f"/servers/{self.server.pk}/sites/create/")
+        self.assertContains(response, "Create a site on Web")
 
     def test_preparation_queues_only_canonical_operator_inputs_and_opens_review(self) -> None:
         from operations.services import read_changes
@@ -148,7 +150,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
         response = self.client.post(f"/servers/{self.server.pk}/sites/http/prepare/", {})
         self.assertEqual(response.status_code, 403)
         self.assertNotContains(
-            self.client.get(f"/servers/{self.server.pk}/sites/"), "Prepare HTTP site review"
+            self.client.get(f"/servers/{self.server.pk}/sites/"), ">Create site</a>"
         )
 
     def test_activity_shows_this_devices_target_site_changes_only(self) -> None:
@@ -184,7 +186,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
 
     def test_current_master_failure_is_shown_without_claiming_verification(self) -> None:
         record_http_sites(self.server, problem="Loaded master evidence is unavailable")
-        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
         self.assertContains(response, "Not manageable: Loaded master evidence is unavailable")
         self.assertNotContains(response, "Verified in this observation")
 
@@ -195,13 +197,10 @@ class HttpSitePageTests(ControllerConfigTestCase):
         record_attempt(self.server, DiscoveryAttempt.Status.FAILED)
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
         self.assertContains(response, "observations may be out of date")
-        self.assertNotContains(response, 'value="php84"')
-        for section in ("overview", "runtime", "activity"):
+        for section in ("", "settings/", "logs/", "activity/"):
             with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
                 self.assertEqual(
-                    self.client.get(
-                        f"/servers/{self.server.pk}/sites/alpha/{section}/"
-                    ).status_code,
+                    self.client.get(f"/servers/{self.server.pk}/sites/alpha/{section}").status_code,
                     200,
                 )
 
@@ -234,10 +233,11 @@ class HttpSitePageTests(ControllerConfigTestCase):
                 finally:
                     post_init.disconnect(correct_connection, sender=Server)
                 self.assertContains(response, "The server connection changed", status_code=409)
-                self.assertContains(
-                    response, "shop.example.com www.shop.example.com", status_code=409
-                )
+                self.assertContains(response, 'value="shop.example.com"', status_code=409)
+                self.assertContains(response, 'value="www.shop.example.com"', status_code=409)
                 self.assertContains(response, 'value="shop"', status_code=409)
-                self.assertContains(response, 'value="php84" selected', status_code=409)
+                self.assertRegex(
+                    response.content.decode(), r'id="create-php-php84"\s+value="php84"\s+checked'
+                )
                 self.assertContains(response, "disabled", status_code=409)
                 self.assertEqual(read_changes(self.server).rows, [])

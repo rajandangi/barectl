@@ -266,7 +266,7 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertEqual(run.execution, Result.LOCK_BUSY)
         self.assertIn("held Barectl's mutation lock", run.failure)
         self.assertIn(EXITED, self.systemd.units)
-        page = self.client.get(f"/runs/{run.pk}/")
+        page = self.client.get(f"/runs/{run.pk}/?tab=logs")
         self.assertContains(page, "The run stopped before making any requested change.")
         self.assert_replayed_collected_unit(run)
 
@@ -321,7 +321,7 @@ class EngineWorkflowTests(ChangeTestCase):
         Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
         self.sign_in_with(*APPLY_PERMISSIONS)
         page = self.client.get(f"/changes/{preparation.pk}/")
-        self.assertContains(page, "over connection <code>203.0.113.7</code>")
+        self.assertContains(page, "<code>203.0.113.7</code>")
         self.assertNotContains(page, "saved-")
 
     def test_the_retained_units_are_checked_before_submitting(self) -> None:
@@ -391,7 +391,10 @@ class EngineReconciliationTests(ChangeTestCase):
         self.assertIn("reached the server", checked.failure)
         self.assertNotIn("may not have been delivered", checked.failure)
         page = self.client.get(f"/runs/{run.pk}/")
-        self.assertContains(page, f"Last stage the run reported: {STAGES[1]}")
+        # Progress marks the step the run reported last, in the kind's plain words.
+        self.assertContains(page, "Checking what happened")
+        self.assertContains(page, 'aria-current="step"')
+        self.assertContains(page, "Check what happened")
         self.assertContains(page, "Close as outcome unknown")
         self.assertNotContains(page, "No native record of this run remains")
         self.systemd.uptime_centiseconds = 10**9
@@ -401,8 +404,9 @@ class EngineReconciliationTests(ChangeTestCase):
         closed = ChangeRun.objects.get(pk=run.pk)
         self.assertEqual(closed.execution, Result.OUTCOME_UNKNOWN)
         self.assertIn("The run reached the server", closed.failure)
-        page = self.client.get(f"/runs/{run.pk}/")
-        self.assertContains(page, f"Last stage the run reported: {STAGES[1]}")
+        page = self.client.get(f"/runs/{run.pk}/?tab=logs")
+        self.assertContains(page, "Last stage reported")
+        self.assertContains(page, STAGES[1])
 
     def test_the_watch_records_the_last_stage_of_a_run_that_stopped_silently(self) -> None:
         from .cleanup import STAGES
@@ -443,7 +447,7 @@ class EngineReconciliationTests(ChangeTestCase):
         self.assertEqual(run.execution, Result.OUTCOME_UNKNOWN)
         self.assertIn("Outcome unknown", run.failure)
         page = self.client.get(f"/runs/{run.pk}/")
-        self.assertContains(page, "this run may have changed the server")
+        self.assertContains(page, "Outcome unknown")
         self.assertContains(page, "Acknowledged by")
 
     def test_a_held_lock_probe_does_not_close_the_run(self) -> None:
@@ -488,9 +492,13 @@ class SharedConsentTests(SiteKindTestCase):
         self.assertEqual(review.affected_sites, ["alpha", "beta"])
         self.assertEqual(review.sites_read, SITES_READ)
         self.assertTrue(review.sites_digest)
+        self.sign_in_with("view_changes", "change_shared")
         page = self.client.get(f"/changes/{review.preparation_id}/")
+        self.assertContains(page, "This change also touches these sites:")
         self.assertContains(page, "alpha, beta")
-        self.assertContains(page, "rechecked under the mutation lock")
+        self.assertContains(page, 'name="affected_sites"')
+        # The digest the run rechecks under the mutation lock is under Show details.
+        self.assertContains(page, review.sites_digest)
 
     def test_review_refuses_when_the_sites_read_disagrees_with_declared_effects(self) -> None:
         from discovery.ssh import CommandResult
@@ -554,9 +562,9 @@ class EngineAccessTests(ChangeTestCase):
     def test_a_viewer_cannot_prepare_and_sees_no_control(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         self.sign_in_with("view_server", "view_changes")
-        page = self.client.get(f"/servers/{self.server.pk}/changes/")
-        self.assertContains(page, "may view changes but not prepare them")
-        self.assertNotIn("Prepare clear finished barectl runs", page.content.decode())
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(page, "An operator who can prepare changes can clean up finished runs.")
+        self.assertNotIn("Clean up finished runs</button>", page.content.decode())
 
         response = self.client.post(
             f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
@@ -580,8 +588,8 @@ class EngineAccessTests(ChangeTestCase):
         )
         save_snapshot(attempt, replace(COLLECTED, standing=standing), COLLECTED_AT)
 
-        page = self.client.get(f"/servers/{self.server.pk}/changes/")
-        self.assertNotIn("Prepare clear finished barectl runs", page.content.decode())
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertNotIn("Clean up finished runs</button>", page.content.decode())
         response = self.client.post(
             f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
         )
@@ -594,10 +602,8 @@ class EngineAccessTests(ChangeTestCase):
         review = self.change()
         self.sign_in_with("view_server", "view_changes", "change_site")
         page = self.client.get(f"/changes/{review.preparation_id}/")
-        self.assertNotIn("Apply review", page.content.decode())
-        self.assertIn(
-            "needs the permission applying this consent level requires", page.content.decode()
-        )
+        self.assertNotIn(f'action="/changes/{review.preparation_id}/apply/"', page.content.decode())
+        self.assertIn("Your role may view this change but not apply it.", page.content.decode())
         response = self.client.post(
             f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"}
         )
@@ -618,11 +624,12 @@ class EngineAccessTests(ChangeTestCase):
         self.user.groups.add(Group.objects.get(name="Site operator"))
         self.client.force_login(self.user)
         page = self.client.get(f"/changes/{review.preparation_id}/")
-        self.assertNotIn("Apply review", page.content.decode())
+        self.assertNotIn(f'action="/changes/{review.preparation_id}/apply/"', page.content.decode())
         self.user.groups.add(Group.objects.get(name="Administrator"))
         self.client.force_login(self.user)
         page = self.client.get(f"/changes/{review.preparation_id}/")
-        self.assertIn("Apply review", page.content.decode())
+        self.assertIn(f'action="/changes/{review.preparation_id}/apply/"', page.content.decode())
+        self.assertIn("Clear finished barectl runs", page.content.decode())
 
 
 class EngineRecordTests(ChangeTestCase):
@@ -673,7 +680,9 @@ class EngineRecordTests(ChangeTestCase):
         self.assertRedirects(response, f"/changes/{review.preparation_id}/")
         self.assertFalse(ChangeRun.objects.exists())
         page = self.client.get(f"/changes/{review.preparation_id}/")
-        self.assertContains(page, "admission deadline has passed")
+        self.assertContains(page, "This confirmation is out of date.")
+        self.assertContains(page, "Check again")
+        self.assertNotContains(page, f'action="/changes/{review.preparation_id}/apply/"')
 
     def test_a_read_review_without_changes_is_not_applied(self) -> None:
         review = self.change()  # nothing finished: a read review without changes
@@ -681,7 +690,8 @@ class EngineRecordTests(ChangeTestCase):
         self.client.post(f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"})
         self.assertFalse(ChangeRun.objects.exists())
         page = self.client.get(f"/changes/{review.preparation_id}/")
-        self.assertNotIn("Apply review", page.content.decode())
+        self.assertNotIn(f'action="/changes/{review.preparation_id}/apply/"', page.content.decode())
+        self.assertContains(page, "Barectl found nothing to change.")
 
 
 class ResultLineTests(SimpleTestCase):
@@ -838,7 +848,7 @@ class ConnectionAdmissionTests(ChangeTestCase):
         self.assertEqual(self.remote.commands, [])
         self.assertContains(
             self.client.get(f"/changes/{review.preparation_id}/"),
-            "The connection changed. Prepare a new review.",
+            "This confirmation is out of date.",
         )
 
     def test_queued_run_refuses_stale_review_before_ssh(self) -> None:
@@ -901,7 +911,7 @@ class ConnectionAdmissionTests(ChangeTestCase):
         self.assertEqual(len(self.systemd.submissions), 1)
         self.server.refresh_from_db()
         remove_server(self.server)
-        page = self.client.get(f"/runs/{run.pk}/")
+        page = self.client.get(f"/runs/{run.pk}/?tab=logs")
         self.assertContains(page, "root@original.example:2222")
         self.assertContains(page, "connection revision 1")
 

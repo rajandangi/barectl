@@ -1,0 +1,46 @@
+<div id="next-action-region">
+  {% if banner %}
+    {% if banner.kind == "confirm" %}
+      {% include "servers/_host_identity.html" %}
+    {% else %}
+      <div class="usa-alert {% if banner.kind == 'failed' or banner.kind == 'cannot_manage' %}usa-alert--error{% else %}usa-alert--info{% endif %}"
+           id="next-action">
+        <div class="usa-alert__body">
+          <h2 class="usa-alert__heading">{{ banner.title }}</h2>
+          {% if banner.note %}<p class="usa-alert__text">{{ banner.note }}</p>{% endif %}
+          {% if banner.reasons %}
+            <ul class="usa-list usa-alert__text">
+              {% for reason in banner.reasons %}<li>{{ reason }}</li>{% endfor %}
+            </ul>
+          {% endif %}
+          {% if banner.kind == "checking" %}
+            {% if banner.worker_unavailable %}
+              <p class="usa-alert__text">Worker unavailable for this check: it has not started within 10 minutes.</p>
+            {% endif %}
+            {% if banner.show_queue %}
+              <p class="usa-alert__text">
+                Queued at <time datetime="{{ banner.queued_at|date:'c' }}">{{ banner.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+              </p>
+              <p class="usa-alert__text">
+                If it stays queued, start the worker on the controller host with <code>python manage.py db_worker</code>.
+              </p>
+            {% endif %}
+          {% endif %}
+          {% for action in banner.actions %}
+            {% if action.post %}
+              <form method="post" action="{{ action.url }}" class="usa-form">
+                {% csrf_token %}
+                {% if action.kind %}<input type="hidden" name="kind" value="{{ action.kind }}">{% endif %}
+                <button type="submit"
+                        class="usa-button{% if not action.primary %} usa-button--outline{% endif %}">{{ action.label }}</button>
+              </form>
+            {% else %}
+              <a class="usa-button{% if not action.primary %} usa-button--outline{% endif %}"
+                 href="{{ action.url }}">{{ action.label }}</a>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  {% endif %}
+</div>

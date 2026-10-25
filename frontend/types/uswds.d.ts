@@ -5,6 +5,11 @@ interface UswdsBehavior {
   off(target: HTMLElement): void;
 }
 
+declare module "@uswds/uswds/js/usa-accordion" {
+  const behavior: UswdsBehavior;
+  export default behavior;
+}
+
 declare module "@uswds/uswds/js/usa-header" {
   const behavior: UswdsBehavior;
   export default behavior;

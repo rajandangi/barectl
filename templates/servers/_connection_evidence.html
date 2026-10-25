@@ -1,0 +1,45 @@
+<section class="barectl-card" aria-labelledby="connection-evidence-heading">
+  <h2 id="connection-evidence-heading">Connection record</h2>
+  {% if state.attempt %}
+    <dl class="barectl-facts">
+      <div>
+        <dt>Connection used</dt>
+        <dd>
+          <code>{{ state.attempt.ssh_alias }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Queued</dt>
+        <dd>
+          <time datetime="{{ state.attempt.queued_at|date:'c' }}">{{ state.attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>
+        </dd>
+      </div>
+      {% if state.attempt.finished_at %}
+        <div>
+          <dt>Finished</dt>
+          <dd>
+            <time datetime="{{ state.attempt.finished_at|date:'c' }}">{{ state.attempt.finished_at|date:'M j, Y, H:i:s T' }}</time>
+          </dd>
+        </div>
+      {% endif %}
+      {% if state.attempt.host_key %}
+        <div>
+          <dt>Host key</dt>
+          <dd>
+            <code>{{ state.attempt.host_key }}</code>
+          </dd>
+        </div>
+      {% endif %}
+      {% if state.attempt.failure %}
+        <div>
+          <dt>Failure</dt>
+          <dd>
+            {{ state.attempt.failure }}
+          </dd>
+        </div>
+      {% endif %}
+    </dl>
+  {% else %}
+    <p>No connection check has been recorded.</p>
+  {% endif %}
+</section>

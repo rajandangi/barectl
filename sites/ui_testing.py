@@ -18,6 +18,7 @@ from discovery.snapshot import (
     SiteAccount,
     SiteCertificate,
     WebStackComponentObservation,
+    current_snapshot,
     save_snapshot,
 )
 from operations.consent import DeclaredEffect, Scope
@@ -59,7 +60,12 @@ def _engine_component(engine_name: str) -> WebStackComponentObservation:
 
 
 def record_http_sites(
-    server: Server, *, problem: str = "", engine: str = "", installed_php: bool = True
+    server: Server,
+    *,
+    problem: str = "",
+    engine: str = "",
+    installed_php: bool = True,
+    present_php85: bool = True,
 ) -> None:
     """A target host whose observed sites can receive a Create site review."""
     sites = tuple(
@@ -90,7 +96,11 @@ def record_http_sites(
         )
         if installed_php
         else ()
-    ) + (RuntimeObservation("php85", "", "", "8.5.11", (), "failed", (), "Master failed"),)
+    ) + (
+        (RuntimeObservation("php85", "", "", "8.5.11", (), "failed", (), "Master failed"),)
+        if present_php85
+        else ()
+    )
     collected = replace(
         COLLECTED,
         components=(_engine_component(engine),) if engine else (),
@@ -99,6 +109,35 @@ def record_http_sites(
         runtimes=runtimes,
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+    attach_current_connection(server, attempt)
+    save_snapshot(attempt, collected, timezone.now())
+
+
+def attach_current_connection(server: Server, attempt: DiscoveryAttempt) -> None:
+    """A recorded observation belongs to the server's current connection revision."""
+    from servers.models import ConnectionDefinition
+
+    attempt.connection = ConnectionDefinition.objects.filter(
+        server=server, revision=server.connection_revision
+    ).first()
+    attempt.save(update_fields=["connection"])
+
+
+def record_php85_installed(server: Server) -> None:
+    """A host where PHP 8.5 was installed and discovery verified its service."""
+    record_http_sites(server)
+    snapshot = current_snapshot(server)
+    if snapshot is None:
+        raise AssertionError("No snapshot.")
+    runtimes = tuple(
+        replace(row, path="/nix/store/observed-php85", master_state="active", problem="")
+        if row.entry == "php85"
+        else row
+        for row in snapshot.collected.runtimes
+    )
+    collected = replace(snapshot.collected, runtimes=runtimes)
+    attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+    attach_current_connection(server, attempt)
     save_snapshot(attempt, collected, timezone.now())
 
 

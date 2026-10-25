@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -29,8 +30,6 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from discovery.fakes import run_worker
-from discovery.recorded import ReplayShell, load
 from servers.discovery_state import DiscoveryState
 from servers.models import Server
 
@@ -46,6 +45,34 @@ Host web.example.com stage.example.net db-1
 Host *.internal
   User ops
 """
+
+# #179 criterion 3: implementation detail the default path must not name.
+NATIVE_TERMS: tuple[str, ...] = (
+    "master",
+    "pool",
+    "fpm",
+    "haproxy",
+    "admission",
+    "caddy",
+    "nix",
+    "store path",
+    "catalog",
+    "socket",
+    "opcache",
+    "systemd",
+    "unit",
+    "invocation",
+    "journal",
+    "stage",
+    "standing",
+    "foundation",
+    "evidence",
+    "consent level",
+    "review",
+    "plan",
+    "digest",
+    "known_hosts",
+)
 
 
 class BrowserTestCase(LiveServerTestCase):
@@ -115,45 +142,6 @@ class BrowserTestCase(LiveServerTestCase):
         self.page.on("console", self.record_console)
         self.page.on("pageerror", self.record_page_error)
 
-    def assert_saved_connection_journey(self) -> None:
-        for codename in ("add_server", "add_discoveryattempt", "change_shared"):
-            self.user.user_permissions.add(Permission.objects.get(codename=codename))
-        self.sign_in()
-        page = self.page
-        page.get_by_role("link", name="Add server").click()
-        expect(page.get_by_role("textbox", name="SSH user", exact=True)).to_have_value("root")
-        expect(page.get_by_role("spinbutton", name="Port", exact=True)).to_have_value("22")
-        page.get_by_role("textbox", name="Name", exact=True).fill("Cloud")
-        address = page.get_by_role("textbox", name="Address", exact=True)
-        address.fill("https://cloud.example")
-        page.get_by_role("button", name="Save and check").click()
-        summary = page.locator("#server-form-errors")
-        expect(summary).to_be_focused()
-        expect(page.get_by_role("textbox", name="Name", exact=True)).to_have_value("Cloud")
-        summary.get_by_role("link", name="Address:", exact=False).click()
-        expect(address).to_be_focused()
-        address.fill("cloud.example")
-        page.get_by_role("button", name="Save and check").click()
-        expect(page.get_by_role("heading", name="Cloud", level=1)).to_be_visible()
-        expect(page.locator("#discovery")).to_contain_text("Connection check queued")
-        with mock.patch(
-            "discovery.ssh.connect",
-            return_value=contextlib.nullcontext(ReplayShell(load("pristine-26.04"))),
-        ):
-            run_worker()
-        page.reload()
-        expect(page.locator("#discovery")).to_contain_text("Fresh host")
-        expect(page.get_by_role("link", name="Set up server", exact=True)).to_be_visible()
-        expect(page.locator(".barectl-facts").first).to_contain_text("cloud.example")
-        expect(page.locator(".barectl-facts").first).to_contain_text("root")
-        page.set_viewport_size({"width": 320, "height": 740})
-        self.assertEqual(
-            page.evaluate(
-                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
-            ),
-            0,
-        )
-
     def record_request(self, request: Request) -> None:
         self.requests.append(request)
 
@@ -178,6 +166,14 @@ class BrowserTestCase(LiveServerTestCase):
         # Scripts evaluated by the test can otherwise observe layout before stylesheets load.
         page.wait_for_load_state("load")
 
+    def many_servers(self, count: int = 11) -> None:
+        """Enough servers that the inventory offers its search field (#363)."""
+        existing = Server.objects.count()
+        Server.objects.bulk_create(
+            Server(name=f"Extra {index}", ssh_alias=f"extra-{index}.internal")
+            for index in range(max(0, count - existing))
+        )
+
     def css(self, selector: str, prop: str) -> str:
         value: str = self.page.locator(selector).first.evaluate(
             "(el, prop) => getComputedStyle(el).getPropertyValue(prop)", prop
@@ -201,6 +197,22 @@ class BrowserTestCase(LiveServerTestCase):
         with self.page.expect_response(lambda r: urlsplit(r.url).path == "/") as info:
             field.press("Enter")
         self.assertEqual(info.value.request.headers["hx-request-type"], "partial")
+
+    def assert_no_native_terms(self, *, allowed: tuple[str, ...] = ()) -> None:
+        """#179 criterion 3: the default path names no native implementation detail.
+
+        Playwright's inner_text reads rendered text only, so a closed Show details
+        accordion or Logs section does not count. ``allowed`` names the terms this
+        screen may legitimately show (the fingerprint step and Journey 7 sentences).
+        """
+        visible = self.page.locator("body").inner_text().lower()
+        found = [
+            term
+            for term in NATIVE_TERMS
+            if term not in allowed
+            and re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", visible)
+        ]
+        self.assertEqual(found, [], f"native terms on the default path: {found}")
 
     def assert_theme_and_components_initialized(self) -> None:
         page = self.page

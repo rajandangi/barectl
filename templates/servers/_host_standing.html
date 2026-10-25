@@ -1,0 +1,59 @@
+{% if presented %}
+  {% if presented.standing %}
+    <section class="usa-alert{% if presented.standing.standing.value == 'Not manageable' %} usa-alert--error{% else %} usa-alert--info{% endif %}"
+             aria-labelledby="standing-heading">
+      <div class="usa-alert__body">
+        <h2 class="usa-alert__heading"
+            id="standing-heading">{{ presented.standing.standing.value }}</h2>
+        {% if presented.standing.standing.value == "Not manageable" %}
+          <p>Barectl will not prepare changes for this host. Resolve the named findings with ordinary administration, then run discovery again.</p>
+        {% endif %}
+        {% if presented.standing.evidence %}
+          <h3>Discovery evidence</h3>
+          <dl class="barectl-facts">
+            {% for label, value in presented.standing.evidence %}
+              <div>
+                <dt>{{ label }}</dt>
+                <dd>
+                  {{ value }}
+                </dd>
+              </div>
+            {% endfor %}
+          </dl>
+        {% endif %}
+        {% if presented.standing.foundation %}
+          <h3>Host foundation</h3>
+          <ul>{% for stage, result in presented.standing.foundation %}<li>{{ stage }}: {{ result }}</li>{% endfor %}</ul>
+        {% endif %}
+      </div>
+    </section>
+  {% endif %}
+  {% if attention %}
+    <section aria-labelledby="attention-heading">
+      <h2 id="attention-heading">Needs attention</h2>
+      <ul id="needs-attention" class="usa-list">
+        {% for item in attention %}
+          <li>
+            <strong>{{ item.kind }}
+              {% if item.subject_url and perms.discovery.view_siteobservation %}
+                <a href="{{ item.subject_url }}">{{ item.name }}</a>
+              {% else %}
+                {{ item.name }}
+              {% endif %}
+            </strong>
+            <span class="barectl-line">{{ item.finding|urlize }}</span>
+            <span class="barectl-line">
+              {% if item.action_url %}
+                <a href="{{ item.action_url }}">{{ item.action }}</a>
+              {% else %}
+                {{ item.action }}
+              {% endif %}
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+{% else %}
+  <p>No observations yet. Verify the connection to inspect the platform and hosting components.</p>
+{% endif %}

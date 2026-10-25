@@ -2,9 +2,9 @@
   <section class="barectl-card" aria-labelledby="site-domains-heading">
     <h2 id="site-domains-heading">Domains and HTTPS</h2>
     <p>
-      These names and the HTTPS setting belong to this site. One reviewed change applies them
-      and checks that every name answers. WordPress and Laravel aliases redirect to the
-      primary domain; a plain PHP site answers every name directly.
+      These names and the HTTPS setting belong to this site. One change applies them after
+      you confirm it and checks that every name answers. WordPress and Laravel aliases
+      redirect to the primary domain; a plain PHP site answers every name directly.
     </p>
     <dl class="barectl-facts">
       <div>
@@ -43,21 +43,24 @@
             {{ field }}
             <label class="usa-checkbox__label"
                    for="{{ field.id_for_label }}">{{ field.label }}</label>
-            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+            <span class="usa-hint" id="{{ field.auto_id }}_helptext">
+              Leave on to have Barectl issue and renew a certificate for every name. Turn it
+              off only for a test site before DNS points here.
+            </span>
           </div>
         {% endwith %}
         <p class="usa-hint">
-          A name that does not resolve to this server only warns. Caddy cannot issue its
+          A name that does not resolve to this server only warns. Barectl cannot issue its
           certificate until the DNS record points here, and Barectl never changes DNS.
         </p>
-        <button class="usa-button" type="submit">Prepare domains and HTTPS review</button>
+        <button class="usa-button" type="submit">Change domains and HTTPS</button>
       </form>
     {% elif blocking %}
       {% include "operations/_blocking_operation.html" with after="Prepare the domains and HTTPS change after it finishes." %}
     {% else %}
       <p class="barectl-note">
         Run discovery, resolve the server's findings, or wait for the current change before
-        preparing a domains and HTTPS review.
+        changing the names and HTTPS setting.
       </p>
     {% endif %}
   </section>

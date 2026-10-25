@@ -1,0 +1,74 @@
+{% if activity.rows %}
+  <div class="usa-table-container--scrollable" tabindex="0">
+    <table class="usa-table usa-table--borderless barectl-table">
+      <caption>Checks and changes, newest first</caption>
+      <thead>
+        <tr>
+          <th scope="col">When</th>
+          {% if show_servers %}<th scope="col">Server</th>{% endif %}
+          <th scope="col">What</th>
+          <th scope="col">Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in activity.rows %}
+          <tr>
+            <td>
+              <time datetime="{{ row.happened_at|date:'c' }}">{{ row.happened_at|date:'M j, Y, H:i' }}</time>
+            </td>
+            {% if show_servers %}
+              <th scope="row">
+                <a href="{% url 'server_activity' row.server_id %}">{{ row.server_name }}</a>
+              </th>
+            {% endif %}
+            <td>
+              <a href="{{ row.url }}">{{ row.title }}</a>
+              {% if row.kind == "change" %}
+                <p class="barectl-note">Change{% if row.site %} · {{ row.site }}{% endif %}</p>
+              {% endif %}
+              {% if row.failure %}<p class="barectl-note">{{ row.failure }}</p>{% endif %}
+              {% if row.prepared_at %}
+                <p class="barectl-note">
+                  Prepared
+                  <time datetime="{{ row.prepared_at|date:'c' }}">{{ row.prepared_at|date:'M j, Y, H:i' }}</time>
+                </p>
+              {% endif %}
+              {% if row.finished_at %}
+                <p class="barectl-note">
+                  Finished
+                  <time datetime="{{ row.finished_at|date:'c' }}">{{ row.finished_at|date:'M j, Y, H:i' }}</time>
+                </p>
+              {% endif %}
+              {% if row.collected_at %}
+                <p class="barectl-note">
+                  Observations collected
+                  <time datetime="{{ row.collected_at|date:'c' }}">{{ row.collected_at|date:'M j, Y, H:i' }}</time>
+                </p>
+              {% endif %}
+              {% if row.warnings %}
+                <details>
+                  <summary>{{ row.warnings|length }} observation warning{{ row.warnings|length|pluralize }}</summary>
+                  <ul class="usa-list">
+                    {% for item in row.warnings %}
+                      <li>
+                        {{ item.label }}: <strong>{{ item.outcome.label }}:</strong> {{ item.warning }}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                </details>
+              {% endif %}
+            </td>
+            <td>{{ row.status }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <section class="barectl-empty" aria-labelledby="no-activity-heading">
+    <h2 id="no-activity-heading">No activity yet</h2>
+    <p>
+      {{ empty_note|default:"Checks and changes appear here after Barectl checks a server's connection or prepares a change." }}
+    </p>
+  </section>
+{% endif %}

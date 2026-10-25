@@ -1,0 +1,175 @@
+{% if create_site_problem %}
+  <div class="usa-alert usa-alert--error usa-alert--slim"
+       id="create-site-problem">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">{{ create_site_problem }}</p>
+    </div>
+  </div>
+{% endif %}
+{% include "sites/_creation_continuation.html" with continuation=create_site_continuation prefix="create" %}
+{% if not create_site_has_choices %}
+  <div class="usa-alert usa-alert--warning usa-alert--slim">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">
+        No PHP version is available yet. Check the server's connection first.
+      </p>
+    </div>
+  </div>
+{% elif not create_site_can_prepare %}
+  <div class="usa-alert usa-alert--info usa-alert--slim">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">
+        Resolve the server's findings or wait for its active operation to finish before
+        continuing.
+      </p>
+    </div>
+  </div>
+{% endif %}
+<form class="usa-form barectl-create-site"
+      method="post"
+      action="{% url 'server_http_site_prepare' server.pk %}"
+      data-site-create
+      novalidate>
+  {% csrf_token %}
+  <fieldset class="usa-fieldset">
+    <legend class="usa-legend">Platform</legend>
+    {% for value, label in create_site_platforms %}
+      <div class="usa-radio">
+        <input class="usa-radio__input usa-radio__input--tile"
+               type="radio"
+               name="platform"
+               id="create-platform-{{ value }}"
+               value="{{ value }}"
+               {% if value == create_site_selected_platform %}checked{% endif %}>
+        <label class="usa-radio__label" for="create-platform-{{ value }}">
+          {{ label }}
+          <span class="barectl-radio__description">
+            {% if value == "php" %}
+              A PHP site with a placeholder page.
+            {% elif value == "wordpress" %}
+              Continue with the WordPress form.
+            {% else %}
+              Continue with the Laravel form.
+            {% endif %}
+          </span>
+        </label>
+      </div>
+    {% endfor %}
+    {% if create_site_form.platform.errors %}
+      <span class="usa-error-message" id="create-platform-error">{% for error in create_site_form.platform.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
+    {% endif %}
+  </fieldset>
+  <fieldset class="usa-fieldset">
+    <legend class="usa-legend">PHP version</legend>
+    {% for choice in create_site_php_choices %}
+      <div class="usa-radio">
+        <input class="usa-radio__input usa-radio__input--tile"
+               type="radio"
+               name="php_version"
+               id="create-php-{{ choice.entry }}"
+               value="{{ choice.entry }}"
+               {% if choice.checked %}checked{% endif %}>
+        <label class="usa-radio__label" for="create-php-{{ choice.entry }}">
+          {{ choice.label }}
+          {% if choice.download %}<span class="barectl-radio__description">{{ choice.download }}</span>{% endif %}
+        </label>
+      </div>
+    {% endfor %}
+    {% if create_site_form.php_version.errors %}
+      <span class="usa-error-message" id="create-php-error">{% for error in create_site_form.php_version.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
+    {% endif %}
+  </fieldset>
+  <div class="usa-form-group{% if create_site_form.names.errors %} usa-form-group--error{% endif %}">
+    <label class="usa-label" for="create-site-domain-0">Domain</label>
+    <span class="usa-hint" id="create-site-domain-hint">
+      The site's primary domain. Add up to nine more names.
+    </span>
+    <div id="create-site-domains" data-site-domains>
+      {% for domain in create_site_domains %}
+        <div class="barectl-domain" data-site-domain>
+          <input class="usa-input"
+                 id="create-site-domain-{{ forloop.counter0 }}"
+                 name="names"
+                 type="text"
+                 value="{{ domain }}"
+                 spellcheck="false"
+                 autocomplete="off"
+                 aria-describedby="create-site-domain-hint{% if create_site_form.names.errors %} create-site-domain-error{% endif %}"
+                 {% if forloop.first %}data-site-names{% endif %}>
+          {% if not forloop.first %}
+            <button class="usa-button usa-button--unstyled"
+                    type="button"
+                    data-remove-domain>
+              Remove<span class="usa-sr-only"> this domain</span>
+            </button>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <button class="usa-button usa-button--unstyled" type="button" data-add-domain>
+      Add another domain
+    </button>
+    <template data-domain-template>
+      <div class="barectl-domain" data-site-domain>
+        <input class="usa-input"
+               name="names"
+               type="text"
+               value=""
+               spellcheck="false"
+               autocomplete="off">
+        <button class="usa-button usa-button--unstyled"
+                type="button"
+                data-remove-domain>
+          Remove<span class="usa-sr-only"> this domain</span>
+        </button>
+      </div>
+    </template>
+    {% if create_site_form.names.errors %}
+      <span class="usa-error-message" id="create-site-domain-error">{% for error in create_site_form.names.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
+    {% endif %}
+  </div>
+  <details class="barectl-more-options"
+           {% if create_site_more_open %}open{% endif %}>
+    <summary>More options</summary>
+    <div class="usa-form-group{% if create_site_form.identifier.errors %} usa-form-group--error{% endif %}">
+      <label class="usa-label" for="create-site-identifier">Short name</label>
+      <span class="usa-hint" id="create-site-identifier-hint">
+        Derived from the first domain. Use 3 to 24 lowercase letters and digits, starting
+        with a letter.
+      </span>
+      <input class="usa-input"
+             id="create-site-identifier"
+             name="identifier"
+             type="text"
+             value="{{ create_site_identifier }}"
+             autocomplete="off"
+             spellcheck="false"
+             aria-describedby="create-site-identifier-hint{% if create_site_form.identifier.errors %} create-site-identifier-error{% endif %}"
+             data-site-identifier>
+      {% if create_site_form.identifier.errors %}
+        <span class="usa-error-message" id="create-site-identifier-error">{% for error in create_site_form.identifier.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
+      {% endif %}
+    </div>
+    <div class="usa-form-group">
+      <p class="usa-label" id="create-site-node-label">Node.js version</p>
+      {% if create_site_node_choices %}
+        <p class="usa-hint">
+          Node.js is selected from the site's Settings after the site is created. This
+          server has {{ create_site_node_choices|join:", " }}.
+        </p>
+      {% else %}
+        <p class="usa-hint">
+          Node.js is selected from the site's Settings after the site is created. This
+          server has no Node.js version installed.
+        </p>
+      {% endif %}
+    </div>
+  </details>
+  <p class="usa-hint">
+    Barectl creates a site account, its folders and a placeholder page, then serves the site
+    with the PHP version you choose. Nothing changes until you confirm.
+  </p>
+  <button class="usa-button"
+          type="submit"
+          {% if not create_site_can_prepare %}disabled{% endif %}>Continue</button>
+</form>

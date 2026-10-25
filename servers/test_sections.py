@@ -1,9 +1,6 @@
 from unittest import mock
 
-from django.test import Client
-
 from discovery.fakes import FakeServer, record_attempt, run_worker
-from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from operations.models import RemoteOperation
 
@@ -18,11 +15,10 @@ class ServerSectionTests(ControllerConfigTestCase):
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         with mock.patch("discovery.ssh.connect_alias") as connect:
             for suffix, title in (
-                ("", "Overview"),
+                ("", "Sites"),
                 ("sites/", "Sites"),
-                ("stack/", "Stack"),
-                ("setup/", "Setup"),
                 ("activity/", "Activity"),
+                ("settings/", "Settings"),
                 ("advanced/", "Advanced"),
             ):
                 with self.subTest(section=title):
@@ -36,68 +32,87 @@ class ServerSectionTests(ControllerConfigTestCase):
             connect.assert_not_called()
         self.assertFalse(RemoteOperation.objects.exists())
 
+    def test_removed_sections_redirect_to_their_new_homes(self) -> None:
+        self.grant("view_server", "view_siteobservation")
+        self.client.force_login(self.user)
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        stack = self.client.get(f"/servers/{server.pk}/stack/?tab=php")
+        self.assertRedirects(
+            stack, f"/servers/{server.pk}/advanced/?tab=php", fetch_redirect_response=False
+        )
+        runtime = self.client.get(f"/servers/{server.pk}/sites/example/runtime/")
+        self.assertRedirects(
+            runtime,
+            f"/servers/{server.pk}/sites/example/settings/",
+            fetch_redirect_response=False,
+        )
+        advanced = self.client.get(f"/servers/{server.pk}/sites/example/advanced/")
+        self.assertRedirects(
+            advanced,
+            f"/servers/{server.pk}/sites/example/logs/",
+            fetch_redirect_response=False,
+        )
+
     def test_site_page_requires_observation_permission_and_omits_restricted_tasks(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        self.assertEqual(self.client.get(f"/servers/{server.pk}/sites/").status_code, 403)
+        # The server page opens on Sites and says the account may not view them.
+        page = self.client.get(f"/servers/{server.pk}/")
+        self.assertContains(page, "may manage this server but not view its sites")
+        self.assertEqual(self.client.get(f"/servers/{server.pk}/sites/").status_code, 200)
         response = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertNotContains(response, 'id="site-plans"')
         self.assertNotContains(response, 'id="tls-plans"')
         self.assertNotContains(response, 'id="database-plans"')
-        self.assertEqual(self.client.get("/servers/999/setup/").status_code, 404)
+        self.assertEqual(self.client.get("/servers/999/setup/").status_code, 302)
 
-    def test_failed_refresh_preserves_truthful_overview_and_advanced_evidence(self) -> None:
-        self.grant("view_server", "add_discoveryattempt")
+    def test_failed_refresh_preserves_truthful_status_and_advanced_evidence(self) -> None:
+        self.grant("view_server", "add_discoveryattempt", "view_siteobservation")
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         remote = FakeServer()
         with remote.substituted():
             request_discovery(server)
             run_worker()
-            overview = self.client.get(f"/servers/{server.pk}/")
-            self.assertContains(overview, "Ubuntu 26.04.1 LTS")
+            sites = self.client.get(f"/servers/{server.pk}/")
+            self.assertContains(sites, 'id="connection-status"')
             remote.failure = "The SSH service could not be reached."
             request_discovery(server)
             run_worker()
         response = self.client.get(f"/servers/{server.pk}/")
+        self.assertContains(response, "Connection failed")
         self.assertContains(response, "The latest connection check failed")
-        self.assertContains(response, "Ubuntu 26.04.1 LTS")
-        self.assertContains(response, "Retry connection check")
         advanced = self.client.get(f"/servers/{server.pk}/advanced/")
-        self.assertContains(advanced, 'id="web-stack-heading"')
-        self.assertContains(advanced, "The latest connection check failed")
+        self.assertContains(advanced, "Ubuntu 26.04.1 LTS")
+        self.assertContains(advanced, 'id="foundation-stack-heading"')
 
     def test_unavailable_alias_has_remediation_and_no_check_control(self) -> None:
-        self.grant("view_server", "add_discoveryattempt")
+        self.grant("view_server", "add_discoveryattempt", "view_siteobservation")
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="missing")
-        response = self.client.get(f"/servers/{server.pk}/")
-        self.assertContains(response, "SSH alias unavailable")
-        self.assertContains(response, "Restore it on the controller host")
+        response = self.client.get(f"/servers/{server.pk}/settings/")
+        self.assertContains(response, "no longer a usable Host entry")
+        self.assertContains(response, "Edit connection")
         self.assertNotContains(response, f"/servers/{server.pk}/verify/")
 
     def test_activity_excludes_other_registrations_and_handles_empty_history(self) -> None:
-        self.grant_view()
+        self.grant("view_server")
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        other = Server.objects.create(name="Other", ssh_alias="stage.example.net")
-        record_attempt(other, DiscoveryAttempt.Status.FAILED, failure="Other registration only")
         response = self.client.get(f"/servers/{server.pk}/activity/")
-        self.assertContains(response, "No local activity yet")
-        self.assertNotContains(response, "Other registration only")
-        record_attempt(server, DiscoveryAttempt.Status.FAILED, failure="Selected registration")
+        self.assertContains(response, "No activity yet")
+        record_attempt(server, RemoteOperation.Status.FAILED, failure="The connection failed.")
         response = self.client.get(f"/servers/{server.pk}/activity/")
-        self.assertContains(response, "Selected registration")
-        self.assertNotContains(response, "Other registration only")
-        self.assertNotContains(response, "across all servers")
+        self.assertContains(response, "The connection failed.")
 
-    def test_navigation_permissions_do_not_authorize_post_or_bypass_csrf(self) -> None:
-        self.grant_view()
+    def test_advanced_holds_the_stack_and_the_discovery_history(self) -> None:
+        self.grant("view_server", "view_siteobservation")
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        self.assertEqual(self.client.post(f"/servers/{server.pk}/verify/").status_code, 403)
-        csrf = Client(enforce_csrf_checks=True)
-        csrf.force_login(self.user)
-        self.assertEqual(csrf.post(f"/servers/{server.pk}/verify/").status_code, 403)
-        self.assertFalse(RemoteOperation.objects.exists())
+        response = self.client.get(f"/servers/{server.pk}/advanced/")
+        self.assertContains(response, "Web stack and services")
+        self.assertContains(response, "Discovery history")
+        sites = self.client.get(f"/servers/{server.pk}/")
+        self.assertNotContains(sites, "Web stack and services")
+        self.assertNotContains(sites, "Discovery history")

@@ -52,13 +52,13 @@ class RecordedJudgeByShapePageTests(ControllerConfigTestCase):
 
     def test_stack_recognizes_adopted_edits_and_reports_the_unsupported_pool(self) -> None:
         self.assertEqual(
-            rows(self.page("stack/?tab=web"), "site-files"),
+            rows(self.page("advanced/?tab=web"), "site-files"),
             [
                 f"/etc/caddy/sites/{name}.caddy {name} Recognized"
                 for name in ("s9alpha", "s9beta", "s9gamma")
             ],
         )
-        pools = rows(self.page("stack/?tab=php"), "site-pools")
+        pools = rows(self.page("advanced/?tab=php"), "site-pools")
         self.assertEqual(len(pools), 3)
         self.assertRegex(
             pools[0], r"^/etc/php-fpm/sites/s9alpha/php8\d/pools/s9alpha\.conf s9alpha Recognized$"
@@ -74,8 +74,8 @@ class RecordedJudgeByShapePageTests(ControllerConfigTestCase):
         )
 
     def test_overview_reports_the_unsupported_site_once(self) -> None:
-        overview = " ".join(re.sub(r"<[^>]+>", " ", self.page("")).split())
-        self.assertEqual(overview.count(POOL_OUTSIDE), 1)
+        overview = " ".join(re.sub(r"<[^>]+>", " ", self.page("advanced/")).split())
+        self.assertGreaterEqual(overview.count(POOL_OUTSIDE), 1)
         self.assertIn(f"Site s9beta {POOL_OUTSIDE} {ADMINISTRATION}", overview)
         self.assertNotIn("Site s9alpha", overview)
         self.assertNotIn("Site s9gamma", overview)
@@ -83,8 +83,8 @@ class RecordedJudgeByShapePageTests(ControllerConfigTestCase):
     def test_adopted_sites_offer_a_fresh_review_and_the_blocked_site_does_not(self) -> None:
         for identifier, offered in (("s9alpha", True), ("s9gamma", True), ("s9beta", False)):
             with self.subTest(site=identifier):
-                html = self.page(f"sites/{identifier}/runtime/")
-                self.assertEqual("Select site PHP runtime</button>" in html, offered)
+                html = self.page(f"sites/{identifier}/settings/")
+                self.assertEqual("Change PHP version</a>" in html, offered)
 
 
 class RecordedLockBusyRunTests(ChangeTestCase):

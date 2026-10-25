@@ -1,100 +1,191 @@
 # Dashboard workflows
 
-The dashboard organizes work around managed servers and their sites. This document describes the current operator workflows: navigation, connection states, review boundaries, what continues without the controller, and recovery. The result is PHP hosting on the [target stack](target-architecture.md): plain PHP, WordPress and Laravel sites over HTTPS, each with its own Linux user, PHP-FPM master, private HAProxy admission and Caddy site file, plus reviewed database installation, environment and WordPress settings, Laravel Deploy and Roll back, and site removal ([sites](sites.md), [databases](databases.md), [settings](settings.md), [WordPress](wordpress.md)). Barectl changes a site's names and turns HTTPS on from **Settings > Domains and HTTPS**, but does not monitor sites, roll changes back automatically or manage DNS records.
+The dashboard organizes work around servers and the sites they host. This document
+describes the current operator workflows: the four top-level places, the server and site
+pages, creating a site, reviewing a change, following a run, and recovery. It describes
+the interface over the change engine; eligibility, consent, the native lock, admission
+and verification are unchanged ([changes and jobs](architecture.md#changes-and-jobs),
+[ADR 0035](adr/0035-one-change-engine-with-effect-derived-consent.md)).
 
-## Server navigation
+## Places
 
-The global navigation is **Servers**, **Sites** (every observed site across servers) and **Activity**. **Add server** saves a connection and queues a connection check ([saved server connections](saved-server-connections.md)). Credentials and host trust stay on the controller host; Barectl offers no browser key upload or host-trust bypass.
+The header leads with **Servers**, **Sites**, **Activity** and **Settings**, and marks
+the current place. Each is one activation from any page.
 
-| Section | Stable URL | What it holds |
-| --- | --- | --- |
-| Overview | `/servers/<pk>/` | The recorded connection outcome and observation time, host standing with its named reasons and foundation stages, platform and capacity, connection remediation and the next action. **Needs attention** lists each host finding, unfinished foundation, unreadable site configuration, site outside supported settings or partly applied, and failed PHP runtime with its one next action: Set up server, finish the runtime change, inspect the unavailable evidence, inspect PHP runtimes, or correction through ordinary administration followed by discovery. Not manageable hosts stay read-only. |
-| Sites | `/servers/<pk>/sites/` | Observed sites, led by their domain names, each linking to its site pages, and **Create HTTP site** (plain PHP), **Create WordPress site** and **Create Laravel site** on a Target stack host ([creating a PHP site](sites.md), [WordPress](wordpress.md), [Laravel](sites.md#creating-a-laravel-site)). |
-| Stack | `/servers/<pk>/stack/` | Web (Caddy evidence and every site file as Recognized, Outside supported settings, Absent or Not confirmed), PHP runtimes (master state, protections read back and every site pool), Defaults, Runtime catalog and Services. Recognized includes hand edits within supported settings. A pool is Not confirmed when another finding stopped the reader before it reached the pool. |
-| Settings | `/servers/<pk>/settings/` | **HTTPS**: the optional certificate contact email read from the server's main Caddy configuration, with one reviewed Shared change to set or clear it ([HTTPS](tls.md#certificate-contact-email)). **Database**: the server's MariaDB or PostgreSQL engine with its version and how it runs, **Install** for the missing engine, and **Remove**, refused while any site's database exists ([databases](databases.md)). |
-| Setup | `/servers/<pk>/setup/` | **Set up server** for a Fresh host or an Incomplete foundation ([setting up a server](bootstrap.md)). Shown to accounts that may prepare changes. |
-| Changes | `/servers/<pk>/changes/` | The server's reviews and runs, and the reviewed cleanup of finished runs. Needs `operations.view_changes`. |
-| Activity | `/servers/<pk>/activity/` | This registration's discovery attempts, reviews and runs, joined by the registration, never by a matching name or address. |
-| Advanced | `/servers/<pk>/advanced/` | The stored discovery evidence in technical detail: commands read, outcomes and warnings. |
+- **Servers** lists saved servers with their connection status. With no servers it asks
+  for the first one and offers **Add server**.
+- **Sites** lists every observed site across servers and offers **Create site**.
+- **Activity** is this controller's record of checks and changes, newest first. It never
+  establishes a server's current state.
+- **Settings** is installation-wide: the signed-in account and how to change its
+  password from the terminal, the controller's approved SSH keys with their public
+  halves, how to check that the background worker runs, and the Barectl version with the
+  runtimes it offers. Nothing here changes a server.
 
-Each page keeps the server's name and a return to Servers. Sections are ordinary links that support direct loading, reload and browser back and forward. Section visibility follows viewing permissions; a hidden control never replaces authorization on the destination request.
+Opening any page reads stored observations and local records. Only a CSRF-protected POST
+queues work, and no page makes an SSH connection.
 
-Navigation reads stored observations and local records. Opening a page, including Overview's host standing, makes no SSH connection. Only CSRF-protected POSTs queue work.
+## Servers
 
-## Connection states and next actions
+**Add server** saves a connection and queues a connection check
+([saved server connections](saved-server-connections.md)). The common form asks for the
+name, address, SSH user and key; port and SSH alias sit under **More options**. A new
+host's identity is confirmed by pasting the provider's fingerprint
+([confirming a fresh host](ssh-connections.md#confirming-a-fresh-saved-address-host)).
+Credentials and host trust stay on the controller host; Barectl offers no browser key
+upload or host-trust bypass.
 
-Next-action guidance describes what the recorded evidence suggests. It is not an eligibility check: preparation, the immutable review, native locking and fresh revalidation decide whether a change can run.
+A server page opens on **Sites**. Its heading shows the name, the address and one status
+line:
 
-| Recorded state or evidence | Operator guidance | Authority and limits |
-| --- | --- | --- |
-| Empty server inventory | Offer **Add server** to an authorized operator. | Needs `servers.view_server` and `servers.add_server`. |
-| Not verified, no successful snapshot | Check the connection before relying on observations. | A check needs `discovery.add_discoveryattempt`. |
-| Check queued | Show the queued time and how to start the worker if it stays queued. | No duplicate check while the server's operation slot is occupied. |
-| Check running | Show its start time. | Polling reads the local status and starts no remote work. |
-| Unknown host key | Show the presented key's SHA256 fingerprint and ask for the provider's fingerprint. | An exact match is trusted; anything else records nothing ([confirming a fresh host](ssh-connections.md#confirming-a-fresh-saved-address-host)). |
-| Changed or revoked host key | Refuse before authentication. | No in-app bypass. |
-| Failed or interrupted check | Show the sanitized failure and **Retry connection check**. | The previous snapshot stays, with its collection time and a stale notice. |
-| Fresh host or Incomplete foundation | Offer **Set up server**. | Applying needs Shared consent. |
-| Target stack | Offer runtimes on Stack, the database engine on Settings and the create-site forms on Sites. | Each change is prepared and reviewed separately. |
-| Not manageable | Show the standing and its reasons; keep operating system, capacity and services visible; offer no change controls. | Only a later discovery can change the judgment. |
-| Evidence inaccessible or unsupported | Explain what could not be read and keep the evidence under Advanced. | Unknown evidence is never treated as absence. |
+| Status | Meaning |
+| --- | --- |
+| Ready | The last check found the target stack. It does not claim live health. |
+| Needs setup | The host is fresh or its foundation is incomplete. |
+| Checking… | A connection check is queued or running. |
+| Cannot be managed | The last check found a host Barectl will not change. |
+| Connection failed | The last check could not connect, or the alias is unusable. |
+| Not checked yet | No complete observation exists. |
 
-Collection time says when observations were read. A successful historical change and current native state answer different questions. A failed refresh never replaces native evidence with local history.
+Below it sits at most one next-action banner, most urgent first: confirm the host's
+identity, check the connection, edit an unusable connection, set up the server, or fix
+the first finding that needs the operator. The banner's action is a CSRF-protected POST
+where it starts a change.
 
-## Site pages
+| Section | What it holds |
+| --- | --- |
+| Sites (default) | Observed sites led by their domains, each opening its site page, and **Create site**. |
+| Activity | This server's checks and changes, newest first. |
+| Settings | Server-wide choices: **PHP versions** with the sites using each and **Add PHP version**, **Default PHP**, **Default Node.js**, **HTTPS** with the optional certificate contact email, **Database** with the server's MariaDB or PostgreSQL engine and its install or remove review, the connection with **Edit connection**, and **Remove server**. |
+| Advanced | Host standing and its evidence, the foundation stages, operating system, capacity, components, the web stack and services, the runtime catalog, masters, protections, site pools, the connection record with its host key, discovery history, and **Clean up finished runs**. |
 
-An observed site opens at `/servers/<pk>/sites/<identifier>/overview/`, with **Runtime**, **Database**, **Deployments**, **Environment** or **WordPress** where the application has one, **Settings** and **Activity** sections at `/servers/<pk>/sites/<identifier>/<section>/`. A site that discovery sees but that does not follow the target convention has **Advanced** in place of Runtime. The identifier resolves within that registration's last complete observation; the same identifier on another server never shares context.
+Removing a server deletes its local connection and history from this installation. It
+changes nothing on the server.
 
-- **Overview** shows the observed names, account, convention conformity, the HTTPS setting and the certificate state (Issued with its expiry, Waiting, Failing with Caddy's reason, or Renewal due), and collection time. It links the site's own address; a WordPress site adds **Sign in to WordPress**, a Laravel site its current release with **Deploy**, and a plain PHP site its readiness path. A conforming layout is not called healthy.
-- **Runtime** shows the site's PHP and Node selections and prepares a change of either ([runtimes](runtimes.md#site-php-selection)). It distinguishes the current selection, unavailable evidence and an incomplete PHP switch. A plain PHP site also shows its **Readiness path**, `/` by default, and prepares a Site change for another path ([readiness](sites.md#readiness)); the same page holds the bounded **PHP settings** ([sites](sites.md#php-settings)).
-- **Database** shows the site's database name, principal and how the application connects, for a site that has a binding, and prepares **Add site database** for a plain PHP site ([databases](databases.md#site-databases-implemented-379)).
-- **Deployments** lists a Laravel site's current and retained releases, holds the **Deploy** and **Roll back** reviews and this controller's migrations switch, and shows the repository, branch and deploy key's public half ([deploying](sites.md#deploying-a-laravel-site)).
-- **Environment** edits a Laravel site's `.env` keys; **WordPress** holds a WordPress site's extra constants and its password reset and core verification ([settings](settings.md), [WordPress](wordpress.md#actions)).
-- **Settings** warns that no backup exists before Phase D and prepares a site's removal ([removing a site](sites.md#removing-a-site)). The review lists every deleted resource, and applying needs Destructive consent and the typed primary domain.
-- **Activity** lists the reviews and runs recorded for the identifier on this registration, newest first. It is history: an old success, a reused identifier or a site recreated outside Barectl does not establish the current site's identity or health.
+The old `stack/`, `setup/` and `changes/` URLs redirect to Advanced, the server page and
+Activity.
 
-While a later connection check is queued, running or failed, site pages keep showing the last successful snapshot with its time and a stale notice, and change controls ask for a fresh observation first. When the last complete observation confirms the site is gone, the page says **Site not found in the latest observation** and offers no change controls. Site pages need `servers.view_server` and `discovery.view_siteobservation`; editing secrets also needs `operations.manage_secrets`.
+## Sites
 
-A verified change's run page hands off to the site's page once discovery observes the new site. Until then the run page keeps its own verification and links to the server, so an unobserved site is never presented as current. The run says Barectl checked the site from the server itself; the review warns, without refusing, when a domain does not resolve to the server, because a proxy or CDN is legitimate. Reachability from the internet is not verified.
+A site page opens on **Overview**: its address with an http or https link, its platform,
+its PHP version, its status, when it was last checked, and where to upload code (the
+site's public folder, as the site user). A WordPress site adds a sign-in link; a Laravel
+site its current release and **Deploy**.
 
-## Review boundaries
+| Section | What it holds |
+| --- | --- |
+| Overview (default) | Address, platform, PHP version, status, last checked time and upload path. |
+| Activity | The site's changes, newest first. |
+| Database | The site's database binding, or the review that adds one ([databases](databases.md)). |
+| Deployments | A Laravel site's releases, **Deploy** and **Roll back** ([deploying](sites.md#deploying-a-laravel-site)). |
+| Environment | A Laravel site's environment keys ([settings](settings.md)). |
+| WordPress | A WordPress site's constants, password reset and core verification ([WordPress](wordpress.md#actions)). |
+| Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, PHP settings and the readiness path, domains and HTTPS, and **Remove site**. |
+| Logs | Native detail: the site account and paths, its file, missing paths, observed facts, the installed runtime diagnostics, masters, protections and a link to the server's pools. |
 
-Every change goes through the one change engine ([ADR 0035](adr/0035-one-change-engine-with-effect-derived-consent.md)): prepare, review, apply natively, verify and reconcile.
+A version this server does not have is marked **Installed first**. Choosing it prepares Add
+runtime as step one; the run page then offers to continue the switch with the same choice.
+The current version is never offered for a change, and a partly applied switch offers both
+the target and the current version to finish or reverse it.
 
-- Preparing a change reads the server and stores one immutable review with its evidence, effects and consent level. It changes nothing.
-- The consent level follows the declared effects. Site changes need Site consent. Server-wide changes, such as Set up server, Add runtime and server defaults, and changes that affect other sites, need Shared consent; a Shared review lists the affected sites, and applying it asks the operator to acknowledge them.
-- A review can be applied once, within 15 minutes of preparation. Apply rechecks the reviewed evidence and the affected sites under the native lock and refuses on any difference. An expired or refused review needs a new preparation.
-- Navigation never authorizes anything.
+A site page shows a stale notice while a later check is queued, running or failed, and
+keeps the last successful snapshot. When the last complete observation confirms the site
+is gone, the page says **Site not found in the latest observation** and offers no change
+controls.
 
-## What continues without the controller
+The old `runtime/` and `advanced/` URLs redirect to Settings and Logs.
 
-Accepted runs are transient systemd units on the server; they finish and leave their evidence without the controller. Everything else needs this controller's worker (`manage.py db_worker`): connection checks, change preparation, **Check outcome** and the discovery after a run.
+## Creating a site
 
-Barectl's records stay in this controller's database. Another controller with its own database and credentials reconstructs the same server and site pages from native evidence, but its Activity holds none of this controller's runs.
+**Create site** appears on the Sites page, on a server's Sites section and on a setup
+run's success banner. From the global page it first asks which server, listing only Ready
+servers and preselecting the only one.
+
+1. **Platform**: PHP, WordPress or Laravel. PHP is selected.
+2. **PHP version**: one tile per offered version, labelled by version. The server's
+   default is preselected, otherwise the newest installed, otherwise the newest offered.
+   A version not on the server says it is installed first and how much it downloads.
+3. **Domain**: one field, with **Add another domain** for up to ten.
+4. **More options**: the short name, derived from the domain and editable, and the
+   Node.js version.
+5. **Continue** prepares the change.
+
+When the chosen PHP version is installed, Continue prepares Create site. When it is not,
+it prepares Add runtime first; that confirm screen says it is step one of two, and its
+successful run offers **Continue to create the site**, which prepares the Create site
+review directly with the same answers kept.
+
+Create site's confirm screen says what will happen: a site account, its folders, a
+placeholder page, the chosen PHP version and HTTP service. It names any affected sites
+and requires the acknowledgement tick box only when the review lists them. On success the
+run hands off to the site page once discovery observes the site. The site page then says
+where the site answers and, when the server's address is known, where to point DNS. It
+never claims the site is public or that an application is deployed.
+
+WordPress and Laravel keep their own forms with their extra fields; the Create site
+choice leads to them.
+
+## Reviews and consent
+
+Every change is prepared, reviewed, applied natively, verified and reconciled by the one
+change engine. A confirm screen is rendered from the stored review and adds no second
+review document or consent level.
+
+- While preparation runs the screen says **Checking the server…** and polls.
+- The title and sentences are plain words; the primary action is named for the change and
+  **Cancel** returns to where it started.
+- A Shared review names the affected sites and requires the existing acknowledgement tick
+  box. With no sites affected it says so. A Site review has one button.
+- **Show details** is a closed accordion holding the full review: effects, stages, the
+  connection and its revision, the admission deadline, digests, consent level, targets,
+  kept resources, postconditions and refusals.
+- An account without the permission applying needs sees no button and the reason.
+- A review that expired or whose connection drifted says **This confirmation is out of
+  date.** and offers **Check again**, which prepares a fresh review of the same kind and
+  inputs.
+
+## Runs
+
+Every change links to its run. **Progress** is the default tab:
+
+- the plain-words title, the plain steps with the current one marked, polled as the run
+  moves, with focus kept;
+- the result in one sentence and one next action: **Create site**, **Open the site**,
+  **Try again**, **Check what happened**, or **Open the server**.
+
+**Logs** holds the stage names, the systemd unit, invocation, journal lines, consent
+level, the original connection and revision, and the audit record. A run continues on
+the server if the page or controller disconnects.
 
 ## Recovery
 
-Recovery starts from the original record, never from a repeated submission. [Native recovery](recovery.md) covers the server side.
+Native detail reaches the main path only here, as one sentence and one action.
 
-| Situation | What the page shows | What resolves it |
+| Situation | Progress or site page shows | Action |
 | --- | --- | --- |
-| Unavailable privilege or unreadable evidence | Observations labelled as unknown, not absent; preparation refuses with the privilege it needs. | Grant the access on the server, then refresh or prepare again. |
-| Native lock held by another controller | The run stops before any change with the lock conflict. | Wait for the other change, then prepare again. |
-| Stale or expired review | The review says it expired. | A new preparation. |
-| Site removed outside Barectl | **Site not found in the latest observation**, without change controls; history stays under the identifier's Activity. | Nothing to apply; create the site again if wanted. |
-| Failed or interrupted discovery | The previous snapshot, marked stale, with the sanitized failure. | **Retry connection check** after correcting the cause. |
-| Partly applied run | The run and the site's Activity name the stage it reached. | A new review, which proposes only what is missing. |
-| Incomplete PHP switch | The site's Runtime page names the transition. | A fresh review for the intended runtime, which finishes or reverses it. |
-| Lost acknowledgement or unverified outcome | **Outcome not established** with **Check outcome** on the original run. | **Check outcome** inspects the same unit and submits nothing; closing as outcome unknown never records success. |
+| Lost contact during a run | Barectl lost contact while this was running. It may have changed the server. | **Check what happened** inspects the original run; it starts no new run. |
+| No native record remains | The same sentence, with the condition for closing under Logs. | **Close as unknown** with its tick box. |
+| Partly applied | This stopped after *plain step*. Nothing after it ran. | **Try again** prepares a fresh review proposing only what is missing. |
+| Refused before any change | Nothing changed: *reason*. | **Try again**. |
+| Incomplete PHP switch | Changing PHP from 8.4 to 8.5 did not finish. | **Finish the switch** or **Stay on PHP 8.4**, each a fresh review. |
+| Out-of-date or expired confirmation | This confirmation is out of date. | **Check again**. |
+| Another computer is changing the server | Another computer is changing this server. | **Check again** later. |
 
-## Accessibility and verification
+Detailed causes, exits and journal lines stay in the run's Logs.
 
-Section links use a named navigation region and current-location indication. Routine polls preserve keyboard focus and entered values. State changes update the persistent status announcement; unchanged polls do not repeat it. Narrow layouts keep navigation and action text readable without horizontal scrolling. Direct links, reload and browser history restore the same section; a signed-out restore leads to sign-in. The browser tests check keyboard access, focus, error association, announcements and layout; they are not a full accessibility audit.
+## Activity
 
-## Upstream guidance and project choices
+**Activity** lists discovery checks and changes across servers, newest first, in plain
+words: what was checked or changed, on which server or site, when, and how it ended. Each
+row opens its confirm screen or run. Server and site filters narrow the list; a server's
+Activity and a site's Activity show the same rows filtered. Activity polls while a row is
+active. It is this controller's record and never establishes current state.
 
-- [USWDS side navigation](https://designsystem.digital.gov/components/side-navigation/) recommends current-page indication and testing the navigation in the application.
-- [Django 6.1 authentication and permissions](https://docs.djangoproject.com/en/6.1/topics/auth/default/#the-permission-required-decorator) documents request-level permission checks.
-- [Official HTMX 4.0.0 guidance](https://raw.githubusercontent.com/bigskysoftware/htmx/v4.0.0/dist/skills/htmx-guidance.md) defines explicit inheritance, partial and full request headers, and polling. Barectl keeps the fragment and full-page contract in [frontend assets](frontend-assets.md#htmx-4).
+## Permissions
 
-The section map, guidance matrix and authorization boundaries are Barectl decisions. The [workflow competition study](workflow-competition.md) is documentation research, not usability evidence.
+Section visibility follows viewing permissions; a hidden control never replaces
+authorization on the request. Every mutation is a CSRF-protected POST checked against the
+account's permissions. Site pages need `servers.view_server` and
+`discovery.view_siteobservation`; editing secrets also needs `operations.manage_secrets`.
+Changes need `operations.view_changes`, and applying needs the permissions the review's
+consent level declares.

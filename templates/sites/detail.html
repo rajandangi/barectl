@@ -5,13 +5,9 @@
     <div>
       <p class="barectl-eyebrow">
         <a href="{% url 'servers' %}">Servers</a> /
-        <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a> /
-        <a href="{% url 'server_sites' server.pk %}">Sites</a>
+        <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a>
       </p>
       <h1>{% if site %}{{ site.domains|join:", "|default:identifier }}{% else %}{{ identifier }}{% endif %}</h1>
-      <p class="barectl-note">
-        Site <code>{{ identifier }}</code> on {{ server.name }}, {% if server.connection_mode == "alias" %}SSH alias <code>{{ server.ssh_alias }}</code>{% else %}address <code>{{ server.address }}</code>{% endif %}.
-      </p>
     </div>
   </div>
   {% if absence %}
@@ -36,41 +32,41 @@
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source=None %}
     {% endif %}
-    <p><a href="{% url 'server_sites' server.pk %}">Return to Sites</a></p>
-    {% if section != "activity" %}
-      <p class="barectl-note">
-        Permitted local history remains available as <a href="{% url 'site_activity' server.pk identifier %}">this identifier's activity</a>. An old plan never makes this a current site.
-      </p>
-    {% endif %}
+    <p><a href="{% url 'server_detail' server.pk %}">Return to {{ server.name }}</a></p>
+    <p class="barectl-note">
+      Permitted local history remains available as <a href="{% url 'site_activity' server.pk identifier %}">this identifier's activity</a>. An old plan never makes this a current site.
+    </p>
   {% else %}
-    {% include "sites/_site_navigation.html" %}
-    {% if section == "overview" %}
-      {% include "sites/_site_overview.html" %}
-    {% elif section == "runtime" %}
-      {% include "sites/_http_runtime.html" %}
-    {% elif section == "deployments" %}
-      {% include "sites/_site_deployments.html" %}
-    {% elif section == "database" %}
-      {% include "sites/_site_database.html" %}
-    {% elif section == "settings" %}
-      {% include "sites/_site_settings.html" %}
-    {% elif section == "wordpress" %}
-      {% include "sites/_site_wordpress.html" %}
-    {% elif section == "environment" %}
-      {% include "sites/_site_environment.html" %}
-    {% elif section == "activity" %}
-      {% if target_site %}
-        {% include "sites/_http_activity.html" %}
-      {% else %}
-        <section class="barectl-card" aria-labelledby="site-activity-heading">
-          <h2 id="site-activity-heading">Activity for <code>{{ identifier }}</code></h2>
-          <p class="barectl-note">
-            This page does not refresh itself. Reload it, or open an operation to follow its progress. Barectl keeps no change records for a site it does not manage.
-          </p>
-        </section>
-      {% endif %}
-    {% elif section == "advanced" %}
-      {% include "sites/_site_advanced.html" %}
-    {% endif %}
+    <div class="barectl-layout">
+      {% include "sites/_site_navigation.html" %}
+      <div class="barectl-layout__content">
+        {% if section == "overview" %}
+          {% include "sites/_site_overview.html" %}
+        {% elif section == "logs" %}
+          {% include "sites/_site_logs.html" %}
+        {% elif section == "deployments" %}
+          {% include "sites/_site_deployments.html" %}
+        {% elif section == "database" %}
+          {% include "sites/_site_database.html" %}
+        {% elif section == "settings" %}
+          {% include "sites/_site_settings.html" %}
+        {% elif section == "wordpress" %}
+          {% include "sites/_site_wordpress.html" %}
+        {% elif section == "environment" %}
+          {% include "sites/_site_environment.html" %}
+        {% elif section == "activity" %}
+          {% if target_site %}
+            {% include "sites/_http_activity.html" %}
+          {% else %}
+            <section class="barectl-card" aria-labelledby="site-activity-heading">
+              <h2 id="site-activity-heading">Activity for <code>{{ identifier }}</code></h2>
+              <p class="barectl-note">
+                This page does not refresh itself. Reload it, or open an operation to follow its progress. Barectl keeps no change records for a site it does not manage.
+              </p>
+            </section>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
   {% endif %}
 {% endblock %}

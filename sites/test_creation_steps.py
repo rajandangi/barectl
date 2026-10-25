@@ -87,7 +87,9 @@ class CreateStepPageTests(ControllerConfigTestCase):
         response = self.client.get(f"/changes/{preparation.pk}/")
         self.assertContains(response, "Step 1: install MariaDB on this server")
         self.assertContains(response, "This is the first step for the WordPress site")
-        response = self.client.get(f"/servers/{self.server.pk}/sites/?create={preparation.pk}")
+        response = self.client.get(
+            f"/servers/{self.server.pk}/sites/create/wordpress/?create={preparation.pk}"
+        )
         self.assertContains(response, "Your answers are kept.")
         self.assertContains(response, 'value="shop.example.com"')
         self.assertContains(response, 'value="Shop"')
@@ -104,11 +106,13 @@ class CreateStepPageTests(ControllerConfigTestCase):
         self.assertContains(response, "Continue creating the WordPress site")
         self.assertContains(
             response,
-            f'href="/servers/{self.server.pk}/sites/?create={preparation.pk}#wordpress-site-create"',
+            f'href="/servers/{self.server.pk}/sites/create/wordpress/?create={preparation.pk}"',
         )
         # The worker's refresh observes MariaDB; the create form still holds the answers.
         record_wordpress_sites(self.server)
-        response = self.client.get(f"/servers/{self.server.pk}/sites/?create={preparation.pk}")
+        response = self.client.get(
+            f"/servers/{self.server.pk}/sites/create/wordpress/?create={preparation.pk}"
+        )
         self.assertContains(response, "Prepare WordPress site review")
         self.assertContains(response, 'value="shop.example.com"')
         self.assertContains(response, 'value="Shop"')
@@ -160,11 +164,11 @@ class CreateStepPageTests(ControllerConfigTestCase):
         self.assertEqual(rows[0].preparation.kind_slug, "add_runtime")
         self.assertEqual(rows[0].preparation.inputs, {"version": 1, "selection": "php85"})
         response = self.client.get(f"/changes/{rows[0].preparation.pk}/")
-        self.assertContains(response, "Step 1: install PHP 8.5 on this server")
+        self.assertContains(response, "Step 1 of 2: add PHP 8.5 to this server")
 
     def test_laravel_without_an_engine_installs_the_engine_the_operator_chose(self) -> None:
         record_http_sites(self.server)
-        page = self.client.get(f"/servers/{self.server.pk}/sites/")
+        page = self.client.get(f"/servers/{self.server.pk}/sites/create/laravel/")
         self.assertContains(page, "Step 1: install a database engine on this server")
         self.assertContains(page, "Step 1: install MariaDB")
         self.assertContains(page, "Step 1: install PostgreSQL")
@@ -183,13 +187,15 @@ class CreateStepPageTests(ControllerConfigTestCase):
         self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
         self.assertEqual(rows[0].preparation.kind_slug, "install_database_engine")
         self.assertEqual(rows[0].preparation.inputs, {"version": 1, "selection": "postgresql"})
-        page = self.client.get(f"/servers/{self.server.pk}/sites/?create={rows[0].preparation.pk}")
+        page = self.client.get(
+            f"/servers/{self.server.pk}/sites/create/laravel/?create={rows[0].preparation.pk}"
+        )
         self.assertContains(page, 'value="https://github.com/acme/shop.git"')
         self.assertContains(page, 'value="main"')
 
     def test_a_host_with_no_runtime_installs_the_engine_then_php(self) -> None:
         record_wordpress_sites(self.server, engine="", installed_php=False)
-        response = self.client.get(f"/servers/{self.server.pk}/sites/")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/create/wordpress/")
         self.assertContains(response, "PHP 8.4 (installs first")
         response = self.client.post(
             f"/servers/{self.server.pk}/sites/wordpress/prepare/", self.wordpress()
@@ -213,7 +219,9 @@ class CreateStepPageTests(ControllerConfigTestCase):
         self.assertEqual(rows[0].preparation.inputs, {"version": 1, "selection": "php84"})
         self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
         # Its answers are the same ones the first step kept.
-        page = self.client.get(f"/servers/{self.server.pk}/sites/?create={rows[0].preparation.pk}")
+        page = self.client.get(
+            f"/servers/{self.server.pk}/sites/create/wordpress/?create={rows[0].preparation.pk}"
+        )
         self.assertContains(page, 'value="shop.example.com"')
         self.assertContains(page, 'value="Shop"')
         self.assertContains(page, 'id="wordpress-site-continuation"')
@@ -235,7 +243,7 @@ class CreateStepPageTests(ControllerConfigTestCase):
         self,
     ) -> None:
         record_http_sites(self.server, problem="Master failed")
-        response = self.client.get(f"/servers/{self.server.pk}/sites/")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/create/wordpress/")
         self.assertNotContains(response, "PHP 8.4 (installs first")
         self.assertContains(response, "PHP 8.5 (installs first")
 
@@ -254,6 +262,6 @@ class CreateStepPageTests(ControllerConfigTestCase):
 
     def test_postgresql_still_disables_the_wordpress_tile(self) -> None:
         record_wordpress_sites(self.server, engine="postgresql")
-        response = self.client.get(f"/servers/{self.server.pk}/sites/")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/create/wordpress/")
         self.assertContains(response, "WordPress needs MariaDB. This server runs PostgreSQL.")
         self.assertNotContains(response, "Step 1: install MariaDB")

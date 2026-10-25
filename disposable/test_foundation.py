@@ -89,7 +89,7 @@ class HostFoundation(ScenarioTestCase):
             self.assertTrue(current.manageable, current.problem)
             self.assertEqual(current.master_state, "active")
             self.assertTrue(current.extensions)
-            self.assertContains(self.client.get(f"/servers/{server.pk}/stack/?tab=php"), entry)
+            self.assertContains(self.client.get(f"/servers/{server.pk}/advanced/?tab=php"), entry)
             self.client.post(
                 f"/servers/{server.pk}/changes/prepare/",
                 {"kind": runtime_change.SLUG, "selection": entry},
@@ -143,8 +143,8 @@ class HostFoundation(ScenarioTestCase):
                     attempt = DiscoveryAttempt.objects.get(server=server)
                     self.assertTrue(attempt.challenge_key_blob)
                     self.assertContains(
-                        self.client.get(f"/servers/{server.pk}/setup/"),
-                        'class="usa-step-indicator__heading-text">Connect</span>',
+                        self.client.get(f"/servers/{server.pk}/"),
+                        "Confirm this is your server",
                     )
                     fingerprint = self.native(
                         "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 | cut -d' ' -f2"
@@ -165,10 +165,7 @@ class HostFoundation(ScenarioTestCase):
                         self.fail("No readiness observation after console confirmation.")
                     self.assertEqual(snapshot.collected.standing.standing, Standing.FRESH)
                     self.assertContains(self.client.get(f"/servers/{server.pk}/"), "Set up server")
-                    self.assertContains(
-                        self.client.get(f"/servers/{server.pk}/setup/"),
-                        'class="usa-step-indicator__heading-text">Review</span>',
-                    )
+                    self.assertContains(self.client.get(f"/servers/{server.pk}/"), "Set up server")
                     self.assertEqual(
                         self.client.post(
                             f"/servers/{server.pk}/changes/prepare/", {"kind": foundation.SLUG}
@@ -181,8 +178,7 @@ class HostFoundation(ScenarioTestCase):
                     self.assertTrue(review.eligible, review.document)
                     self.assertEqual(review.consent, "shared")
                     self.assertContains(
-                        self.client.get(f"/servers/{server.pk}/setup/"),
-                        'class="usa-step-indicator__heading-text">Apply and verify</span>',
+                        self.client.get(f"/changes/{preparation.pk}/"), "Set up Foundation"
                     )
                     reviewed_page = self.client.get(f"/changes/{preparation.pk}/")
                     for disclosed in (
@@ -240,14 +236,15 @@ class HostFoundation(ScenarioTestCase):
                     if refreshed is None or refreshed.collected.standing is None:
                         self.fail("The verified setup did not refresh discovery.")
                     self.assertEqual(refreshed.collected.standing.standing, Standing.TARGET_STACK)
+                    self.assertContains(self.client.get(f"/servers/{server.pk}/"), "Ready")
                     self.assertContains(
-                        self.client.get(f"/servers/{server.pk}/setup/"), "Server setup verified"
-                    )
-                    self.assertContains(
-                        self.client.get(f"/servers/{server.pk}/stack/?tab=web"), "v2.11.7"
+                        self.client.get(f"/servers/{server.pk}/advanced/?tab=web"), "v2.11.7"
                     )
                     self.assertEqual(self.native("cat /run/foundation-admin-listeners").strip(), "")
-                    self.assertContains(self.client.get(f"/runs/{run.pk}/"), "Applied and verified")
+                    self.assertContains(
+                        self.client.get(f"/runs/{run.pk}/"),
+                        "Barectl finished this change and checked it on the server.",
+                    )
                     self.add_php_runtimes(server)
                     self.assertEqual(
                         self.client.post(

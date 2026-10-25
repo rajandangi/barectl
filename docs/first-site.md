@@ -31,5 +31,5 @@ Point your domain's DNS at the server to reach the placeholder page from the int
 
 ## Next steps
 
-- Move the site to another PHP version from its **Runtime** page; requests in progress finish on the old version.
+- Move the site to another PHP version from its **Settings**; requests in progress finish on the old version.
 - Read [native recovery](recovery.md) to find the site's files, services and logs on the server.

@@ -2,6 +2,8 @@ from collections.abc import Mapping
 
 from django import forms
 
+from .presentation import runtime_label
+
 
 class DefaultRuntimeForm(forms.Form):
     selection = forms.ChoiceField(label="Installed runtime")
@@ -16,7 +18,7 @@ class DefaultRuntimeForm(forms.Form):
     ) -> None:
         super().__init__(data, initial={"selection": selected}, auto_id=f"id_default_{family}_%s")
         self.fields["selection"] = forms.ChoiceField(
-            label=f"Default {'PHP' if family == 'php' else 'Node.js'} runtime",
-            choices=[(entry, entry) for entry in choices],
+            label=f"Default {'PHP' if family == 'php' else 'Node.js'} version",
+            choices=[(entry, runtime_label(entry)) for entry in choices],
             widget=forms.Select(attrs={"class": "usa-select"}),
         )

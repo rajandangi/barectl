@@ -3,8 +3,9 @@
   <h2 id="site-php-settings-heading">PHP settings</h2>
   {% if site_pool %}
     <p>
-      These limits apply to this site's own PHP master. A change rewrites only this site's
-      pool and reloads its master after running requests finish; no other site is restarted.
+      These limits apply to this site's own PHP service. A change rewrites only this site's
+      settings and reloads its PHP service after running requests finish; no other site is
+      restarted.
     </p>
     {% if site_pool_can_prepare %}
       <form method="post"
@@ -68,7 +69,7 @@
             {% endif %}
           {% endfor %}
         </fieldset>
-        <button class="usa-button" type="submit">Review PHP settings</button>
+        <button class="usa-button" type="submit">Change PHP settings</button>
       </form>
     {% elif blocking %}
       {% include "operations/_blocking_operation.html" with after="Prepare the PHP settings after it finishes." %}
@@ -78,6 +79,6 @@
       </p>
     {% endif %}
   {% else %}
-    <p class="barectl-note">The site's PHP pool settings were not observed.</p>
+    <p class="barectl-note">The site's PHP settings were not observed.</p>
   {% endif %}
 </section>

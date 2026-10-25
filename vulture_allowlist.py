@@ -112,6 +112,7 @@ if TYPE_CHECKING:
     from laravel.apps import LaravelConfig
     from laravel.bodies import settings as laravel_settings_body
     from laravel.bodies.common import laravel_read
+    from operations.activity import ActivityRow
     from operations.apps import OperationsConfig
     from operations.forms import (
         AcknowledgeForm,
@@ -127,14 +128,21 @@ if TYPE_CHECKING:
         Consent,
         RemoteOperation,
     )
-    from operations.presentation import ReviewView, RunOutcome, RunView
+    from operations.presentation import PlainStep, ReviewView, RunOutcome, RunView
+    from operations.test_pages import _DefaultText
     from runtimes.apps import RuntimesConfig
     from runtimes.bodies.update import update_catalog
-    from runtimes.presentation import ShownBuild, ShownCatalog
+    from runtimes.presentation import (
+        ShownBuild,
+        ShownCatalog,
+        ShownPhpAddition,
+        ShownPhpVersion,
+    )
     from servers.apps import ServersConfig
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import ConnectionDefinition, Server
+    from servers.page import Banner
     from servers.testing import ControllerConfigTestCase
     from servers.tests import InventoryTests
     from sites.apps import SitesConfig
@@ -142,7 +150,7 @@ if TYPE_CHECKING:
     from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
-    from sites.continuation import CreationStep
+    from sites.continuation import CreationStep, StepBanner
     from sites.forms import (
         HttpSiteForm,
         LaravelSiteForm,
@@ -294,6 +302,8 @@ if TYPE_CHECKING:
     _http_site_field = HttpSiteForm.http_only
     # The create form renders the Step 1 continuation note from the session step.
     _creation_step = CreationStep.resume_note
+    # The run banner's template renders the continuation as a form POST.
+    _step_banner = StepBanner("", "", "", "", True).continue_post
     # The Stack page's runtime catalog template reads these fields.
     _shown_build = ShownBuild("", "", "", 0, 0)
     _runtime_catalog = (
@@ -302,6 +312,11 @@ if TYPE_CHECKING:
         _shown_build.language,
         _shown_build.unpacked_size,
     )
+    # Server Settings lists each installed PHP version and each missing one.
+    _settings_runtimes = (
+        ShownPhpVersion("", "", "", (), False, False).sites_phrase,
+        ShownPhpAddition("", "", 0).download_phrase,
+    )
     # The Status poll token keys the discovery fragment.
     _discovery_views = (DiscoveryState.poll_token,)
     # The run page's template reads these properties.
@@ -309,6 +324,14 @@ if TYPE_CHECKING:
         RunView.native_record_missing,
         RunView.execution_label,
         RunView.verification_label,
+    )
+    # Progress renders each plain step's state label; no Python code reads it.
+    _plain_steps = (PlainStep("", "", False).state_label,)
+    # HTMLParser calls these hooks while the page test collects default-visible text.
+    _default_text_parser = (
+        _DefaultText.handle_starttag,
+        _DefaultText.handle_endtag,
+        _DefaultText.handle_data,
     )
     # Form metaclasses collect declared fields and Meta options; templates render the search
     # field as form.q.
@@ -475,6 +498,15 @@ if TYPE_CHECKING:
     )
     # templates/servers/_connection.html presents this recorded dispatch delay.
     _saved_connection_worker_delay = AttemptView.worker_unavailable
+    # templates/servers/_next_action.html presents these banner fields.
+    _banner_template_fields = (
+        Banner.show_queue,
+        Banner.queued_at,
+        Banner.worker_unavailable,
+    )
+    # templates/servers/_activity_table.html presents a change's preparation time beside
+    # the run that applied it.
+    _activity_template_fields = (ActivityRow.prepared_at,)
     # Registration forms and their history/audit templates read these fields dynamically.
     _connection_revision_presentation = (
         ServerForm.expected_revision,

@@ -1,0 +1,142 @@
+{% with record=review.review %}
+  <dl class="barectl-facts">
+    {% for label, value in review.details %}
+      <div>
+        <dt>{{ label }}</dt>
+        <dd>
+          {{ value|linebreaksbr }}
+        </dd>
+      </div>
+    {% endfor %}
+    <div>
+      <dt>Intent</dt>
+      <dd>
+        {{ record.intent }}
+      </dd>
+    </div>
+    <div>
+      <dt>Consent level</dt>
+      <dd>
+        {{ review.consent_label }}
+      </dd>
+    </div>
+    <div>
+      <dt>Affected sites</dt>
+      <dd>
+        {% if review.affected_sites %}
+          {{ review.affected_sites|join:', ' }}
+        {% elif review.shared %}
+          None named: this change touches the server's shared state, and reaches no site.
+        {% else %}
+          —
+        {% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Connection</dt>
+      <dd>
+        <code>{{ review.connection }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Connection revision</dt>
+      <dd>
+        {% if record.preparation %}{{ record.preparation.revision }}{% else %}Not recorded{% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Admission deadline</dt>
+      <dd>
+        <time datetime="{{ record.admission_expires_at|date:'c' }}">{{ record.admission_expires_at|date:'M j, Y, H:i:s T' }}</time>
+      </dd>
+    </div>
+    <div>
+      <dt>Affected-sites digest</dt>
+      <dd>
+        {% if record.sites_digest %}
+          <code class="barectl-break-all">{{ record.sites_digest }}</code>
+        {% else %}
+          None: this change names no site.
+        {% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Change digest</dt>
+      <dd>
+        {% if record.document.body_sha256 %}
+          <code class="barectl-break-all">{{ record.document.body_sha256 }}</code>
+        {% else %}
+          Not recorded
+        {% endif %}
+      </dd>
+    </div>
+  </dl>
+  <h3>Stages</h3>
+  <ol class="usa-list">
+    {% for stage in review.stages %}
+      <li>{{ stage }}</li>
+    {% endfor %}
+  </ol>
+  {% if review.refusals %}
+    <div class="usa-alert usa-alert--error">
+      <div class="usa-alert__body">
+        <h3 class="usa-alert__heading">Refused</h3>
+        <ul class="usa-list">
+          {% for refusal in review.refusals %}
+            <li>{{ refusal|urlize }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  {% endif %}
+  {% if review.note %}<p>{{ review.note }}</p>{% endif %}
+  {% if review.effects %}
+    <h3>Effects</h3>
+    <ul class="usa-list barectl-reviewed-effects">
+      {% for scope, text in review.effects %}
+        <li><strong>{{ scope }}.</strong> {{ text }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if review.targets %}
+    <h3 id="cleanup-targets">Finished barectl runs to clear</h3>
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table">
+        <caption class="usa-sr-only">Finished barectl runs the review clears</caption>
+        <thead>
+          <tr>
+            <th scope="col">Unit</th>
+            <th scope="col">Invocation</th>
+            <th scope="col">Outcome on the server</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for target in review.targets %}
+            <tr>
+              <th scope="row"><code>{{ target.unit }}</code></th>
+              <td><code>{{ target.invocation }}</code></td>
+              <td>{{ target.failed|yesno:'failed,exited successfully' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+  {% if review.kept %}
+    <p class="barectl-note">Left in place: {{ review.kept|join:'; ' }}. A cleanup never stops them.</p>
+  {% endif %}
+  {% if review.postconditions %}
+    <h3>Verified after applying</h3>
+    <ul class="usa-list">
+      {% for condition in review.postconditions %}
+        <li>{{ condition }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if review.run_id %}
+    <p><a href="{% url 'run_detail' review.run_id %}">Open the run for this review</a></p>
+  {% endif %}
+  <p class="barectl-note">
+    A review is a local record of this installation; it is not written to the server.
+  </p>
+{% endwith %}

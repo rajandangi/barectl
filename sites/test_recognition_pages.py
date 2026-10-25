@@ -58,7 +58,7 @@ class StackRecognitionTests(ControllerConfigTestCase):
         return response.content.decode()
 
     def test_web_lists_each_site_file_as_recognized_or_unsupported(self) -> None:
-        html = self.page(f"/servers/{self.server.pk}/stack/?tab=web")
+        html = self.page(f"/servers/{self.server.pk}/advanced/?tab=web")
         self.assertEqual(
             rows(html, "site-files"),
             [
@@ -71,14 +71,14 @@ class StackRecognitionTests(ControllerConfigTestCase):
         )
 
     def test_site_files_and_site_pools_appear_only_on_their_own_tabs(self) -> None:
-        for tab in ("web", "services", "php", "defaults", "catalog"):
+        for tab in ("web", "services", "php", "catalog"):
             with self.subTest(tab=tab):
-                html = self.page(f"/servers/{self.server.pk}/stack/?tab={tab}")
+                html = self.page(f"/servers/{self.server.pk}/advanced/?tab={tab}")
                 self.assertEqual("Site files</h2>" in html, tab == "web")
                 self.assertEqual("Site pools</h2>" in html, tab == "php")
 
     def test_php_runtimes_lists_each_site_pool_as_recognized_or_unsupported(self) -> None:
-        html = self.page(f"/servers/{self.server.pk}/stack/?tab=php")
+        html = self.page(f"/servers/{self.server.pk}/advanced/?tab=php")
         self.assertEqual(
             rows(html, "site-pools"),
             [
@@ -91,7 +91,7 @@ class StackRecognitionTests(ControllerConfigTestCase):
         )
 
     def test_overview_lists_each_unsupported_item_with_one_next_action(self) -> None:
-        html = self.page(f"/servers/{self.server.pk}/")
+        html = self.page(f"/servers/{self.server.pk}/advanced/")
         self.assertEqual(
             attention(html),
             [
@@ -104,11 +104,11 @@ class StackRecognitionTests(ControllerConfigTestCase):
         )
         server = self.server.pk
         self.assertInHTML(
-            f'<a href="/servers/{server}/sites/delta/runtime/">Finish the runtime change</a>', html
+            f'<a href="/servers/{server}/sites/delta/settings/">Finish the runtime change</a>', html
         )
-        self.assertInHTML(f'<a href="/servers/{server}/sites/beta/overview/">beta</a>', html)
+        self.assertInHTML(f'<a href="/servers/{server}/sites/beta/">beta</a>', html)
         self.assertInHTML(
-            f'<a href="/servers/{server}/stack/?tab=php">Inspect PHP runtimes</a>', html
+            f'<a href="/servers/{server}/advanced/?tab=php">Inspect PHP runtimes</a>', html
         )
 
 
@@ -127,7 +127,7 @@ class StandingAttentionTests(ControllerConfigTestCase):
             collected,
             timezone.now(),
         )
-        return self.client.get(f"/servers/{self.server.pk}/").content.decode()
+        return self.client.get(f"/servers/{self.server.pk}/advanced/").content.decode()
 
     def test_host_findings_carry_their_next_action(self) -> None:
         unread = Observation(

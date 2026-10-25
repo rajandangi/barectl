@@ -249,7 +249,7 @@ class SitePoolPageTests(ControllerConfigTestCase):
 
     def test_an_out_of_bounds_value_is_refused_before_queueing(self) -> None:
         response = self.client.post(self.url, {"process_manager": "static", "max_children": "65"})
-        self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/runtime/")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/settings/")
         self.assertEqual(read_changes(self.server).rows, [])
 
     def test_viewer_cannot_change_php_settings(self) -> None:
@@ -264,9 +264,9 @@ class SitePoolPageTests(ControllerConfigTestCase):
             self.fail("No setup snapshot.")
         self.assertEqual(snapshot.collected.sites.value[0].pool, SitePool())
 
-    def test_the_runtime_page_offers_the_observed_settings_without_ssh(self) -> None:
+    def test_the_settings_page_offers_the_observed_settings_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/settings/")
         self.assertContains(response, "PHP settings")
         self.assertContains(response, 'name="max_children"')
         self.assertContains(response, 'value="2"')

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Create site · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        <a href="{% url 'sites' %}">Sites</a>
+        {% if server %} / <a href="{% url 'server_sites' server.pk %}">{{ server.name }}</a>{% endif %}
+      </p>
+      <h1 {% if create_site_problem or create_site_form.errors %}tabindex="-1" autofocus{% endif %}>Create site</h1>
+    </div>
+  </div>
+  {% if choose_server %}
+    <section class="barectl-card" aria-labelledby="create-site-server-heading">
+      <h2 id="create-site-server-heading">Which server?</h2>
+      {% if ready_servers %}
+        <p>Choose a server that is ready for a site.</p>
+        <form class="usa-form" method="get" action="{% url 'site_create' %}">
+          <fieldset class="usa-fieldset">
+            <legend class="usa-legend usa-sr-only">Server</legend>
+            {% for ready in ready_servers %}
+              <div class="usa-radio">
+                <input class="usa-radio__input usa-radio__input--tile"
+                       type="radio"
+                       name="server"
+                       id="create-server-{{ ready.pk }}"
+                       value="{{ ready.pk }}"
+                       {% if ready.pk == selected_server %}checked{% endif %}>
+                <label class="usa-radio__label" for="create-server-{{ ready.pk }}">
+                  {{ ready.name }}
+                  <span class="barectl-radio__description">{{ ready.address|default:ready.ssh_alias }}</span>
+                </label>
+              </div>
+            {% endfor %}
+          </fieldset>
+          <button class="usa-button" type="submit">Continue</button>
+        </form>
+      {% else %}
+        <p>
+          No server is ready yet. Add a server, then set it up. A site needs a server Barectl
+          has checked and set up.
+        </p>
+        {% if perms.servers.add_server %}
+          <p><a class="usa-button" href="{% url 'server_add' %}">Add server</a></p>
+        {% else %}
+          <p class="barectl-note">An operator with the add-server permission can add one.</p>
+        {% endif %}
+      {% endif %}
+    </section>
+  {% elif create_site_not_ready and not create_site_retained %}
+    <section class="barectl-card" aria-labelledby="create-site-not-ready-heading">
+      <h2 id="create-site-not-ready-heading">{{ server.name }} is not ready for a site</h2>
+      <p>{{ create_site_not_ready }}</p>
+      <p><a class="usa-button" href="{{ create_site_not_ready_url }}">Continue</a></p>
+    </section>
+  {% else %}
+    {% if create_site_not_ready %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            {{ create_site_not_ready }}
+            <a href="{{ create_site_not_ready_url }}">Check the server first</a>.
+          </p>
+        </div>
+      </div>
+    {% endif %}
+    {% include "sites/_create_form.html" %}
+  {% endif %}
+{% endblock %}

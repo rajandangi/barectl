@@ -8,21 +8,21 @@ from .catalog import Architecture, load
 
 
 class RuntimeCatalogPageTests(DiscoveryTestCase):
-    def stack_page(self, machine: str) -> str:
+    def advanced_page(self, machine: str) -> str:
         self.remote.results["uname -m"] = ssh.CommandResult(0, f"{machine}\n")
-        return self.stack_page_after_discovery()
+        return self.advanced_page_after_discovery()
 
-    def stack_page_after_discovery(self) -> str:
+    def advanced_page_after_discovery(self) -> str:
         self.discover()
         connections = len(self.remote.targets)
-        page = self.client.get(f"/servers/{Server.objects.get().pk}/stack/?tab=catalog")
+        page = self.client.get(f"/servers/{Server.objects.get().pk}/advanced/?tab=catalog")
         self.assertEqual(page.status_code, 200)
         self.assertEqual(len(self.remote.targets), connections, "The page connected over SSH.")
-        self.assertContains(page, 'aria-current="page">Stack</a>')
+        self.assertContains(page, 'aria-current="page">Advanced</a>')
         return page.content.decode()
 
     def assert_offers(self, machine: str, architecture: Architecture, other: Architecture) -> None:
-        page = self.stack_page(machine)
+        page = self.advanced_page(machine)
         self.assertIn(f"<code>{architecture}</code>", page)
         for build in load().offered(architecture):
             self.assertIn(f"<code>{build.entry}</code>", page)
@@ -38,26 +38,37 @@ class RuntimeCatalogPageTests(DiscoveryTestCase):
         self.assert_offers("aarch64", Architecture.AARCH64, Architecture.X86_64)
 
     def test_an_architecture_without_builds_is_explained(self) -> None:
-        page = self.stack_page("riscv64")
+        page = self.advanced_page("riscv64")
         self.assertIn("Barectl offers no runtimes for the riscv64 architecture.", page)
         self.assertNotIn("<code>php84</code>", page)
 
     def test_an_unidentified_architecture_is_not_mistaken_for_a_missing_check(self) -> None:
         self.remote.results["uname -m"] = ssh.CommandResult(1, "")
-        page = self.stack_page_after_discovery()
+        page = self.advanced_page_after_discovery()
         self.assertIn("did not identify the server&#x27;s architecture", page)
         self.assertNotIn("Check the connection first", page)
 
     def test_a_server_never_checked_is_asked_for_a_connection_check(self) -> None:
         self.sign_in_with("view_server")
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        page = self.client.get(f"/servers/{server.pk}/stack/?tab=catalog")
+        page = self.client.get(f"/servers/{server.pk}/advanced/?tab=catalog")
         self.assertContains(page, "Check the connection first")
         self.assertEqual(self.remote.targets, [])
+
+    def test_the_catalog_table_is_in_advanced_and_not_in_settings(self) -> None:
+        page = self.advanced_page("x86_64")
+        self.assertIn("Runtime catalog", page)
+        self.assertIn("Download size", page)
+        self.assertNotIn("Add runtime php84", page)
+        settings = self.client.get(f"/servers/{Server.objects.get().pk}/settings/")
+        self.assertEqual(settings.status_code, 200)
+        self.assertNotContains(settings, "Runtime catalog")
+        self.assertNotContains(settings, "Download size")
+        self.assertNotContains(settings, "Unpacked size")
 
     def test_requires_the_server_view_permission(self) -> None:
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         self.assertEqual(
-            self.client.get(f"/servers/{server.pk}/stack/?tab=catalog").status_code, 403
+            self.client.get(f"/servers/{server.pk}/advanced/?tab=catalog").status_code, 403
         )

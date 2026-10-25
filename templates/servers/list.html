@@ -3,51 +3,58 @@
 {% block content %}
   <div class="barectl-page-heading">
     <div>
-      <p class="barectl-eyebrow">Server inventory</p>
       <h1>Servers</h1>
     </div>
-    {% if perms.servers.add_server %}
+    {% if total_count and perms.servers.add_server %}
       <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
     {% endif %}
   </div>
-  <div class="usa-alert usa-alert--info usa-alert--slim">
-    <div class="usa-alert__body">
-      <p class="usa-alert__text">
-        Barectl registers servers by their SSH alias on the controller host, verifies each connection and runs read-only discovery of the operating system, capacity, web-stack components, convention sites and blocked configuration. Hosting changes require an authorized workflow. Registration and discovery do not change the server.
+  {% if not total_count %}
+    <section class="barectl-card" aria-labelledby="servers-empty-heading">
+      <h2 id="servers-empty-heading">Add your first server</h2>
+      <p>
+        Barectl needs a fresh Ubuntu 26.04 server you can reach over SSH as root, or as a
+        user with passwordless sudo.
       </p>
-    </div>
-  </div>
-  {% if total_count %}
-    <form class="usa-form barectl-search"
-          role="search"
-          method="get"
-          action="{% url 'servers' %}"
-          hx-get="{% url 'servers' %}"
-          hx-target="#server-results"
-          hx-swap="outerHTML"
-          hx-push-url="true"
-          hx-sync="this:replace">
-      <label class="usa-label" for="{{ form.q.id_for_label }}">{{ form.q.label }}</label>
-      <span class="usa-hint" id="server-search-hint">Matches server names and SSH aliases.</span>
-      {% if form.q.errors %}
-        <span class="usa-error-message"
-              id="{{ form.q.auto_id }}_error">{{ form.q.errors|join:" " }}</span>
+      {% if perms.servers.add_server %}
+        <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
+      {% else %}
+        <p class="barectl-note">An operator with the add-server permission can add one.</p>
       {% endif %}
-      <div class="barectl-search__controls">
-        <input class="usa-input{% if form.q.errors %} usa-input--error{% endif %}"
-               id="{{ form.q.id_for_label }}"
-               type="search"
-               name="{{ form.q.html_name }}"
-               value="{{ form.q.value|default:'' }}"
-               maxlength="{{ form.q.field.max_length }}"
-               aria-describedby="server-search-hint{% if form.q.errors %} {{ form.q.auto_id }}_error{% endif %}"
-               {% if form.q.errors %}aria-invalid="true"{% endif %}>
-        <button class="usa-button" type="submit">Search</button>
-      </div>
-    </form>
+    </section>
+  {% else %}
+    {% if total_count > 10 %}
+      <form class="usa-form barectl-search"
+            role="search"
+            method="get"
+            action="{% url 'servers' %}"
+            hx-get="{% url 'servers' %}"
+            hx-target="#server-results"
+            hx-swap="outerHTML"
+            hx-push-url="true"
+            hx-sync="this:replace">
+        <label class="usa-label" for="{{ form.q.id_for_label }}">{{ form.q.label }}</label>
+        <span class="usa-hint" id="server-search-hint">Matches server names and addresses.</span>
+        {% if form.q.errors %}
+          <span class="usa-error-message"
+                id="{{ form.q.auto_id }}_error">{{ form.q.errors|join:" " }}</span>
+        {% endif %}
+        <div class="barectl-search__controls">
+          <input class="usa-input{% if form.q.errors %} usa-input--error{% endif %}"
+                 id="{{ form.q.id_for_label }}"
+                 type="search"
+                 name="{{ form.q.html_name }}"
+                 value="{{ form.q.value|default:'' }}"
+                 maxlength="{{ form.q.field.max_length }}"
+                 aria-describedby="server-search-hint{% if form.q.errors %} {{ form.q.auto_id }}_error{% endif %}"
+                 {% if form.q.errors %}aria-invalid="true"{% endif %}>
+          <button class="usa-button" type="submit">Search</button>
+        </div>
+      </form>
+    {% endif %}
+    <p id="server-results-status"
+       class="barectl-results-status"
+       role="status">{% include "servers/_status.html" %}</p>
+    {% include "servers/_table.html" %}
   {% endif %}
-  <p id="server-results-status"
-     class="barectl-results-status"
-     role="status">{% include "servers/_status.html" %}</p>
-  {% include "servers/_table.html" %}
 {% endblock %}

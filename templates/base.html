@@ -36,8 +36,8 @@
               <span class="barectl-icon barectl-icon--close" aria-hidden="true"></span>
               <span class="usa-sr-only">Close menu</span>
             </button>
-            {% if perms.servers.view_server %}
-              <ul class="usa-nav__primary usa-accordion">
+            <ul class="usa-nav__primary usa-accordion">
+              {% if perms.servers.view_server %}
                 <li class="usa-nav__primary-item">
                   <a href="{% url 'servers' %}"
                      class="usa-nav-link{% if request.resolver_match.url_name == 'servers' %} usa-current{% endif %}"
@@ -45,13 +45,15 @@
                     <span>Servers</span>
                   </a>
                 </li>
-                {% if perms.discovery.view_siteobservation %}
-                  <li class="usa-nav__primary-item">
-                    <a href="{% url 'sites' %}"
-                       class="usa-nav-link{% if request.resolver_match.url_name == 'sites' %} usa-current{% endif %}"
-                       {% if request.resolver_match.url_name == 'sites' %}aria-current="page"{% endif %}><span>Sites</span></a>
-                  </li>
-                {% endif %}
+              {% endif %}
+              {% if perms.discovery.view_siteobservation %}
+                <li class="usa-nav__primary-item">
+                  <a href="{% url 'sites' %}"
+                     class="usa-nav-link{% if request.resolver_match.url_name == 'sites' %} usa-current{% endif %}"
+                     {% if request.resolver_match.url_name == 'sites' %}aria-current="page"{% endif %}><span>Sites</span></a>
+                </li>
+              {% endif %}
+              {% if perms.servers.view_server %}
                 <li class="usa-nav__primary-item">
                   <a href="{% url 'activity' %}"
                      class="usa-nav-link{% if request.resolver_match.url_name == 'activity' %} usa-current{% endif %}"
@@ -59,8 +61,15 @@
                     <span>Activity</span>
                   </a>
                 </li>
-              </ul>
-            {% endif %}
+              {% endif %}
+              <li class="usa-nav__primary-item">
+                <a href="{% url 'settings' %}"
+                   class="usa-nav-link{% if request.resolver_match.url_name == 'settings' %} usa-current{% endif %}"
+                   {% if request.resolver_match.url_name == 'settings' %}aria-current="page"{% endif %}>
+                  <span>Settings</span>
+                </a>
+              </li>
+            </ul>
             <form class="barectl-account" method="post" action="{% url 'logout' %}">
               {% csrf_token %}
               <span class="barectl-account__name">Signed in as {{ user.get_username }}</span>

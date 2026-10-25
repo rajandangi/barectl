@@ -13,6 +13,8 @@ PLATFORM_LABELS: dict[str, str] = {
     "http": "HTTP site",
     "wordpress": "WordPress site",
     "laravel": "Laravel site",
+    "switch_php": "PHP version",
+    "switch_node": "Node.js version",
 }
 ANCHORS: dict[str, str] = {
     "http": "http-site-create",
@@ -39,7 +41,10 @@ ANSWER_FIELDS: dict[str, tuple[str, ...]] = {
         "php_version",
         "http_only",
     ),
+    "switch_php": ("identifier", "selection"),
+    "switch_node": ("identifier", "selection"),
 }
+SWITCH_PLATFORMS: dict[str, str] = {"switch_php": "php", "switch_node": "node"}
 
 
 @dataclass(frozen=True)
@@ -68,11 +73,28 @@ class CreationStep:
         return {key: value for key, value in self.answers.items() if key in fields}
 
     def continue_url(self) -> str:
+        if self.platform in SWITCH_PLATFORMS:
+            identifier = self.answers.get("identifier")
+            if not isinstance(identifier, str) or not identifier:
+                return ""
+            base = reverse("site_settings", args=[self.server_id, identifier])
+            family = SWITCH_PLATFORMS[self.platform]
+            return f"{base}?change={family}&selection={self.selection}#change-{family}"
+        if self.platform == "http":
+            return reverse("site_create_continue", args=[self.server_id])
+        if self.platform in ("wordpress", "laravel"):
+            base = reverse("site_create_platform", args=[self.server_id, self.platform])
+            return f"{base}?create={self.preparation_id}"
         base = reverse("server_sites", args=[self.server_id])
         return f"{base}?create={self.preparation_id}#{self.anchor}"
 
     @property
     def resume_note(self) -> str:
+        if self.platform in SWITCH_PLATFORMS:
+            return (
+                f"Your choice from Step 1 is kept. Prepare the {self.platform_label} change "
+                "when you are ready."
+            )
         return (
             f"Your answers from Step 1 are kept. Prepare the {self.platform_label} review "
             "when you are ready."
@@ -129,6 +151,8 @@ class StepBanner:
     note: str
     continue_url: str = ""
     continue_label: str = ""
+    # A continuation that prepares the next review itself is a CSRF-protected POST.
+    continue_post: bool = False
 
 
 def remember(request: HttpRequest, step: CreationStep) -> None:
@@ -161,6 +185,14 @@ def requested_step(request: HttpRequest, server_id: int) -> CreationStep | None:
 
 
 def change_banner(step: CreationStep) -> StepBanner:
+    if step.platform in SWITCH_PLATFORMS:
+        return StepBanner(
+            title=step.step_title,
+            note=(
+                f"This is the first step of the {step.platform_label} change. Your choice is "
+                "kept; the run page continues the switch once this step finishes."
+            ),
+        )
     return StepBanner(
         title=step.step_title,
         note=(
@@ -172,13 +204,32 @@ def change_banner(step: CreationStep) -> StepBanner:
 
 
 def run_banner(step: CreationStep, *, succeeded: bool, finished: bool) -> StepBanner:
+    switch = step.platform in SWITCH_PLATFORMS
     if not finished:
         return StepBanner(
             title=step.step_title,
             note=(
-                f"This is the first step for the {step.platform_label} you are creating. "
+                f"This is the first step of the {step.platform_label} change. Your choice is kept."
+                if switch
+                else f"This is the first step for the {step.platform_label} you are creating. "
                 "Your answers are kept."
             ),
+        )
+    if switch:
+        note = (
+            f"Step 1 is complete. Continue switching the site's {step.platform_label} with "
+            "the version you chose."
+            if succeeded
+            else (
+                "Step 1 did not complete. Your choice is kept; return to the site's Settings "
+                "to try again."
+            )
+        )
+        return StepBanner(
+            title=step.step_title,
+            note=note,
+            continue_url=step.continue_url(),
+            continue_label=(step.continue_label if succeeded else "Return to site Settings"),
         )
     note = (
         f"Step 1 is complete. Continue creating your {step.platform_label} with the "
@@ -194,4 +245,5 @@ def run_banner(step: CreationStep, *, succeeded: bool, finished: bool) -> StepBa
         note=note,
         continue_url=step.continue_url(),
         continue_label=step.continue_label if succeeded else "Return to Create site",
+        continue_post=succeeded and step.platform == "http",
     )

@@ -1,58 +1,44 @@
-<nav class="barectl-section-navigation" aria-label="Site sections">
-  <ul class="usa-button-group">
-    <li class="usa-button-group__item">
-      <a class="usa-button{% if section != 'overview' %} usa-button--outline{% endif %}"
-         href="{% url 'site_detail' server.pk identifier %}"
-         {% if section == 'overview' %}aria-current="page"{% endif %}>Overview</a>
+<nav class="barectl-layout__nav" aria-label="Site sections">
+  <ul class="usa-sidenav">
+    <li class="usa-sidenav__item">
+      <a href="{% url 'site_detail' server.pk identifier %}"
+         {% if section == 'overview' %}class="usa-current" aria-current="page"{% endif %}>Overview</a>
+    </li>
+    <li class="usa-sidenav__item">
+      <a href="{% url 'site_activity' server.pk identifier %}"
+         {% if section == 'activity' %}class="usa-current" aria-current="page"{% endif %}>Activity</a>
     </li>
     {% if target_site %}
-      <li class="usa-button-group__item">
-        <a class="usa-button{% if section != 'runtime' %} usa-button--outline{% endif %}"
-           href="{% url 'site_runtime' server.pk identifier %}"
-           {% if section == 'runtime' %}aria-current="page"{% endif %}>Runtime</a>
+      <li class="usa-sidenav__item">
+        <a href="{% url 'site_database' server.pk identifier %}"
+           {% if section == 'database' %}class="usa-current" aria-current="page"{% endif %}>Database</a>
       </li>
       {% if has_releases %}
-        <li class="usa-button-group__item">
-          <a class="usa-button{% if section != 'deployments' %} usa-button--outline{% endif %}"
-             href="{% url 'site_deployments' server.pk identifier %}"
-             {% if section == 'deployments' %}aria-current="page"{% endif %}>Deployments</a>
+        <li class="usa-sidenav__item">
+          <a href="{% url 'site_deployments' server.pk identifier %}"
+             {% if section == 'deployments' %}class="usa-current" aria-current="page"{% endif %}>Deployments</a>
         </li>
       {% endif %}
       {% if has_laravel %}
-        <li class="usa-button-group__item">
-          <a class="usa-button{% if section != 'environment' %} usa-button--outline{% endif %}"
-             href="{% url 'site_environment' server.pk identifier %}"
-             {% if section == 'environment' %}aria-current="page"{% endif %}>Environment</a>
+        <li class="usa-sidenav__item">
+          <a href="{% url 'site_environment' server.pk identifier %}"
+             {% if section == 'environment' %}class="usa-current" aria-current="page"{% endif %}>Environment</a>
         </li>
       {% endif %}
       {% if has_wordpress %}
-        <li class="usa-button-group__item">
-          <a class="usa-button{% if section != 'wordpress' %} usa-button--outline{% endif %}"
-             href="{% url 'site_wordpress' server.pk identifier %}"
-             {% if section == 'wordpress' %}aria-current="page"{% endif %}>WordPress</a>
+        <li class="usa-sidenav__item">
+          <a href="{% url 'site_wordpress' server.pk identifier %}"
+             {% if section == 'wordpress' %}class="usa-current" aria-current="page"{% endif %}>WordPress</a>
         </li>
       {% endif %}
-      <li class="usa-button-group__item">
-        <a class="usa-button{% if section != 'database' %} usa-button--outline{% endif %}"
-           href="{% url 'site_database' server.pk identifier %}"
-           {% if section == 'database' %}aria-current="page"{% endif %}>Database</a>
-      </li>
-      <li class="usa-button-group__item">
-        <a class="usa-button{% if section != 'settings' %} usa-button--outline{% endif %}"
-           href="{% url 'site_settings' server.pk identifier %}"
-           {% if section == 'settings' %}aria-current="page"{% endif %}>Settings</a>
-      </li>
-    {% else %}
-      <li class="usa-button-group__item">
-        <a class="usa-button{% if section != 'advanced' %} usa-button--outline{% endif %}"
-           href="{% url 'site_advanced' server.pk identifier %}"
-           {% if section == 'advanced' %}aria-current="page"{% endif %}>Advanced</a>
+      <li class="usa-sidenav__item">
+        <a href="{% url 'site_settings' server.pk identifier %}"
+           {% if section == 'settings' %}class="usa-current" aria-current="page"{% endif %}>Settings</a>
       </li>
     {% endif %}
-    <li class="usa-button-group__item">
-      <a class="usa-button{% if section != 'activity' %} usa-button--outline{% endif %}"
-         href="{% url 'site_activity' server.pk identifier %}"
-         {% if section == 'activity' %}aria-current="page"{% endif %}>Activity</a>
+    <li class="usa-sidenav__item">
+      <a href="{% url 'site_logs' server.pk identifier %}"
+         {% if section == 'logs' %}class="usa-current" aria-current="page"{% endif %}>Logs</a>
     </li>
   </ul>
 </nav>

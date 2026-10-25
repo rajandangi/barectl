@@ -7,102 +7,89 @@
         <a href="{% url 'servers' %}">Servers</a>
       </p>
       <h1>{{ server.name }}</h1>
-    </div>
-    {% if perms.servers.change_server or perms.servers.delete_server %}
-      <div class="barectl-page-actions">
-        {% if perms.servers.change_server %}
-          <a class="usa-button usa-button--outline"
-             href="{% url 'server_edit' server.pk %}">Edit<span class="usa-sr-only"> {{ server.name }}</span></a>
-        {% endif %}
-        {% if perms.servers.delete_server %}
-          <a class="usa-button usa-button--outline barectl-button--destructive-outline"
-             href="{% url 'server_remove' server.pk %}">Remove<span class="usa-sr-only"> {{ server.name }}</span></a>
-        {% endif %}
-      </div>
-    {% endif %}
-  </div>
-  {% include "servers/_navigation.html" %}
-  <h2>{{ section_title }}</h2>
-  <dl class="barectl-facts barectl-card">
-    <div>
-      <dt>{% if server.connection_mode == "alias" %}SSH alias{% else %}Address{% endif %}</dt>
-      <dd>
+      <p class="barectl-note">
         <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code>
-      </dd>
+        · {% include "servers/_status_line.html" %}
+      </p>
     </div>
-    {% if server.address %}
-      {% if server.connection_mode == "alias" %}
-        <div>
-          <dt>Address</dt>
-          <dd>
-            {{ server.address }}
-          </dd>
-        </div>
-      {% endif %}
-      <div>
-        <dt>SSH user</dt>
-        <dd>
-          {{ server.username }}
-        </dd>
-      </div>
-      <div>
-        <dt>Port</dt>
-        <dd>
-          {{ server.port }}
-        </dd>
-      </div>
-    {% endif %}
-    <div>
-      <dt>Status</dt>
-      <dd id="connection-status">
-        {{ state.status }}
-      </dd>
-    </div>
-    <div>
-      <dt>Added</dt>
-      <dd>
-        <time datetime="{{ server.created_at|date:'c' }}">{{ server.created_at|date:'M j, Y' }}</time>
-      </dd>
-    </div>
-  </dl>
-  {% if not state.alias_usable %}
-    <div class="usa-alert usa-alert--warning usa-alert--slim">
-      <div class="usa-alert__body">
-        <p class="usa-alert__text">
-          The alias <code>{{ server.ssh_alias }}</code> is no longer a usable Host entry in the controller's SSH configuration. Restore it on the controller host, or edit this server to choose another alias.
-        </p>
-      </div>
-    </div>
-  {% endif %}
-  {# Announces connection check progress, which the fragment below updates by polling. #}
+  </div>
+  {# Announces connection check progress, which the status poll updates. #}
   <p id="discovery-announcement" class="usa-sr-only" role="status"></p>
-  {% include "servers/_discovery.html" with attempt=state.attempt snapshot=state.snapshot presented=state.presentation %}
-  {% if section == "overview" and state.can_prepare_changes %}
-    {% include "servers/_task_links.html" %}
-  {% endif %}
-  {% if section == "setup" %}
-    {% include "servers/_setup.html" %}
-  {% elif section == "sites" %}
-    {% include "servers/_sites.html" %}
-    {% if target_host and http_site_permission %}
-      {% include "sites/_http_create.html" %}
-      {% include "sites/_wordpress_create.html" %}
-      {% include "sites/_laravel_create.html" %}
-    {% endif %}
-  {% elif section == "stack" %}
-    {% include "bootstrap/_foundation_stack.html" %}
-  {% elif section == "settings" %}
-    {% include "servers/_settings.html" %}
-  {% elif section == "activity" %}
-    <p class="barectl-note">Local operation history for this server registration. Past success does not establish current native state.</p>
-    {% if attempts %}
-      {% include "servers/_attempts_table.html" with attempts=attempts show_servers=False show_warnings=True %}
-    {% else %}
-      <p>No local activity yet. Connection checks and permitted hosting operations appear here after they are requested.</p>
-    {% endif %}
-  {% endif %}
-  <details>
-    <summary>Discovery history</summary>
-    {% include "servers/_history.html" %}
-  </details>
+  {% include "servers/_next_action.html" %}
+  <div class="barectl-layout">
+    {% include "servers/_navigation.html" %}
+    <div class="barectl-layout__content">
+      <h2 class="usa-sr-only">{{ section_title }}</h2>
+      {% if section == "sites" %}
+        {% if sites_forbidden %}
+          <p class="barectl-note">Your account may manage this server but not view its sites.</p>
+        {% else %}
+          {% if target_host and http_site_permission %}
+            <p>
+              <a class="usa-button" href="{% url 'server_site_create' server.pk %}">Create site</a>
+            </p>
+          {% endif %}
+          {% include "servers/_sites.html" %}
+        {% endif %}
+      {% elif section == "settings" %}
+        {% include "servers/_settings.html" %}
+        <section class="margin-top-4" aria-labelledby="settings-connection-heading">
+          <h2 id="settings-connection-heading">Connection</h2>
+          <dl class="barectl-facts">
+            <div>
+              <dt>{% if server.connection_mode == "alias" %}SSH alias{% else %}Address{% endif %}</dt>
+              <dd>
+                <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code>
+              </dd>
+            </div>
+            {% if server.connection_mode == "alias" and server.address %}
+              <div>
+                <dt>Address</dt>
+                <dd>
+                  <code>{{ server.address }}</code>
+                </dd>
+              </div>
+            {% endif %}
+            <div>
+              <dt>SSH user</dt>
+              <dd>
+                {{ server.username }}
+              </dd>
+            </div>
+            <div>
+              <dt>Port</dt>
+              <dd>
+                {{ server.port }}
+              </dd>
+            </div>
+          </dl>
+          {% if perms.servers.change_server %}
+            <a class="usa-button usa-button--outline"
+               href="{% url 'server_edit' server.pk %}">Edit connection</a>
+          {% endif %}
+        </section>
+        {% include "servers/_connection.html" with attempt=state.attempt %}
+        <section class="margin-top-4" aria-labelledby="settings-remove-heading">
+          <h2 id="settings-remove-heading">Remove server</h2>
+          <p class="barectl-note">
+            Removing the server deletes its local connection and history from this
+            installation. It changes nothing on the server.
+          </p>
+          {% if perms.servers.delete_server %}
+            <a class="usa-button usa-button--outline barectl-button--destructive-outline"
+               href="{% url 'server_remove' server.pk %}">Remove {{ server.name }}</a>
+          {% endif %}
+        </section>
+      {% elif section == "advanced" %}
+        {% include "servers/_advanced.html" %}
+      {% elif section == "activity" %}
+        <p id="activity-announcement" class="usa-sr-only" role="status"></p>
+        <p class="barectl-note">
+          This controller's record of checks and changes for this server, newest first. It
+          never establishes the server's current state.
+        </p>
+        {% include "servers/_activity_rows.html" %}
+      {% endif %}
+    </div>
+  </div>
 {% endblock %}

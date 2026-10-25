@@ -176,7 +176,7 @@ class RuntimeRemovalPageTests(ControllerConfigTestCase):
     def test_a_php_runtime_offers_a_revert_review(self) -> None:
         self.record((site(),))
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            page = self.client.get(f"/servers/{self.server.pk}/stack/?tab=php")
+            page = self.client.get(f"/servers/{self.server.pk}/advanced/?tab=php")
             self.assertContains(page, "Revert runtime php84 to its previous build")
             response = self.client.post(
                 f"/servers/{self.server.pk}/changes/prepare/",
@@ -190,7 +190,7 @@ class RuntimeRemovalPageTests(ControllerConfigTestCase):
     def test_a_used_runtime_explains_itself_and_an_unused_one_queues_removal(self) -> None:
         self.record((site(),))
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            page = self.client.get(f"/servers/{self.server.pk}/stack/?tab=php")
+            page = self.client.get(f"/servers/{self.server.pk}/advanced/?tab=php")
             self.assertContains(page, "Used by 1 site (alpha)")
             self.assertContains(page, "Remove runtime php85")
             response = self.client.post(
