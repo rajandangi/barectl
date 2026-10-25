@@ -312,6 +312,13 @@ class LaravelDeployCase(ScenarioTestCase):
             "git config user.email fixture@barectl.test",
             "git config user.name fixture",
         ]
+        if not getattr(self, "_pushed", False):
+            # The lane's Git container is shared by every scenario on that lane, so a later
+            # exclusive scenario would otherwise inherit an earlier one's fixture migrations.
+            # The first push of each test starts from the fixture app's root commit; the
+            # test's own later pushes build on it so its retained releases survive.
+            lines.append("git reset --hard $(git rev-list --max-parents=0 HEAD)")
+            self._pushed = True
         # The lane's fixture repository is shared by every scenario on its lane, so each
         # push carries a unique marker: a commit always has a change even when a previous
         # scenario already pushed the same application files.
@@ -322,13 +329,6 @@ class LaravelDeployCase(ScenarioTestCase):
             payload = base64.b64encode(content.encode()).decode()
             lines.append(f"mkdir -p $(dirname {target})")
             lines.append(f"printf %s {shlex.quote(payload)} | base64 -d > {target}")
-        if not getattr(self, "_pushed", False):
-            # The lane's Git container is shared by every scenario on that lane, so a later
-            # exclusive scenario would otherwise inherit an earlier one's fixture migrations.
-            # The first push of each test starts from the fixture app's root commit; the
-            # test's own later pushes build on it so its retained releases survive.
-            lines.append("git reset --hard $(git rev-list --max-parents=0 HEAD)")
-            self._pushed = True
         lines.append(
             f"git add -A && git commit -qm {shlex.quote(message)} "
             "&& git push --quiet origin main && git rev-parse HEAD"
