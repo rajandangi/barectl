@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import TYPE_CHECKING
 
 from sites.bodies.admission import haproxy_state
 from sites.bodies.common import (
@@ -52,6 +53,10 @@ from sites.bodies.common import (
     stage,
     walk_routes,
 )
+
+if TYPE_CHECKING:
+    # Assembled into this body by automation/bodies/source.py (Phase C #395).
+    from automation.bodies.units import daemon_reload, fence, forget, reviewed_units
 
 # The ``databases.binding`` source, injected at assembly time.
 BINDING_SOURCE = ""
@@ -240,6 +245,22 @@ def inventory(identifier: str) -> dict[str, object]:
     stable = {key: item for key, item in value.items() if key not in ("uptime", "services")}
     value["digest"] = hashlib.sha256(canonical(stable).encode()).hexdigest()
     return value
+
+
+def remove_automation(document: dict[str, object], identifier: str) -> None:
+    """Remove the reviewed automation unit files and clear their runtime masks.
+
+    The fence already masked and stopped them; removal never starts them again
+    (docs/automation.md#fencing).
+    """
+    names = reviewed_units(document, identifier)
+    for name in names:
+        remove_path(f"/etc/systemd/system/{name}")
+    daemon_reload()
+    forget(document, identifier)
+    for name in names:
+        if exists(f"/etc/systemd/system/{name}"):
+            raise ValueError("An automation unit file is still present.")
 
 
 def remove_path(path: str) -> None:
@@ -592,6 +613,9 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
             return 1
     changed = False
     try:
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
+            return 1
         if not current["caddy_matches"]:
             # A previous attempt may have left Caddy serving its old in-memory
             # configuration after the file changed. Make disk and memory agree before
@@ -610,6 +634,7 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
         stop_services(identifier)
         changed = True
         stage("configuration")
+        remove_automation(document, identifier)
         paths = site_paths(identifier)
         for path in [*paths[1:7], *paths[8:]]:
             remove_path(path)

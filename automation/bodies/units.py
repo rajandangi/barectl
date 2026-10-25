@@ -30,8 +30,32 @@ NAME = re.compile(
 POLL_SECONDS = 0.25
 
 
+# A runtime drop-in that refuses a manual start. On systemd 259 a runtime mask of an
+# already-loaded unit changes nothing until the unit is loaded again, so the mask alone
+# cannot keep a manual ``systemctl start`` out while the change runs. The drop-in is read
+# by discovery as native evidence of the pause and cleared by restore (docs/adr/0036).
+FENCE_DROPIN = "50-barectl-fence.conf"
+
+
 def systemctl(*arguments: str) -> str:
     return run(["/usr/bin/systemctl", *arguments])
+
+
+def fence_dropin(name: str) -> pathlib.Path:
+    return pathlib.Path("/run/systemd/system") / (_checked_unit(name) + ".d") / FENCE_DROPIN
+
+
+def write_dropin(name: str) -> None:
+    path = fence_dropin(name)
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    path.write_text("[Unit]\nRefuseManualStart=yes\n", encoding="utf-8")
+
+
+def clear_dropin(name: str) -> None:
+    path = fence_dropin(name)
+    path.unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        path.parent.rmdir()
 
 
 def daemon_reload() -> None:
@@ -49,7 +73,7 @@ def current_text(path: pathlib.Path) -> str | None:
     return path.read_text(encoding="utf-8")
 
 
-def publish(path: str, text: str, expected: str | None) -> None:
+def publish_unit_file(path: str, text: str, expected: str | None) -> None:
     """Replace ``path`` with ``text`` only if it is still the reviewed ``expected`` text."""
     target = pathlib.Path(path)
     if current_text(target) != expected or not safe(str(target.parent), directory=True):
@@ -57,7 +81,7 @@ def publish(path: str, text: str, expected: str | None) -> None:
     replace_site_file(target, text, expected)
 
 
-def remove(path: str, expected: str | None) -> None:
+def remove_unit_file(path: str, expected: str | None) -> None:
     target = pathlib.Path(path)
     if current_text(target) != expected:
         raise ValueError("The reviewed automation evidence changed before removal.")
@@ -100,13 +124,13 @@ def publish_units(identifier: str, role: str, expected: dict[str, str]) -> None:
     for kind in ("slice", "service", "timer"):
         path = _path(identifier, role, kind)
         preimage = _reviewed_preimage(path, expected.get(kind, ""))
-        publish(path, render(identifier, role, kind), preimage)
+        publish_unit_file(path, render(identifier, role, kind), preimage)
 
 
 def remove_units(identifier: str, role: str, expected: dict[str, str]) -> None:
     for kind in ("service", "timer", "slice"):
         path = _path(identifier, role, kind)
-        remove(path, _reviewed_preimage(path, expected.get(kind, "")))
+        remove_unit_file(path, _reviewed_preimage(path, expected.get(kind, "")))
     daemon_reload()
     with contextlib.suppress(ValueError):
         # The unit is no longer loaded, so there is no failed state left to clear.
@@ -235,13 +259,25 @@ def timer_ready(identifier: str, role: str) -> bool:
     )
 
 
-def slice_events(name: str) -> pathlib.Path:
-    return pathlib.Path("/sys/fs/cgroup/system.slice") / name / "cgroup.events"
+def slice_events(name: str) -> pathlib.Path | None:
+    """The loaded slice's ``cgroup.events``, or ``None`` when systemd has no such slice.
+
+    A slice's own name nests it: ``barectl-site-<id>.slice`` lives under the parent slices
+    systemd derives from its dashes, so the path is read from the live control group rather
+    than assumed under ``system.slice`` (docs/adr/0036).
+    """
+    control_group = systemctl("show", "--value", "-p", "ControlGroup", name).strip()
+    if not control_group.startswith("/") or ".." in control_group or "\n" in control_group:
+        return None
+    return pathlib.Path("/sys/fs/cgroup" + control_group) / "cgroup.events"
 
 
 def slice_empty(name: str) -> bool:
+    events = slice_events(name)
+    if events is None:
+        return True
     try:
-        return "populated 1" not in slice_events(name).read_text(encoding="utf-8")
+        return "populated 1" not in events.read_text(encoding="utf-8")
     except OSError:
         return True
 
@@ -261,16 +297,40 @@ def _checked_unit(name: object) -> str:
     return name
 
 
-def _checked_plan(document: object) -> SimpleNamespace:
+def _checked_plan(document: object, identifier: str) -> SimpleNamespace | None:
+    """One site's reviewed fence from the change's document, or ``None`` for nothing to pause."""
     if not isinstance(document, dict):
+        raise ValueError("The reviewed change is not valid.")
+    fence = document.get("automation_fence")
+    if fence is None:
+        return None
+    if not isinstance(fence, dict) or set(fence) != {"version", "sites"} or fence["version"] != 1:
         raise ValueError("The reviewed automation plan is not valid.")
+    entries = fence["sites"]
+    if not isinstance(entries, list):
+        raise ValueError("The reviewed automation plan is not valid.")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("The reviewed automation plan is not valid.")
+        if entry.get("identifier") != identifier:
+            continue
+        return _checked_site(entry, identifier)
+    return None
+
+
+def _checked_site(document: dict[str, object], identifier: str) -> SimpleNamespace:
+    expected = {"identifier", "slice", "timers", "services", "resume", "budget_seconds"}
     slice_value = document.get("slice")
-    timers = document.get("timers")
-    services = document.get("services")
-    resume = document.get("resume")
+    timers, services, resume = (
+        document.get("timers"),
+        document.get("services"),
+        document.get("resume"),
+    )
     budget = document.get("budget_seconds")
     if (
-        not isinstance(slice_value, str)
+        set(document) != expected
+        or document.get("identifier") != identifier
+        or not isinstance(slice_value, str)
         or not isinstance(timers, list)
         or not isinstance(services, list)
         or not isinstance(resume, list)
@@ -279,46 +339,123 @@ def _checked_plan(document: object) -> SimpleNamespace:
         or not all(isinstance(name, str) for name in (*timers, *services, *resume))
     ):
         raise ValueError("The reviewed automation plan is not valid.")
-    return SimpleNamespace(
+    plan = SimpleNamespace(
         slice=_checked_unit(slice_value),
         timers=[_checked_unit(name) for name in timers if isinstance(name, str)],
         services=[_checked_unit(name) for name in services if isinstance(name, str)],
         resume=[_checked_unit(name) for name in resume if isinstance(name, str)],
         budget_seconds=budget,
     )
+    units_of_site = [*plan.timers, *plan.services]
+    if (
+        plan.slice != slice_name(identifier)
+        or len(set(units_of_site)) != len(units_of_site)
+        or any(role_of(name, identifier) is None for name in units_of_site)
+        or not set(plan.resume) <= set(units_of_site)
+    ):
+        raise ValueError("The reviewed automation plan is not valid.")
+    return plan
 
 
-def fence(document: object) -> bool:
+def fence(  # noqa: C901 - one reviewed stop sequence
+    document: object, identifier: str, *, gate: bool = False
+) -> bool:
     """Stop a site's background work and prove its slice has no processes.
 
-    Call it after the kind's site lock and before its own mutation. A mask keeps the work
-    from starting again, including from a boot, until :func:`restore` clears it.
+    Call it after the kind's site lock and before its own mutation. A runtime mask keeps the
+    work from starting again until :func:`restore` clears it. A mask does not survive a
+    reboot, so when the change enters a persistent maintenance gate, ``gate`` also removes
+    boot activation for every reviewed unit — timers and worker services alike — so a reboot
+    during the gate cannot restart work.
     """
-    plan = _checked_plan(document)
-    for name in [*plan.timers, *plan.services]:
-        if load_state(name) != "not-found":
-            systemctl("mask", "--runtime", name)
-    for name in plan.timers:
-        if load_state(name) != "not-found":
-            systemctl("stop", name)
-    for name in plan.services:
-        if load_state(name) != "not-found":
-            systemctl("stop", name)
-    if load_state(plan.slice) != "not-found":
-        systemctl("stop", plan.slice)
+    plan = _checked_plan(document, identifier)
+    if plan is None:
+        return True
+    try:
+        for name in [*plan.timers, *plan.services]:
+            if load_state(name) != "not-found":
+                systemctl("mask", "--runtime", name)
+                write_dropin(name)
+        # A loaded unit keeps its old unit-file state, and would start from the copy it
+        # loaded, until systemd reads the fence's drop-in. Reload before the stops.
+        daemon_reload()
+        if gate:
+            # A stopped unit is not a reboot fence. A runtime mask and the /run drop-in are
+            # gone after a reboot, so a persistent gate must also remove boot activation for
+            # every reviewed unit: the timers and the always-on worker services that carry
+            # their own install section (docs/adr/0036).
+            for name in [*plan.timers, *plan.services]:
+                run(["/usr/bin/systemctl", "disable", name], check=False)
+        for name in plan.timers:
+            if load_state(name) != "not-found":
+                systemctl("stop", name)
+        for name in plan.services:
+            if load_state(name) != "not-found":
+                systemctl("stop", name)
+        if load_state(plan.slice) != "not-found":
+            systemctl("stop", plan.slice)
+    except OSError, ValueError, KeyError:
+        return False
     return wait_slice_empty(plan.slice, plan.budget_seconds)
 
 
-def restore(document: object) -> bool:
-    """Clear the fence and start exactly the reviewed resume set."""
-    plan = _checked_plan(document)
+def restore(document: object, identifier: str) -> bool:
+    """Clear the fence and start exactly the reviewed resume set, then prove it is active.
+
+    A failed or unknown change never reaches here, so its work stays fenced. A change that
+    cannot prove one resumed unit is active reports partial and leaves the rest stopped.
+    """
+    plan = _checked_plan(document, identifier)
+    if plan is None:
+        return True
+    try:
+        for name in [*plan.timers, *plan.services]:
+            if load_state(name) == "masked":
+                systemctl("unmask", "--runtime", name)
+            clear_dropin(name)
+        daemon_reload()
+        for name in plan.resume:
+            if name.endswith(".timer"):
+                systemctl("enable", name)
+            else:
+                # An always-on worker carries its own install section; a oneshot service is
+                # started by its timer and has none.
+                run(["/usr/bin/systemctl", "enable", name], check=False)
+            systemctl("start", name)
+        return all(_active(name) for name in plan.resume)
+    except OSError, ValueError, KeyError:
+        return False
+
+
+def _active(name: str) -> bool:
+    if name.endswith(".timer"):
+        return active_state(name) == "active" and unit_file_state(name) in (
+            "enabled",
+            "enabled-runtime",
+            "static",
+            "indirect",
+        )
+    return active_state(name) in ("active", "activating")
+
+
+def reviewed_units(document: object, identifier: str) -> list[str]:
+    """The reviewed unit names of one site: its timers, its services and its slice."""
+    plan = _checked_plan(document, identifier)
+    if plan is None:
+        return []
+    return [*plan.timers, *plan.services, plan.slice]
+
+
+def forget(document: object, identifier: str) -> None:
+    """Clear the fence's masks once its unit files are gone, as site removal does."""
+    plan = _checked_plan(document, identifier)
+    if plan is None:
+        return
     for name in [*plan.timers, *plan.services]:
-        if load_state(name) == "masked":
-            systemctl("unmask", "--runtime", name)
-    for name in plan.resume:
-        systemctl("enable", name)
-        systemctl("start", name)
-    return True
+        clear_dropin(name)
+        for action in ("unmask --runtime", "reset-failed"):
+            run(["/usr/bin/systemctl", *action.split(), name], check=False)
+    run(["/usr/bin/systemctl", "daemon-reload"], check=False)
 
 
 def _role(name: str, identifier: str) -> str:
@@ -335,13 +472,16 @@ __all__ = [
     "disable_and_stop",
     "enable_timer",
     "fence",
+    "fence_dropin",
+    "forget",
     "load_state",
     "properties",
-    "publish",
+    "publish_unit_file",
     "publish_units",
-    "remove",
+    "remove_unit_file",
     "remove_units",
     "restore",
+    "reviewed_units",
     "slice_empty",
     "start_and_wait",
     "systemctl",

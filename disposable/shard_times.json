@@ -5,12 +5,15 @@
     "egress control": 10.0
   },
   "scenarios": {
+    "disposable.test_automation.WordPressServerCron": 150.0,
+    "disposable.test_cache.SiteObjectCache": 35.2,
     "disposable.test_cache.ValkeyInstall": 14.5,
     "disposable.test_catalog_update.CatalogRuntimeUpdate": 51.5,
     "disposable.test_catalog_update.CatalogRuntimeUpdateFailure": 25.6,
     "disposable.test_confidential_channel.ConfidentialChannelLifecycle": 2.9,
     "disposable.test_database_engine.DatabaseEngineMariaDB": 67.7,
     "disposable.test_database_engine.DatabaseEnginePostgreSQL": 42.4,
+    "disposable.test_fence.PHPFence": 95.0,
     "disposable.test_foundation.FoundationAdmission": 12.4,
     "disposable.test_foundation.FoundationSudoDiscovery": 18.6,
     "disposable.test_foundation.FoundationValidators": 14.6,
@@ -70,8 +73,6 @@
     "disposable.test_target_race.TwoControllerNativeLock": 47.5,
     "disposable.test_target_reconstruction.FreshControllerReconstruction": 87.3,
     "disposable.test_target_shape.JudgeByShape": 51.1,
-    "disposable.test_wordpress_create.WordPressCreateMariaDB": 135.1,
-    "disposable.test_cache.SiteObjectCache": 35.2,
-    "disposable.test_automation.WordPressServerCron": 150.0
+    "disposable.test_wordpress_create.WordPressCreateMariaDB": 135.1
   }
 }

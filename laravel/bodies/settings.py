@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 from laravel.bodies.common import (
     ENVIRONMENT_KEY,
@@ -27,6 +28,10 @@ from laravel.bodies.common import (
     user_command,
 )
 from sites.bodies.common import open_site_lock, result, setting, site_account, stage
+
+if TYPE_CHECKING:
+    # Assembled into this body by automation/bodies/source.py (Phase C #395).
+    from automation.bodies.units import fence, restore
 
 SECRET_PATH = re.compile(r"/run/barectl/secrets/[0-9a-f]{32}")
 SECRET_BYTES = 4096
@@ -194,6 +199,9 @@ def edit_environment(document: dict[str, object]) -> None:  # noqa: C901 - revie
             if action == "set" and key not in values:
                 result("refused", "settings_secret")
                 return
+        if not fence(document, settings.identifier):
+            result("refused", "automation_fence")
+            return
         stage("write")
         reviewed: list[dict[str, object]] = [
             {
@@ -217,6 +225,9 @@ def edit_environment(document: dict[str, object]) -> None:  # noqa: C901 - revie
             result("partial", "laravel_config")
             return
         stage("verify")
+        if not restore(document, settings.identifier):
+            result("partial", "automation_restore")
+            return
         result("succeeded")
     except ValueError, OSError, subprocess.TimeoutExpired:
         sys.stderr.write("barectl-problem " + "The environment could not be changed.\n")

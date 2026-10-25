@@ -43,7 +43,7 @@ that grammar is reported as unsupported and is never rewritten.
 
 ## Scheduled tasks
 
-A Laravel site's **Settings > Scheduled tasks** turns its scheduler on or off and offers **Run now**. Turning on and Run now need a verified Deploy or Roll back outcome for the current release, with no maintenance gate and no pending migrations; turning off is always available. The review states the one-hour run limit, the no-catch-up behaviour and the sub-minute and `runInBackground` limits in plain words ([automation](automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
+A site's **Settings > Scheduled tasks** shows the same state line as its Overview, including **Paused by an unfinished change** and **Background work is off while the site is in maintenance**, with one next action: choosing the state the work should have (the change asks; it never restores a remembered set). A Laravel site's card turns its scheduler on or off and offers **Run now**. Turning on and Run now need a verified Deploy or Roll back outcome for the current release, with no maintenance gate and no pending migrations; turning off is always available. The review states the one-hour run limit, the no-catch-up behaviour and the sub-minute and `runInBackground` limits in plain words ([automation](automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
 
 ## Permissions and discovery
 

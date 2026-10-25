@@ -8,6 +8,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 from django.utils import timezone
 
+from automation.testing import automation
 from bootstrap.standing import HostJudgment, Standing
 from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
@@ -123,6 +124,7 @@ class CatalogUpdateReviewTests(SimpleTestCase):
             {"alpha": "/etc/caddy/sites/alpha.caddy"},
             ObservationOutcome.OBSERVED,
             (),
+            automation(identifier="alpha"),
         )
 
     def test_review_names_the_exact_builds_services_and_affected_sites(self) -> None:
@@ -171,6 +173,7 @@ class CatalogUpdateReviewTests(SimpleTestCase):
             {},
             ObservationOutcome.OBSERVED,
             (),
+            automation(identifier="alpha"),
         )
         draft = update.review(evidence, PreparationInputs())
         self.assertTrue(draft.eligible)

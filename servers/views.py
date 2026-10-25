@@ -536,7 +536,10 @@ def _site_overview_context(
         from automation import presentation
 
         context["site_schedule_lines"] = presentation.lines(
-            state.snapshot.collected, site.identifier, state.snapshot.collected_at
+            state.snapshot.collected,
+            site.identifier,
+            state.snapshot.collected_at,
+            presentation.paused_change(server, site.identifier),
         )
     if context.get("has_wordpress"):
         context["site_wordpress_admin"] = f"{scheme}://{primary}/wp-admin/"

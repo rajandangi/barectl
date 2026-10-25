@@ -394,8 +394,12 @@ A calendar elapse that did not start a run because the previous run of the same 
 _Avoid_: Dropped run, missed cron
 
 **Fence**:
-The step that stops a site's automation slice, keeps it from starting, and proves the slice has no processes before a change to that site's code, schema, runtime or settings proceeds; its restore starts exactly the work the review declared ([automation](docs/automation.md#fencing-later-changes)).
-_Avoid_: Pause, maintenance mode
+The step that runtime-masks a site's automation units, stops its slice, and proves the slice has no processes before a change to that site's code, schema, runtime, settings or files proceeds. Its restore starts exactly the work the review declared, and only after the change verifies ([automation](docs/automation.md#fencing-site-changes)).
+_Avoid_: Pause, maintenance mode, lockdown
+
+**Paused by an unfinished change**:
+The site's own evidence that a change fenced its background work and did not finish: its automation units carry a runtime mask, or a maintenance page is up with boot activation off. It is read from the server, never from a Barectl marker or a remembered resume set, and the Overview offers one safe next action ([automation](docs/automation.md#status)).
+_Avoid_: Fenced flag, disabled flag, stale change
 
 ### Later phases
 

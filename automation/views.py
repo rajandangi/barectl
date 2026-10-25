@@ -71,7 +71,12 @@ def context_for_site(
         and site.state == SiteState.MANAGED
     )
     lines = (
-        presentation.lines(snapshot.collected, identifier, snapshot.collected_at)
+        presentation.lines(
+            snapshot.collected,
+            identifier,
+            snapshot.collected_at,
+            presentation.paused_change(server, identifier),
+        )
         if snapshot is not None and site is not None and site.application in APPLICATIONS
         else ()
     )

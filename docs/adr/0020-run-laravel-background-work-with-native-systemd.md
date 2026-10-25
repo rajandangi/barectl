@@ -1,6 +1,6 @@
 # Run Laravel background work with native systemd
 
-> Amended by [ADR 0036](0036-run-site-automation-in-per-site-slices-without-the-global-lock.md): scheduled ticks no longer take the global mutation lock; a site change stops the site's slice instead.
+> Amended by [ADR 0036](0036-run-site-automation-in-per-site-slices-without-the-global-lock.md): scheduled ticks no longer take the global mutation lock; a site change stops the site's slice instead. ADR 0036 also supersedes this record's lock-taking launcher and its cgroup-check-at-tick requirement: systemd runs one instance of a unit at a time, and the change that needs exclusivity runtime-masks the site's units and proves the slice empty before it mutates anything.
 
 Accepted for [v0.5](https://github.com/rajandangi/barectl/blob/9fee36c2aab356439c27e903454f16f6c96d5396/docs/v0.5.md), with implementation and qualification pending. Native systemd units own Laravel's supported minute scheduler and database queue worker. They continue without Barectl and are reconstructable through operative unit configuration and native state. No scheduler/worker agent, custom management journal or persistent Barectl helper is installed.
 

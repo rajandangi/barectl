@@ -14,6 +14,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
 from sites.bodies.common import open_site_lock, result, site_account, stage
 from wordpress.convention import (
@@ -24,6 +25,10 @@ from wordpress.convention import (
     valid_constant_key,
     write_as_site,
 )
+
+if TYPE_CHECKING:
+    # Assembled into this body by automation/bodies/source.py (Phase C #395).
+    from automation.bodies.units import fence, restore
 
 SECRET_PATH = re.compile(r"/run/barectl/secrets/[0-9a-f]{32}")
 SECRET_BYTES = 4096
@@ -157,6 +162,9 @@ def edit_constants(document: dict[str, object]) -> None:  # noqa: C901 - reviewe
             if action == "set" and key not in values:
                 result("refused", "settings_secret")
                 return
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
+            return
         stage("write")
         reviewed: list[dict[str, object]] = [
             {
@@ -179,6 +187,9 @@ def edit_constants(document: dict[str, object]) -> None:  # noqa: C901 - reviewe
             result("partial", "wordpress_settings")
             return
         stage("verify")
+        if not restore(document, identifier):
+            result("partial", "automation_restore")
+            return
         result("succeeded")
     except ValueError, OSError, subprocess.TimeoutExpired:
         sys.stderr.write("barectl-problem The private configuration could not be changed.\n")

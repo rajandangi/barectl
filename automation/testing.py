@@ -1,5 +1,6 @@
 """Stored and in-memory automation evidence for reviews, pages and recordings."""
 
+import json
 from dataclasses import replace
 from datetime import datetime
 
@@ -15,16 +16,40 @@ from discovery.snapshot import (
     SiteAccount,
     save_snapshot,
 )
+from discovery.ssh import CommandResult, RemoteShell
 from servers.models import Server
 from sites.bodies.common import NativeState, SiteRecord
 
-from . import convention
+from . import convention, observation
 from .observation import ObservedSchedule
 from .status import ScheduleStatus
 
 IDENTIFIER = "shop"
 DIGEST = "a" * 64
 BOOT = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
+
+
+class AutomationReplay:
+    """A replaying shell that also answers the reviewed fence's automation read.
+
+    A transcript is recorded with discovery's release inventory off, so it holds no
+    automation read and no automation units (docs/quality.md#recorded-transcripts). A test
+    that prepares a fenced change through the worker opts in here; every other command is
+    the transcript's own answer, and an unrecorded one still fails.
+    """
+
+    def __init__(self, inner: RemoteShell, value: dict[str, object] | None = None) -> None:
+        self._inner = inner
+        self._value = {"version": 2, "sites": []} if value is None else value
+
+    @property
+    def host_key(self) -> str:
+        return self._inner.host_key
+
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
+        if command == observation.read_command():
+            return CommandResult(0, json.dumps(self._value))
+        return self._inner.run(command, stdin)
 
 
 def show(
@@ -54,6 +79,7 @@ def show(
         "LastTriggerUSec": last_trigger,
         "NextElapseUSecRealtime": next_elapse,
         "ControlGroup": group,
+        "RefuseManualStart": "no",
     }
 
 

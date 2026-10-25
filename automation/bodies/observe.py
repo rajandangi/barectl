@@ -52,6 +52,7 @@ SHOW_PROPERTIES = (
     "LastTriggerUSec",
     "NextElapseUSecRealtime",
     "ControlGroup",
+    "RefuseManualStart",
 )
 SHOW_NAMES = ("service", "timer")
 SITE_NAME = re.compile(
