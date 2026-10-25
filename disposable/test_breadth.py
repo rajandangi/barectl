@@ -103,6 +103,37 @@ class BreadthCase(LaravelDeployCase):
         )
         self.assert_succeeded(line, unit)
 
+    def _wait_for_gate(self, *, timeout: float = 90) -> bool:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if self.https_status("/") == 503:
+                return True
+            time.sleep(0.3)
+        return False
+
+    def _assert_fenced(self, timer: str, service: str) -> None:
+        self.assertEqual(self.unit_property(timer, "RefuseManualStart"), "yes")
+        self.assertIn(self.unit_property(timer, "ActiveState"), ("inactive", "failed"))
+        self.assertNotIn(self.unit_property(timer, "UnitFileState"), ("enabled", "enabled-runtime"))
+        for name in (service, *self.worker_units()):
+            self.assertEqual(self.unit_property(name, "RefuseManualStart"), "yes", name)
+            self.assertNotIn(
+                self.unit_property(name, "ActiveState"), ("active", "activating"), name
+            )
+        for name in self.worker_units():
+            self.assertNotIn(
+                self.unit_property(name, "UnitFileState"), ("enabled", "enabled-runtime")
+            )
+
+    def _assert_resumed(self, timer: str, service: str) -> None:
+        self.assertEqual(self.unit_property(timer, "ActiveState"), "active")
+        self.assertIn("enabled", self.unit_property(timer, "UnitFileState"))
+        self.assertEqual(self.unit_property(service, "RefuseManualStart"), "no")
+        for unit in self.worker_units():
+            self.wait_active(unit)
+            self.assertIn("enabled", self.unit_property(unit, "UnitFileState"))
+            self.assertEqual(self.unit_property(unit, "RefuseManualStart"), "no")
+
     def ensure_scheduler(self) -> None:
         from automation.convention import timer_name
 
@@ -176,37 +207,6 @@ class RebootAutomation(BreadthCase):
 class GateFence(BreadthCase):
     """A Deploy and a Roll back pause the site's work while their gate is up."""
 
-    def _wait_for_gate(self, *, timeout: float = 90) -> bool:
-        end = time.monotonic() + timeout
-        while time.monotonic() < end:
-            if self.https_status("/") == 503:
-                return True
-            time.sleep(0.3)
-        return False
-
-    def _assert_fenced(self, timer: str, service: str) -> None:
-        self.assertEqual(self.unit_property(timer, "RefuseManualStart"), "yes")
-        self.assertIn(self.unit_property(timer, "ActiveState"), ("inactive", "failed"))
-        self.assertNotIn(self.unit_property(timer, "UnitFileState"), ("enabled", "enabled-runtime"))
-        for name in (service, *self.worker_units()):
-            self.assertEqual(self.unit_property(name, "RefuseManualStart"), "yes", name)
-            self.assertNotIn(
-                self.unit_property(name, "ActiveState"), ("active", "activating"), name
-            )
-        for name in self.worker_units():
-            self.assertNotIn(
-                self.unit_property(name, "UnitFileState"), ("enabled", "enabled-runtime")
-            )
-
-    def _assert_resumed(self, timer: str, service: str) -> None:
-        self.assertEqual(self.unit_property(timer, "ActiveState"), "active")
-        self.assertIn("enabled", self.unit_property(timer, "UnitFileState"))
-        self.assertEqual(self.unit_property(service, "RefuseManualStart"), "no")
-        for unit in self.worker_units():
-            self.wait_active(unit)
-            self.assertIn("enabled", self.unit_property(unit, "UnitFileState"))
-            self.assertEqual(self.unit_property(unit, "RefuseManualStart"), "no")
-
     def test_a_deploy_fences_the_work_and_restores_it_after_up(self) -> None:
         from automation import scheduler
         from automation.convention import service_name, timer_name
@@ -232,7 +232,12 @@ class GateFence(BreadthCase):
             line, unit, _ = running.result()
         self.assert_succeeded(line, unit)
         self.assertNotEqual(self.current_release(), previous)
-        self.assertTrue(self.served())
+        status = self.https_status("/")
+        self.assertEqual(
+            status,
+            200,
+            self.native(f"tail -n 30 {self.base()}/private/storage/logs/*.log 2>/dev/null || true"),
+        )
         self._assert_resumed(timer, service)
         # The restored scheduler runs the new release: Run now starts its installed service.
         line, unit, _ = self.apply(

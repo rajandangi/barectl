@@ -148,14 +148,15 @@ object cache on, requests the page once and waits two seconds before reading cgr
 
 | Class | Container limit | Cache instance | Worker 1 | Worker 2 | Whole container current / peak |
 | --- | --- | --- | --- | --- | --- |
-| `MemoryOneGiB` | 1 GiB | 9.1 MiB (9,527,296 B) | 35.0 MiB (36,696,064 B) | 33.3 MiB (34,926,592 B) | 523.5 / 543.0 MiB |
-| `MemoryTwoGiB` | 2 GiB | 4.2 MiB (4,407,296 B) | 33.2 MiB (34,779,136 B) | 33.1 MiB (34,729,984 B) | 454.0 / 478.3 MiB |
-| `MemoryFourGiB` | 4 GiB | 8.0 MiB (8,355,840 B) | 33.2 MiB (34,824,192 B) | 33.1 MiB (34,758,656 B) | 412.4 / 433.6 MiB |
+| `MemoryOneGiB` | 1 GiB | 4.2 MiB (4,415,488 B) | 33.2 MiB (34,783,232 B) | 33.6 MiB (35,201,024 B) | 355.6 / 374.9 MiB |
+| `MemoryTwoGiB` | 2 GiB | 4.4 MiB (4,599,808 B) | 33.0 MiB (34,648,064 B) | 33.3 MiB (34,930,688 B) | 363.5 / 383.1 MiB |
+| `MemoryFourGiB` | 4 GiB | 8.0 MiB (8,368,128 B) | 33.3 MiB (34,865,152 B) | 33.0 MiB (34,635,776 B) | 521.5 / 545.0 MiB |
 
 
 The instance's configured `maxmemory` is 64 MiB in every class, and the measured instance
 memory stays far below it because the site's cache is nearly empty. The workers carry a PHP
-process each and dominate the per-site cost. The whole-container figure includes page cache
+process each and dominate the per-site cost; the whole-container figure is mostly the
+prepared stack and page cache and moves with what the class had run before. The whole-container figure includes page cache
 and the prepared stack (MariaDB, Caddy, the Nix store on disk), so it is not additive with the
 per-unit figures.
 
