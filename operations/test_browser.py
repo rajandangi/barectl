@@ -1,7 +1,6 @@
 """The confirm screen and the run page in a browser: plain words by default, the full
 record under Show details and Logs, and keyboard-only confirmation (#179, #364)."""
 
-import re
 import tempfile
 from datetime import timedelta
 from typing import override
@@ -26,41 +25,7 @@ from operations.models import (
 )
 from servers.models import Server
 
-NATIVE_TERMS = (
-    "master",
-    "pool",
-    "fpm",
-    "haproxy",
-    "admission",
-    "caddy",
-    "nix",
-    "store path",
-    "catalog",
-    "socket",
-    "opcache",
-    "systemd",
-    "unit",
-    "invocation",
-    "journal",
-    "stage",
-    "standing",
-    "foundation",
-    "evidence",
-    "consent level",
-    "review",
-    "plan",
-    "digest",
-    "known_hosts",
-)
 STAGES = ("preflight", "Nix", "catalog", "Caddy", "journald", "verify")
-
-
-def native_terms_in(text: str) -> list[str]:
-    return [
-        term
-        for term in NATIVE_TERMS
-        if re.search(rf"(?<![\w-]){re.escape(term)}(?![\w-])", text, re.IGNORECASE)
-    ]
 
 
 def prepare(
@@ -122,7 +87,7 @@ class ConfirmAndRunBrowserTests(BrowserTestCase):
         expect(self.page.get_by_role("heading", name="Set up Production", level=1)).to_be_visible()
         expect(self.page.get_by_text("This change also touches these sites:")).to_be_visible()
         expect(self.page.get_by_text("alpha, beta").first).to_be_visible()
-        self.assertEqual(native_terms_in(self.page.locator("main").inner_text()), [])
+        self.assert_no_native_terms()
         # Show details is a closed accordion holding the full review.
         details = self.page.get_by_role("button", name="Show details", exact=True)
         expect(details).to_have_attribute("aria-expanded", "false")
@@ -181,7 +146,7 @@ class ConfirmAndRunBrowserTests(BrowserTestCase):
         expect(current).to_have_count(1)
         expect(current).to_contain_text("Installing")
         expect(current).to_contain_text("In progress")
-        self.assertEqual(native_terms_in(self.page.locator("main").inner_text()), [])
+        self.assert_no_native_terms()
         self.page.get_by_role("link", name="Logs", exact=True).click()
         expect(self.page.get_by_role("heading", name="Logs", level=2)).to_be_visible()
         expect(self.page.get_by_text("Systemd unit")).to_be_visible()
