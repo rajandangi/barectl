@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import override
 
 from django import forms
+from django.http import QueryDict
 
 from laravel import configuration as laravel_configuration
 
@@ -122,7 +123,7 @@ class HttpSiteForm(forms.Form):
         for name in self.errors:
             if name in self.fields:
                 widget = self.fields[name].widget
-                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+                widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error".strip()
 
     def clean_identifier(self) -> str:
         identifier: str = self.cleaned_data["identifier"]
@@ -148,6 +149,69 @@ def _derive_identifier(domain: str) -> str:
     if value and len(value) < 3:
         value += "site"
     return value
+
+
+CREATE_PLATFORMS: tuple[tuple[str, str], ...] = (
+    ("php", "PHP"),
+    ("wordpress", "WordPress"),
+    ("laravel", "Laravel"),
+)
+
+
+class CreateSiteForm(HttpSiteForm):
+    """The one Create site page: a platform, a PHP version and one or more domains.
+
+    WordPress and Laravel keep their own forms; this form only carries their tile so the
+    page can send the operator there. The site short name is derived from the first domain
+    and stays editable under More options (docs/dashboard-workflows.md).
+    """
+
+    platform = forms.ChoiceField(
+        choices=CREATE_PLATFORMS,
+        initial="php",
+        widget=forms.HiddenInput(),
+        error_messages={"invalid_choice": "Choose PHP, WordPress or Laravel."},
+    )
+
+    def __init__(
+        self,
+        data: Mapping[str, str] | None = None,
+        *,
+        php_versions: tuple[str, ...] = (),
+        installable: tuple[tuple[str, int], ...] = (),
+        initial: dict[str, object] | None = None,
+    ) -> None:
+        if data is not None:
+            values = (
+                data.getlist("names") if isinstance(data, QueryDict) else [data.get("names", "")]
+            )
+            base: dict[str, str] = {
+                key: value
+                for key, value in (
+                    data.dict() if isinstance(data, QueryDict) else dict(data)
+                ).items()
+                if isinstance(value, str)
+            }
+            data = {
+                **base,
+                "names": " ".join(value for value in values if value),
+                "platform": base.get("platform") or "php",
+            }
+        super().__init__(data, php_versions=php_versions, installable=installable, initial=initial)
+        self.fields["identifier"].required = False
+
+    @override
+    def clean_identifier(self) -> str:
+        identifier: str = self.cleaned_data["identifier"]
+        if not identifier:
+            names = self.cleaned_data.get("names")
+            if not names:
+                return ""
+            return _derive_identifier(str(names[0]))
+        problems = site_names.identifier_problems(identifier)
+        if problems:
+            raise forms.ValidationError(problems)
+        return identifier
 
 
 class SiteDomainsForm(forms.Form):
@@ -189,7 +253,7 @@ class SiteDomainsForm(forms.Form):
         for name in self.errors:
             if name in self.fields:
                 widget = self.fields[name].widget
-                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+                widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error".strip()
 
     def clean_names(self) -> tuple[str, ...]:
         try:
@@ -319,7 +383,7 @@ class LaravelSiteForm(forms.Form):
         for name in self.errors:
             if name in self.fields:
                 widget = self.fields[name].widget
-                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+                widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error".strip()
 
     def clean_identifier(self) -> str:
         identifier: str = self.cleaned_data["identifier"]
@@ -495,7 +559,7 @@ class WordPressSiteForm(forms.Form):
         for name in self.errors:
             if name in self.fields:
                 widget = self.fields[name].widget
-                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+                widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error".strip()
 
     def clean_identifier(self) -> str:
         identifier: str = self.cleaned_data["identifier"]
@@ -546,7 +610,7 @@ class SiteReadinessForm(forms.Form):
         for name in self.errors:
             if name in self.fields:
                 widget = self.fields[name].widget
-                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+                widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error".strip()
 
     def clean_readiness(self) -> str:
         path, problem = site_names.readiness_path(self.cleaned_data["readiness"])

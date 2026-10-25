@@ -46,31 +46,28 @@ class HttpSiteBrowserTests(BrowserTestCase):
         link = self.page.get_by_role("link", name="Create a site on Production", exact=True)
         link.focus()
         self.page.keyboard.press("Enter")
-        form = self.page.locator("#http-site-create")
-        names = form.get_by_label("DNS names", exact=True)
-        names.fill("shop.example.com")
-        identifier = form.get_by_label("Site identifier", exact=True)
+        form = self.page.locator("form.barectl-create-site")
+        domain = form.get_by_label("Domain", exact=True)
+        domain.fill("shop.example.com")
+        form.get_by_text("More options", exact=True).click()
+        identifier = form.get_by_label("Short name", exact=True)
         expect(identifier).to_have_value("shop")
         identifier.fill("myshop")
-        names.fill("second.example.com")
+        domain.fill("second.example.com")
         expect(identifier).to_have_value("myshop")
         identifier.fill("apply")
-        php = form.get_by_label("PHP runtime", exact=True)
-        php.select_option("php85")
-        expect(
-            form.get_by_role("button", name="Step 1: install PHP 8.5", exact=True)
-        ).to_be_visible()
-        php.select_option("php84")
-        button = form.get_by_role("button", name="Prepare HTTP site review", exact=True)
+        form.locator("#create-php-php85").check()
+        form.locator("#create-php-php84").check()
+        form.get_by_role("button", name="Add another domain", exact=True).click()
+        expect(form.locator('input[name="names"]')).to_have_count(2)
+        button = form.get_by_role("button", name="Continue", exact=True)
         button.focus()
         self.page.keyboard.press("Enter")
         expect(
             self.page.get_by_text("apply is reserved; choose another identifier.")
         ).to_be_visible()
-        expect(
-            self.page.get_by_role("heading", name="Create HTTP site", exact=True)
-        ).to_be_focused()
-        expect(form.get_by_label("Site identifier", exact=True)).to_have_value("apply")
+        expect(self.page.get_by_role("heading", name="Create site", exact=True)).to_be_focused()
+        expect(form.get_by_label("Short name", exact=True)).to_have_value("apply")
         self.assertEqual(len(self.console_errors), 1)
         self.assertIn("status of 422", self.console_errors.pop())
         self.page.set_viewport_size({"width": 375, "height": 812})
@@ -78,6 +75,93 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
+
+    def test_platform_tiles_are_available_and_more_options_hold_the_short_name(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/create/")
+        form = self.page.locator("form.barectl-create-site")
+        expect(form.locator("#create-platform-php")).to_be_checked()
+        expect(form.locator("#create-platform-wordpress")).to_be_enabled()
+        expect(form.locator("#create-platform-laravel")).to_be_enabled()
+        expect(form.get_by_text("Not available yet")).to_have_count(0)
+        expect(form.get_by_label("Domain", exact=True)).to_be_visible()
+        expect(form.get_by_label("Short name", exact=True)).to_be_hidden()
+        form.get_by_text("More options", exact=True).click()
+        expect(form.get_by_label("Short name", exact=True)).to_be_visible()
+        expect(form.get_by_text("Node.js version", exact=True)).to_be_visible()
+        expect(form.get_by_label("Serve over HTTP only", exact=True)).to_have_count(0)
+        expect(form.get_by_text("Database", exact=True)).to_have_count(0)
+        expect(form.get_by_text("Web server", exact=True)).to_have_count(0)
+
+    def test_create_site_with_php_installed_reaches_the_confirm_screen(self) -> None:
+        from operations.services import read_changes
+
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        self.page.goto(f"{self.live_server_url}/sites/")
+        self.page.get_by_role("link", name="Create a site on Production", exact=True).click()
+        form = self.page.locator("form.barectl-create-site")
+        form.get_by_label("Domain", exact=True).fill("shop.example.com")
+        form.get_by_role("button", name="Continue", exact=True).click()
+        expect(
+            self.page.get_by_role("heading", name="Create PHP site: review", exact=True)
+        ).to_be_visible()
+        rows = read_changes(server).rows
+        self.assertEqual(rows[0].preparation.kind_slug, "create_http_site")
+        self.assertEqual(rows[0].preparation.inputs["identifier"], "shop")
+
+    def test_a_missing_php_version_is_added_before_the_site(self) -> None:
+        from operations.services import read_changes
+        from sites.ui_testing import record_step_run
+
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/create/")
+        form = self.page.locator("form.barectl-create-site")
+        form.get_by_label("Domain", exact=True).fill("shop.example.com")
+        form.locator("#create-php-php85").check()
+        form.get_by_role("button", name="Continue", exact=True).click()
+        expect(
+            self.page.get_by_text("Step 1 of 2: add PHP 8.5 to this server", exact=True)
+        ).to_be_visible()
+        preparation = read_changes(server).rows[0].preparation
+        self.assertEqual(preparation.kind_slug, "add_runtime")
+        run = record_step_run(preparation)
+        self.page.goto(f"{self.live_server_url}/runs/{run.pk}/")
+        link = self.page.get_by_role("link", name="Continue to create the site", exact=True)
+        link.focus()
+        self.page.keyboard.press("Enter")
+        form = self.page.locator("form.barectl-create-site")
+        expect(form.get_by_label("Domain", exact=True)).to_have_value("shop.example.com")
+        expect(form.locator("#create-php-php85")).to_be_checked()
+        form.get_by_role("button", name="Continue", exact=True).click()
+        expect(
+            self.page.get_by_role("heading", name="Create PHP site: review", exact=True)
+        ).to_be_visible()
+
+    def test_create_site_reads_at_phone_width(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/create/")
+        self.assert_theme_and_components_initialized()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+        self.assertEqual(self.console_errors, [])
 
     def test_operator_prepares_the_laravel_site_change_without_ssh(self) -> None:
         from unittest import mock
@@ -359,28 +443,6 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.assert_theme_and_components_initialized()
         self.assertEqual(self.console_errors, [])
 
-    def test_discovery_poll_leaves_the_creation_field_focused(self) -> None:
-        from django.utils import timezone
-
-        from discovery.fakes import record_attempt
-        from discovery.models import DiscoveryAttempt
-
-        server = Server.objects.get(name="Production")
-        record_http_sites(server)
-        for codename in ("view_siteobservation", "view_changes", "change_site"):
-            self.user.user_permissions.add(Permission.objects.get(codename=codename))
-        attempt = record_attempt(server, DiscoveryAttempt.Status.QUEUED)
-        self.sign_in()
-        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
-        field = self.page.locator("#http-site-create").get_by_label("DNS names", exact=True)
-        field.focus()
-        with self.page.expect_response(lambda response: "/discovery/?" in response.url):
-            attempt.status = DiscoveryAttempt.Status.FAILED
-            attempt.finished_at = timezone.now()
-            attempt.save(update_fields=("status", "finished_at"))
-        expect(self.page.locator("#discovery")).not_to_have_attribute("hx-trigger", "every 2s")
-        expect(field).to_be_focused()
-
     def test_operator_prepares_the_real_registered_site_change_without_ssh(self) -> None:
         from unittest import mock
 
@@ -392,12 +454,13 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
-            form = self.page.locator("#http-site-create")
-            form.get_by_label("DNS names", exact=True).fill("shop.example.com www.shop.example.com")
-            form.get_by_label("PHP runtime", exact=True).select_option("php84")
-            expect(form.get_by_label("Serve over HTTP only", exact=True)).not_to_be_checked()
-            button = form.get_by_role("button", name="Prepare HTTP site review", exact=True)
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/create/")
+            form = self.page.locator("form.barectl-create-site")
+            form.get_by_label("Domain", exact=True).fill("shop.example.com")
+            form.get_by_role("button", name="Add another domain", exact=True).click()
+            form.locator('input[name="names"]').nth(1).fill("www.shop.example.com")
+            form.locator("#create-php-php84").check()
+            button = form.get_by_role("button", name="Continue", exact=True)
             button.focus()
             self.page.keyboard.press("Enter")
             expect(

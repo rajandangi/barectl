@@ -18,6 +18,12 @@
       </div>
     </div>
   {% endif %}
+  {% if run.succeeded and run.review.kind_slug == "host_foundation" and run.run.server_id and perms.operations.change_site %}
+    <p>
+      <a class="usa-button"
+         href="{% url 'server_site_create' run.run.server_id %}">Create site</a>
+    </p>
+  {% endif %}
   {% if run.unknown %}
     <div class="usa-alert usa-alert--error" id="outcome-unknown">
       <div class="usa-alert__body">

@@ -160,7 +160,7 @@ class CreateStepPageTests(ControllerConfigTestCase):
         self.assertEqual(rows[0].preparation.kind_slug, "add_runtime")
         self.assertEqual(rows[0].preparation.inputs, {"version": 1, "selection": "php85"})
         response = self.client.get(f"/changes/{rows[0].preparation.pk}/")
-        self.assertContains(response, "Step 1: install PHP 8.5 on this server")
+        self.assertContains(response, "Step 1 of 2: add PHP 8.5 to this server")
 
     def test_laravel_without_an_engine_installs_the_engine_the_operator_chose(self) -> None:
         record_http_sites(self.server)
