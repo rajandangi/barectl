@@ -34,6 +34,9 @@ class Kind(StrEnum):
     PHP = "php"
     NODE = "node"
     TOOL = "tool"
+    # A packaged PHP extension a site enables for its own master (ADR 0030). It is a
+    # catalog build a server realises, never a runtime profile it selects.
+    EXTENSION = "extension"
 
 
 @dataclass(frozen=True)

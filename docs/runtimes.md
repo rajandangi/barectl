@@ -26,6 +26,19 @@ No minimum host capacity is claimed. The host foundation's 4 GiB disk and 900 Mi
 
 The executable check follows the pinned [PHP extension wrapper](https://github.com/NixOS/nixpkgs/blob/7c8764b7c7b09b34f632464276218ef9090eaa11/pkgs/development/interpreters/php/generic.nix): the catalog output wraps FPM to preserve extension loading. Barectl compares the running executable with the resolved `.php-fpm-wrapped` inside that exact output, not the wrapper's configured `ExecStart` text alone. A restart during the diagnostic read makes that evidence unavailable.
 
+## PHP extensions
+
+The catalog also locks the Hydra-built `redis` extension package for each PHP runtime, as the entries `php84_redis` and `php85_redis` (6.3.0), without offering either as a runtime an operator adds. Each entry's shared object is `<build>/lib/php/extensions/redis.so` inside the exact store path the lock names. Barectl supplied phpredis from those entries when Phase C settled the object-cache client ([#390](https://github.com/rajandangi/barectl/issues/390)); Predis is not needed. The extension is inert until a site enables it, and enabling is per site.
+
+The extension cannot be named in a site's `php.ini`. `php-fpm -c <ini>` parses that file before the Nix wrapper's packaged `lib/php.ini`, so an `extension=<redis.so>` line there is dlopened before `session.so`, and phpredis fails with `undefined symbol: php_session_register_module`. The supported levers are both applied after the packaged ini:
+
+- the site pool and its diagnostic pool carry `php_admin_value[extension] = <locked redis.so>`, which FPM applies before it loads the extension for that pool's workers;
+- the site's `bin/php`, `bin/composer` and `bin/wp` wrappers pass `-dextension=<locked redis.so>` on the command line.
+
+`PHP_INI_SCAN_DIR` stays unset, and the runtime master's `php.ini` stays the mandatory OPcache protection set, so the diagnostic master is unchanged. Discovery requires the site pool, the diagnostic pool and all three wrappers to agree on the same catalog build, or none of them to name one; anything else is **Outside supported settings**. The fixed diagnostic probe lists `redis` in `extensions` when the client is loaded and still requires the OPcache protections, so a site's live client state is recognized from native evidence alone.
+
+Enabling or disabling the client is a Site review. Apply realises the locked extension with `nix-store --realise`, `max-jobs = 0` and `fallback = false` (a missing closure refuses with nothing changed), rewrites the two pool files and the three wrappers under the site lock, then restarts only that site's own PHP master and waits for its completed load and protection read. The restart waits out running requests under `process_control_timeout`, so requests to that site are refused while its master restarts; the measured window is recorded in [target architecture](target-architecture.md#object-cache). A PHP runtime switch keeps the client on the target runtime's locked build, and the CLI commands and master then load the same extension.
+
 ## Server command defaults
 
 Stack's Defaults section prepares separate Shared reviews for PHP and Node. The [server-default convention](runtime-defaults.md) owns command links, selected-interpreter wrappers, native refusal rules and reconstruction. Existing sites keep their own selections. New-site forms preselect only a fresh, verified observed PHP default.
