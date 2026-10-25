@@ -89,7 +89,7 @@ class HostFoundation(ScenarioTestCase):
             self.assertTrue(current.manageable, current.problem)
             self.assertEqual(current.master_state, "active")
             self.assertTrue(current.extensions)
-            self.assertContains(self.client.get(f"/servers/{server.pk}/stack/?tab=php"), entry)
+            self.assertContains(self.client.get(f"/servers/{server.pk}/advanced/?tab=php"), entry)
             self.client.post(
                 f"/servers/{server.pk}/changes/prepare/",
                 {"kind": runtime_change.SLUG, "selection": entry},
@@ -240,10 +240,13 @@ class HostFoundation(ScenarioTestCase):
                     self.assertEqual(refreshed.collected.standing.standing, Standing.TARGET_STACK)
                     self.assertContains(self.client.get(f"/servers/{server.pk}/"), "Ready")
                     self.assertContains(
-                        self.client.get(f"/servers/{server.pk}/stack/?tab=web"), "v2.11.7"
+                        self.client.get(f"/servers/{server.pk}/advanced/?tab=web"), "v2.11.7"
                     )
                     self.assertEqual(self.native("cat /run/foundation-admin-listeners").strip(), "")
-                    self.assertContains(self.client.get(f"/runs/{run.pk}/"), "Applied and verified")
+                    self.assertContains(
+                        self.client.get(f"/runs/{run.pk}/"),
+                        "Barectl finished this change and checked it on the server.",
+                    )
                     self.add_php_runtimes(server)
                     self.assertEqual(
                         self.client.post(

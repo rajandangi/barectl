@@ -112,7 +112,8 @@ servers and preselecting the only one.
 
 When the chosen PHP version is installed, Continue prepares Create site. When it is not,
 it prepares Add runtime first; that confirm screen says it is step one of two, and its
-successful run offers **Continue to create the site** with the same answers kept.
+successful run offers **Continue to create the site**, which prepares the Create site
+review directly with the same answers kept.
 
 Create site's confirm screen says what will happen: a site account, its folders, a
 placeholder page, the chosen PHP version and HTTP service. It names any affected sites
