@@ -1,0 +1,36 @@
+{% if php_runtime_incomplete %}
+  <div class="usa-alert usa-alert--warning" id="php-switch-incomplete">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">
+        <strong>
+          Changing PHP
+          {% if php_switch_back_number and site_php_current_label %}
+            from {{ php_switch_back_number }} to {{ site_php_current_label }}
+          {% endif %}
+          did not finish.
+        </strong>
+        Finish the switch or stay on the version the site had before.
+      </p>
+      {% if site_php_can_prepare %}
+        <div class="barectl-page-actions">
+          <form method="post"
+                action="{% url 'site_php_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <input type="hidden" name="selection" value="{{ site_php_current }}">
+            <button type="submit" class="usa-button">Finish the switch</button>
+          </form>
+          {% if php_switch_back %}
+            <form method="post"
+                  action="{% url 'site_php_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <input type="hidden" name="selection" value="{{ php_switch_back }}">
+              <button type="submit" class="usa-button usa-button--outline">
+                Stay on {{ php_switch_back_label }}
+              </button>
+            </form>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

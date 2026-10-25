@@ -35,7 +35,7 @@ journalctl -u 'barectl-apply-*' --since today
 
 ### Which PHP master serves a site
 
-The site's **Runtime** page in Barectl is the readable answer: it shows the recorded selection, and **Finish or reverse the PHP transition** when a switch stopped partway. Without Barectl, read the same evidence from HAProxy. `show servers state` prints the live state and `/var/lib/haproxy/sites/<id>.state` holds the persisted copy that `haproxy-site@<id>` restores when it restarts. Both have the same columns ([HAProxy 3.3 `show servers state`](https://docs.haproxy.org/3.3/management.html#9.3-show%20servers%20state)): the fourth, `srv_name`, is the runtime, the sixth is `srv_op_state` and the seventh is `srv_admin_state`.
+The site's **Settings** in Barectl is the readable answer: it shows the recorded selection, and **Finish or reverse the PHP change** when a switch stopped partway. Without Barectl, read the same evidence from HAProxy. `show servers state` prints the live state and `/var/lib/haproxy/sites/<id>.state` holds the persisted copy that `haproxy-site@<id>` restores when it restarts. Both have the same columns ([HAProxy 3.3 `show servers state`](https://docs.haproxy.org/3.3/management.html#9.3-show%20servers%20state)): the fourth, `srv_name`, is the runtime, the sixth is `srv_op_state` and the seventh is `srv_admin_state`.
 
 | `srv_op_state` `srv_admin_state` | Meaning |
 | --- | --- |
@@ -54,18 +54,18 @@ systemctl restart php-fpm@php84             # the runtime's diagnostic master; n
 systemctl restart nix-daemon
 ```
 
-Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Runtime** page, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)).
+Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Settings**, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)).
 
 ## After a change stopped partway
 
-A run that has not finished shows **Outcome being reconciled**. Until it is closed, Barectl runs no discovery and accepts no new review for that server: the server's page says that Barectl is running another remote operation, and the site's **Runtime** page links the run. Follow these steps in order.
+A run that has not finished shows **Outcome being reconciled**. Until it is closed, Barectl runs no discovery and accepts no new review for that server: the server's page says that Barectl is running another remote operation, and the site's **Settings** links the run. Follow these steps in order.
 
 1. Open the run's page in Barectl and choose **Check outcome**. It inspects the original unit and its journal and submits nothing new. A result line in the journal ends the run as succeeded, refused before any change, partly applied or failed. When systemd no longer has the unit and the journal has no result line, the outcome stays unknown: missing evidence is never taken as proof that nothing ran. If the journal holds the run's stage lines, the page says that the run reached the server and names the last stage it reported.
 2. Read the run's own record with `journalctl -u barectl-apply-<32 hex>`, the unit name on the run's page. Each run prints its stages as `barectl-stage <name>` lines and its result as one `barectl-result` line. A run that was killed shows its stage lines and systemd's `code=killed` line, without a result line. `systemctl status` shows the unit only while it runs.
 3. Read the paths the change touches with `ls -l`, `stat` and `cat` before changing anything.
 4. Close the run. A run whose outcome stays unknown closes only as **outcome unknown**, never as unchanged: choose **Close as outcome unknown** on its page. Barectl closes it only after it takes the mutation lock and proves that no barectl run has processes and that the run can no longer start, because the server restarted or the review's admission deadline passed on the server's clock. The page shows when the deadline passes; before then the run stays reconciling, and you acknowledge again afterwards.
 5. Choose **Refresh observations** on the server's page. Discovery reads the server as it is now.
-6. Prepare a new review. It proposes only what is missing; it never adopts or replaces a resource that differs from the convention. For a PHP selection, open the site's **Runtime** page, which shows **Finish or reverse the PHP transition**, choose the runtime to keep and prepare the review.
+6. Prepare a new review. It proposes only what is missing; it never adopts or replaces a resource that differs from the convention. For a PHP selection, open the site's **Settings**, which shows **Finish or reverse the PHP change**, choose the runtime to keep and prepare the review.
 
 The shared mutation lock is `/run/lock/barectl/mutation.lock`. It is empty, holds no state and disappears at reboot. Every run takes it with `flock`, whose helper process exits once the lock is taken, so `lslocks` and `/proc/locks` do not list the holder. This lists every process whose open lock file carries the lock, with its unit:
 
@@ -82,7 +82,7 @@ No output means no process holds it. Barectl's read-only commands take the lock 
 | Set up server | An Incomplete foundation. A new review keeps the stages that exist in their supported form and proposes the rest. A Nix installation that stopped inside the installer is refused as incomplete; follow the [official uninstall steps](https://nix.dev/manual/nix/2.35/installation/uninstall.html), then set up again. |
 | Add runtime | The profile may exist without a running, verified master. **Stack → PHP runtimes** names the problem, and a new review refuses while it remains. Check `systemctl status php-fpm@<runtime>`, fix the cause, restart the master and run discovery. A Node runtime starts no service. |
 | Create HTTP site | Part of the site's accounts, directories, configuration and services. Discovery reports the site as partly applied, and a new review creates only what is missing. A failed Caddy reload already restored the previous files. |
-| Site PHP selection | An incomplete transition: both masters may run, and HAProxy's state shows which serves ([which PHP master serves a site](#which-php-master-serves-a-site)). The site's **Runtime** page shows it; choose the intended runtime and prepare a fresh review to finish or reverse it. Barectl never kills remaining PHP work to complete a switch. |
+| Site PHP selection | An incomplete transition: both masters may run, and HAProxy's state shows which serves ([which PHP master serves a site](#which-php-master-serves-a-site)). The site's **Settings** shows it; choose the intended runtime and prepare a fresh review to finish or reverse it. Barectl never kills remaining PHP work to complete a switch. |
 | Site Node selection, server defaults | A mixed set of links. The page reports it as interrupted, and a new review repairs it. Barectl never overwrites a link or wrapper it does not recognize. |
 
 ## Unknown outcomes and reboots

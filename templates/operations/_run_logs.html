@@ -1,0 +1,142 @@
+{% with record=run.review %}
+  <section class="barectl-card" aria-labelledby="run-logs-heading">
+    <h2 id="run-logs-heading">Logs</h2>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Outcome</dt>
+        <dd>
+          {{ run.outcome }}
+        </dd>
+      </div>
+      <div>
+        <dt>Execution on the server</dt>
+        <dd>
+          {{ run.execution_label }}{% if run.refused_before_changes %}. The run stopped before making any requested change.{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Verification</dt>
+        <dd>
+          {{ run.verification_label }}
+        </dd>
+      </div>
+      <div>
+        <dt>Consent level</dt>
+        <dd>
+          {{ run.consent_label }}
+        </dd>
+      </div>
+      <div>
+        <dt>Last stage reported</dt>
+        <dd>
+          {% if run.run.progress_stage %}{{ run.run.progress_stage }}{% else %}None yet{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Systemd unit</dt>
+        <dd>
+          <code>{{ run.run.unit_name }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Invocation</dt>
+        <dd>
+          {% if run.run.invocation_id %}<code>{{ run.run.invocation_id }}</code>{% else %}Not recorded{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Connection</dt>
+        <dd>
+          {% if run.run.connection %}<code>{{ run.run.connection.target_label }}</code>, connection revision {{ run.run.connection.revision }}{% else %}<code>{{ run.run.ssh_alias }}</code>, connection revision 0{% endif %}
+        </dd>
+      </div>
+    </dl>
+    <h3>Stages</h3>
+    <ol class="usa-list">
+      {% for stage in record.document.stages %}
+        <li>{{ stage }}</li>
+      {% endfor %}
+    </ol>
+    <h3>Journal</h3>
+    <p>
+      The unit collects itself when it is done; its evidence lives in the server journal,
+      which ordinary administration reads with
+      <code>journalctl -u {{ run.run.unit_name }}</code>.
+    </p>
+    {% if run.run.closure_blocked %}
+      <div class="usa-alert usa-alert--info usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text"><strong>Not closed.</strong> {{ run.run.closure_blocked }}</p>
+        </div>
+      </div>
+    {% endif %}
+    {% if run.native_record_missing %}
+      <p class="barectl-note">
+        Barectl can close this run as <strong>outcome unknown</strong>, never as unchanged,
+        but only if it proves under the server's mutation lock that the run can no longer
+        start or still be running: the server restarted or the admission deadline passed on
+        its clock, the lock is free, and no barectl run has processes. The admission
+        deadline passes about
+        <time datetime="{{ record.admission_expires_at|date:'c' }}">{{ record.admission_expires_at|date:'M j, Y, H:i:s T' }}</time>.
+        Until then the run stays reconciling, and this server accepts no discovery or new
+        review.
+      </p>
+    {% endif %}
+    <h3>Audit</h3>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Requested by</dt>
+        <dd>
+          {{ run.requested_by }}, <time datetime="{{ run.run.queued_at|date:'c' }}">{{ run.run.queued_at|date:'M j, Y, H:i:s T' }}</time>
+        </dd>
+      </div>
+      <div>
+        <dt>Reviewed change</dt>
+        <dd>
+          {% if record.preparation_id %}
+            <a href="{% url 'change_detail' record.preparation_id %}">Review {{ record.pk }}</a>
+          {% else %}
+            Review {{ record.pk }} (preparation removed with its server)
+          {% endif %}
+          : {{ record.intent }}
+        </dd>
+      </div>
+      <div>
+        <dt>Effects</dt>
+        <dd>
+          <ul class="usa-list">
+            {% for effect in record.effects %}
+              <li>{{ effect.text }}</li>
+            {% endfor %}
+          </ul>
+        </dd>
+      </div>
+      <div>
+        <dt>Affected sites</dt>
+        <dd>{% if record.affected_sites %}{{ record.affected_sites|join:', ' }}{% else %}None named{% endif %}</dd>
+      </div>
+      {% if run.run.sites_acknowledged_at %}
+        <div>
+          <dt>Affected sites acknowledged</dt>
+          <dd>
+            {{ run.run.sites_acknowledged_by.get_username }},
+            <time datetime="{{ run.run.sites_acknowledged_at|date:'c' }}">{{ run.run.sites_acknowledged_at|date:'M j, Y, H:i:s T' }}</time>
+          </dd>
+        </div>
+      {% endif %}
+      {% if run.run.unknown_acknowledged_by_name %}
+        <div>
+          <dt>Outcome unknown acknowledged</dt>
+          <dd>
+            {{ run.run.unknown_acknowledged_by_name }},
+            <time datetime="{{ run.run.unknown_acknowledged_at|date:'c' }}">{{ run.run.unknown_acknowledged_at|date:'M j, Y, H:i:s T' }}</time>
+          </dd>
+        </div>
+      {% endif %}
+    </dl>
+    <p class="barectl-note">
+      This page reads this installation's record. It never establishes the server's current
+      state.
+    </p>
+  </section>
+{% endwith %}

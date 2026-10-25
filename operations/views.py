@@ -2,6 +2,7 @@
 (docs/adr/0035-one-change-engine-with-effect-derived-consent.md)."""
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from django.contrib import messages
@@ -27,8 +28,21 @@ from .forms import (
     SharedApplyForm,
 )
 from .inputs import InputShape
-from .models import MANAGE_SECRETS, VIEW_CHANGES, ChangePreparation, ChangeReview, Consent
-from .presentation import ChangeView, RunView, change_view, run_view
+from .models import (
+    MANAGE_SECRETS,
+    VIEW_CHANGES,
+    ChangePreparation,
+    ChangeReview,
+    Consent,
+)
+from .presentation import (
+    ChangeView,
+    NextAction,
+    RunView,
+    blocking_operation,
+    change_view,
+    run_view,
+)
 
 if TYPE_CHECKING:
     from sites.continuation import StepBanner
@@ -126,8 +140,7 @@ def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("server_changes", pk=pk)
     messages.success(
         request,
-        f"Barectl queued a review of {kind.label} for {server.name}. Nothing changes "
-        "until its review is applied.",
+        f"Barectl is checking {server.name} before it asks you to confirm. Nothing changes yet.",
     )
     return redirect("change_detail", operation_id=queued.pk)
 
@@ -140,17 +153,146 @@ def change_detail(request: HttpRequest, operation_id: int) -> HttpResponse:
     if row is None:
         raise Http404
     _may_view(request)
+    fragment = _is_fragment_request(request)
     view = change_view(row)
+    context = _change_context(request, row, view, fragment=fragment)
+    response = render(
+        request,
+        "operations/_change_status.html" if fragment else "operations/change.html",
+        context,
+    )
+    patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+    return response
+
+
+def _change_context(
+    request: HttpRequest,
+    row: services.ChangeRow,
+    view: ChangeView,
+    *,
+    fragment: bool = False,
+) -> dict[str, object]:
+    preparation = row.preparation
+    review = view.review
+    can_apply = _can_apply(request, view) and _server_can_prepare(preparation.server)
+    out_of_date = bool(
+        review is not None
+        and review.run_id is None
+        and (review.expired or review.connection_changed)
+    )
+    other = (
+        blocking_operation(server_state(preparation.server).other_operation)
+        if preparation.server is not None
+        else None
+    )
     context: dict[str, object] = {
         "change": view,
-        "server": row.preparation.server,
-        "can_apply": _can_apply(request, view) and _server_can_prepare(row.preparation.server),
+        "server": preparation.server,
+        "other_operation": other,
+        "can_apply": can_apply and other is None,
+        "out_of_date": out_of_date,
+        "apply_reason": (
+            "Another computer is changing this server."
+            if other is not None
+            else "" if can_apply or out_of_date else _apply_reason(request, view)
+        ),
+        "can_prepare_again": _can_prepare_again(request, preparation),
         "shared_form": SharedApplyForm(),
         "kind_form": ChangeApplyForm(),
         "confirmation_form": ChangeConfirmationForm(),
-        "creation_banner": _creation_banner(request, row.preparation, view=None),
+        "creation_banner": _creation_banner(request, preparation, view=None),
+        "focus_heading": fragment and not view.active,
     }
-    return render(request, "operations/change.html", context)
+    if fragment and not view.active:
+        context["announcement"] = "Barectl finished checking the server."
+    return context
+
+
+def _apply_reason(request: HttpRequest, view: ChangeView) -> str:
+    """Why the confirm screen shows no apply control, in one plain sentence."""
+    review = view.review
+    if review is None:
+        return ""
+    if review.run_id:
+        return "This change already ran."
+    if not review.eligible:
+        return "Barectl refused this change. Its reasons are under Show details."
+    if review.no_changes:
+        return "Barectl found nothing to change."
+    if not _server_can_prepare(
+        review.review.preparation.server if review.review.preparation else None
+    ):
+        return (
+            "Barectl has no current manageable observation of this server, so it will not "
+            "apply changes."
+        )
+    if not request.user.has_perms(review.permissions):
+        return "Your role may view this change but not apply it."
+    return ""
+
+
+def _can_prepare_again(request: HttpRequest, preparation: ChangePreparation) -> bool:
+    kind = engine.kind_of(preparation.kind_slug)
+    if kind is None or preparation.server is None:
+        return False
+    permissions = (
+        (*PREPARE_PERMISSIONS, MANAGE_SECRETS) if kind.writes_secrets else PREPARE_PERMISSIONS
+    )
+    return (
+        request.user.has_perm("servers.view_server")
+        and request.user.has_perms(permissions)
+        and _server_can_prepare(preparation.server)
+    )
+
+
+@require_POST
+@login_required
+def change_prepare_again(request: HttpRequest, operation_id: int) -> HttpResponse:
+    """Prepare a fresh confirmation of the same kind and inputs (#179, Journey 7).
+
+    A presentation convenience over the existing prepare service: the stored inputs are
+    read here, never from the POST, so a forged request cannot change what is prepared.
+    """
+    row = services.read_change(operation_id)
+    if row is None:
+        raise Http404
+    _may_view(request)
+    preparation = row.preparation
+    server = preparation.server
+    if server is None:
+        raise Http404
+    user = _user(request)
+    if not _can_prepare_again(request, preparation):
+        raise PermissionDenied
+    if not server_state(server).can_prepare_changes:
+        messages.error(
+            request,
+            "This server has no current manageable observation. Run discovery and resolve "
+            "any findings before preparing this change again.",
+        )
+        return redirect("change_detail", operation_id=operation_id)
+    try:
+        queued = services.request_prepare(
+            server, user, preparation.kind_slug, inputs=preparation.inputs
+        )
+    except ValueError:
+        messages.error(
+            request,
+            "Barectl cannot prepare this change again from its stored answers. Start it "
+            "again from the page that offers it.",
+        )
+        return redirect("change_detail", operation_id=operation_id)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if queued is None:
+        messages.warning(
+            request,
+            "Barectl is running another remote operation for this server. Prepare the "
+            "change again after it finishes.",
+        )
+        return redirect("change_detail", operation_id=operation_id)
+    messages.success(request, "Barectl is checking the server for a fresh confirmation.")
+    return redirect("change_detail", operation_id=queued.pk)
 
 
 def _creation_banner(
@@ -266,8 +408,8 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:  # no
         return redirect("change_detail", operation_id=operation_id)
     messages.success(
         request,
-        "Barectl queued the change for applying. Its outcome is established from the "
-        "server's native evidence.",
+        "Barectl started the change on the server. Its outcome is established from the "
+        "server itself.",
     )
     return redirect("run_detail", operation_id=requested.run.pk)
 
@@ -280,19 +422,36 @@ def run_detail(request: HttpRequest, operation_id: int) -> HttpResponse:
     if run is None:
         raise Http404
     _may_view(request)
-    return render(request, "operations/run.html", _run_context(request, run_view(run)))
+    view = run_view(run)
+    tab = "logs" if request.GET.get("tab") == "logs" else "progress"
+    return render(request, "operations/run.html", _run_context(request, view, tab=tab))
 
 
-def _run_context(request: HttpRequest, view: RunView) -> dict[str, object]:
+def _may_take(request: HttpRequest, action: NextAction, can_prepare_again: bool) -> bool:
+    if action.kind == "again":
+        return can_prepare_again
+    return not action.permission or request.user.has_perm(action.permission)
+
+
+def _run_context(
+    request: HttpRequest, view: RunView, *, tab: str = "progress"
+) -> dict[str, object]:
     run = view.run
     permissions = permissions_for(view.consent, writes_secrets=run.review.writes_secrets)
+    preparation = run.review.preparation
+    can_prepare_again = preparation is not None and _can_prepare_again(request, preparation)
+    plain = view.plain
+    if plain.next is not None and not _may_take(request, plain.next, can_prepare_again):
+        plain = replace(plain, next=None)
     return {
         "run": view,
+        "plain": plain,
         "server": run.server,
+        "tab": tab,
         "can_check": view.reconciling,
         "can_acknowledge": view.reconciling and request.user.has_perms(permissions),
         "acknowledge_form": AcknowledgeForm(),
-        "creation_banner": _creation_banner(request, run.review.preparation, view=view),
+        "creation_banner": _creation_banner(request, preparation, view=view),
     }
 
 
@@ -324,7 +483,7 @@ def run_check(request: HttpRequest, operation_id: int) -> HttpResponse:
         raise Http404
     _may_view(request)
     if services.request_check(operation_id):
-        messages.success(request, "Barectl queued a check of this run's native outcome.")
+        messages.success(request, "Barectl is checking what happened on the server.")
     else:
         messages.warning(request, "Only a run whose outcome is being reconciled can be checked.")
     return redirect("run_detail", operation_id=operation_id)
@@ -349,8 +508,8 @@ def run_acknowledge(request: HttpRequest, operation_id: int) -> HttpResponse:
     elif services.request_closure(operation_id, user):
         messages.success(
             request,
-            "Barectl queued a check that closes this run as outcome unknown only if it can "
-            "prove the run can no longer start or still be running.",
+            "Barectl will close this run as outcome unknown only if it can prove the run "
+            "can no longer start or still be running.",
         )
     else:
         messages.warning(

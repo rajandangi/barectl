@@ -44,9 +44,9 @@ class ActivityPageTests(ControllerConfigTestCase):
         run = record_run(preparation, age=timedelta(minutes=30))
         content = self.client.get("/activity/").content.decode()
         self.assertIn("Check the connection", content)
-        self.assertIn("Set up server", content)
+        self.assertIn("Set up DB", content)
         self.assertIn(f'href="/runs/{run.pk}/"', content)
-        self.assertLess(content.index("Set up server"), content.index("Check the connection"))
+        self.assertLess(content.index("Set up DB"), content.index("Check the connection"))
         self.assertIn("Applied", content)
 
     def test_a_change_without_a_run_links_to_its_confirm_screen(self) -> None:
@@ -62,7 +62,7 @@ class ActivityPageTests(ControllerConfigTestCase):
         preparation = record_change(self.web)
         content = self.client.get("/activity/").content.decode()
         self.assertIn("Check the connection", content)
-        self.assertNotIn("Set up server", content)
+        self.assertNotIn("Set up", content)
         self.assertNotIn(f"/changes/{preparation.pk}/", content)
 
     def test_the_server_filter_narrows_the_list_to_one_server(self) -> None:
@@ -70,7 +70,7 @@ class ActivityPageTests(ControllerConfigTestCase):
         record_attempt(self.web, DiscoveryAttempt.Status.SUCCEEDED)
         record_change(self.db)
         content = self.client.get("/activity/", {"server": self.db.pk}).content.decode()
-        self.assertIn("Set up server", content)
+        self.assertIn("Set up DB", content)
         self.assertNotIn("Check the connection", content)
 
     def test_the_site_filter_lists_only_that_site_s_changes(self) -> None:
@@ -94,7 +94,7 @@ class ActivityPageTests(ControllerConfigTestCase):
         record_change(self.db)
         content = self.client.get(f"/servers/{self.web.pk}/activity/").content.decode()
         self.assertIn("Check the connection", content)
-        self.assertNotIn("Set up server", content)
+        self.assertNotIn("Set up DB", content)
 
     def test_a_site_s_activity_lists_that_site_s_rows_from_the_same_list(self) -> None:
         record_http_sites(self.web)

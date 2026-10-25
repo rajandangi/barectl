@@ -1,4 +1,5 @@
 {% if site %}
+  {% include "sites/_site_switch_banner.html" %}
   <section class="barectl-card" aria-labelledby="site-overview-heading">
     <h2 id="site-overview-heading">Site</h2>
     {% if site_address and site.complete and not has_wordpress and not has_laravel %}
@@ -44,7 +45,7 @@
       <div>
         <dt>PHP version</dt>
         <dd>
-          {{ site.php_version|default:"Not observed" }}
+          {{ site_php_current_label|default:site.php_version|default:"Not observed" }}
         </dd>
       </div>
       <div>

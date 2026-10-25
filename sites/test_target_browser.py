@@ -111,7 +111,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         form.get_by_label("Domain", exact=True).fill("shop.example.com")
         form.get_by_role("button", name="Continue", exact=True).click()
         expect(
-            self.page.get_by_role("heading", name="Create PHP site: review", exact=True)
+            self.page.get_by_role("heading", name="Create shop.example.com", exact=True)
         ).to_be_visible()
         rows = read_changes(server).rows
         self.assertEqual(rows[0].preparation.kind_slug, "create_http_site")
@@ -146,7 +146,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         expect(form.locator("#create-php-php85")).to_be_checked()
         form.get_by_role("button", name="Continue", exact=True).click()
         expect(
-            self.page.get_by_role("heading", name="Create PHP site: review", exact=True)
+            self.page.get_by_role("heading", name="Create shop.example.com", exact=True)
         ).to_be_visible()
 
     def test_create_site_reads_at_phone_width(self) -> None:
@@ -184,7 +184,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             button.focus()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Create Laravel site: review", exact=True)
+                self.page.get_by_role("heading", name="Create shop.example.com", exact=True)
             ).to_be_visible()
         rows = read_changes(server).rows
         self.assertEqual(len(rows), 1)
@@ -223,7 +223,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             button.focus()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Create WordPress site: review", exact=True)
+                self.page.get_by_role("heading", name="Create shop.example.com", exact=True)
             ).to_be_visible()
         rows = read_changes(server).rows
         self.assertEqual(len(rows), 1)
@@ -274,7 +274,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             step.focus()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Install database engine: review", exact=True)
+                self.page.get_by_role("heading", name="Install MariaDB on Production", exact=True)
             ).to_be_visible()
         rows = read_changes(server).rows
         self.assertEqual(len(rows), 1)
@@ -304,7 +304,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         button.focus()
         self.page.keyboard.press("Enter")
         expect(
-            self.page.get_by_role("heading", name="Create WordPress site: review", exact=True)
+            self.page.get_by_role("heading", name="Create shop.example.com", exact=True)
         ).to_be_visible()
         rows = read_changes(server).rows
         self.assertEqual(rows[0].preparation.kind_slug, "create_wordpress_site")
@@ -332,15 +332,11 @@ class HttpSiteBrowserTests(BrowserTestCase):
             expect(https).not_to_be_checked()
             https.check()
             expect(https).to_be_checked()
-            button = self.page.get_by_role(
-                "button", name="Prepare domains and HTTPS review", exact=True
-            )
+            button = self.page.get_by_role("button", name="Change domains and HTTPS", exact=True)
             button.focus()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role(
-                    "heading", name="Change domains and HTTPS: review", exact=True
-                )
+                self.page.get_by_role("heading", name="Change domains and HTTPS", exact=True)
             ).to_be_visible()
         rows = read_changes(server).rows
         self.assertEqual(len(rows), 1)
@@ -405,7 +401,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.page.keyboard.press("Enter")
             expect(
                 self.page.get_by_role(
-                    "heading", name="Reset WordPress administrator password: review", exact=True
+                    "heading", name="Reset WordPress administrator password", exact=True
                 )
             ).to_be_visible()
         rows = read_changes(server).rows
@@ -432,7 +428,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         link.focus()
         self.page.keyboard.press("Enter")
         expect(self.page).to_have_url(
-            f"{self.live_server_url}/servers/{server.pk}/sites/delta/runtime/"
+            f"{self.live_server_url}/servers/{server.pk}/sites/delta/settings/"
         )
         for tab, table in (("web", "Caddy site files"), ("php", "PHP-FPM site pools")):
             self.page.goto(f"{self.live_server_url}/servers/{server.pk}/stack/?tab={tab}")
@@ -464,7 +460,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             button.focus()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Create PHP site: review", exact=True)
+                self.page.get_by_role("heading", name="Create shop.example.com", exact=True)
             ).to_be_visible()
         rows = read_changes(server).rows
         self.assertEqual(len(rows), 1)
@@ -479,7 +475,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             },
         )
         expect(
-            self.page.get_by_role("heading", name="Preparation queued", exact=True)
+            self.page.get_by_role("heading", name="Checking the server…", exact=True)
         ).to_be_visible()
 
     def test_operator_reviews_a_deploy_with_its_migration_acknowledgement(self) -> None:
@@ -503,7 +499,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             deploy.focus()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Deploy Laravel site: review", level=1)
+                self.page.get_by_role("heading", name="Deploy Laravel site", level=1)
             ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "deploy_laravel_site")
@@ -511,8 +507,10 @@ class HttpSiteBrowserTests(BrowserTestCase):
         record_deploy_review(preparation)
         self.page.reload()
         expect(
-            self.page.get_by_role("heading", name="Deploy Laravel site: review", level=1)
+            self.page.get_by_role("heading", name="Deploy Laravel site", level=1)
         ).to_be_visible()
+        # The full review, including the migrations setting, is under Show details.
+        self.page.get_by_role("button", name="Show details", exact=True).click()
         expect(self.page.get_by_text("Run pending migrations", exact=True)).to_be_visible()
         acknowledgement = self.page.get_by_label(MIGRATION_ACKNOWLEDGEMENT)
         acknowledgement.focus()
@@ -544,7 +542,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             rollback.focus()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Roll back Laravel site: review", level=1)
+                self.page.get_by_role("heading", name="Roll back Laravel site", level=1)
             ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "rollback_laravel_site")
@@ -555,7 +553,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         record_rollback_review(preparation)
         self.page.reload()
         expect(
-            self.page.get_by_role("heading", name="Roll back Laravel site: review", level=1)
+            self.page.get_by_role("heading", name="Roll back Laravel site", level=1)
         ).to_be_visible()
         expect(self.page.get_by_text(ROLLBACK_ACKNOWLEDGEMENT, exact=True)).to_be_visible()
         acknowledgement = self.page.get_by_label(ROLLBACK_ACKNOWLEDGEMENT)
@@ -600,7 +598,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             expect(button).to_be_focused()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Edit Laravel environment: review", level=1)
+                self.page.get_by_role("heading", name="Edit Laravel environment", level=1)
             ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "edit_laravel_environment")
@@ -645,7 +643,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             expect(button).to_be_focused()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Edit WordPress settings: review", level=1)
+                self.page.get_by_role("heading", name="Edit WordPress settings", level=1)
             ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "edit_wordpress_settings")
@@ -671,7 +669,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/runtime/")
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/settings/")
             self.page.get_by_label("Process manager", exact=True).select_option("static")
             self.page.get_by_label("Maximum child processes", exact=True).fill("8")
             self.page.get_by_label("Slow request log threshold (seconds)", exact=True).fill("10")
@@ -679,12 +677,12 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.page.get_by_label("Memory limit (MB)", exact=True).fill("256")
             self.page.get_by_label("Maximum upload size (MB)", exact=True).fill("64")
             self.page.get_by_label("Maximum post size (MB)", exact=True).fill("64")
-            button = self.page.get_by_role("button", name="Review PHP settings", exact=True)
+            button = self.page.get_by_role("button", name="Change PHP settings", exact=True)
             button.focus()
             expect(button).to_be_focused()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Change site PHP settings: review", level=1)
+                self.page.get_by_role("heading", name="Change site PHP settings", level=1)
             ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "set_site_pool")
@@ -724,7 +722,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             expect(button).to_be_focused()
             self.page.keyboard.press("Enter")
             expect(
-                self.page.get_by_role("heading", name="Install database engine: review", level=1)
+                self.page.get_by_role("heading", name="Install MariaDB on Production", level=1)
             ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "install_database_engine")
@@ -750,13 +748,11 @@ class HttpSiteBrowserTests(BrowserTestCase):
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
             self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/settings/")
             expect(self.page.get_by_text("No backup exists", exact=True)).to_be_visible()
-            button = self.page.get_by_role("button", name="Prepare removal review", exact=True)
+            button = self.page.get_by_role("button", name="Remove site", exact=True)
             button.focus()
             expect(button).to_be_focused()
             self.page.keyboard.press("Enter")
-            expect(
-                self.page.get_by_role("heading", name="Remove site: review", level=1)
-            ).to_be_visible()
+            expect(self.page.get_by_role("heading", name="Remove site", level=1)).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "remove_site")
         self.assertEqual(
@@ -765,9 +761,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         )
         record_removal_review(preparation)
         self.page.reload()
-        expect(
-            self.page.get_by_role("heading", name="Remove site: review", level=1)
-        ).to_be_visible()
+        expect(self.page.get_by_role("heading", name="Remove site", level=1)).to_be_visible()
         label = "Type alpha.example.com to confirm this removal."
         expect(self.page.get_by_text(label, exact=True)).to_be_visible()
         confirmation = self.page.get_by_label(label, exact=True)

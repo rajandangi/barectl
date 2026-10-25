@@ -1,0 +1,63 @@
+<section class="barectl-card" aria-labelledby="site-php-version-heading">
+  <h2 id="site-php-version-heading">PHP version</h2>
+  <p>
+    PHP version:
+    {% if site_php_current_label %}
+      <strong>{{ site_php_current_label }}</strong>
+    {% else %}
+      not selected
+    {% endif %}
+  </p>
+  {% if php_runtime_incomplete %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          Changing this site's PHP version did not finish. Choose the version you want to
+          keep and confirm a fresh change to finish or reverse it.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+  {% if site_php_can_prepare %}
+    {% if request.GET.change == "php" or php_runtime_incomplete %}
+      <form class="usa-form"
+            id="change-php"
+            method="post"
+            action="{% url 'site_php_prepare' server.pk identifier %}">
+        {% csrf_token %}
+        <fieldset class="usa-fieldset">
+          <legend class="usa-legend">
+            {% if php_runtime_incomplete %}Finish or reverse the PHP change{% else %}Change PHP version{% endif %}
+          </legend>
+          {% for choice in site_php_choices %}
+            <div class="usa-radio">
+              <input class="usa-radio__input usa-radio__input--tile"
+                     type="radio"
+                     name="selection"
+                     id="site-php-{{ choice.entry }}"
+                     value="{{ choice.entry }}"
+                     {% if request.GET.selection == choice.entry %}checked{% endif %}>
+              <label class="usa-radio__label" for="site-php-{{ choice.entry }}">
+                {{ choice.label }}
+                {% if choice.download %}<span class="barectl-radio__description">{{ choice.download }}</span>{% endif %}
+              </label>
+            </div>
+          {% endfor %}
+        </fieldset>
+        <button class="usa-button" type="submit">Continue</button>
+      </form>
+    {% else %}
+      <p>
+        <a class="usa-button usa-button--secondary"
+           href="?change=php#change-php">Change PHP version</a>
+      </p>
+    {% endif %}
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Change the PHP version after it finishes." %}
+  {% else %}
+    <p class="barectl-note">
+      Changing the PHP version is unavailable until a fresh check confirms this site is
+      managed.
+    </p>
+  {% endif %}
+</section>

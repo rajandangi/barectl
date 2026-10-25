@@ -129,10 +129,16 @@ if TYPE_CHECKING:
         Consent,
         RemoteOperation,
     )
-    from operations.presentation import ReviewView, RunOutcome, RunView
+    from operations.presentation import PlainStep, ReviewView, RunOutcome, RunView
+    from operations.test_pages import _DefaultText
     from runtimes.apps import RuntimesConfig
     from runtimes.bodies.update import update_catalog
-    from runtimes.presentation import ShownBuild, ShownCatalog
+    from runtimes.presentation import (
+        ShownBuild,
+        ShownCatalog,
+        ShownPhpAddition,
+        ShownPhpVersion,
+    )
     from servers.apps import ServersConfig
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
@@ -305,6 +311,11 @@ if TYPE_CHECKING:
         _shown_build.language,
         _shown_build.unpacked_size,
     )
+    # Server Settings lists each installed PHP version and each missing one.
+    _settings_runtimes = (
+        ShownPhpVersion("", "", "", (), False, False).sites_phrase,
+        ShownPhpAddition("", "", 0).download_phrase,
+    )
     # The Status poll token keys the discovery fragment.
     _discovery_views = (DiscoveryState.poll_token,)
     # The run page's template reads these properties.
@@ -312,6 +323,14 @@ if TYPE_CHECKING:
         RunView.native_record_missing,
         RunView.execution_label,
         RunView.verification_label,
+    )
+    # Progress renders each plain step's state label; no Python code reads it.
+    _plain_steps = (PlainStep("", "", False).state_label,)
+    # HTMLParser calls these hooks while the page test collects default-visible text.
+    _default_text_parser = (
+        _DefaultText.handle_starttag,
+        _DefaultText.handle_endtag,
+        _DefaultText.handle_data,
     )
     # Form metaclasses collect declared fields and Meta options; templates render the search
     # field as form.q.

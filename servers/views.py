@@ -299,9 +299,7 @@ def _advanced_section(
         snapshot = state.snapshot
         requested_tab = request.GET.get("tab", "web")
         stack_tab = (
-            requested_tab
-            if requested_tab in {"web", "services", "catalog", "php", "defaults"}
-            else "web"
+            requested_tab if requested_tab in {"web", "services", "catalog", "php"} else "web"
         )
         context["stack_tab"] = stack_tab
         standing = snapshot.collected.standing if snapshot else None
@@ -336,9 +334,6 @@ def _advanced_section(
         context["can_clean_up"] = (
             request.user.has_perms(PREPARE_PERMISSIONS) and state.can_prepare_changes
         )
-        from runtimes.defaults_views import context_for_server
-
-        context.update(context_for_server(state.server, request.user))
         runtime_rows = shown_runtimes(snapshot.collected) if snapshot else ()
         runtime_updates = shown_updates(snapshot.collected, runtime_rows) if snapshot else ()
         context["runtime_profiles"] = runtime_rows
@@ -382,8 +377,10 @@ def server_page(
         from bootstrap.certificate_email_views import context_for_server
         from databases import engine as database_engine
         from databases.presentation import panel
+        from runtimes.defaults_views import context_for_server as runtime_context_for_server
 
         context.update(context_for_server(server, request.user, state))
+        context.update(runtime_context_for_server(state, request.user))
         context["database_panel"] = (
             panel(state.snapshot.collected) if state.snapshot is not None else None
         )
@@ -571,6 +568,10 @@ def site_page_response(
     target_site = page.site is not None and page.site.file.startswith("/etc/caddy/sites/")
     context["target_site"] = target_site
     _target_site_context(page, state, section, context)
+    if target_site and section == "overview":
+        from sites.php_views import context_for_site as php_overview_context
+
+        context.update(php_overview_context(server, identifier, request.user))
     if target_site and section == "settings":
         from sites.domains_views import context_for_site as domains_context_for_site
         from sites.node_views import context_for_site
