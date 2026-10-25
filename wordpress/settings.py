@@ -46,6 +46,7 @@ BODY_SOURCE: Final = (
         "    private_configuration_path,\n"
         "    private_configuration_problem,\n"
         "    valid_constant_key,\n"
+        "    write_as_site,\n"
         ")\n",
         "",
     )

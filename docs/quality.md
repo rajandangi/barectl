@@ -153,6 +153,8 @@ The full build reports controller-fast and fast-validators separately and their 
 
 ### Lanes and scenarios
 
+Snapshot layers are keyed by the code that builds them: L1 is the real S1 foundation, L2 adds one plain site the product created, L3 adds MariaDB and one WordPress site (created after the engine, because a package transaction's `daemon-reload` would otherwise leave an existing site proxy unverifiable), and L4 adds the masked Valkey package and the site's phpredis client so a cache scenario stays a small item. A missing layer is prepared through the real product flow and cached like the others.
+
 A scenario is a Django test class tagged `scenario` (excluded from the fast layer) declaring the snapshot layer it needs, whether it needs a server of its own, the name prefix for every resource it creates, and the checkpoint states it records. Non-exclusive scenarios share one server per lane in sequence, each prefixed and followed by a residue check; a failed scenario or residue check discards the server, so the next scenario gets a fresh one. A residue check waits for a removed pool's workers before deleting the account. A lane's server joins only an `--internal` network, so it has no egress and only Docker's aliased names resolve; the harness reaches its SSH through a dual-homed forwarder, and the runner refuses an item that asks for a name no mirror serves, naming the host. `run-scenarios.sh -- --check-egress` proves that refusal with a scenario that deliberately looks one up. The number of lanes is `min(floor(CPUs / 1.75), floor(Docker VM GiB / 0.5))`, or `--lanes` / `BARECTL_NATIVE_LANES`.
 
 ### Limits

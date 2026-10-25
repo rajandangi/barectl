@@ -65,6 +65,16 @@
         </dd>
       </div>
     </dl>
+    {% if site_cache_line %}
+      <p id="site-cache-line">{{ site_cache_line }}</p>
+      {% if site_cache_can_read %}
+        <form method="post"
+              action="{% url 'site_object_cache_read' server.pk identifier %}">
+          {% csrf_token %}
+          <button type="submit" class="usa-button usa-button--outline">Check the cache</button>
+        </form>
+      {% endif %}
+    {% endif %}
     <p>
       Upload your code to <code>{{ site_upload_path }}</code> as <code>{{ site_user }}</code>.
     </p>

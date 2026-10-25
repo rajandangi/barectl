@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet
@@ -16,6 +16,9 @@ from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
 from servers.models import Server
 from sites.bodies.pool import SitePool
+
+if TYPE_CHECKING:
+    from cache.models import CacheObservation
 
 from .models import (
     ComponentObservation,
@@ -173,6 +176,23 @@ class ObservedRelease:
 
 
 @dataclass(frozen=True)
+class ObservedCache:
+    """One site's object cache, from the instance and the application's own files.
+
+    ``state`` is ``off``, ``on``, ``partial`` or ``unsupported``; the controller never
+    keeps a cache's contents, only this observation and an on-demand reading.
+    """
+
+    identifier: str
+    state: str
+    memory_mib: int | None = None
+    problem: str = ""
+    plugin_version: str = ""
+    client: str = ""
+    unit_state: str = ""
+
+
+@dataclass(frozen=True)
 class CollectedSnapshot:
     """Scalar values are ``None`` unless observed."""
 
@@ -192,6 +212,10 @@ class CollectedSnapshot:
     )
     # The keys and server-computed digests of each site's private settings file.
     settings: Observation[tuple[ObservedSetting, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
+    # Each site's object cache instance and application wiring (Phase C #392).
+    cache: Observation[tuple[ObservedCache, ...]] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
     )
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
@@ -258,6 +282,9 @@ def save_snapshot(
         settings_status=collected.settings.outcome,
         settings_source=_joined(collected.settings.source),
         settings_warning=collected.settings.warning,
+        cache_status=collected.cache.outcome,
+        cache_source=_joined(collected.cache.source),
+        cache_warning=collected.cache.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -340,6 +367,7 @@ def save_snapshot(
         for unit in observed.service.value
     )
     _save_sites(snapshot, collected.sites.value)
+    _save_cache(snapshot, collected.cache.value)
     _save_releases(snapshot, collected.releases.value)
     _save_settings(snapshot, collected.settings.value)
     # The history of a server's discovery stays on its attempts.
@@ -385,8 +413,27 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             application=site.application,
             application_version=site.application_version,
             application_problem=site.application_problem,
+            client=site.client,
         )
         for site in sites
+    )
+
+
+def _save_cache(snapshot: DiscoverySnapshot, cache: tuple[ObservedCache, ...]) -> None:
+    from cache.models import CacheObservation
+
+    CacheObservation.objects.bulk_create(
+        CacheObservation(
+            snapshot=snapshot,
+            identifier=row.identifier,
+            state=row.state,
+            memory_mib=row.memory_mib,
+            problem=row.problem,
+            plugin_version=row.plugin_version,
+            client=row.client,
+            unit_state=row.unit_state,
+        )
+        for row in cache
     )
 
 
@@ -429,6 +476,7 @@ _OBSERVATION_ROWS = (
     "components",
     "components__service_units",
     "sites",
+    "cache",
     "releases",
     "settings",
 )
@@ -532,6 +580,12 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             row.sites_warning,
             tuple(_read_site(site) for site in row.sites.all()),
         ),
+        cache=Observation(
+            ObservationOutcome(row.cache_status),
+            _reads(row.cache_source),
+            row.cache_warning,
+            tuple(_read_cache(item) for item in row.cache.all()),
+        ),
         releases=Observation(
             ObservationOutcome(row.releases_status),
             _reads(row.releases_source),
@@ -597,6 +651,18 @@ def _read_pairs(text: str) -> tuple[tuple[str, str], ...]:
     )
 
 
+def _read_cache(row: CacheObservation) -> ObservedCache:
+    return ObservedCache(
+        row.identifier,
+        row.state,
+        row.memory_mib,
+        row.problem,
+        row.plugin_version,
+        row.client,
+        row.unit_state,
+    )
+
+
 def _read_site(row: SiteObservation) -> ObservedSite:
     account = (
         SiteAccount(row.uid, row.gid, row.home, row.shell)
@@ -620,6 +686,7 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         application=row.application,
         application_version=row.application_version,
         application_problem=row.application_problem,
+        client=row.client,
     )
 
 

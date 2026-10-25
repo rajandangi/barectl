@@ -30,7 +30,10 @@ The WordPress settings section lists the extra named constants in `private/wp-co
 The values are never shown and are write-only. Barectl owns the fixed part of that file and
 refuses these names in the extra block: the eight salts, the database settings, `ABSPATH`,
 `DISABLE_WP_CRON` and every `WP_REDIS_*` constant reserved for Phase C
-([automation specification](https://github.com/rajandangi/barectl/issues/357)).
+([automation specification](https://github.com/rajandangi/barectl/issues/357)). The three
+cache constants (`WP_REDIS_SCHEME`, `WP_REDIS_PATH`, `WP_REDIS_PREFIX`) are written and
+removed only by the site's Object cache change, with fixed values, and are never editable
+here ([object cache](object-cache.md#wordpress-wiring-and-ordering)).
 
 The same review and confidential-channel path applies. The apply rewrites only the changed
 constant lines, leaves the fixed Barectl block and every untouched line byte-identical, and

@@ -41,6 +41,7 @@ class RemoteOperation(models.Model):
         DISCOVERY = "discovery", "Discovery"
         CHANGE_PREPARATION = "change_preparation", "Change preparation"
         CHANGE_APPLY = "change_apply", "Change apply"
+        CACHE_READING = "cache_reading", "Object cache reading"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
@@ -94,6 +95,7 @@ class RemoteOperation(models.Model):
                         "discovery",
                         "change_preparation",
                         "change_apply",
+                        "cache_reading",
                     ]
                 ),
                 name="remote_operation_kind_known",

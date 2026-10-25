@@ -74,13 +74,13 @@ site its current release and **Deploy**.
 
 | Section | What it holds |
 | --- | --- |
-| Overview (default) | Address, platform, PHP version, status, last checked time and upload path. |
+| Overview (default) | Address, platform, PHP version, status, last checked time, upload path, and — for a WordPress site — one line for its object cache with **Check the cache** ([object cache](object-cache.md#reading-the-cache-on-demand)). |
 | Activity | The site's changes, newest first. |
 | Database | The site's database binding, or the review that adds one ([databases](databases.md)). |
 | Deployments | A Laravel site's releases, **Deploy** and **Roll back** ([deploying](sites.md#deploying-a-laravel-site)). |
 | Environment | A Laravel site's environment keys ([settings](settings.md)). |
 | WordPress | A WordPress site's constants, password reset and core verification ([WordPress](wordpress.md#actions)). |
-| Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, PHP settings and the readiness path, domains and HTTPS, and **Remove site**. |
+| Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, **Object cache** for a WordPress site with its state, **Turn on object cache**, **Turn off object cache** and **Check the cache**, PHP settings and the readiness path, domains and HTTPS, and **Remove site** ([object cache](object-cache.md#a-sites-own-cache-implemented-392)). |
 | Logs | Native detail: the site account and paths, its file, missing paths, observed facts, the installed runtime diagnostics, masters, protections and a link to the server's pools. |
 
 A version this server does not have is marked **Installed first**. Choosing it prepares Add
