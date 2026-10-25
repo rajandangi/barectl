@@ -493,7 +493,26 @@ def _connected(settings: dict[str, object], version: str) -> bool:
     return all(line in text for line in required) and f"Plugin Version: {version}" in text
 
 
-def _restart_site_workers(identifier: str) -> bool:
+def _fenced_units(document: dict[str, object], identifier: str) -> bool:
+    """Whether the reviewed fence plan stops this site's own services.
+
+    A fenced cache change stops the site's workers before it edits the environment, so a
+    restart here would start a masked unit and fail; ``restore`` starts exactly the reviewed
+    work again, on the new environment, after the change verifies.
+    """
+    plan = document.get("automation_fence")
+    if not isinstance(plan, dict):
+        return False
+    for entry in plan.get("sites", []):
+        if isinstance(entry, dict) and entry.get("identifier") == identifier:
+            services = entry.get("services")
+            return isinstance(services, list) and bool(services)
+    return False
+
+
+def _restart_site_workers(document: dict[str, object], identifier: str) -> bool:
+    if _fenced_units(document, identifier):
+        return True
     restarted, succeeded = restart_workers(identifier)
     if restarted:
         stage("workers")
@@ -540,7 +559,7 @@ def _apply_laravel(  # noqa: C901 - one reviewed sequence
                 return "partial", "object_cache_wiring"
             if not _laravel_config(settings):
                 return "partial", "laravel_config"
-            if not _restart_site_workers(identifier):
+            if not _restart_site_workers(document, identifier):
                 return "partial", "laravel_worker"
         stage("verify")
         after = _instance_row(identifier)
@@ -575,7 +594,7 @@ def _apply_laravel(  # noqa: C901 - one reviewed sequence
             changed = True
         if not _laravel_config(settings):
             return "partial", "laravel_config"
-        if not _restart_site_workers(identifier):
+        if not _restart_site_workers(document, identifier):
             return "partial", "laravel_worker"
     stage("stop")
     _remove_instance(identifier)

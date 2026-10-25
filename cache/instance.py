@@ -21,6 +21,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final, cast
 
+from automation import fence as automation_fence
 from automation.bodies.source import AUTOMATION_SOURCE
 from discovery.root_read import run_root
 from discovery.snapshot import CollectedSnapshot, ObservedCache, ObservedSite
@@ -1329,6 +1330,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
             "previous_store",
         )
     }
+    payload["automation_fence"] = automation_fence.checked(document)
     from base64 import b64encode
     from gzip import compress
 

@@ -1,20 +1,21 @@
 {
-  "recorded": "hosted Native amd64, run 40066133079 at 9f42ba8, 2026-10-24",
+  "recorded": "hosted Native amd64, run 40201880046 at bcaf565, plus local arm64 item times measured 2026-10-26",
   "stages": {
     "egress control": 10.0,
     "validators": 110.0
   },
   "scenarios": {
-    "disposable.test_automation.WordPressServerCron": 150.0,
-    "disposable.test_automation.LaravelQueueWorkers": 150.0,
-    "disposable.test_cache.SiteObjectCache": 35.2,
-    "disposable.test_cache.ValkeyInstall": 14.5,
+    "disposable.test_automation.LaravelQueueWorkers": 66.6,
+    "disposable.test_automation.WordPressServerCron": 83.0,
+    "disposable.test_cache.LaravelObjectCache": 13.1,
+    "disposable.test_cache.SiteObjectCache": 50.8,
+    "disposable.test_cache.ValkeyInstall": 27.7,
     "disposable.test_catalog_update.CatalogRuntimeUpdate": 51.5,
     "disposable.test_catalog_update.CatalogRuntimeUpdateFailure": 25.6,
     "disposable.test_confidential_channel.ConfidentialChannelLifecycle": 2.9,
     "disposable.test_database_engine.DatabaseEngineMariaDB": 67.7,
     "disposable.test_database_engine.DatabaseEnginePostgreSQL": 42.4,
-    "disposable.test_fence.PHPFence": 95.0,
+    "disposable.test_fence.PHPFence": 94.0,
     "disposable.test_foundation.FoundationAdmission": 12.4,
     "disposable.test_foundation.FoundationSudoDiscovery": 18.6,
     "disposable.test_foundation.FoundationValidators": 14.6,
@@ -43,7 +44,7 @@
     "disposable.test_l0_discovery.PlainL0Discovery": 8.2,
     "disposable.test_laravel_create.LaravelCreateMariaDB": 86.0,
     "disposable.test_laravel_deploy.LaravelDeployBootFailure": 66.3,
-    "disposable.test_laravel_deploy.LaravelDeployMariaDB": 170.0,
+    "disposable.test_laravel_deploy.LaravelDeployMariaDB": 51.7,
     "disposable.test_laravel_deploy.LaravelDeployOutcomes": 110.9,
     "disposable.test_laravel_deploy.LaravelDeployPostgreSQL": 56.8,
     "disposable.test_laravel_releases.LaravelReleaseReconstruction": 40.3,
@@ -67,6 +68,7 @@
     "disposable.test_runtime_retention.RuntimeClientRetention": 3.4,
     "disposable.test_runtimes.RuntimeNativeBehavior": 119.8,
     "disposable.test_runtimes.RuntimeSmallHost": 20.3,
+    "disposable.test_scheduler.LaravelScheduler": 24.5,
     "disposable.test_site_database.SiteDatabaseMariaDB": 79.2,
     "disposable.test_site_database.SiteDatabasePostgreSQL": 59.6,
     "disposable.test_site_node.SiteNodeInterruptedTransition": 41.1,
@@ -74,7 +76,6 @@
     "disposable.test_target_race.TwoControllerNativeLock": 47.5,
     "disposable.test_target_reconstruction.FreshControllerReconstruction": 87.3,
     "disposable.test_target_shape.JudgeByShape": 51.1,
-    "disposable.test_wordpress_create.WordPressCreateMariaDB": 135.1,
-    "disposable.test_cache.LaravelObjectCache": 13.1
+    "disposable.test_wordpress_create.WordPressCreateMariaDB": 135.1
   }
 }

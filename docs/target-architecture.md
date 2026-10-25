@@ -1,6 +1,6 @@
 # Target architecture
 
-The one stack Barectl manages, tracked in [#323](https://github.com/rajandangi/barectl/issues/323). Phase A implements the saved connections, host standing, host foundation, runtimes, server defaults, plain PHP sites over HTTP with per-site HAProxy and PHP-FPM, discovery and the change engine described below; the sections on Valkey, settings and secrets, automation, backups and logs record the accepted direction for later phases ([rollout](#rollout)). The Nginx, Certbot, APT-PHP and rclone stack this replaces was deleted at the Phase A exit. The PHP serving design was amended on 2026-10-15 by [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md). Source evidence below is dated.
+The one stack Barectl manages, tracked in [#323](https://github.com/rajandangi/barectl/issues/323). Phase A implements the saved connections, host standing, host foundation, runtimes, server defaults, plain PHP sites over HTTP with per-site HAProxy and PHP-FPM, discovery and the change engine described below; Phase B adds WordPress, Laravel, HTTPS, databases and settings; Phase C adds background work, the per-site object cache and logs. The remaining sections on backups record the accepted direction for later phases ([rollout](#rollout)). The Nginx, Certbot, APT-PHP and rclone stack this replaces was deleted at the Phase A exit. The PHP serving design was amended on 2026-10-15 by [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md). Source evidence below is dated.
 
 Barectl is a portable, local-first, agentless control plane for fresh Ubuntu 26.04 LTS servers. Ubuntu 24.04 is not supported on the target stack; a later LTS is added only by its own reviewed release policy and qualification. Mature native components own hosting mechanics. Barectl owns the operator experience, review, admission, reconciliation and recovery, through the existing pyinfra SSH connection and the detached native execution of [ADR 0006](adr/0006-use-native-bootstrap-execution.md). The [core philosophy](../README.md#core-philosophy) is unchanged: the server is the source of truth, and a new controller with authorized SSH access reconstructs supported state without the previous controller's database.
 
@@ -126,22 +126,25 @@ Source cleanup requires the supported `wait srv-removable` predicate in the auth
 
 ## Object cache
 
-Each site that enables an object cache gets its own Valkey instance. The PHP client is phpredis from the runtime catalog, loaded into that site's own master and CLI wrappers ([PHP extensions](runtimes.md#php-extensions)). Enabling it restarts only that site's master. On the disposable arm64 lane a measured enable took 3.59 s, served 210 requests with 2 refused (502) over a 0.17 s window, left the runtime master's MainPID and invocation untouched, and reported `redis` 6.3.0 with `Zend OPcache` through the site's diagnostic pool; `disposable/test_native_qualification.py::SitePHPMasterRestart` prints the measurement.
-
-A WordPress site is connected by the pinned Redis Object Cache plugin and its `WP_REDIS_*` constants. A Laravel site is connected through its own `.env`: `CACHE_STORE=redis`, `REDIS_HOST` set to the site's private socket path and `REDIS_PORT=0`, written through the same reviewed environment path as any other key, followed by a cached-configuration rebuild and a graceful restart of the site's running workers. Those three keys are Barectl-managed while they name the site's own cache: the Environment screen shows them read-only and discovery keeps their values on the server. Turning the cache off restores the store the site used before Barectl changed it, rebuilds the configuration and restarts workers before the instance stops; a controller with no record of that earlier store refuses to guess ([object cache](object-cache.md#laravel-wiring-and-ordering)).
+Each site that enables an object cache gets its own Valkey instance over a private Unix
+socket, with its own reviewed memory bound, no TCP, password or persistence, and an ACL
+that keeps ordinary flushes but refuses administrative commands. The PHP client is phpredis
+from the runtime catalog, loaded into that site's own master and CLI wrappers
+([PHP extensions](runtimes.md#php-extensions)). WordPress is wired through the pinned Redis
+Object Cache plugin and `WP_REDIS_*` constants; Laravel through its own `.env`, a cached
+configuration rebuild and a graceful worker restart. [Object cache](object-cache.md) holds
+the convention, the ordering, the refusals and the measured enable cost, and
+[ADR 0030](adr/0030-give-each-site-its-own-valkey-instance.md) the decision.
 
 ## Valkey
 
 One Ubuntu `valkey-server` package is installed per server from Server **Settings > Object
 cache (Valkey)** by one reviewed exact APT transaction, and the distribution's shared
-`valkey-server.service` is stopped and masked
-([object cache](object-cache.md#the-shared-unit-stays-masked)). Each site that enables an
-object cache gets its own `valkey-server@<identifier>` instance over a private Unix socket
-with its own reviewed memory bound, no TCP, password or persistence, and an ACL that keeps
-ordinary flushes but refuses administrative commands
-([object cache](object-cache.md#a-sites-own-cache-implemented-392),
-[ADR 0030](adr/0030-give-each-site-its-own-valkey-instance.md)). The server-wide install is
-the prerequisite a site screen offers first.
+`valkey-server.service` is stopped and masked. Each site that enables an object cache gets
+its own `valkey-server@<identifier>` instance. [Object cache](object-cache.md) owns the
+install, the instance configuration, the ACL and the client supply
+([ADR 0030](adr/0030-give-each-site-its-own-valkey-instance.md)); the
+[Phase C qualification record](phase-c-qualification.md#memory) holds the measured memory.
 
 ## Settings and secrets
 
@@ -151,7 +154,12 @@ A value entered in the browser is sealed under the worker's key and stored only 
 
 ## Automation
 
-WordPress cron and Laravel database queue workers are implemented in [Automation](automation.md); the Laravel scheduler and per-site cache follow in the [Phase C specification](https://github.com/rajandangi/barectl/issues/357); see [ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md).
+WordPress server cron, the Laravel scheduler and Laravel database queue workers are
+implemented, with the per-site slice, the status projection, the fence and restore step and
+the per-site cache wiring. [Automation](automation.md) owns the units, the actions, the
+refusals, the projection and the fence;
+[ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md) the
+decision, and the [Phase C qualification record](phase-c-qualification.md) the evidence.
 
 ## Backups
 
@@ -159,7 +167,12 @@ restic backups and restore are planned in the [Phase D specification](https://gi
 
 ## Logs
 
-The host foundation keeps journald logs in persistent storage, and Caddy writes per-site JSON access logs with size and age rotation ([site convention](site-conventions.md#serving)). Log viewing and rotation of the other site logs are planned in the [Phase C specification](https://github.com/rajandangi/barectl/issues/357).
+The host foundation keeps journald logs in persistent storage, and Caddy writes per-site JSON
+access logs. A site's **Logs** section lists its access log, PHP error and slow logs,
+application log and the journals of its background-work units and its cache, reads bounded
+and scrubbed pages on explicit request, and follows new lines while it is open. Every file
+Barectl creates in a site's log directory rotates by size and age. [Logs](logs.md) owns the
+catalogue, the bounds, the cursors, the scrubbing and the rotation convention.
 
 ## Tests and build time
 
@@ -193,11 +206,11 @@ The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their na
 
 ## Qualification
 
-Phase A's native scenarios exercise the items this design left open: independent site masters with their OPcache protections, private directories and admission sockets blocking cross-site access, the single-thread removability check and complete FPM drain in both switch directions, target failure, interrupted native state and fresh-controller finish or reverse, and the HAProxy service convention. The [Phase A qualification record](phase-a-qualification.md) names the revision, architectures, results and measured memory and disk, and what remains unqualified.
+Phase A's native scenarios exercise the items this design left open: independent site masters with their OPcache protections, private directories and admission sockets blocking cross-site access, the single-thread removability check and complete FPM drain in both switch directions, target failure, interrupted native state and fresh-controller finish or reverse, and the HAProxy service convention. Phase C's scenarios prove the per-site automation, cache and log conventions, the fence and restore step and the scheduled breadth job. The [Phase A qualification record](phase-a-qualification.md), the [Phase B qualification record](phase-b-qualification.md) and the [Phase C qualification record](phase-c-qualification.md) name the revisions, architectures, results, measured memory and disk, and what remains unqualified.
 
 Still open, for later phases or beyond the disposable server:
 
 - AppArmor behavior of the Nix daemon and installer on Ubuntu 26.04 hosts other than the disposable server.
 - ~~Whether a Hydra-built extension such as phpredis loads into the matching default build from its locked store path, for Phase C.~~ Settled in Phase C (#390): it loads, but only from a site pool or command line after the packaged ini; see [PHP extensions](runtimes.md#php-extensions).
-- Ubuntu's `valkey-server` template unit for per-site instances.
+- ~~Ubuntu's `valkey-server` template unit for per-site instances.~~ Settled in Phase C (#392, #393): the packaged template runs one site's instance through a root-owned drop-in; see [object cache](object-cache.md#the-instance).
 - restic with R2 end to end, retention by tag, and read-back verification of the kept copy.

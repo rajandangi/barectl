@@ -5,9 +5,14 @@ than one item; the L5 snapshot commits them once so the cache lifecycle stays a 
 """
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import override
 
 from django.test import tag
 
+from discovery import ssh
+from discovery.ssh import RemoteShell
 from operations.inputs import PreparationInputs
 
 from . import images
@@ -66,6 +71,14 @@ class PrepareLaravel(LaravelDeployCase):
     identity = "sqwalpha"
     domain = "site.fixture.test"
     prefix = "sqw"
+
+    @override
+    @contextmanager
+    def shell(self) -> Iterator[RemoteShell]:
+        """A plain connection: the preparation applies changes, and records no checkpoint."""
+        os.environ["SSH_AUTH_SOCK"] = ""
+        with ssh.connect(self.target()) as connection:
+            yield connection
 
     def test_commits_the_laravel_cache_fixture_into_the_prepared_layer(self) -> None:
         from automation import worker_change

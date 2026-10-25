@@ -5,12 +5,16 @@ body that never reaches its fence fails instead of passing on a staged-source su
 The staged program is still compiled, because a body that does not compile cannot run.
 """
 
+import base64
 import contextlib
+import gzip
 import hashlib
 import importlib.resources
+import json
 import os
 from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
+from typing import ClassVar, cast
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -20,10 +24,12 @@ from automation.status import STATUS_SENTENCE, ScheduleStatus
 from cache import instance as cache_instance
 from cache.bodies import instance as cache_body
 from laravel import change as laravel_change
+from laravel import configuration as laravel_configuration
 from laravel import rollback as laravel_rollback
 from laravel import settings as laravel_settings
 from laravel.bodies import common as laravel_common
 from laravel.bodies import settings as laravel_settings_body
+from operations.engine import NativeBody
 from runtimes import update as catalog_update
 from runtimes.bodies import update as catalog_update_body
 from sites import node_change, php_change, pool_change, remove
@@ -349,6 +355,108 @@ CALLERS: tuple[
     ("update_catalog", catalog_update_body, "move_site", _update_args, _update_patches),
     ("set_site_object_cache", cache_body, "_apply_laravel", _cache_args, _cache_patches),
 )
+
+
+def passthrough(value: dict[str, object]) -> dict[str, object]:
+    return dict(value)
+
+
+class PayloadTests(SimpleTestCase):
+    """The reviewed plan must survive each kind's closed payload (#398 regression).
+
+    A body that rebuilds its payload from a fixed key list silently dropped the plan, so the
+    fence read the document as "nothing to pause" and did nothing. The native
+    ``RebootGateFence`` scenario found it; this pins the assembly for every affected kind.
+    """
+
+    PLAN: ClassVar[dict[str, object]] = {
+        "version": 1,
+        "sites": [
+            {
+                "identifier": "shop",
+                "slice": "barectl-site-shop.slice",
+                "timers": ["barectl-site-shop-wpcron.timer"],
+                "services": ["barectl-site-shop-wpcron.service"],
+                "resume": ["barectl-site-shop-wpcron.timer"],
+                "budget_seconds": 30,
+            }
+        ],
+    }
+
+    def decode(self, body: NativeBody) -> dict[str, object]:
+        return cast(
+            dict[str, object], json.loads(gzip.decompress(base64.b64decode(body.arguments[0])))
+        )
+
+    def laravel_document(self, bootstrap: str) -> dict[str, object]:
+        return {
+            "version": 1,
+            "body_sha256": bootstrap,
+            "identifier": "shop",
+            "names": ["shop.example.com"],
+            "runtime": "php84",
+            "repository": "https://git.example.com/shop.git",
+            "commit": "a" * 40,
+            "token": "t" * 8,
+            "current": "release-1",
+            "releases": ["release-1"],
+            "prune": [],
+            "disk_required": 0,
+            "migrations": True,
+            "gate": "",
+            "caddy": "",
+            "https": True,
+            "branch": "main",
+            "acknowledgement": laravel_change.MIGRATION_ACKNOWLEDGEMENT,
+            "automation_fence": self.PLAN,
+        }
+
+    def settings_document(self, digest: str) -> dict[str, object]:
+        return {
+            "version": 1,
+            "identifier": "shop",
+            "names": ["shop.example.com"],
+            "selection": "php84",
+            "https": True,
+            "changes": [{"key": "FEATURE_FLAG", "action": "set", "digest": "b" * 64}],
+            "secret_fields": [],
+            "environment_digest": digest,
+            "configuration_digest": digest,
+            "automation_fence": self.PLAN,
+        }
+
+    def test_a_deploy_and_a_roll_back_payload_carry_the_plan(self) -> None:
+        for module, acknowledgement in (
+            (laravel_change, laravel_change.MIGRATION_ACKNOWLEDGEMENT),
+            (laravel_rollback, laravel_configuration.ROLLBACK_ACKNOWLEDGEMENT),
+        ):
+            with self.subTest(module=module.__name__):
+                document = self.laravel_document(module.BODY_SHA256)
+                document["acknowledgement"] = acknowledgement
+                body = module.body(document, mock.Mock())
+                self.assertEqual(self.decode(body)["automation_fence"], self.PLAN)
+
+    def test_a_settings_payload_carries_the_plan(self) -> None:
+        digest = "c" * 64
+        for module in (laravel_settings, wordpress_settings):
+            with self.subTest(module=module.__name__):
+                document = self.settings_document(digest)
+                with mock.patch.object(module, "_document", passthrough):
+                    body = module.body(document, mock.Mock(secret_path=""))
+                self.assertEqual(self.decode(body)["automation_fence"], self.PLAN)
+
+    def test_a_cache_payload_carries_the_plan(self) -> None:
+        document = {
+            "version": 1,
+            "identifier": "shop",
+            "application": "wordpress",
+            "enabled": True,
+            "maxmemory_mib": 64,
+            "automation_fence": self.PLAN,
+        }
+        with mock.patch.object(cache_instance, "_document", passthrough):
+            body = cache_instance.body(document, mock.Mock())
+        self.assertEqual(self.decode(body)["automation_fence"], self.PLAN)
 
 
 class FenceSummaryTests(SimpleTestCase):
