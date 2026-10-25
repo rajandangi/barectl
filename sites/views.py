@@ -20,6 +20,7 @@ from discovery.presentation import VIEW_SITES, present_sites
 from operations import services as change_services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
+from operations.presentation import blocking_operation
 from runtimes.defaults import NODE_CHOICES
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
@@ -478,10 +479,8 @@ def _stale_wordpress_site(request: HttpRequest, pk: int, form: WordPressSiteForm
         )
         patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
         return response
-    from servers.views import server_page
-
     messages.error(request, problem)
-    return server_page(request, pk, "sites", wordpress_site_form=retained, status=409)
+    return site_create_platform_form(request, pk, "wordpress", retained)
 
 
 def _stale_laravel_site(request: HttpRequest, pk: int, form: LaravelSiteForm) -> HttpResponse:
@@ -516,10 +515,8 @@ def _stale_laravel_site(request: HttpRequest, pk: int, form: LaravelSiteForm) ->
         )
         patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
         return response
-    from servers.views import server_page
-
     messages.error(request, problem)
-    return server_page(request, pk, "sites", laravel_site_form=retained, status=409)
+    return site_create_platform_form(request, pk, "laravel", retained)
 
 
 def _stale_http_site(request: HttpRequest, pk: int, form: HttpSiteForm) -> HttpResponse:
@@ -607,6 +604,61 @@ def _finish_creation(
     return redirect(destination)
 
 
+def site_create_platform_form(
+    request: HttpRequest, pk: int, platform: str, form: WordPressSiteForm | LaravelSiteForm
+) -> HttpResponse:
+    """A refused platform submission, keeping the operator's answers."""
+    server = get_object_or_404(Server, pk=pk)
+    state = server_state(server)
+    context: dict[str, object] = {
+        "server": server,
+        "state": state,
+        "platform": platform,
+        "blocking": blocking_operation(state.other_operation),
+    }
+    can_prepare = request.user.has_perms(PREPARE_PERMISSIONS)
+    if platform == "wordpress":
+        context.update(wordpress_site_context(server, form))
+        context["wordpress_site_can_prepare"] = (
+            can_prepare and context["wordpress_site_can_prepare"]
+        )
+        context["wordpress_site_focus"] = True
+    else:
+        context.update(laravel_site_context(server, form))
+        context["laravel_site_can_prepare"] = can_prepare and context["laravel_site_can_prepare"]
+        context["laravel_site_focus"] = True
+    return render(request, "sites/create_platform.html", context, status=409)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(("servers.view_server", VIEW_SITES), raise_exception=True)
+def site_create_platform(request: HttpRequest, pk: int, platform: str) -> HttpResponse:
+    """The WordPress or Laravel form the Create site page leads to."""
+    if platform not in ("wordpress", "laravel"):
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    state = server_state(server)
+    context: dict[str, object] = {
+        "server": server,
+        "state": state,
+        "platform": platform,
+        "blocking": blocking_operation(state.other_operation),
+    }
+    step = continuation.requested_step(request, server.pk)
+    can_prepare = request.user.has_perms(PREPARE_PERMISSIONS)
+    if platform == "wordpress":
+        context.update(wordpress_site_context(server, step=step))
+        context["wordpress_site_can_prepare"] = (
+            can_prepare and context["wordpress_site_can_prepare"]
+        )
+    else:
+        context.update(laravel_site_context(server, step=step))
+        context["laravel_site_can_prepare"] = can_prepare and context["laravel_site_can_prepare"]
+    return render(request, "sites/create_platform.html", context)
+
+
 @never_cache
 @require_POST
 @login_required
@@ -626,11 +678,9 @@ def server_http_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             status=422,
         )
     if platform == "wordpress":
-        messages.info(request, "Continue with the WordPress form below.")
-        return redirect(f"{reverse('server_sites', args=[server.pk])}#wordpress-site-create")
+        return redirect("site_create_platform", pk=server.pk, platform="wordpress")
     if platform == "laravel":
-        messages.info(request, "Continue with the Laravel form below.")
-        return redirect(f"{reverse('server_sites', args=[server.pk])}#laravel-site-create")
+        return redirect("site_create_platform", pk=server.pk, platform="laravel")
     state = server_state(server)
     choices = prerequisites.php_choices(state)
     versions = tuple(choice.entry for choice in choices if choice.installed)

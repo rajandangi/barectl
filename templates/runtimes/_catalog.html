@@ -26,7 +26,6 @@
             <th scope="col">Version</th>
             <th scope="col">Download size</th>
             <th scope="col">Unpacked size</th>
-            {% if can_add_runtime %}<th scope="col">Change</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -39,17 +38,6 @@
               <td>{{ build.version }}</td>
               <td>{{ build.download_size|filesizeformat }}</td>
               <td>{{ build.unpacked_size|filesizeformat }}</td>
-              {% if can_add_runtime %}
-                <td>
-                  <form method="post" action="{% url 'server_change_prepare' server.pk %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="kind" value="add_runtime">
-                    <input type="hidden" name="selection" value="{{ build.entry }}">
-                    <button type="submit"
-                            class="usa-button usa-button--outline">Add runtime {{ build.entry }}</button>
-                  </form>
-                </td>
-              {% endif %}
             </tr>
           {% endfor %}
         </tbody>

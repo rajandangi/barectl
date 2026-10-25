@@ -83,7 +83,7 @@ class LaravelSiteTileTests(ControllerConfigTestCase):
         self,
     ) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/create/laravel/")
         self.assertContains(response, "Create Laravel site")
         self.assertContains(response, 'name="repository"')
         self.assertContains(response, 'name="branch"')
@@ -93,6 +93,9 @@ class LaravelSiteTileTests(ControllerConfigTestCase):
 
     def test_a_viewer_without_prepare_permission_still_reads_the_tile(self) -> None:
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
-        response = self.client.get(f"/servers/{self.server.pk}/sites/")
-        self.assertNotContains(response, "Prepare Laravel site review")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/create/laravel/")
+        self.assertRegex(
+            response.content.decode(),
+            r"<button[^>]*disabled[^>]*>Prepare Laravel site review",
+        )
         self.assertNotContains(response, "Step 1: install MariaDB")

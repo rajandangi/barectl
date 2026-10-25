@@ -176,15 +176,14 @@ class CreateSitePageTests(ControllerConfigTestCase):
         self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
 
     def test_wordpress_and_laravel_tiles_lead_to_their_forms(self) -> None:
-        for platform, anchor in (
-            ("wordpress", "wordpress-site-create"),
-            ("laravel", "laravel-site-create"),
-        ):
+        for platform in ("wordpress", "laravel"):
             with self.subTest(platform=platform):
                 response = self.client.post(
                     f"/servers/{self.server.pk}/sites/http/prepare/", {"platform": platform}
                 )
-                self.assertRedirects(response, f"/servers/{self.server.pk}/sites/#{anchor}")
+                self.assertRedirects(
+                    response, f"/servers/{self.server.pk}/sites/create/{platform}/"
+                )
         self.assertEqual(read_changes(self.server).rows, [])
 
     def test_a_platform_outside_the_three_is_refused(self) -> None:

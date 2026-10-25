@@ -30,10 +30,6 @@
             </p>
           {% endif %}
           {% include "servers/_sites.html" %}
-          {% if target_host and http_site_permission %}
-            {% include "sites/_wordpress_create.html" %}
-            {% include "sites/_laravel_create.html" %}
-          {% endif %}
         {% endif %}
       {% elif section == "settings" %}
         {% include "servers/_settings.html" %}
@@ -86,8 +82,6 @@
         </section>
       {% elif section == "advanced" %}
         {% include "servers/_advanced.html" %}
-      {% elif section == "setup" %}
-        {% include "servers/_setup.html" %}
       {% elif section == "activity" %}
         <p class="barectl-note">
           This installation's record of checks and changes for this server. It never

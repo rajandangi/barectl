@@ -68,7 +68,7 @@ class SitePhpSettingsBrowserTests(BrowserTestCase):
         button.focus()
         self.page.keyboard.press("Enter")
         expect(
-            self.page.get_by_role("heading", name="Select site PHP: review", level=1)
+            self.page.get_by_role("heading", name="Switch alpha to PHP 8.5", level=1)
         ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "set_site_php")
@@ -91,7 +91,7 @@ class SitePhpSettingsBrowserTests(BrowserTestCase):
         expect(self.page.locator("#site-php-php85")).to_be_checked()
         self.page.get_by_role("button", name="Continue", exact=True).click()
         expect(
-            self.page.get_by_role("heading", name="Add runtime: review", level=1)
+            self.page.get_by_role("heading", name="Add PHP 8.5 to Production", level=1)
         ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "add_runtime")
@@ -107,7 +107,7 @@ class SitePhpSettingsBrowserTests(BrowserTestCase):
         record_php85_installed(server)
         self.page.get_by_role("button", name="Continue", exact=True).click()
         expect(
-            self.page.get_by_role("heading", name="Select site PHP: review", level=1)
+            self.page.get_by_role("heading", name="Switch alpha to PHP 8.5", level=1)
         ).to_be_visible()
         latest = ChangePreparation.objects.filter(server=server).order_by("-pk").first()
         self.assertEqual(latest.kind_slug if latest is not None else "", "set_site_php")

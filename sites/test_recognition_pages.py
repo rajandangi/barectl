@@ -71,7 +71,7 @@ class StackRecognitionTests(ControllerConfigTestCase):
         )
 
     def test_site_files_and_site_pools_appear_only_on_their_own_tabs(self) -> None:
-        for tab in ("web", "services", "php", "defaults", "catalog"):
+        for tab in ("web", "services", "php", "catalog"):
             with self.subTest(tab=tab):
                 html = self.page(f"/servers/{self.server.pk}/advanced/?tab={tab}")
                 self.assertEqual("Site files</h2>" in html, tab == "web")

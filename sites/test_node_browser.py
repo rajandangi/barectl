@@ -54,7 +54,7 @@ class SiteNodeBrowserTests(BrowserTestCase):
         button.focus()
         self.page.keyboard.press("Enter")
         expect(
-            self.page.get_by_role("heading", name="Select site Node runtime: review", level=1)
+            self.page.get_by_role("heading", name="Switch s7node to Node.js 24", level=1)
         ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(
@@ -69,7 +69,7 @@ class SiteNodeBrowserTests(BrowserTestCase):
         review = ChangeReview.objects.get(preparation=preparation)
         self.assertTrue(review.eligible, review.document)
         self.assertEqual(review.consent, Consent.SITE)
-        expect(self.page.get_by_role("button", name="Apply review", exact=False)).to_be_visible()
+        expect(self.page.get_by_role("button", name="Switch version", exact=True)).to_be_visible()
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/s7node/settings/")
         expect(

@@ -84,7 +84,7 @@ class WordPressSiteTileTests(ControllerConfigTestCase):
     def test_the_tile_asks_for_the_wordpress_fields_without_ssh(self) -> None:
         record_wordpress_sites(self.server)
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/create/wordpress/")
         self.assertContains(response, "Create WordPress site")
         self.assertContains(response, 'name="title"')
         self.assertContains(response, 'name="admin_username"')
@@ -94,7 +94,7 @@ class WordPressSiteTileTests(ControllerConfigTestCase):
     def test_a_missing_engine_is_offered_as_step_one(self) -> None:
         record_wordpress_sites(self.server, engine="")
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/create/wordpress/")
         self.assertContains(response, "Step 1: install MariaDB on this server")
         self.assertContains(response, "Step 1: install MariaDB")
         self.assertNotContains(response, "Install a database engine from Server Settings first.")
@@ -102,7 +102,7 @@ class WordPressSiteTileTests(ControllerConfigTestCase):
     def test_postgresql_disables_the_tile_with_the_reason(self) -> None:
         record_wordpress_sites(self.server, engine="postgresql")
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/create/wordpress/")
         self.assertContains(response, "WordPress needs MariaDB. This server runs PostgreSQL.")
 
     def test_preparing_the_tile_queues_the_reviewed_inputs(self) -> None:
@@ -137,5 +137,8 @@ class WordPressSiteTileTests(ControllerConfigTestCase):
     def test_a_viewer_without_prepare_permission_cannot_prepare_the_review(self) -> None:
         record_wordpress_sites(self.server)
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
-        response = self.client.get(f"/servers/{self.server.pk}/sites/")
-        self.assertNotContains(response, "Prepare WordPress site review")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/create/wordpress/")
+        self.assertRegex(
+            response.content.decode(),
+            r"<button[^>]*disabled[^>]*>Prepare WordPress site review",
+        )

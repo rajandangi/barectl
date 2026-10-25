@@ -269,7 +269,7 @@ class CertificateEmailPageTests(ControllerConfigTestCase):
         target_snapshot(self.server)
         response = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(
-            response, "Not set. Caddy requests certificates without a contact address."
+            response, "Not set. Certificates are requested without a contact address."
         )
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):
             queued = self.client.post(
@@ -285,7 +285,7 @@ class CertificateEmailPageTests(ControllerConfigTestCase):
         target_snapshot(self.server, state=OUTSIDE)
         response = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(response, "outside supported settings")
-        self.assertNotContains(response, "Prepare review")
+        self.assertNotContains(response, "Change certificate email")
         response = self.client.post(
             f"/servers/{self.server.pk}/settings/certificate-email/prepare/",
             {"email": "ops@example.com"},
@@ -299,7 +299,7 @@ class CertificateEmailPageTests(ControllerConfigTestCase):
         response = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(response, "has not been observed yet")
         self.assertContains(response, "saved@example.com")
-        self.assertNotContains(response, "Prepare review")
+        self.assertNotContains(response, "Change certificate email")
 
     def test_an_invalid_address_is_refused(self) -> None:
         target_snapshot(self.server)

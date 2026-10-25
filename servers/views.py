@@ -12,7 +12,6 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from bootstrap import foundation_setup
 from bootstrap.standing import Standing
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
@@ -139,10 +138,9 @@ def _more_options_open(form: ServerForm) -> bool:
     return (port not in (None, "", 22, "22")) or bool(alias)
 
 
-Section = Literal["sites", "setup", "activity", "advanced", "settings"]
+Section = Literal["sites", "activity", "advanced", "settings"]
 _SECTIONS: dict[Section, str] = {
     "sites": "Sites",
-    "setup": "Setup",
     "activity": "Activity",
     "advanced": "Advanced",
     "settings": "Settings",
@@ -294,9 +292,7 @@ def _advanced_section(
         snapshot = state.snapshot
         requested_tab = request.GET.get("tab", "web")
         stack_tab = (
-            requested_tab
-            if requested_tab in {"web", "services", "catalog", "php", "defaults"}
-            else "web"
+            requested_tab if requested_tab in {"web", "services", "catalog", "php"} else "web"
         )
         context["stack_tab"] = stack_tab
         standing = snapshot.collected.standing if snapshot else None
@@ -328,9 +324,6 @@ def _advanced_section(
             and standing is not None
             and standing.standing == Standing.TARGET_STACK
         )
-        from runtimes.defaults_views import context_for_server
-
-        context.update(context_for_server(state.server, request.user))
         runtime_rows = shown_runtimes(snapshot.collected) if snapshot else ()
         runtime_updates = shown_updates(snapshot.collected, runtime_rows) if snapshot else ()
         context["runtime_profiles"] = runtime_rows
@@ -374,8 +367,10 @@ def server_page(
         from bootstrap.certificate_email_views import context_for_server
         from databases import engine as database_engine
         from databases.presentation import panel
+        from runtimes.defaults_views import context_for_server as runtime_context_for_server
 
         context.update(context_for_server(server, request.user, state))
+        context.update(runtime_context_for_server(state, request.user))
         context["database_panel"] = (
             panel(state.snapshot.collected) if state.snapshot is not None else None
         )
@@ -386,11 +381,6 @@ def server_page(
         context["database_remove_kind"] = database_engine.REMOVE_SLUG
     if section == "activity":
         context.update(attempts=list(state.history))
-    if section == "setup":
-        context["can_prepare_foundation"] = state.can_prepare_changes and request.user.has_perms(
-            PREPARE_PERMISSIONS
-        )
-        context["foundation_journey"] = foundation_setup.project(state)
     if section == "advanced":
         context["presented"] = state.presentation
     standing = state.snapshot.collected.standing if state.snapshot else None
