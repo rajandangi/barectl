@@ -361,6 +361,17 @@ class ConfirmScreenTests(ScreenTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "operations/change.html")
 
+    def test_opening_the_confirm_screen_makes_no_connection(self) -> None:
+        review = self.change("fixture_site")
+        self.sign_in_with("view_changes", "change_site")
+        self.remote.commands.clear()
+        self.client.get(f"/changes/{review.preparation_id}/")
+        self.client.get(
+            f"/changes/{review.preparation_id}/",
+            headers={"HX-Request": "true", "HX-Request-Type": "partial"},
+        )
+        self.assertEqual(self.remote.commands, [])
+
 
 class RunScreenTests(ScreenTestCase):
     def running(self, review: object) -> ChangeRun:
@@ -437,6 +448,17 @@ class RunScreenTests(ScreenTestCase):
         self.assertTemplateUsed(response, "operations/run.html")
         logs = self.client.get(f"/runs/{run.pk}/?tab=logs")
         self.assertTemplateUsed(logs, "operations/run.html")
+
+    def test_opening_progress_or_logs_makes_no_connection(self) -> None:
+        run = self.running(self.change("fixture_site"))
+        self.remote.commands.clear()
+        self.client.get(f"/runs/{run.pk}/")
+        self.client.get(f"/runs/{run.pk}/?tab=logs")
+        self.client.get(
+            f"/runs/{run.pk}/status/",
+            headers={"HX-Request": "true", "HX-Request-Type": "partial"},
+        )
+        self.assertEqual(self.remote.commands, [])
 
 
 class RunRecoveryTests(ChangeTestCase):
