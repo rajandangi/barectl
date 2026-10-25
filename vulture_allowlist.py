@@ -127,7 +127,8 @@ if TYPE_CHECKING:
         Consent,
         RemoteOperation,
     )
-    from operations.presentation import ReviewView, RunOutcome, RunView
+    from operations.presentation import PlainStep, ReviewView, RunOutcome, RunView
+    from operations.test_pages import _DefaultText
     from runtimes.apps import RuntimesConfig
     from runtimes.bodies.update import update_catalog
     from runtimes.presentation import ShownBuild, ShownCatalog
@@ -309,6 +310,14 @@ if TYPE_CHECKING:
         RunView.native_record_missing,
         RunView.execution_label,
         RunView.verification_label,
+    )
+    # Progress renders each plain step's state label; no Python code reads it.
+    _plain_steps = (PlainStep("", "", False).state_label,)
+    # HTMLParser calls these hooks while the page test collects default-visible text.
+    _default_text_parser = (
+        _DefaultText.handle_starttag,
+        _DefaultText.handle_endtag,
+        _DefaultText.handle_data,
     )
     # Form metaclasses collect declared fields and Meta options; templates render the search
     # field as form.q.

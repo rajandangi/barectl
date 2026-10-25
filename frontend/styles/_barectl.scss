@@ -431,3 +431,12 @@ body {
 .barectl-break-all {
   overflow-wrap: anywhere;
 }
+
+// A run's plain steps mark the one the change reported last (docs/dashboard-workflows.md).
+.barectl-steps__current {
+  font-weight: font-weight("semibold");
+}
+
+.barectl-steps .usa-hint {
+  display: block;
+}
