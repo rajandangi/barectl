@@ -172,6 +172,25 @@ def teardown_command(prefix: str) -> str:
     quoted = shlex.quote(prefix)
     return f"""
 prefix={quoted}
+automation_units=$(systemctl list-units --all --plain --no-legend \
+    'barectl-site-'$prefix'*' | cut -d' ' -f1)
+for unit in $automation_units; do
+    systemctl unmask --runtime "$unit" 2>/dev/null || true
+    systemctl stop "$unit" 2>/dev/null || true
+    systemctl --no-reload disable "$unit" 2>/dev/null || true
+done
+automation_slices=$(systemctl list-units --all --plain --no-legend \
+    'barectl-site-'$prefix'*.slice' | cut -d' ' -f1)
+for slice in $automation_slices; do
+    systemctl stop "$slice" 2>/dev/null || true
+done
+rm -f /etc/systemd/system/barectl-site-"$prefix"*.service \
+    /etc/systemd/system/barectl-site-"$prefix"*.timer \
+    /etc/systemd/system/barectl-site-"$prefix"*.slice 2>/dev/null
+rm -f /run/systemd/system/barectl-site-"$prefix"*.service \
+    /run/systemd/system/barectl-site-"$prefix"*.timer \
+    /run/systemd/system/barectl-site-"$prefix"*.slice 2>/dev/null
+systemctl daemon-reload 2>/dev/null || true
 for config in /etc/haproxy/sites/"$prefix"*.cfg; do
     [ -e "$config" ] || continue
     site=$(basename "$config" .cfg)
@@ -229,6 +248,19 @@ for path in /etc/logrotate.d/barectl-site-"$prefix"*; do
 done
 for path in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$path" ] && problems="$problems pool:$path"
+done
+for path in /etc/systemd/system/barectl-site-"$prefix"*.service \
+    /etc/systemd/system/barectl-site-"$prefix"*.timer \
+    /etc/systemd/system/barectl-site-"$prefix"*.slice \
+    /run/systemd/system/barectl-site-"$prefix"*.service \
+    /run/systemd/system/barectl-site-"$prefix"*.timer \
+    /run/systemd/system/barectl-site-"$prefix"*.slice; do
+    [ -e "$path" ] && problems="$problems automation:$path"
+done
+automation_units=$(systemctl list-units --all --plain --no-legend \
+    'barectl-site-'$prefix'*' | cut -d' ' -f1)
+for unit in $automation_units; do
+    problems="$problems automation-unit:$unit"
 done
 if command -v caddy >/dev/null 2>&1 && [ -f /etc/caddy/Caddyfile ]; then
     caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 \

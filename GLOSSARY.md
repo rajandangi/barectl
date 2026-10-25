@@ -365,6 +365,26 @@ _Avoid_: Discovery history, complete audit trail
 A managed server's dashboard section for supported running work, schedules, background services and retained native server history. It is distinct from Activity's private Barectl records and does not list individual application queue items.
 _Avoid_: Activity, complete audit trail, application job history
 
+**Automation slice**:
+The root-owned systemd slice `barectl-site-<id>.slice` that holds one site's scheduled tasks and queue workers and nothing else. Stopping it never stops the site's web serving ([ADR 0036](docs/adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md)).
+_Avoid_: Service group, worker pool
+
+**Scheduled task**:
+One reviewed, native timer and bounded service that runs a site's application work on the server under the site's own account, with no Barectl controller involved. WordPress server cron is the first one ([automation](docs/automation.md)).
+_Avoid_: Cron job, background process
+
+**Server cron**:
+A WordPress site's scheduled events run every minute by the managed server instead of by page loads. Barectl sets the site's `DISABLE_WP_CRON` only after one server run has succeeded and clears it before the server task stops.
+_Avoid_: WP-Cron, system cron
+
+**Skipped tick**:
+A calendar elapse that did not start a run because the previous run of the same scheduled task was still active, inferred from the run's native start and end timestamps. It is shown as skipped, never as success.
+_Avoid_: Dropped run, missed cron
+
+**Fence**:
+The step that stops a site's automation slice, keeps it from starting, and proves the slice has no processes before a change to that site's code, schema, runtime or settings proceeds; its restore starts exactly the work the review declared ([automation](docs/automation.md#fencing-later-changes)).
+_Avoid_: Pause, maintenance mode
+
 ### Later phases
 
 Terms for planned WordPress and Laravel sites, site automation and backups are defined in the Phase B ([#356](https://github.com/rajandangi/barectl/issues/356)), Phase C ([#357](https://github.com/rajandangi/barectl/issues/357)) and Phase D ([#358](https://github.com/rajandangi/barectl/issues/358)) specifications.

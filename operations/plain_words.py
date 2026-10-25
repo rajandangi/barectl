@@ -261,6 +261,32 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Open the site",
         after_home=Home.SITE,
     ),
+    "set_wordpress_server_cron": ChangeWords(
+        title="Change scheduled tasks for {site}",
+        summary=(
+            (
+                "WordPress normally runs scheduled events when someone visits a page. "
+                "Barectl can run them on the server every minute as the site's own account, "
+                "or give them back to page loads."
+            ),
+            "Page loads keep running scheduled events until one server run has succeeded.",
+            (
+                "Each run is limited to fifteen minutes, and a slow run delays the next one "
+                "instead of overlapping it."
+            ),
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the site",
+            "install": "Starting the scheduled task",
+            "tick": "Waiting for one successful run",
+            "configuration": "Changing when scheduled events run",
+            "verify": "Checking it works",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
 }
 
 

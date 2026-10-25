@@ -72,6 +72,8 @@ def settings_read():
                 "identifier": identifier,
                 "digest": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                 "constants": constant_details(text, identifier),
+                # The one Phase C value recovery reads, and nothing else of the file.
+                "cron": {"disable": cron_disabled(text, identifier)},
             }
         )
     sys.stdout.write(
@@ -115,14 +117,23 @@ def valid_inventory(value: dict[str, object]) -> bool:
 
 
 def valid_site(value: object) -> bool:
-    if not isinstance(value, dict) or set(value) != {"identifier", "digest", "constants"}:
+    if not isinstance(value, dict) or set(value) != {
+        "identifier",
+        "digest",
+        "constants",
+        "cron",
+    }:
         return False
     identifier, digest, constants = value["identifier"], value["digest"], value["constants"]
+    cron = value["cron"]
     return (
         isinstance(identifier, str)
         and _IDENTIFIER.fullmatch(identifier) is not None
         and isinstance(digest, str)
         and _DIGEST.fullmatch(digest) is not None
+        and isinstance(cron, dict)
+        and set(cron) == {"disable"}
+        and cron["disable"] in ("", "true", "false")
         and isinstance(constants, list)
         and len(constants) <= 128
         and all(

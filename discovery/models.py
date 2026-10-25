@@ -91,6 +91,12 @@ class DiscoverySnapshot(models.Model):
     )
     settings_source = models.TextField(blank=True, default="")
     settings_warning = models.TextField(blank=True, default="")
+    # Each WordPress site's scheduled work and its last result (Phase C #357).
+    automation_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    automation_source = models.TextField(blank=True, default="")
+    automation_warning = models.TextField(blank=True, default="")
     host_standing = models.CharField(max_length=32, blank=True)
     host_standing_reasons = models.TextField(blank=True)
     host_standing_warnings = models.TextField(blank=True)

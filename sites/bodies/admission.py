@@ -138,7 +138,9 @@ def state_selection(text: str) -> str:
     return selected[0]
 
 
-def hap_execution(identifier: str, argv: list[str], pid: int) -> tuple[dict[str, object], int]:
+def hap_execution(
+    identifier: str, argv: list[str], pid: int, start_monotonic: int
+) -> tuple[dict[str, object], int]:
     path = "/org/freedesktop/systemd1/unit/haproxy_2dsite_40" + identifier + "_2eservice"
     names = (
         "ExecMainStartTimestamp",
@@ -174,15 +176,34 @@ def hap_execution(identifier: str, argv: list[str], pid: int) -> tuple[dict[str,
     start, mono = context["ExecMainStartTimestamp"], context["ExecMainStartTimestampMonotonic"]
     commands = context["ExecStart"]
     if (
+        not isinstance(commands, list)
+        or len(commands) != 1
+        or not isinstance(commands[0], list)
+        or len(commands[0]) != 10
+        or type(commands[0][3]) is not int
+        or type(commands[0][4]) is not int
+        or any(context[name] != [] for name in names[3:])
+    ):
+        raise ValueError("Unbound or foreign executed proxy command.")
+    executable, arguments, ignore_failure = commands[0][0], commands[0][1], commands[0][2]
+    if executable != argv[0] or arguments != argv or ignore_failure is not False:
+        raise ValueError("Unbound or foreign executed proxy command.")
+    runtime = commands[0][3:]
+    if runtime == [0] * 7:
+        # ``systemctl daemon-reload`` clears the running invocation's ExecStart runtime
+        # fields (systemd 259), even though the process is unchanged. The configured
+        # command, the process itself, its cgroup and its INVOCATION_ID still bind it;
+        # derive its realtime start from the unit's preserved monotonic start.
+        if type(start_monotonic) is not int or start_monotonic <= 0:
+            raise ValueError("Unbound or foreign executed proxy command.")
+        start = start_monotonic + int((time.time() - time.monotonic()) * 1_000_000)
+    elif (
         type(start) is not int
         or type(mono) is not int
         or start <= 0
         or mono <= 0
         or abs(start - mono - (time.time_ns() // 1000 - time.monotonic_ns() // 1000)) > 1000000
-        or not isinstance(commands, list)
-        or len(commands) != 1
-        or commands[0] != [argv[0], argv, False, start, mono, 0, 0, pid, 0, 0]
-        or any(context[name] != [] for name in names[3:])
+        or runtime != [start, mono, 0, 0, pid, 0, 0]
     ):
         raise ValueError("Unbound or foreign executed proxy command.")
     return context, start
@@ -371,12 +392,16 @@ def hap_process(identifier: str) -> dict[str, object]:
     env = (process / "environ").read_bytes().split(b"\0")
     if b"INVOCATION_ID=" + values["InvocationID"].encode() not in env:
         raise ValueError("Proxy process is not bound to its native invocation.")
-    context, start = hap_execution(identifier, argv, int(pid))
+    monotonic = values.get("ExecMainStartTimestampMonotonic", "")
+    context, start = hap_execution(
+        identifier, argv, int(pid), int(monotonic) if monotonic.isdecimal() else 0
+    )
     guarded = (cfg, "/etc/systemd/system/haproxy-site@.service")
     files: dict[str, object] = {}
     for name in guarded:
         item = hap_safe(name, mode=0o644 if name.endswith(".service") else 0o600)
-        if max(item.st_ctime_ns, item.st_mtime_ns) >= start * 1000:
+        # A derived start is accurate to one second; a reload never changes either file.
+        if max(item.st_ctime_ns, item.st_mtime_ns) >= (start + 1_000_000) * 1000:
             raise ValueError("Proxy configuration changed after its loaded boundary.")
         files[name] = [
             item.st_ino,

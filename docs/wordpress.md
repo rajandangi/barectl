@@ -31,6 +31,15 @@ A run that stops before verification leaves the maintenance gate in place. A fre
 
 Barectl does not manage plugins, themes or core updates; WordPress keeps updating itself as
 the site user. Extra named constants are edited under **WordPress settings**, with
-Barectl-owned names kept fixed ([settings](settings.md)). WordPress cron is the
-[Phase C specification](https://github.com/rajandangi/barectl/issues/357).
+Barectl-owned names kept fixed ([settings](settings.md)).
+
+## Scheduled events
+
+A WordPress site's Settings gains **Scheduled tasks**, which moves WP-Cron to the server
+([automation](automation.md)). Turning it on runs due events every minute as the site's own
+account, waits for one successful run, and only then sets `DISABLE_WP_CRON` in the private
+configuration so page loads stop running cron. Turning it off clears the constant first and
+then stops the server task. A hand-made crontab entry, Supervisor program or other service
+already running cron for the site blocks turning it on, and a `DISABLE_WP_CRON` set by hand
+with no server task is shown as "No cron is running".
 

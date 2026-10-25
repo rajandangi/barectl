@@ -130,6 +130,18 @@ class ResidueTests(SimpleTestCase):
         self.assertIn("caddy validate", script)
         self.assertIn("lock-held", script)
 
+    def test_teardown_stops_and_removes_a_sites_automation_before_its_accounts(self) -> None:
+        script = scenarios.teardown_command("s4")
+        self.assertIn("barectl-site-" + '"$prefix"*.service', script)
+        self.assertIn("systemctl unmask --runtime", script)
+        self.assertIn("systemctl daemon-reload", script)
+        self.assertLess(script.index("systemctl unmask"), script.index("userdel"))
+
+    def test_residue_reports_an_automation_unit_left_behind(self) -> None:
+        script = scenarios.residue_command("s4")
+        self.assertIn("automation:$path", script)
+        self.assertIn("automation-unit:$unit", script)
+
 
 class DiscoveryTests(SimpleTestCase):
     def test_finds_the_plain_l0_discovery_scenario(self) -> None:
@@ -203,7 +215,7 @@ class ValidatorSelectionTests(SimpleTestCase):
     def test_all_snapshot_validators_share_one_post_bootstrap_server(self) -> None:
         selected = scenarios.discover(validators=True)
         units = scenarios.plan(selected, lanes=1)
-        self.assertEqual(sum(len(item.tests) for item in selected), 17)
+        self.assertEqual(sum(len(item.tests) for item in selected), 20)
         self.assertEqual(len(units), 1)
         self.assertEqual(units[0].layer, "L1")
         self.assertEqual(units[0].scenarios, selected)

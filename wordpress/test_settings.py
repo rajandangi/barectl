@@ -83,6 +83,7 @@ class WordPressConstantConventionTests(SimpleTestCase):
                             "identifier": "shop",
                             "digest": "a" * 64,
                             "constants": [{"key": "MAIL_HOST", "digest": "b" * 64}],
+                            "cron": {"disable": "true"},
                         }
                     ],
                 }
@@ -97,6 +98,7 @@ class WordPressConstantConventionTests(SimpleTestCase):
                             "identifier": "shop",
                             "digest": "a" * 64,
                             "constants": [{"key": "MAIL_HOST", "digest": "b" * 64, "value": "x"}],
+                            "cron": {"disable": "true"},
                         }
                     ],
                 }

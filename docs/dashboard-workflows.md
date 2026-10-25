@@ -80,7 +80,7 @@ site its current release and **Deploy**.
 | Deployments | A Laravel site's releases, **Deploy** and **Roll back** ([deploying](sites.md#deploying-a-laravel-site)). |
 | Environment | A Laravel site's environment keys ([settings](settings.md)). |
 | WordPress | A WordPress site's constants, password reset and core verification ([WordPress](wordpress.md#actions)). |
-| Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, PHP settings and the readiness path, domains and HTTPS, and **Remove site**. |
+| Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, PHP settings and the readiness path, domains and HTTPS, **Scheduled tasks** for a WordPress site, and **Remove site**. |
 | Logs | The log catalogue named in plain words, a bounded viewer on request with older pages, a search term and a time range, and the site's log rotation state with **Set up log rotation** when it is missing or outside the supported shape ([logs](logs.md)). Native detail stays under **Advanced**. |
 
 A version this server does not have is marked **Installed first**. Choosing it prepares Add
