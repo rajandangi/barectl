@@ -92,6 +92,26 @@
             </dl>
           </div>
         {% endif %}
+        {% if review.fence.work_off and server %}
+          <div class="usa-alert usa-alert--warning" id="background-work-off">
+            <div class="usa-alert__body">
+              <p class="usa-alert__text">
+                <strong>Background work is off.</strong> Choose what to turn back on after
+                this change, or it stays off:
+              </p>
+              <ul class="usa-list">
+                {% for identifier in review.fence.stopped_sites %}
+                  <li>
+                    {{ identifier }}:
+                    <a href="{% url 'site_settings' server.pk identifier %}#scheduled-tasks">Scheduled tasks</a>
+                    or
+                    <a href="{% url 'site_settings' server.pk identifier %}#queue-workers">Queue workers</a>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+        {% endif %}
         {% if review.shared %}
           <p>
             <strong>This change also touches these sites:</strong>
