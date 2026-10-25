@@ -554,9 +554,9 @@ class EngineAccessTests(ChangeTestCase):
     def test_a_viewer_cannot_prepare_and_sees_no_control(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         self.sign_in_with("view_server", "view_changes")
-        page = self.client.get(f"/servers/{self.server.pk}/changes/")
-        self.assertContains(page, "may view changes but not prepare them")
-        self.assertNotIn("Prepare clear finished barectl runs", page.content.decode())
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(page, "An operator who can prepare changes can clean up finished runs.")
+        self.assertNotIn("Clean up finished runs</button>", page.content.decode())
 
         response = self.client.post(
             f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
@@ -580,8 +580,8 @@ class EngineAccessTests(ChangeTestCase):
         )
         save_snapshot(attempt, replace(COLLECTED, standing=standing), COLLECTED_AT)
 
-        page = self.client.get(f"/servers/{self.server.pk}/changes/")
-        self.assertNotIn("Prepare clear finished barectl runs", page.content.decode())
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertNotIn("Clean up finished runs</button>", page.content.decode())
         response = self.client.post(
             f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
         )

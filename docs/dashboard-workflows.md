@@ -13,9 +13,9 @@ The global navigation is **Servers**, **Sites** (every observed site across serv
 | Stack | `/servers/<pk>/stack/` | Web (Caddy evidence and every site file as Recognized, Outside supported settings, Absent or Not confirmed), PHP runtimes (master state, protections read back and every site pool), Defaults, Runtime catalog and Services. Recognized includes hand edits within supported settings. A pool is Not confirmed when another finding stopped the reader before it reached the pool. |
 | Settings | `/servers/<pk>/settings/` | **HTTPS**: the optional certificate contact email read from the server's main Caddy configuration, with one reviewed Shared change to set or clear it ([HTTPS](tls.md#certificate-contact-email)). **Database**: the server's MariaDB or PostgreSQL engine with its version and how it runs, **Install** for the missing engine, and **Remove**, refused while any site's database exists ([databases](databases.md)). |
 | Setup | `/servers/<pk>/setup/` | **Set up server** for a Fresh host or an Incomplete foundation ([setting up a server](bootstrap.md)). Shown to accounts that may prepare changes. |
-| Changes | `/servers/<pk>/changes/` | The server's reviews and runs, and the reviewed cleanup of finished runs. Needs `operations.view_changes`. |
-| Activity | `/servers/<pk>/activity/` | This registration's discovery attempts, reviews and runs, joined by the registration, never by a matching name or address. |
-| Advanced | `/servers/<pk>/advanced/` | The stored discovery evidence in technical detail: commands read, outcomes and warnings. |
+| Changes | `/servers/<pk>/changes/` | Retired: redirects to the server's Activity. Each change starts from its own place, and the reviewed cleanup of finished runs is in Advanced. |
+| Activity | `/servers/<pk>/activity/` | This controller's checks and changes for this registration, newest first and in plain words. It is history: an old success or a reused identifier never establishes the server's current state. Needs `servers.view_server`; change rows also need `operations.view_changes`. |
+| Advanced | `/servers/<pk>/advanced/` | The stored discovery evidence in technical detail: commands read, outcomes and warnings, and **Clean up finished runs**. |
 
 Each page keeps the server's name and a return to Servers. Sections are ordinary links that support direct loading, reload and browser back and forward. Section visibility follows viewing permissions; a hidden control never replaces authorization on the destination request.
 

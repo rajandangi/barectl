@@ -603,7 +603,6 @@ class ActivityTests(ControllerConfigTestCase):
         # Activity words each outcome as the server page does.
         self.assertLess(content.index("Connection failed"), content.index("Verified"))
         self.assertNotIn("Succeeded", content)
-        self.assertContains(response, "Snapshot collected")
         # Each row reports its attempt's outcome, not the connection status an alias decides.
         self.write_config("Host db-1\n")
         response = self.client.get("/activity/")
@@ -628,7 +627,8 @@ class ActivityTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED, age=timedelta(minutes=60))
         response = self.client.get("/activity/")
-        self.assertContains(response, "not live status")
+        self.assertContains(response, "never establishes")
+        self.assertContains(response, "current state")
 
     def test_snapshot_collection_time_is_shown_only_where_one_exists(self) -> None:
         self.grant_view()

@@ -112,6 +112,8 @@ if TYPE_CHECKING:
     from laravel.apps import LaravelConfig
     from laravel.bodies import settings as laravel_settings_body
     from laravel.bodies.common import laravel_read
+    from operations import views as operations_views
+    from operations.activity import ActivityRow
     from operations.apps import OperationsConfig
     from operations.forms import (
         AcknowledgeForm,
@@ -482,6 +484,12 @@ if TYPE_CHECKING:
         Banner.queued_at,
         Banner.worker_unavailable,
     )
+    # The retired server changes page: its URL redirects to the server's Activity and its
+    # view stays until #371 removes the old screens.
+    _retired_changes_view = (operations_views.server_changes,)
+    # templates/servers/_activity_table.html presents a change's preparation time beside
+    # the run that applied it.
+    _activity_template_fields = (ActivityRow.prepared_at,)
     # Registration forms and their history/audit templates read these fields dynamically.
     _connection_revision_presentation = (
         ServerForm.expected_revision,

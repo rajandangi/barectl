@@ -454,8 +454,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(activity_rows.nth(1)).to_contain_text("could not reach the SSH service")
         expect(activity_rows.nth(1)).to_contain_text("Connection failed")
         expect(activity_rows.nth(2)).to_contain_text("Verified")
-        expect(page.get_by_role("columnheader", name="Snapshot collected")).to_be_visible()
-        expect(page.locator("body")).to_contain_text("not live status")
+        expect(page.get_by_role("columnheader", name="Result")).to_be_visible()
+        expect(page.locator("body")).to_contain_text("never establishes")
         # The attempts table scrolls inside its container; the page never scrolls sideways.
         page.set_viewport_size({"width": 320, "height": 740})
         expect(page.get_by_role("row")).to_have_count(3)
