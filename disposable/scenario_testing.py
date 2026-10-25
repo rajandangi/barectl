@@ -105,15 +105,6 @@ class ScenarioTestCase(TestCase):
         """Run a harness command in the server container (teardown, probes)."""
         return docker("exec", _setting("CONTAINER"), "sh", "-c", command, timeout=timeout)
 
-    def reboot(self, *, timeout: float = 90) -> None:
-        """Restart the container's init and wait for systemd (a userspace reboot).
-
-        The container shares the Docker VM's kernel, so this is not a kernel reboot; it is
-        the closest boot path the lane can prove (docs/phase-c-qualification.md).
-        """
-        docker("restart", "--time", "5", _setting("CONTAINER"), timeout=timeout + 30)
-        self._wait_for_systemd(timeout)
-
     def stop_for(self, seconds: float) -> None:
         """Stop the container, leave it down for ``seconds``, then start it again."""
         docker("stop", "--time", "5", _setting("CONTAINER"), timeout=60)

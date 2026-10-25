@@ -10,14 +10,16 @@ list as passing is not qualified. Phase C is not released.
 
 ## Revisions
 
-The local numbers in [Build budget](#build-budget) and [Scenarios](#scenarios) belong to the
-head of `feat/357-398` named under [Handoff](#handoff). The hosted figures belong to the
-revisions named under [Hosted runs](#hosted-runs); this branch has no hosted run of its own.
+The local numbers in [Build budget](#build-budget) and [Scenarios](#scenarios) belong to
+`439e1c1`, the `feat/357-398` head that merged the integration tip and the review fixes and ran
+the full build. Later commits on the branch change tests, measurements and documentation only;
+[Handoff](#handoff) names the final head. The hosted figures belong to the revisions named under
+[Hosted runs](#hosted-runs); this branch has no hosted run of its own.
 
 | Evidence | Where |
 | --- | --- |
-| Local fast suite, fast validators, browser suite and native lifecycle scenarios, arm64 | `feat/357-398` head, named in [Handoff](#handoff) |
-| Scheduled breadth job, arm64 (dispatched locally) | The same head; the workflow has no hosted run yet |
+| Local full build: fast suite, fast validators, browser and native lifecycle scenarios, arm64 | `439e1c1` |
+| Scheduled breadth job, arm64, all seven items in one run | `439e1c1` plus test-only breadth fixes; the workflow has no hosted run yet |
 | Hosted Checks and Native (8 shards), amd64 | Integration `bfe2339` (green) and `bcaf565` (failed, fixed here), named under [Hosted runs](#hosted-runs) |
 
 ## Environments
@@ -47,11 +49,13 @@ fast-validator, browser and native stages run concurrently and each is timed.
 | Longest native item | 94.0 s (`PHPFence`) | | 180 s | Within the item limit |
 | Full local build, wall time | 261 s | 300 s | 900 s | Meets the target |
 
-The joint fast stage misses its 60 s target because the validator stage now runs six classes
-(the Phase C automation, journal, rotation, node and HTTP-site validators) in 77 s. The target
-is not raised: the next action is to consolidate the validator classes onto one prepared
-server and one real rotation, as the Phase A record did for its three Node cases, and to
-re-measure the joint stage. The 90 s fast-gate target is met with room.
+The joint fast stage misses its 60 s target. In this build the validator stage took 77 s; run
+alone on a cold validator container on the same head it took **118 s** (`SiteNodeValidators`
+alone took 38 s), against the same 60 s target. The target is not raised: the next action is to
+consolidate the six validator classes onto one prepared server and one real rotation, as the
+Phase A record did for its three Node cases, and to bring the node validator's preparation back
+to a few seconds. The 90 s fast-gate target is met: 42 s in this build, 72 s standalone on a
+cold test database. The 261 s full-build wall time is inside its 300 s target.
 
 The breadth job is outside this budget. Its literal item times on this head are in
 [Breadth scenarios](#breadth-scenarios). It is never a required check and adds no time to a
@@ -89,7 +93,17 @@ runs them.
 
 | Class | Item time | Result |
 | --- | --- | --- |
-<!-- BREADTH TABLE -->
+| `GateFence` | 33.4 s | Passed: paused during the Deploy and the Roll back, restored after each |
+| `RebootGateFence` | 47.2 s | Passed: the gate's boot activation stays off across a container boot |
+| `RebootAutomation` | 85.7 s | Passed: workers returned once, no missed-tick burst, the site served |
+| `LongSchedulerTick` | 108.4 s | Passed: the next start is the next calendar minute, not an immediate restart |
+| `MemoryOneGiB` | 14.5 s | Passed: 4.2 MiB instance, 33.1 and 33.5 MiB workers, 424.9 MiB peak |
+| `MemoryTwoGiB` | 14.6 s | Passed: 7.1 MiB instance, 33.1 and 33.8 MiB workers, 388.1 MiB peak |
+| `MemoryFourGiB` | 15.5 s | Passed: 8.8 MiB instance, 33.1 and 33.4 MiB workers, 441.9 MiB peak |
+
+The run was 7 of 7 in 229 s, with two lanes and no item over the 180 s limit. The cache
+instance's resident memory varies with what the allocator has touched; the configured bound
+is 64 MiB and the instance never approached it with one site's keys.
 
 ## Exit criterion
 
@@ -110,7 +124,7 @@ local build stays within 15 minutes (target 10).
 | Failed, skipped and unknown outcomes are shown honestly | The one projection distinguishes Off, On and waiting, Running, Last run succeeded, Last run failed, Timed out, Skipped, Stopped after repeated crashes, Paused by an unfinished change, Off during maintenance and Could not confirm (`automation/test_status.py`, `automation/test_scheduler.py`, `automation/test_worker_status.py`). `LongSchedulerTick` proves natively that a run spanning a calendar elapse is followed by the next calendar elapse rather than an immediate second start. A worker crash loop reads `Stopped after repeated crashes` natively in `LaravelQueueWorkers`. The recorded transcripts prove a missing read never becomes a success. |
 | A fresh controller reconstructs all of it and repeated reviews propose nothing | The recorded states `automation-wordpress-26.04`, `automation-laravel-26.04`, `automation-laravel-workers-26.04`, `object-cache-26.04`, `object-cache-edited-26.04`, `object-cache-laravel-26.04` and `fence-wordpress-26.04` replay through `collect()` and each area's review proposes no effects (`automation/test_recorded.py`, `automation/test_worker_recorded.py`, `cache/test_recorded.py`, `sites/test_node_recorded.py`). Each native scenario's checkpoint also runs the same collect and review on the live server. |
 | Memory per cache instance and per worker on 1, 2 and 4 GiB hosts | [Memory](#memory): three memory-cgroup classes. **Not a whole-host measurement**; see [Not qualified](#not-qualified). |
-| The full local build stays within 15 minutes (target 10) | [Build budget](#build-budget): TBD |
+| The full local build stays within 15 minutes (target 10) | [Build budget](#build-budget): 261 s of wall time, inside the 300 s target and the 900 s limit. The joint fast stage misses its separate 60 s target at 77 s. |
 
 ## Fences and restores
 
@@ -148,9 +162,9 @@ object cache on, requests the page once and waits two seconds before reading cgr
 
 | Class | Container limit | Cache instance | Worker 1 | Worker 2 | Whole container current / peak |
 | --- | --- | --- | --- | --- | --- |
-| `MemoryOneGiB` | 1 GiB | 4.2 MiB (4,415,488 B) | 33.2 MiB (34,783,232 B) | 33.6 MiB (35,201,024 B) | 355.6 / 374.9 MiB |
-| `MemoryTwoGiB` | 2 GiB | 4.4 MiB (4,599,808 B) | 33.0 MiB (34,648,064 B) | 33.3 MiB (34,930,688 B) | 363.5 / 383.1 MiB |
-| `MemoryFourGiB` | 4 GiB | 8.0 MiB (8,368,128 B) | 33.3 MiB (34,865,152 B) | 33.0 MiB (34,635,776 B) | 521.5 / 545.0 MiB |
+| `MemoryOneGiB` | 1 GiB | 4.2 MiB (4,407,296 B) | 33.1 MiB (34,672,640 B) | 33.5 MiB (35,078,144 B) | 395.2 / 424.9 MiB |
+| `MemoryTwoGiB` | 2 GiB | 7.1 MiB (7,458,816 B) | 33.1 MiB (34,734,080 B) | 33.8 MiB (35,414,016 B) | 369.5 / 388.1 MiB |
+| `MemoryFourGiB` | 4 GiB | 8.8 MiB (9,261,056 B) | 33.1 MiB (34,742,272 B) | 33.4 MiB (35,045,376 B) | 424.9 / 441.9 MiB |
 
 
 The instance's configured `maxmemory` is 64 MiB in every class, and the measured instance

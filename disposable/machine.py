@@ -67,19 +67,5 @@ class Machine:
         pattern = '{{(index .NetworkSettings.Networks "' + network + '").IPAddress}}'
         return docker("inspect", "-f", pattern, self.name).strip()
 
-    def boot_id(self) -> str:
-        return self.exec("cat /proc/sys/kernel/random/boot_id").strip()
-
-    def reboot(self, *, timeout: float = 120) -> None:
-        """Restart the container's init and wait for systemd again.
-
-        This is a userspace reboot of the same kernel, not a kernel reboot: the container
-        shares the Docker VM's kernel. It re-runs every boot-time path Barectl relies on
-        (unit enablement, timers, slice parenting) and is the closest the lane can prove
-        without a virtual machine (docs/phase-c-qualification.md#not-qualified).
-        """
-        docker("restart", "--time", "10", self.name, timeout=timeout)
-        self.wait_for_systemd()
-
     def remove(self) -> None:
         quietly("rm", "-f", self.name)
