@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-from . import images, mirror, quarantine
+from . import images, mirror, quarantine, shard_times
 from .docker import DockerError, docker, quietly
 from .machine import Machine
 
@@ -780,11 +780,17 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def _shard(scenarios: Sequence[Scenario], value: str) -> list[Scenario]:
+    """The scenarios of one shard, balanced by their recorded item times."""
     index, _, count = value.partition("/")
     position, total = int(index), int(count)
     if not 1 <= position <= total:
         raise SystemExit("--shard takes I/N with 1 <= I <= N.")
-    return [scenario for number, scenario in enumerate(scenarios) if number % total == position - 1]
+    recorded, stages = shard_times.record()
+    groups = shard_times.partition(
+        [scenario.label for scenario in scenarios], total, scenarios=recorded, stages=stages
+    )
+    chosen = set(groups[position - 1])
+    return [scenario for scenario in scenarios if scenario.label in chosen]
 
 
 def prepare_layers(
