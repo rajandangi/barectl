@@ -119,6 +119,23 @@
       },
       "kind": "php"
     },
+    "php84_redis": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 50074912,
+          "download_size": 11275675,
+          "path": "/nix/store/ghx7d2mxgylh5mc1fli23riji47glcq7-php-redis-6.3.0",
+          "version": "6.3.0"
+        },
+        "x86_64-linux": {
+          "closure_size": 38488296,
+          "download_size": 11550461,
+          "path": "/nix/store/q7p0d2m8r320z5nn9296vabkxmrbw781-php-redis-6.3.0",
+          "version": "6.3.0"
+        }
+      },
+      "kind": "extension"
+    },
     "php85": {
       "builds": {
         "aarch64-linux": {
@@ -135,6 +152,23 @@
         }
       },
       "kind": "php"
+    },
+    "php85_redis": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 50074912,
+          "download_size": 11275666,
+          "path": "/nix/store/gk5x050bdr7y5c4qlr77z7l6gfwr37vv-php-redis-6.3.0",
+          "version": "6.3.0"
+        },
+        "x86_64-linux": {
+          "closure_size": 38488296,
+          "download_size": 11550451,
+          "path": "/nix/store/wq7hgm50i8mwf88sp1gdz5y8k3q8bf77-php-redis-6.3.0",
+          "version": "6.3.0"
+        }
+      },
+      "kind": "extension"
     },
     "restic": {
       "builds": {

@@ -73,8 +73,8 @@ def shown_catalog(*, checked: bool, machine: str | None) -> ShownCatalog:
     return ShownCatalog(
         architecture,
         catalog.nixpkgs,
-        tuple(_shown(b) for b in builds if b.kind != Kind.TOOL),
-        tuple(_shown(b) for b in builds if b.kind == Kind.TOOL),
+        tuple(_shown(b) for b in builds if b.kind in (Kind.PHP, Kind.NODE)),
+        tuple(_shown(b) for b in builds if b.kind is Kind.TOOL),
         "",
     )
 

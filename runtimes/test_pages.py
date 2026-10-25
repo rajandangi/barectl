@@ -4,7 +4,7 @@ from discovery import ssh
 from discovery.fakes import DiscoveryTestCase
 from servers.models import Server
 
-from .catalog import Architecture, load
+from .catalog import Architecture, Kind, load
 
 
 class RuntimeCatalogPageTests(DiscoveryTestCase):
@@ -25,6 +25,10 @@ class RuntimeCatalogPageTests(DiscoveryTestCase):
         page = self.advanced_page(machine)
         self.assertIn(f"<code>{architecture}</code>", page)
         for build in load().offered(architecture):
+            if build.kind is Kind.EXTENSION:
+                # phpdbg-style extension builds are supply, not a runtime an operator adds.
+                self.assertNotIn(f"<code>{build.entry}</code>", page)
+                continue
             self.assertIn(f"<code>{build.entry}</code>", page)
             self.assertIn(build.version, page)
             self.assertIn(filesizeformat(build.download_size), page)

@@ -258,6 +258,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not prove the site's new PHP settings after reloading its own master, "
         "so it restored the previous pool. Check the run's journal, then prepare a new review."
     ),
+    "site_client": (
+        "Barectl could not prove the site's cache PHP client after restarting its own master. "
+        "Check the run's journal, then prepare a new review."
+    ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
         "database catalog changed, so Barectl stopped before creating the binding. Prepare a "
@@ -615,6 +619,7 @@ RESULT_REASONS: Final = frozenset(
         "valkey_server",
         "valkey_mask",
         "valkey_reload",
+        "site_client",
         "site_database",
         "site_database_driver",
         "site_database_principal",

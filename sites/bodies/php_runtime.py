@@ -6,7 +6,6 @@ import pathlib
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from types import SimpleNamespace
 from typing import TypedDict
@@ -104,7 +103,10 @@ def missing_php_modules(state: PHPState, selected: str) -> list[str]:
             ):
                 raise ValueError("Current application modules are unavailable.")
             required.update(set(extensions) - set(state["builtins"][entry]))
-    return sorted(required - set(state["modules"][selected]))
+    available = set(state["modules"][selected])
+    if common.known_redis(selected):
+        available.add("redis")
+    return sorted(required - available)
 
 
 def php_state(identifier: str) -> PHPState:
@@ -177,13 +179,29 @@ def php_state(identifier: str) -> PHPState:
 
 def php_settings(identifier: str, state: PHPState, entry: str) -> SimpleNamespace:
     row = next(s for s in state["native"]["sites"] if s["identifier"] == identifier)
-    return common.setting(
+    settings = common.setting(
         identifier,
         row["names"],
         entry,
         https=row["https"],
         readiness=row["readiness"],
     )
+    # A PHP switch keeps the site's object-cache client: the target runtime loads its own
+    # locked phpredis build (#390), so the site keeps its application cache across the switch.
+    selected = state["proxy"]["selection"]
+    current = (
+        common.setting(
+            identifier, row["names"], selected, https=row["https"], readiness=row["readiness"]
+        )
+        if selected
+        else None
+    )
+    settings.client = (
+        common.known_redis(entry)
+        if current is not None and common.site_client(current) == "phpredis"
+        else ""
+    )
+    return settings
 
 
 def source_php_path(identifier: str, runtime: str) -> pathlib.Path:
@@ -232,27 +250,7 @@ def remove_stopped_php(settings: SimpleNamespace) -> None:
 
 
 def replace_php_wrapper(path: pathlib.Path, contents: str) -> None:
-    before = common.fingerprint(str(path))
-    if before is None or not common.safe(str(path)):
-        raise ValueError("A PHP command preimage is unavailable.")
-    descriptor, staged_name = tempfile.mkstemp(prefix=".php-runtime-", dir=path.parent)
-    staged = pathlib.Path(staged_name)
-    try:
-        with os.fdopen(descriptor, "w") as stream:
-            stream.write(contents)
-            stream.flush()
-            os.fchmod(stream.fileno(), 0o755)
-            os.fsync(stream.fileno())
-        if common.fingerprint(str(path)) != before:
-            raise ValueError("A PHP command changed during staging.")
-        os.replace(staged, path)
-        parent = os.open(path.parent, os.O_DIRECTORY)
-        try:
-            os.fsync(parent)
-        finally:
-            os.close(parent)
-    finally:
-        staged.unlink(missing_ok=True)
+    common.publish_wrapper(path, contents)
 
 
 def start_target_php(
@@ -266,7 +264,10 @@ def start_target_php(
     extensions = target["extensions"]
     if not isinstance(extensions, list) or any(not isinstance(name, str) for name in extensions):
         raise ValueError("Target loaded module evidence is unavailable.")
-    if set(extensions) != set(before["modules"][settings.runtime]):
+    expected = set(before["modules"][settings.runtime])
+    if getattr(settings, "client", ""):
+        expected.add("redis")
+    if set(extensions) != expected:
         raise ValueError("Target loaded modules differ from reviewed build capabilities.")
     if source_evidence is not None:
         refreshed = common.site_fpm_read(php_settings(identifier, before, source))
@@ -356,7 +357,9 @@ def switch_php(document: dict[str, object]) -> None:
         common.stage("commands")
         for name in ("php", "composer", "wp"):
             path = pathlib.Path(settings.directory) / "bin" / name
-            replace_php_wrapper(path, common.wrapper(settings, name))
+            replace_php_wrapper(
+                path, common.wrapper(settings, name, getattr(settings, "client", ""))
+            )
         common.stage("verify")
         final = php_state(identifier)
         if (
