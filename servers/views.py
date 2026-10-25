@@ -22,7 +22,7 @@ from discovery.services import recorded_discovery, request_discovery
 from operations import activity as activity_read
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from operations.models import VIEW_CHANGES
+from operations.models import CHANGE_SHARED, VIEW_CHANGES
 from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog, shown_runtimes, shown_updates
 from sites import names as site_names
@@ -375,6 +375,8 @@ def server_page(
     _advanced_section(request, state, section, context)
     if section == "settings":
         from bootstrap.certificate_email_views import context_for_server
+        from cache import engine as cache_engine
+        from cache.presentation import panel as cache_panel
         from databases import engine as database_engine
         from databases.presentation import panel
         from runtimes.defaults_views import context_for_server as runtime_context_for_server
@@ -389,6 +391,13 @@ def server_page(
         )
         context["database_install_kind"] = database_engine.SLUG
         context["database_remove_kind"] = database_engine.REMOVE_SLUG
+        context["object_cache_panel"] = (
+            cache_panel(state.snapshot.collected) if state.snapshot is not None else None
+        )
+        context["object_cache_can_prepare"] = state.can_prepare_changes and request.user.has_perms(
+            (*PREPARE_PERMISSIONS, CHANGE_SHARED)
+        )
+        context["object_cache_kind"] = cache_engine.SLUG
     if section == "activity":
         context.update(
             _activity_context(

@@ -54,7 +54,7 @@ systemctl restart php-fpm@php84             # the runtime's diagnostic master; n
 systemctl restart nix-daemon
 ```
 
-Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Settings**, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)).
+Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Settings**, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)), and restart each running `haproxy-site@<id>` so its loaded execution evidence is bound again. A restarted proxy loads its persisted server state and reports that server's check-health counter, which discovery accepts as an integer.
 
 ## After a change stopped partway
 

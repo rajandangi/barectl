@@ -136,6 +136,14 @@ _Avoid_: Shared master, PHP service
 The runtime the server's plain `php`, `composer` and `wp`, or `node`, `npm` and `npx`, commands run. Changing it never changes a site.
 _Avoid_: System PHP, global version
 
+**Valkey**:
+Ubuntu 26.04's Redis-compatible cache server. Barectl installs one package per server, keeps the distribution's shared unit masked, and later gives each site that enables an object cache its own instance. Discovery recognizes it from the package database and systemd alone.
+_Avoid_: Redis, cache service
+
+**Object cache**:
+A site's use of its own Valkey instance for application caching. Enabling it is a Site change; the server-wide Valkey install is its prerequisite.
+_Avoid_: Shared cache, Redis cache
+
 ### Sites
 
 **Site**:

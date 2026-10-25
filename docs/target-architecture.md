@@ -126,7 +126,14 @@ Source cleanup requires the supported `wait srv-removable` predicate in the auth
 
 ## Valkey
 
-Per-site Valkey object caches are planned in the [Phase C specification](https://github.com/rajandangi/barectl/issues/357); see [ADR 0030](adr/0030-give-each-site-its-own-valkey-instance.md).
+One Ubuntu `valkey-server` package is installed per server from Server **Settings > Object
+cache (Valkey)** by one reviewed exact APT transaction, and the distribution's shared
+`valkey-server.service` is stopped and masked
+([object cache](object-cache.md#the-shared-unit-stays-masked)). Per-site Valkey object
+caches are planned in the [Phase C specification](https://github.com/rajandangi/barectl/issues/357);
+each site that enables one gets its own instance over a private Unix socket with its own
+memory bound, following [ADR 0030](adr/0030-give-each-site-its-own-valkey-instance.md).
+The server-wide install is the prerequisite a site screen offers first.
 
 ## Settings and secrets
 

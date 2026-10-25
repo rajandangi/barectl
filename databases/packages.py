@@ -83,6 +83,11 @@ class Simulation(NamedTuple):
     transitions: tuple[Transition, ...]
     # Why APT's answer cannot be used, such as an error it reported; empty when usable.
     problems: tuple[str, ...]
+    # What APT reported it must download, in bytes; None when the answer had no size
+    # summary. The review shows this before the operator applies the transaction.
+    download_bytes: int | None = None
+    # What APT reported the installed packages will occupy, in bytes.
+    installed_bytes: int | None = None
 
 
 _INST = re.compile(
@@ -98,6 +103,27 @@ _SUMMARY = re.compile(
     r"(\d+) upgraded, (\d+) newly installed, (?:(\d+) downgraded, )?(?:(\d+) reinstalled, )?"
     r"(\d+) to remove and (\d+) not upgraded\."
 )
+# apt 3.2's own summary wording. It prints an amount such as "2,758 kB" or "13.4 MB",
+# and when part of the download is already cached, "0 B/2,758 kB": the first part is
+# what the transaction still needs.
+_NEED = re.compile(r"Need to get (.+?) of archives\.")
+_AFTER = re.compile(r"After this operation, (.+?) of additional disk space will be used\.")
+_AMOUNT = re.compile(r"(\d+(?:[.,]\d+)*)\s*(B|kB|MB|GB|TB)")
+_SIZE_FACTORS: Final = {"B": 1, "kB": 1000, "MB": 1000**2, "GB": 1000**3, "TB": 1000**4}
+SIZE_PROBLEM = "APT reported the transaction's size in an unsupported form."
+
+
+def _amount(value: str) -> int | None:
+    """APT's human-readable amount in bytes, or None when it is not one."""
+    amount = value.split("/", 1)[0].strip()
+    match = _AMOUNT.fullmatch(amount)
+    if match is None:
+        return None
+    number, unit = match[1].replace(",", ""), match[2]
+    try:
+        return int(float(number) * _SIZE_FACTORS[unit])
+    except KeyError, ValueError:
+        return None
 
 
 def simulate_command(roots: tuple[str, ...]) -> str:
@@ -109,11 +135,29 @@ def simulate_command(roots: tuple[str, ...]) -> str:
     return f"DEBIAN_FRONTEND=noninteractive apt-get {options} --simulate install {requested}"
 
 
+def size_command(roots: tuple[str, ...]) -> str:
+    """The read that reports the transaction's download and disk sizes.
+
+    apt 3.2's simulation prints the resolved actions but no size summary; its
+    ``--print-uris`` planning read prints ``Need to get …`` and the archive URIs without
+    fetching or installing anything. It therefore answers the size question only, beside
+    the simulation that names the actions the guard admits.
+    """
+    for root in roots:
+        _check(_PACKAGE, root, "package name")
+    options = " ".join(
+        shlex.quote(option) for option in INSTALL_OPTIONS if option not in {"-q", "-y"}
+    )
+    requested = " ".join(shlex.quote(root) for root in roots)
+    return f"DEBIAN_FRONTEND=noninteractive apt-get -y --print-uris {options} install {requested}"
+
+
 def parse_simulation(text: str) -> Simulation:
     """Read ``apt-get -s install``: every action line strictly, checked against its summary."""
     transitions: list[Transition] = []
     problems: list[str] = []
     summaries: list[re.Match[str]] = []
+    sizes: list[str] = []
     for line in text.splitlines():
         if line.startswith(("Inst ", "Conf ", "Remv ", "Purg ")):
             transitions.append(_action(line))
@@ -123,10 +167,52 @@ def parse_simulation(text: str) -> Simulation:
             problems.append("APT reported a warning, such as unauthenticated packages.")
         elif summary := _SUMMARY.fullmatch(line):
             summaries.append(summary)
+        elif line.startswith(("Need to get ", "After this operation,")):
+            sizes.append(line)
     if len(transitions) > 400:
         raise ValueError("APT's simulation proposes more changes than Barectl reviews.")
+    download_bytes, installed_bytes, size_problems = _sizes(sizes)
+    problems.extend(size_problems)
     problems.extend(_summary_problems(transitions, summaries))
-    return Simulation(tuple(transitions), tuple(dict.fromkeys(problems)))
+    return Simulation(
+        tuple(transitions),
+        tuple(dict.fromkeys(problems)),
+        download_bytes,
+        installed_bytes,
+    )
+
+
+def parse_sizes(text: str) -> tuple[int | None, int | None, tuple[str, ...]]:
+    """The sizes of a ``--print-uris`` planning read, and why they are unusable."""
+    lines = [
+        line
+        for line in text.splitlines()
+        if line.startswith(("Need to get ", "After this operation,"))
+    ]
+    download_bytes, installed_bytes, problems = _sizes(lines)
+    if not lines:
+        problems.append(SIZE_PROBLEM)
+    return download_bytes, installed_bytes, tuple(dict.fromkeys(problems))
+
+
+def _sizes(lines: list[str]) -> tuple[int | None, int | None, list[str]]:
+    """The download and disk amounts APT reported, and the lines it reported in another form."""
+    download_bytes: int | None = None
+    installed_bytes: int | None = None
+    problems: list[str] = []
+    for line in lines:
+        if line.startswith("Need to get "):
+            download_bytes = _size(_NEED, line)
+        else:
+            installed_bytes = _size(_AFTER, line)
+        if (download_bytes if line.startswith("Need to get ") else installed_bytes) is None:
+            problems.append(SIZE_PROBLEM)
+    return download_bytes, installed_bytes, problems
+
+
+def _size(pattern: re.Pattern[str], line: str) -> int | None:
+    match = pattern.fullmatch(line)
+    return _amount(match[1]) if match is not None else None
 
 
 def _action(line: str) -> Transition:
@@ -238,6 +324,11 @@ def _check(pattern: re.Pattern[str], value: str, what: str) -> str:
 
 def check_package(value: str) -> str:
     return _check(_PACKAGE, value, "package name")
+
+
+def check_version(value: str) -> str:
+    """A reviewed package version, as dpkg reports it."""
+    return _check(_VERSION, value, "package version")
 
 
 def valid_digest(value: str) -> bool:

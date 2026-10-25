@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
     from bootstrap.apps import BootstrapConfig
     from bootstrap.certificate_email_views import CertificateEmailForm
+    from cache.apps import CacheConfig
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
     from dashboard.checks import check_built_assets
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
+    from disposable.test_cache import ValkeyInstall
     from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
     from disposable.test_confidential_channel import ConfidentialChannelLifecycle
     from disposable.test_database_engine import (
@@ -206,6 +208,7 @@ if TYPE_CHECKING:
         LaravelConfig,
         WordPressConfig,
         DatabasesConfig,
+        CacheConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
@@ -550,3 +553,5 @@ if TYPE_CHECKING:
         LaravelDeployBootFailure.test_a_release_whose_readiness_fails_is_never_reached,
         LaravelDeployPostgreSQL.test_a_deploy_on_postgresql,
     )
+    # The Phase C Valkey scenario is found by Django's test discovery.
+    _cache_scenarios = (ValkeyInstall,)
