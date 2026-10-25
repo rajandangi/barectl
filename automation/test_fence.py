@@ -83,7 +83,10 @@ class FencePlanTests(SimpleTestCase):
             unit(SLICE, "slice"),
             unit("barectl-site-shop-queue1.service", "service", "[Service]\nType=exec\n"),
         ]
-        self.assertIsNone(fence.plan_from(automation(units=units), (SHOP,)))
+        value = automation(units=units)
+        row = cast("dict[str, object]", cast("list[object]", value["sites"])[0])
+        cast("dict[str, object]", row["roles"])["queue1"] = {"service": None, "timer": None}
+        self.assertIsNone(fence.plan_from(value, (SHOP,)))
 
     def test_every_installed_role_is_carried_in_its_own_order(self) -> None:
         """The scheduler and queue roles #265/#266 add need no fence change."""

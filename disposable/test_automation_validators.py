@@ -8,7 +8,7 @@ import shlex
 
 from django.test import tag
 
-from automation import convention
+from automation import convention, workers
 from discovery.ssh import RemoteShell
 
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
@@ -78,6 +78,16 @@ class AutomationValidators(ScenarioTestCase):
             "systemd-analyze verify " + " ".join(shlex.quote(path) for path in paths) + " 2>&1"
         )
 
+    def test_four_queue_processes_load_in_systemd(self) -> None:
+        self.prepare()
+        definition = workers.WorkerDefinition(("default", "mail"), 4, 900)
+        units = workers.render_worker_units(IDENTIFIER, definition)
+        with self.shell() as shell:
+            paths = [self.write(shell, name, text) for _kind, name, text in units]
+        self.native(
+            "systemd-analyze verify " + " ".join(shlex.quote(path) for path in paths) + " 2>&1"
+        )
+
     def test_the_rendered_laravel_scheduler_loads_in_systemd(self) -> None:
         self.prepare()
         with self.shell() as shell:
@@ -96,6 +106,19 @@ class AutomationValidators(ScenarioTestCase):
         self.native(
             "systemd-analyze verify " + " ".join(shlex.quote(path) for path in paths) + " 2>&1"
         )
+
+    def test_a_worker_with_an_unknown_command_fails_before_publication(self) -> None:
+        self.prepare()
+        service = workers.render_worker_service(
+            IDENTIFIER, 1, workers.WorkerDefinition(("default",), 1, 60)
+        ).replace(f"ExecStart=/var/www/{IDENTIFIER}/bin/php", "ExecStart=/nonexistent/barectl-php")
+        with self.shell() as shell:
+            path = self.write(shell, "broken-queue.service", service)
+        output = self.native(
+            f"systemd-analyze verify {shlex.quote(path)} 2>&1; printf '\nstatus=%s\n' $?"
+        )
+        self.assertNotIn("status=0", output)
+        self.assertIn("/nonexistent/barectl-php", output)
 
     def test_the_calendar_expression_is_the_one_systemd_parses(self) -> None:
         parsed = self.native(f"systemd-analyze calendar {shlex.quote(convention.ON_CALENDAR)} 2>&1")

@@ -16,7 +16,10 @@ SITE_IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}\Z")
 ROLE: Final = re.compile(r"[a-z][a-z0-9]{2,20}\Z")
 ROLE_WPCRON: Final = "wpcron"
 ROLE_SCHEDULE: Final = "schedule"
-ROLES: Final = (ROLE_WPCRON, ROLE_SCHEDULE)
+# One Laravel queue process per role. They share the scheduled roles' slice and identity;
+# their service text is owned by automation.workers (Phase C #266).
+WORKER_ROLES: Final = tuple(f"queue{process}" for process in range(1, 5))
+ROLES: Final = (ROLE_WPCRON, ROLE_SCHEDULE, *WORKER_ROLES)
 # A site starts one worker process per reviewed process count (#266). The role carries its
 # position so every installed ``queue<N>`` unit is found from the convention, never from a
 # second naming scheme (docs/automation.md).

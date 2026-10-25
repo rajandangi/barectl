@@ -45,6 +45,7 @@ NO_FENCE: Final = frozenset(
         "verify_wordpress_core",
         "set_wordpress_server_cron",
         "set_laravel_scheduler",
+        "set_laravel_queue_workers",
     }
 )
 # What a review says when it cannot read the site's background work: the change would not

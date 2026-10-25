@@ -464,6 +464,37 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not remove the site's scheduled task, so it may still be installed. "
         "Check the run's journal, then prepare a new review."
     ),
+    "queue_workers": (
+        "Barectl could not change the site's queue workers, so the run stopped. The site "
+        "may be partly changed; check the run's journal on the server, then prepare a new "
+        "review."
+    ),
+    "queue_workers_site": (
+        "The site's account, current release or private files were not the reviewed ones, "
+        "so the run stopped before changing anything. Run discovery again and prepare a new "
+        "review."
+    ),
+    "queue_workers_activation": (
+        "The site's current release changed before the workers could start, so the run "
+        "stopped without changing them. Deploy again, then prepare a new review."
+    ),
+    "queue_workers_environment": (
+        "Barectl could not write the site's retry interval, so no worker was started. Check "
+        "the run's journal, then prepare a new review."
+    ),
+    "queue_workers_start": (
+        "Barectl could not confirm that every queue worker process is running. Check the "
+        "run's journal, then prepare a new review."
+    ),
+    "queue_workers_stop": (
+        "Barectl could not confirm that every queue worker stopped. Check the run's journal, "
+        "then prepare a new review."
+    ),
+    "laravel_worker": (
+        "The environment changed, but Barectl could not restart the site's queue workers in "
+        "time. They may still be running the previous environment; check the run's journal "
+        "and restart them."
+    ),
     "automation_scheduler": (
         "The site's Laravel files, account or scheduler units were not the reviewed ones, so "
         "the run stopped before changing anything. Run discovery again and prepare a new "
@@ -752,6 +783,13 @@ RESULT_REASONS: Final = frozenset(
         "automation_tick",
         "automation_configuration",
         "automation_units",
+        "queue_workers",
+        "queue_workers_site",
+        "queue_workers_activation",
+        "queue_workers_environment",
+        "queue_workers_start",
+        "queue_workers_stop",
+        "laravel_worker",
         "automation_scheduler",
         "automation_run",
         "automation_running",

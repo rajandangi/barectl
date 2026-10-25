@@ -470,6 +470,8 @@ __all__ = [
     "active_state",
     "daemon_reload",
     "disable_and_stop",
+    "disable_and_stop_service",
+    "enable_service",
     "enable_timer",
     "fence",
     "fence_dropin",
@@ -480,6 +482,8 @@ __all__ = [
     "publish_units",
     "remove_unit_file",
     "remove_units",
+    "reset_failed",
+    "restart_service",
     "restore",
     "reviewed_units",
     "slice_empty",
@@ -489,5 +493,32 @@ __all__ = [
     "unit_digests",
     "unit_file_state",
     "wait_for_tick",
+    "wait_services_active",
     "wait_slice_empty",
 ]
+
+
+def reset_failed(name: str) -> None:
+    with contextlib.suppress(ValueError):
+        systemctl("reset-failed", name)
+
+
+def restart_service(name: str) -> None:
+    systemctl("restart", name)
+
+
+def enable_service(name: str) -> None:
+    systemctl("enable", name)
+
+
+def disable_and_stop_service(name: str) -> None:
+    systemctl("disable", "--now", name)
+
+
+def wait_services_active(names: list[str], budget_seconds: int) -> bool:
+    deadline = time.monotonic() + budget_seconds
+    while time.monotonic() < deadline:
+        if all(active_state(name) == "active" for name in names):
+            return True
+        time.sleep(POLL_SECONDS)
+    return all(active_state(name) == "active" for name in names)

@@ -1,11 +1,12 @@
 {
   "recorded": "hosted Native amd64, run 40066133079 at 9f42ba8, 2026-10-24",
   "stages": {
-    "validators": 107.0,
-    "egress control": 10.0
+    "egress control": 10.0,
+    "validators": 110.0
   },
   "scenarios": {
     "disposable.test_automation.WordPressServerCron": 150.0,
+    "disposable.test_automation.LaravelQueueWorkers": 150.0,
     "disposable.test_cache.SiteObjectCache": 35.2,
     "disposable.test_cache.ValkeyInstall": 14.5,
     "disposable.test_catalog_update.CatalogRuntimeUpdate": 51.5,

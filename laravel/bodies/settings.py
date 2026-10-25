@@ -18,6 +18,7 @@ import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+from automation.bodies.worker_env import restart_workers
 from laravel.bodies.common import (
     ENVIRONMENT_KEY,
     _private_file_ok,
@@ -223,6 +224,12 @@ def edit_environment(document: dict[str, object]) -> None:  # noqa: C901 - revie
             return
         if not _config(settings):
             result("partial", "laravel_config")
+            return
+        restarted, workers_ok = restart_workers(settings.identifier)
+        if restarted:
+            stage("workers")
+        if not workers_ok:
+            result("partial", "laravel_worker")
             return
         stage("verify")
         if not restore(document, settings.identifier):

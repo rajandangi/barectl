@@ -149,7 +149,7 @@ A value entered in the browser is sealed under the worker's key and stored only 
 
 ## Automation
 
-WordPress cron, the Laravel scheduler and queue workers are planned in the [Phase C specification](https://github.com/rajandangi/barectl/issues/357); see [ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md).
+WordPress cron and Laravel database queue workers are implemented in [Automation](automation.md); the Laravel scheduler and per-site cache follow in the [Phase C specification](https://github.com/rajandangi/barectl/issues/357); see [ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md).
 
 ## Backups
 
