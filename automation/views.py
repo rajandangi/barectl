@@ -58,7 +58,12 @@ def context_for_site(
         and standing.standing == Standing.TARGET_STACK
     )
     lines = (
-        presentation.lines(snapshot.collected, identifier, snapshot.collected_at)
+        presentation.lines(
+            snapshot.collected,
+            identifier,
+            snapshot.collected_at,
+            presentation.paused_change(server, identifier),
+        )
         if snapshot is not None and site is not None and site.application == "wordpress"
         else ()
     )

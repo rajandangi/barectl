@@ -138,53 +138,70 @@ def sfp_context(unit: str) -> dict[str, object] | None:
     return {**service, **unit_values}
 
 
-def sfp_execution(identifier: str, entry: str, context: dict[str, object]) -> bool:
+def sfp_execution(  # noqa: C901 - one bounded native binding
+    identifier: str, entry: str, context: dict[str, object]
+) -> int | None:
+    """The running master's realtime start when the unit binds its process, else ``None``.
+
+    ``systemctl daemon-reload`` clears the running invocation's ``ExecStart`` and
+    ``ExecStartPost`` runtime fields (systemd 259), exactly as it does for the site's own
+    proxy ([admission](admission.py)). The configured commands, the process itself, its
+    cgroup and its invocation still bind it, and the unit keeps its monotonic start, so the
+    realtime start is derived from that preserved clock. Any change that writes a unit file
+    — a scheduled task, a log rotation, a runtime update — reloads systemd, so without this
+    a site's own master reads as unverifiable after such a change.
+    """
     base = f"/etc/php-fpm/sites/{identifier}/{entry}"
     executable = f"/nix/var/nix/profiles/barectl/{entry}/bin/php-fpm"
     commands = context.get("ExecStart")
     if not isinstance(commands, list) or len(commands) != 1 or not isinstance(commands[0], list):
-        return False
+        return None
     command = commands[0]
     if len(command) != 10 or command[:3] != [
         executable,
         [executable, "-F", "-y", base + "/php-fpm.conf", "-c", base + "/php.ini"],
         False,
     ]:
-        return False
+        return None
     if any(type(item) is not int for item in command[3:]):
-        return False
+        return None
     post = context.get("ExecStartPost")
     if not isinstance(post, list) or len(post) != 1 or not isinstance(post[0], list):
-        return False
+        return None
     chmod = post[0]
     if len(chmod) != 10 or chmod[:3] != [
         "/usr/bin/chmod",
         ["/usr/bin/chmod", "0600", f"/run/php-fpm/sites/{identifier}/{entry}/status/listen.sock"],
         False,
     ]:
-        return False
+        return None
     if any(type(item) is not int for item in chmod[3:]):
-        return False
+        return None
     start, mono = (
         context.get("ExecMainStartTimestamp"),
         context.get("ExecMainStartTimestampMonotonic"),
     )
-    return (
-        type(start) is int
-        and type(mono) is int
-        and start > 0
-        and mono > 0
-        and command[3:5] == [start, mono]
-        and command[5:7] == [0, 0]
-        and command[7] == context.get("MainPID")
-        and command[8:] == [0, 0]
-        and chmod[3] >= start
-        and chmod[4] >= mono
-        and chmod[5] >= chmod[3]
-        and chmod[6] >= chmod[4]
-        and chmod[7] > 0
-        and chmod[8:] == [1, 0]
-        and context.get("Type") == "notify"
+    if type(start) is not int or type(mono) is not int or mono <= 0:
+        return None
+    if command[3:] == [0] * 7:
+        if chmod[3:] != [0] * 7:
+            return None
+        start = mono + int((time.time() - time.monotonic()) * 1_000_000)
+    elif start <= 0 or (
+        command[3:5] != [start, mono]
+        or command[5:7] != [0, 0]
+        or command[7] != context.get("MainPID")
+        or command[8:] != [0, 0]
+        or chmod[3] < start
+        or chmod[4] < mono
+        or chmod[5] < chmod[3]
+        or chmod[6] < chmod[4]
+        or chmod[7] <= 0
+        or chmod[8:] != [1, 0]
+    ):
+        return None
+    if not (
+        context.get("Type") == "notify"
         and context.get("KillSignal") == 3
         and context.get("TimeoutStopUSec") == 310000000
         and context.get("SendSIGKILL") is True
@@ -203,7 +220,9 @@ def sfp_execution(identifier: str, entry: str, context: dict[str, object]) -> bo
                 "DropInPaths",
             )
         )
-    )
+    ):
+        return None
+    return start
 
 
 def sfp_process(pid: int, executable: str, cgroup: str) -> dict[str, object] | None:
@@ -789,18 +808,22 @@ def site_fpm_evidence(  # noqa: C901 - one bounded native read
     version, executable = selected
     unit = f"php-fpm-site-{entry}@{identifier}.service"
     context = sfp_context(unit)
-    if context is None or not sfp_execution(identifier, entry, context):
+    if context is None:
+        return None
+    start = sfp_execution(identifier, entry, context)
+    if start is None:
         return None
     pid = context.get("MainPID")
     invocation = sfp_invocation(context.get("InvocationID"))
     cgroup = context.get("ControlGroup")
-    if type(pid) is not int or pid <= 0 or not isinstance(cgroup, str) or invocation is None:
-        return None
-    start, mono = (
-        context.get("ExecMainStartTimestamp"),
-        context.get("ExecMainStartTimestampMonotonic"),
-    )
-    if type(start) is not int or type(mono) is not int:
+    mono = context.get("ExecMainStartTimestampMonotonic")
+    if (
+        type(pid) is not int
+        or pid <= 0
+        or not isinstance(cgroup, str)
+        or invocation is None
+        or type(mono) is not int
+    ):
         return None
     offset = time.time_ns() // 1000 - time.monotonic_ns() // 1000
     if abs(start - mono - offset) > 1000000:

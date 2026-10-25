@@ -190,6 +190,8 @@ rm -f /etc/systemd/system/barectl-site-"$prefix"*.service \
 rm -f /run/systemd/system/barectl-site-"$prefix"*.service \
     /run/systemd/system/barectl-site-"$prefix"*.timer \
     /run/systemd/system/barectl-site-"$prefix"*.slice 2>/dev/null
+rm -rf /run/systemd/system/barectl-site-"$prefix"*".service.d" \
+    /run/systemd/system/barectl-site-"$prefix"*".timer.d" 2>/dev/null
 systemctl daemon-reload 2>/dev/null || true
 for config in /etc/haproxy/sites/"$prefix"*.cfg; do
     [ -e "$config" ] || continue
@@ -254,7 +256,9 @@ for path in /etc/systemd/system/barectl-site-"$prefix"*.service \
     /etc/systemd/system/barectl-site-"$prefix"*.slice \
     /run/systemd/system/barectl-site-"$prefix"*.service \
     /run/systemd/system/barectl-site-"$prefix"*.timer \
-    /run/systemd/system/barectl-site-"$prefix"*.slice; do
+    /run/systemd/system/barectl-site-"$prefix"*.slice \
+    /run/systemd/system/barectl-site-"$prefix"*.service.d \
+    /run/systemd/system/barectl-site-"$prefix"*.timer.d; do
     [ -e "$path" ] && problems="$problems automation:$path"
 done
 automation_units=$(systemctl list-units --all --plain --no-legend \

@@ -65,12 +65,12 @@ One pure projection (`automation/status.py`) turns native evidence into the stat
 | Last run failed | the last run exited non-zero or was killed |
 | Timed out | the last run hit `TimeoutStartSec` |
 | Skipped | the last run's start and end span a calendar elapse, so the tick between them did not run |
-| Paused by a change | the units are runtime-masked |
+| Paused by an unfinished change | the units are runtime-masked |
 | Off during maintenance | a maintenance page is up and boot activation is off |
 | No cron is running | `DISABLE_WP_CRON` is set but no timer exists |
 | Could not confirm | the native read was unavailable or outside supported settings |
 
-Deliberate Off, Paused and maintenance states are not alarms. Failed, timed out, skipped, no-cron and unconfirmed states appear in the site's Overview line and in the server's Needs attention list with one next action.
+A deliberate Off is not an alarm. Paused, off-during-maintenance, failed, timed out, skipped, no-cron and unconfirmed states appear in the site's Overview line and in the server's Needs attention list with one next action: turning the work back on is the ordinary Scheduled tasks change, which asks for the state it should have and preselects nothing.
 
 ## Discovery and reconstruction
 
@@ -78,8 +78,18 @@ Full discovery runs one bounded root read ([`automation/observation.py`](../auto
 
 The projected rows are stored in `automation_observation` (ADR 0003), so a controller with an empty database reconstructs the setting and its last result from the server alone. Repeated reviews propose no change.
 
-## Fencing later changes
+## Fencing site changes
 
-Every change to a site's code, schema, runtime or settings stops that site's automation first ([#395](https://github.com/rajandangi/barectl/issues/395)). `automation/fence.py` builds the review's plan from the stored snapshot: the slice, the timers and services to mask and stop, the resume set (what was on when the review was prepared) and the stop budget. `automation/bodies/units.py` applies it after the kind's site lock and before its mutation, and restores only after the change verifies. A change that cannot prove its slice empty within budget refuses with nothing changed; a failed or unknown change leaves the work fenced, and the run's sentence says so.
+Every change to a site's code, schema, runtime, settings or files pauses that site's background work first ([#395](https://github.com/rajandangi/barectl/issues/395)). The step is owned by this module and called from each change's own body; no kind adds a member to the engine's seam.
 
-No marker records a fence. A runtime mask with no active change reads as *paused by a change*; a maintenance page with boot activation off reads as *off during maintenance*. A fresh controller never guesses which work was on before an interrupted change; the review that lifts the fence asks.
+**The review declares the plan.** When a fenced change is eligible and changes something, `operations/engine._prepare` reads the server's automation evidence once (the same bounded read discovery uses) and stores it in the review document under `automation_fence`: the slice, every `barectl-site-<id>-<role>` timer and service to mask and stop, the resume set and the stop budget. The resume set is exactly the units whose unit-file state was enabled when the review was prepared, timers first by their own service; a role the read added later is carried by its unit name, not by the fence. An unreadable answer refuses the review with nothing planned, because masking blind is worse than stopping.
+
+The changes that fence are `automation/fence.py:FENCING`: the PHP and Node switch, Change PHP settings, Laravel Deploy and Roll back, Edit Laravel environment, Edit WordPress settings, Remove site and Update catalog builds (per moved site). Reset WordPress administrator password and Verify core files never fence, and neither does the change that owns the units itself. A change that names no site is server-wide and pauses nothing: host foundation, Add or Remove runtime, server defaults, the database engine, Install Valkey and cleanup.
+
+**The body fences and restores.** `automation/bodies/units.py` is assembled into each of those bodies (`automation/bodies/source.py`). After the kind's site lock and its own preconditions, and before its first mutation, the body runtime-masks every reviewed timer and service, stops the timers, then their services, then the slice, and proves the slice has no processes within the budget; if it cannot, the run refuses `automation_fence` and nothing else changed. A change that enters a persistent maintenance gate (Deploy, Roll back) also removes the timers' boot activation, so a reboot during the gate cannot restart work: a stopped unit is not a reboot fence. After the change verifies — for Deploy and Roll back only after `/up` answers on the new release — the body unmasks and starts exactly the reviewed resume set, services before timers, and proves each one active. A restore that cannot prove it reports `automation_restore` and leaves the work stopped.
+
+Site removal fences, then removes the reviewed unit files and the slice with the rest of the site, clears their runtime masks, and never starts anything again. Update catalog builds fences each moved site around its own move.
+
+**Paused without a marker.** No file records a fence. A runtime mask reads as *paused by an unfinished change*; a maintenance page with boot activation off reads as *background work is off while the site is in maintenance*. The site's Overview and attention banner show that sentence and one safe next action: the ordinary Scheduled tasks change. The newest change to the site that did not finish is named from this device's own history when it has one; a fresh controller shows only native evidence and never guesses what was on, and the change that turns work back on asks for the state rather than restoring a remembered one.
+
+Stopping the automation slice never stops the site's HAProxy, PHP-FPM or Valkey instance: they live outside the slice (ADR 0036, ADR 0030). Independent CI deploys that use the site's deployment lock without Barectl are outside this guarantee.

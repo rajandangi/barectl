@@ -45,6 +45,7 @@ SHOW_PROPERTIES = (
     "LastTriggerUSec",
     "NextElapseUSecRealtime",
     "ControlGroup",
+    "RefuseManualStart",
 )
 SHOW_NAMES = ("service", "timer", "slice")
 SITE_NAME = re.compile(

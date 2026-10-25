@@ -65,6 +65,7 @@ SHOW_PROPERTIES: Final = frozenset(
         "LastTriggerUSec",
         "NextElapseUSecRealtime",
         "ControlGroup",
+        "RefuseManualStart",
     }
 )
 MAX_TEXT: Final = 16384
@@ -98,10 +99,6 @@ class ObservedSchedule:
 
     @property
     def timer_present(self) -> bool:
-        return self.installed
-
-    @property
-    def service_present(self) -> bool:
         return self.installed
 
     @property
@@ -292,6 +289,18 @@ def _project(
     if service is None or timer is None or slice_values is None:
         unreadable = True
         service, timer = {}, {}
+    masked = (
+        service.get("LoadState") == "masked"
+        or timer.get("LoadState") == "masked"
+        # A loaded unit keeps LoadState=loaded when a runtime mask replaces its file;
+        # the mask itself is the unit-file state (systemd 259).
+        or service.get("UnitFileState") in ("masked", "masked-runtime")
+        or timer.get("UnitFileState") in ("masked", "masked-runtime")
+        # The fence's runtime drop-in refuses a manual start on a loaded unit, where a
+        # runtime mask alone is inert on systemd 259 (automation/bodies/units.py).
+        or service.get("RefuseManualStart") == "yes"
+        or timer.get("RefuseManualStart") == "yes"
+    )
     evidence = ScheduleEvidence(
         identifier=identifier,
         role=role,
@@ -300,10 +309,11 @@ def _project(
         problems=tuple(dict.fromkeys(problems)),
         timer_present="timer" in present,
         timer_active=timer.get("ActiveState") == "active",
-        timer_enabled=timer.get("UnitFileState") in ENABLED_STATES,
-        service_present="service" in present,
+        # A fenced timer cannot run, so it is not on: a fresh controller must not resume
+        # work it never saw run (docs/adr/0036).
+        timer_enabled=timer.get("UnitFileState") in ENABLED_STATES and not masked,
         service_active=service.get("ActiveState") in ("active", "activating"),
-        masked=(service.get("LoadState") == "masked" or timer.get("LoadState") == "masked"),
+        masked=masked,
         result=service.get("Result", ""),
         exec_status=_int(service.get("ExecMainStatus", "0")),
         last_start_us=_timestamp(service.get("ExecMainStartTimestamp", "")),
@@ -339,6 +349,34 @@ def _stored(evidence: ScheduleEvidence, status: ScheduleStatus) -> ObservedSched
         next_elapse_us=evidence.next_elapse_us,
         slice_populated=evidence.slice_populated,
     )
+
+
+def role_show(row: dict[str, object], role: str) -> tuple[dict[str, str], dict[str, str]] | None:
+    """One installed role's timer and service properties, or ``None`` when unread.
+
+    The read answers the default role's properties in the row's ``service`` and ``timer``
+    keys. A read that answers every installed role adds them under ``show["roles"]`` keyed by
+    role, which is how the scheduler and queue roles #265/#266 add arrive here unchanged.
+    """
+    show = row.get("show")
+    if not isinstance(show, dict):
+        return None
+    roles = show.get("roles")
+    if isinstance(roles, dict):
+        entry = roles.get(role)
+        if not isinstance(entry, dict):
+            return None
+        return _both(entry.get("timer"), entry.get("service"))
+    if role != convention.ROLES[0]:
+        return None
+    return _both(show.get("timer"), show.get("service"))
+
+
+def _both(timer: object, service: object) -> tuple[dict[str, str], dict[str, str]] | None:
+    timer_values, service_values = _values(timer), _values(service)
+    if timer_values is None or service_values is None:
+        return None
+    return timer_values, service_values
 
 
 def _values(value: object) -> dict[str, str] | None:

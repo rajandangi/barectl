@@ -8,7 +8,6 @@ if TYPE_CHECKING:
     from django.db.migrations import Migration
 
     from automation.apps import AutomationConfig
-    from automation.fence import review_fence_plan
     from automation.presentation import ScheduleView
     from bootstrap.apps import BootstrapConfig
     from bootstrap.certificate_email_views import CertificateEmailForm
@@ -553,7 +552,6 @@ if TYPE_CHECKING:
     _automation_templates_and_extension_points = (
         AutomationConfig,
         ScheduleView("", "", "", "", None, "", False, False).last_run,
-        review_fence_plan,
     )
     # Django's form validation calls the settings form's clean_<field> by name, and the
     # settings bodies are read as resources by their change kinds.

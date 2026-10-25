@@ -115,6 +115,7 @@ class ReviewTests(SimpleTestCase):
                         "LastTriggerUSec": "@60000000",
                         "NextElapseUSecRealtime": "@120000000",
                         "ControlGroup": "",
+                        "RefuseManualStart": "no",
                     },
                     service={
                         "Id": "service",
@@ -129,6 +130,7 @@ class ReviewTests(SimpleTestCase):
                         "LastTriggerUSec": "",
                         "NextElapseUSecRealtime": "",
                         "ControlGroup": "",
+                        "RefuseManualStart": "no",
                     },
                 ),
             ),

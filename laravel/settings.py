@@ -15,6 +15,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
@@ -32,7 +33,9 @@ from .bodies.common import ENVIRONMENT_KEY, NON_SECRET_KEYS
 SLUG: Final = "edit_laravel_environment"
 LABEL: Final = "Edit Laravel environment"
 BODY_SOURCE: Final = (
-    observation.LARAVEL_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + observation.LARAVEL_SOURCE
     + "\n"
     + importlib.resources.files("laravel.bodies")
     .joinpath("settings.py")
