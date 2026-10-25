@@ -30,9 +30,9 @@ recorded item time; [the balanced run](#the-balanced-run) records the eight shar
 ## Revisions
 
 Every local number in [Build budget](#build-budget) and [Scenarios](#scenarios) belongs to one
-code revision, `5be4abc` on `fix/450-deploy-readiness`. The hosted figures belong to the revisions
-named under [Hosted runs](#hosted-runs); the balanced run differs from `5be4abc` in the shard
-partition, the hosted matrix and documentation.
+code revision, `5be4abc` on `fix/450-deploy-readiness`. The hosted figures belong to the
+revisions named under [Hosted runs](#hosted-runs); the balanced run was measured on a later
+revision, not on `5be4abc`, and that section names both.
 
 | Evidence | Where |
 | --- | --- |
@@ -90,6 +90,10 @@ report 197 s to 267 s, all inside the 900 s limit. The earlier four-shard run ex
 target on three shards and is kept below as the gap [#449](https://github.com/rajandangi/barectl/issues/449)
 closed.
 
+The 300 s shard target is the intended number: the [test time budget](quality.md#test-time-budget)
+is the single source of truth for test time and sets 300 s, superseding the 600 s shard target
+the Phase A record names.
+
 ## Scenarios
 
 Phase B adds fifteen native scenario classes to the Phase A set. Each row lists the class and
@@ -117,7 +121,7 @@ item against one prepared server.
 The Phase A scenarios S1 to S10 also run on this revision and all passed; their times are in
 the Phase A record. The hosted column is from the four-shard run named under
 [Hosted runs](#hosted-runs) and is kept for comparison rather than as this revision's
-measurement. The longest item is `WordPressCreateMariaDB` at 50.5 s locally and 141.6 s
+measurement. The longest item is `WordPressCreateMariaDB` at 50.5 s locally and 137.3 s
 hosted on the balanced run, both inside the 180 s item limit.
 
 What the Phase B classes assert:
@@ -484,13 +488,9 @@ also carries the validators and the egress control, which the balance reserves i
 The first attempt of that run restored no cache: the mirror missed, so each shard generated its
 own fixture CA, no two shards shared a snapshot key, and every shard prepared L1 through S1. It
 passed, but measured 273 s to 386 s of lifecycle time and 217 s of validators on shard 1 — 322 s
-for shard 1's stages — inside the 900 s limit and over the 300 s target on every shard. The
-recorded measurement is the warm attempt the budget names.
-
-On the same revision, the local full build on the arm64 reference host passed: the native stage
-215 s with all 65 lifecycle scenarios passing, the controller fast gate 45 s, the fast validators
-62 s, the browser tests 62 s, and the joint fast stage 62 s against its 60 s target, inside the
-run-to-run range the [build budget](#build-budget) records for that stage.
+for shard 1's stages — inside the 900 s limit and over the 300 s target on seven of the eight
+shards. The recorded measurement is the warm attempt the budget names: as the budget's baseline
+does, the shard target is judged with the keyed L1 snapshot restored.
 
 ### The four-shard run
 

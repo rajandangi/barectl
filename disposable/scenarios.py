@@ -780,17 +780,14 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def _shard(scenarios: Sequence[Scenario], value: str) -> list[Scenario]:
-    """The scenarios of one shard, balanced by their recorded item times."""
+    """The scenarios of one shard (docs/quality.md#limits)."""
     index, _, count = value.partition("/")
     position, total = int(index), int(count)
     if not 1 <= position <= total:
         raise SystemExit("--shard takes I/N with 1 <= I <= N.")
-    recorded, stages = shard_times.record()
-    groups = shard_times.partition(
-        [scenario.label for scenario in scenarios], total, scenarios=recorded, stages=stages
-    )
-    chosen = set(groups[position - 1])
-    return [scenario for scenario in scenarios if scenario.label in chosen]
+    groups = shard_times.Record.load().partition([item.label for item in scenarios], total)
+    chosen = {scenario.label: scenario for scenario in scenarios}
+    return [chosen[label] for label in groups[position - 1]]
 
 
 def prepare_layers(
