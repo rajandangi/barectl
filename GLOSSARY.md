@@ -195,8 +195,12 @@ One explicit, Read-consent remote operation that returns a bounded, scrubbed pag
 _Avoid_: Log fetch, tail, download
 
 **Log page**:
-The typed evidence of one log read: at most 500 lines and 256 KiB of text, a cursor for older lines, and the names of the files it came from. It is deleted after 24 hours or at the next read of that log.
+The typed evidence of one log read: at most 500 lines and 256 KiB of text, a cursor for older lines, a cursor for the next live line when the source is a journal, and the names of the files or units it came from. It is deleted after 24 hours or at the next read of that log.
 _Avoid_: Log file, cached log
+
+**Live view**:
+A journal log's open panel that asks for lines after its newest cursor while the page is visible, and stops asking while the page is hidden or closed. It appends lines without moving focus and announces each batch through the Logs status region. It is operator reading, not monitoring.
+_Avoid_: Log streaming, tail -f, real-time monitoring
 
 **Log rotation**:
 The root-owned `/etc/logrotate.d/barectl-site-<identifier>` file that rotates the logs Barectl creates in a site's log directory daily or at 20 MiB, keeping five compressed files for 14 days. Caddy and Laravel rotate their own logs.

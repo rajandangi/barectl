@@ -39,13 +39,13 @@ def read_log(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     slug = request.POST.get("source", "")
-    if source(slug) is None:
+    server = get_object_or_404(Server, pk=pk)
+    if services.available_source(server, identifier, slug) is None:
         raise Http404
     form = LogFilterForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Choose a valid search term and time range.")
         return redirect(_logs_url(pk, identifier, slug))
-    server = get_object_or_404(Server, pk=pk)
     queued = services.request_read(
         server,
         request.user,
@@ -57,6 +57,35 @@ def read_log(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     if queued is None:
         messages.error(request, "Wait for the current operation before reading this log.")
     return redirect(_logs_url(pk, identifier, slug))
+
+
+@require_POST
+@login_required
+@permission_required(services.READ_PERMISSIONS, raise_exception=True)
+def live_log(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """Poll one journal source by cursor; only this explicit POST queues a read."""
+    if not valid_identifier(identifier) or not isinstance(request.user, User):
+        raise Http404
+    slug = request.POST.get("source", "")
+    server = get_object_or_404(Server, pk=pk)
+    entry = services.available_source(server, identifier, slug)
+    if entry is None or not entry.journal:
+        raise Http404
+    if not _is_fragment_request(request):
+        return redirect(f"{_logs_url(pk, identifier, slug)}&live=1")
+    context = services.context_for_site(server, identifier, request.user, selected=slug, live=True)
+    queued = services.follow_read(server, request.user, identifier, slug)
+    selected = context.get("logs_selected")
+    page = selected.page if isinstance(selected, services.SourceView) else None
+    context["logs_live_queued"] = queued is not None
+    context["logs_live_busy"] = queued is None and not context["logs_active"]
+    # Only a live page is a delta: the newest page is already above the live panel.
+    context["logs_live_lines"] = (
+        page.lines if queued is not None and page is not None and page.live else ()
+    )
+    response = render(request, "logs/_live.html", context)
+    patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+    return response
 
 
 @require_GET

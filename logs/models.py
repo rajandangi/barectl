@@ -20,6 +20,7 @@ class LogOutcome(models.TextChoices):
     EMPTY = "empty", "Empty"
     UNREADABLE = "unreadable", "Unreadable"
     ROTATED = "rotated", "Rotated away"
+    NOT_CONFIGURED = "not_configured", "Not configured"
 
 
 class LogRead(RemoteOperation):
@@ -43,7 +44,7 @@ class LogRead(RemoteOperation):
     until = models.DateTimeField(null=True, blank=True)
     # An opaque continuation for older lines: file identity plus byte offset.
     cursor = models.CharField(max_length=200, blank=True)
-    outcome = models.CharField(max_length=12, choices=LogOutcome, default=LogOutcome.PENDING)
+    outcome = models.CharField(max_length=20, choices=LogOutcome, default=LogOutcome.PENDING)
     page = models.JSONField(default=dict)
     page_expires_at = models.DateTimeField(null=True, blank=True)
     collected_at = models.DateTimeField(null=True, blank=True)

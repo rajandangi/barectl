@@ -1,0 +1,18 @@
+<hx-partial hx-target="#log-live-status" hx-swap="innerHTML">
+{% if logs_live_busy %}
+  Wait for the current operation before reading this log.
+{% elif logs_live_queued or logs_active %}
+  Reading new lines…
+{% else %}
+  Following new lines while this page is visible.
+{% endif %}
+</hx-partial>
+{% if logs_live_lines %}
+  <hx-partial hx-target="#log-announcement" hx-swap="innerHTML">{{ logs_live_lines|length }} new line{{ logs_live_lines|length|pluralize }}</hx-partial>
+{% endif %}
+{% for line in logs_live_lines %}
+  <p class="log-live-line">
+    <code>{{ line.raw }}</code>
+    {% if line.truncated %}<span class="barectl-note">This line was shortened for the page.</span>{% endif %}
+  </p>
+{% endfor %}
