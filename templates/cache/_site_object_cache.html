@@ -38,7 +38,8 @@
               action="{% url 'site_object_cache_prepare' server.pk identifier %}">
           {% csrf_token %}
           <input type="hidden" name="action" value="off">
-          <button type="submit" class="usa-button usa-button--outline">Turn off object cache</button>
+          <button type="submit"
+                  class="usa-button usa-button--outline">Turn off object cache</button>
         </form>
       {% endif %}
     {% elif object_cache_state == "off" %}
