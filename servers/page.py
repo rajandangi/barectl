@@ -55,28 +55,12 @@ def next_action(
     *,
     host_challenge: bool,
     can_set_up: bool,
-    can_view_sites: bool,
     attention: tuple[object, ...] = (),
 ) -> NextAction | None:
     """The most urgent action, or ``None`` when the page already offers it."""
-    if host_challenge:
-        return NextAction(
-            "Confirm this is your server",
-            f"{reverse('server_settings', args=[state.server.pk])}#connection",
-            "Barectl needs the fingerprint from your provider before it connects.",
-        )
-    if not state.alias_usable:
-        return NextAction(
-            "Edit connection",
-            reverse("server_edit", args=[state.server.pk]),
-            "The saved SSH alias is no longer a usable Host entry on this computer.",
-        )
-    if state.status == Status.FAILED:
-        return NextAction(
-            "Check again",
-            f"{reverse('server_settings', args=[state.server.pk])}#connection",
-            "The last check could not connect.",
-        )
+    connection = _connection_action(state, host_challenge=host_challenge)
+    if connection is not None:
+        return connection
     if state.checking:
         return None
     snapshot = state.snapshot
@@ -102,6 +86,27 @@ def next_action(
         action_url = getattr(item, "action_url", "")
         if action_url:
             return NextAction(str(getattr(item, "action", "")), action_url)
-    if can_view_sites:
-        return None
+    return None
+
+
+def _connection_action(state: DiscoveryState, *, host_challenge: bool) -> NextAction | None:
+    """The one action a server whose connection is not established needs."""
+    if host_challenge:
+        return NextAction(
+            "Confirm this is your server",
+            f"{reverse('server_settings', args=[state.server.pk])}#connection",
+            "Barectl needs the fingerprint from your provider before it connects.",
+        )
+    if not state.alias_usable:
+        return NextAction(
+            "Edit connection",
+            reverse("server_edit", args=[state.server.pk]),
+            "The saved SSH alias is no longer a usable Host entry on this computer.",
+        )
+    if state.status == Status.FAILED:
+        return NextAction(
+            "Check again",
+            f"{reverse('server_settings', args=[state.server.pk])}#connection",
+            "The last check could not connect.",
+        )
     return None

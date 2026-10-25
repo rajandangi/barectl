@@ -46,7 +46,42 @@
         {% endif %}
       {% elif section == "settings" %}
         {% include "servers/_settings.html" %}
-        {% include "servers/_connection.html" %}
+        <section class="margin-top-4" aria-labelledby="settings-connection-heading">
+          <h2 id="settings-connection-heading">Connection</h2>
+          <dl class="barectl-facts">
+            <div>
+              <dt>{% if server.connection_mode == "alias" %}SSH alias{% else %}Address{% endif %}</dt>
+              <dd>
+                <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code>
+              </dd>
+            </div>
+            {% if server.connection_mode == "alias" and server.address %}
+              <div>
+                <dt>Address</dt>
+                <dd>
+                  <code>{{ server.address }}</code>
+                </dd>
+              </div>
+            {% endif %}
+            <div>
+              <dt>SSH user</dt>
+              <dd>
+                {{ server.username }}
+              </dd>
+            </div>
+            <div>
+              <dt>Port</dt>
+              <dd>
+                {{ server.port }}
+              </dd>
+            </div>
+          </dl>
+          {% if perms.servers.change_server %}
+            <a class="usa-button usa-button--outline"
+               href="{% url 'server_edit' server.pk %}">Edit connection</a>
+          {% endif %}
+        </section>
+        {% include "servers/_connection.html" with attempt=state.attempt %}
         <section class="margin-top-4" aria-labelledby="settings-remove-heading">
           <h2 id="settings-remove-heading">Remove server</h2>
           <p class="barectl-note">

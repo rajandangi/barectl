@@ -1,7 +1,10 @@
 """Installation-wide Settings: the signed-in account, controller keys and this release."""
 
+import tomllib
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
@@ -16,7 +19,14 @@ def barectl_version() -> str:
     try:
         return version("barectl")
     except PackageNotFoundError:
+        pass
+    try:
+        with (Path(settings.BASE_DIR) / "pyproject.toml").open("rb") as source:
+            project = tomllib.load(source).get("project", {})
+    except OSError, tomllib.TOMLDecodeError:
         return "unknown"
+    declared = project.get("version") if isinstance(project, dict) else None
+    return declared if isinstance(declared, str) else "unknown"
 
 
 def catalog_rows() -> tuple[dict[str, str], ...]:

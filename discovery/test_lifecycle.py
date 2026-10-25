@@ -184,7 +184,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
         self.assertIn("The SSH alias web.example.com", attempt.failure)
         self.assertEqual(self.remote.targets, [])
-        page = self.client.get(f"/servers/{server.pk}/")
+        page = self.client.get(f"/servers/{server.pk}/settings/")
         self.assertContains(page, "Connection failed")
         self.assertContains(page, "It is no longer a Host entry.")
 
@@ -205,9 +205,11 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.run_worker()
         self.assertEqual(DiscoveryAttempt.objects.get().status, DiscoveryAttempt.Status.FAILED)
         self.assertFalse(DiscoverySnapshot.objects.exists())
-        page = self.client.get(f"/servers/{server.pk}/")
+        page = self.client.get(f"/servers/{server.pk}/settings/")
         self.assertContains(page, "does not trust the host key presented.")
-        self.assertContains(page, "No observations yet.")
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/advanced/"), "No observations yet."
+        )
         self.assertContains(self.client.get("/"), "<td>Connection failed</td>", html=True)
 
     def test_unexpected_errors_are_recorded_without_their_details(self) -> None:
@@ -298,7 +300,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
 
     def test_explicit_verification_queues_one_attempt(self) -> None:
         self.sign_in_with("view_server", "add_discoveryattempt")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "<strong>Not verified.</strong>", html=True)
         self.assertContains(page, "Verify connection")
         response = self.client.post(self.verify_url())
@@ -310,7 +312,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertEqual(task_records().count(), 1)
         self.run_worker()
         self.assertEqual(self.remote.targets[0].alias, "web.example.com")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "<strong>Verified</strong>", html=True)
         self.assertContains(page, "Refresh observations")
         response = self.client.post(self.verify_url(), follow=True)
@@ -327,23 +329,25 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertIn('<hx-partial hx-target="#discovery-announcement"', content)
         self.assertIn("Connection check queued.", content)
         poll = f"/servers/{self.server.pk}/discovery/?shown=QUEUED"
-        self.assertRegex(
-            content, r'<hx-partial hx-target="#connection-status"[^>]*>\s*Connection check queued'
-        )
+        status = self.client.get(
+            f"/servers/{self.server.pk}/status/", headers=HTMX_FRAGMENT
+        ).content.decode()
+        self.assertIn("Checking", status)
         unchanged = self.client.get(poll, headers=HTMX_FRAGMENT).content.decode()
         self.assertNotIn("hx-partial", unchanged)
         self.run_worker()
         finished = self.client.get(poll, headers=HTMX_FRAGMENT)
         self.assertNotContains(finished, "hx-trigger")
         self.assertContains(finished, "Connection verified.")
-        # The Status row above the fragment changes with it.
-        self.assertRegex(
-            finished.content.decode(),
-            r'<hx-partial hx-target="#connection-status"[^>]*>\s*Verified\s*</hx-partial>',
+        status = self.client.get(
+            f"/servers/{self.server.pk}/status/", headers=HTMX_FRAGMENT
+        ).content.decode()
+        self.assertNotIn("Checking", status)
+        self.assertContains(
+            self.client.get(f"/servers/{self.server.pk}/advanced/"),
+            "<dd>Ubuntu 26.04.1 LTS</dd>",
+            html=True,
         )
-        page = self.client.get(f"/servers/{self.server.pk}/")
-        self.assertContains(page, '<dd id="connection-status">Verified</dd>', html=True)
-        self.assertContains(finished, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertIn("HX-Request-Type", finished.headers["Vary"])
         # A plain request for the fragment URL gets the complete page.
         self.assertRedirects(
@@ -356,7 +360,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.sign_in_with("view_server", "add_discoveryattempt")
         self.client.post(self.verify_url())
         self.run_worker()
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "rejected the SSH credentials")
         self.assertContains(page, "Retry connection check")
         self.remote.failure = ""
@@ -415,7 +419,7 @@ class RefreshTests(DiscoveryTestCase):
     def test_refresh_queues_work_shows_progress_and_replaces_snapshot(self) -> None:
         first = self.succeed_once()
         self.sign_in_with("view_server", "add_discoveryattempt")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "Refresh observations")
         self.assertNotContains(page, "hx-trigger")
 
@@ -451,7 +455,7 @@ class RefreshTests(DiscoveryTestCase):
             observed(current(self.server).collected.os).pretty_name, "Ubuntu 26.04.2 LTS"
         )
         self.assertNotEqual(snapshot.pk, first.pk)
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Ubuntu 26.04.2 LTS")
         self.assertNotContains(page, "may be out of date")
 
@@ -482,7 +486,7 @@ class RefreshTests(DiscoveryTestCase):
                 ("certbot", "observed", "observed"),
             ],
         )
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotContains(page, "nginx 1.28.3-2ubuntu1.11")
         self.assertContains(page, "mariadb.service inactive (dead), enabled")
 
@@ -501,12 +505,13 @@ class RefreshTests(DiscoveryTestCase):
         self.assertEqual(latest.status, DiscoveryAttempt.Status.FAILED)
         self.assertFalse(DiscoverySnapshot.objects.filter(attempt=latest).exists())
 
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "Connection failed")
         self.assertContains(page, "could not reach the SSH service")
-        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
-        self.assertContains(page, "The latest connection check failed, so these observations")
         self.assertContains(page, "Retry connection check")
+        advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(advanced, "The latest connection check failed, so these observations")
         # No automatic retry: one failed attempt stays until the operator retries.
         self.assertEqual(DiscoveryAttempt.objects.count(), 2)
 
@@ -515,7 +520,7 @@ class RefreshTests(DiscoveryTestCase):
         self.run_worker()
         self.assertEqual(DiscoveryAttempt.objects.count(), 3)
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "<strong>Verified</strong>", html=True)
         self.assertContains(page, "Refresh observations")
 
@@ -528,7 +533,7 @@ class RefreshTests(DiscoveryTestCase):
         self.run_worker()
 
         self.assertEqual(current(self.server).collected.os.outcome, "inaccessible")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "<strong>Inaccessible:</strong>", html=True)
         self.assertNotContains(page, "No observations yet.")
         self.assert_succeeded()
@@ -539,7 +544,7 @@ class RefreshTests(DiscoveryTestCase):
             collected_at=timezone.now() - datetime.timedelta(hours=3, minutes=5)
         )
         self.sign_in_with("view_server")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "(3\xa0hours, 5\xa0minutes ago)")
 
     def test_bounded_timeout_failure_preserves_snapshot(self) -> None:
@@ -552,10 +557,11 @@ class RefreshTests(DiscoveryTestCase):
         self.run_worker()
 
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "did not finish within")
-        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
-        self.assertContains(page, "may be out of date")
+        advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(advanced, "may be out of date")
 
 
 class RecoveryTests(DiscoveryTestCase):
@@ -618,11 +624,12 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
         self.assertEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
         self.sign_in_with("view_server", "add_discoveryattempt")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "stopped before finishing")
-        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
-        self.assertContains(page, "may be out of date")
         self.assertContains(page, "Retry connection check")
+        advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(advanced, "may be out of date")
 
         self.client.post(f"/servers/{self.server.pk}/verify/")
         self.run_worker()
@@ -737,7 +744,11 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertNotIn("hx-trigger", content)
         self.assertIn("stopped before finishing", content)
         self.assertIn("Retry connection check", content)
-        self.assertContains(fragment, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(
+            self.client.get(f"/servers/{self.server.pk}/advanced/"),
+            "<dd>Ubuntu 26.04.1 LTS</dd>",
+            html=True,
+        )
         self.assertRegex(
             content, r'hx-target="#discovery-announcement"[^>]*>\s*The connection failed\.'
         )
@@ -755,9 +766,12 @@ class RecoveryTests(DiscoveryTestCase):
     def test_a_running_attempt_that_is_not_stale_is_shown_as_running(self) -> None:
         self.interrupt_running()
         self.sign_in_with("view_server")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "<strong>Checking connection</strong> since", html=False)
-        self.assertContains(page, "A new connection check is running")
+        self.assertContains(
+            self.client.get(f"/servers/{self.server.pk}/advanced/"),
+            "A new connection check is running",
+        )
         self.assertContains(page, 'hx-trigger="every 2s"')
 
     def test_every_page_that_shows_attempts_recovers_abandoned_ones(self) -> None:
@@ -820,7 +834,7 @@ class ActivityHistoryTests(DiscoveryTestCase):
         self.run_worker()
         snapshot = DiscoverySnapshot.objects.get()
         self.sign_in_with("view_server")
-        history = self.history_of(self.client.get(f"/servers/{self.server.pk}/"))
+        history = self.history_of(self.client.get(f"/servers/{self.server.pk}/advanced/"))
         self.assertIn("Discovery history", history)
         self.assertIn("Verified", history)
         self.assertIn(date_format(snapshot.collected_at, "M j, Y, H:i:s T"), history)
@@ -835,7 +849,7 @@ class ActivityHistoryTests(DiscoveryTestCase):
         self.client.post(self.verify_url())
         self.run_worker()
 
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         content = page.content.decode()
         # The latest failure is shown although the earlier snapshot is still displayed.
         self.assertIn("The latest connection check failed", content)
