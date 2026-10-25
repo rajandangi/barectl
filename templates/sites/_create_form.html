@@ -128,7 +128,8 @@
       <span class="usa-error-message" id="create-site-domain-error">{% for error in create_site_form.names.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
     {% endif %}
   </div>
-  <details class="barectl-more-options" {% if create_site_more_open %}open{% endif %}>
+  <details class="barectl-more-options"
+           {% if create_site_more_open %}open{% endif %}>
     <summary>More options</summary>
     <div class="usa-form-group{% if create_site_form.identifier.errors %} usa-form-group--error{% endif %}">
       <label class="usa-label" for="create-site-identifier">Short name</label>

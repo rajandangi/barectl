@@ -12,9 +12,12 @@
           </p>
           {% if creation_banner.continue_url %}
             {% if creation_banner.continue_post %}
-              <form class="usa-form" method="post" action="{{ creation_banner.continue_url }}">
+              <form class="usa-form"
+                    method="post"
+                    action="{{ creation_banner.continue_url }}">
                 {% csrf_token %}
-                <button type="submit" class="usa-button">{{ creation_banner.continue_label }}</button>
+                <button type="submit"
+                        class="usa-button">{{ creation_banner.continue_label }}</button>
               </form>
             {% else %}
               <p>
