@@ -112,7 +112,10 @@ object cache on, requests the page once and waits two seconds before reading cgr
 
 | Class | Container limit | Cache instance | Worker 1 | Worker 2 | Whole container current / peak |
 | --- | --- | --- | --- | --- | --- |
-<!-- MEMORY TABLE -->
+| `MemoryOneGiB` | 1 GiB | 9.1 MiB (9,527,296 B) | 35.0 MiB (36,696,064 B) | 33.3 MiB (34,926,592 B) | 523.5 / 543.0 MiB |
+| `MemoryTwoGiB` | 2 GiB | 4.2 MiB (4,407,296 B) | 33.2 MiB (34,779,136 B) | 33.1 MiB (34,729,984 B) | 454.0 / 478.3 MiB |
+| `MemoryFourGiB` | 4 GiB | 8.0 MiB (8,355,840 B) | 33.2 MiB (34,824,192 B) | 33.1 MiB (34,758,656 B) | 412.4 / 433.6 MiB |
+
 
 The instance's configured `maxmemory` is 64 MiB in every class, and the measured instance
 memory stays far below it because the site's cache is nearly empty. The workers carry a PHP
