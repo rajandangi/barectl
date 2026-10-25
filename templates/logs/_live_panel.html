@@ -1,8 +1,6 @@
 <section id="log-live-panel" aria-labelledby="log-live-heading">
   <h3 id="log-live-heading">Live lines</h3>
-  <p class="barectl-note" id="log-live-status">
-    Following new lines while this page is visible.
-  </p>
+  <p class="barectl-note" id="log-live-status">Following new lines while this page is visible.</p>
   <div id="log-live-lines"></div>
   <div class="margin-top-2"
        hx-post="{% url 'site_log_live' server.pk identifier %}"
