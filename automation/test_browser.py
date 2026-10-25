@@ -32,7 +32,9 @@ class ScheduledTasksBrowserTests(BrowserTestCase):
         self.sign_in()
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/")
         self.assert_no_native_terms()
-        self.page.get_by_role("link", name="Settings", exact=True).click()
+        self.page.get_by_role("navigation", name="Site sections").get_by_role(
+            "link", name="Settings", exact=True
+        ).click()
         expect(self.page.get_by_role("heading", name="Scheduled tasks", level=2)).to_be_visible()
         self.assert_no_native_terms()
         button = self.page.get_by_role("button", name="Turn on", exact=True)

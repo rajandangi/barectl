@@ -69,3 +69,44 @@ class RecordedValkeyWorkerTests(ChangeTestCase):
         self.assertTrue(review.eligible, review.document)
         self.assertEqual(review.consent, Consent.READ)
         self.assertTrue(review.no_changes)
+
+
+OBJECT_CACHE_STATE = "object-cache-26.04"
+OBJECT_CACHE_EDITED_STATE = "object-cache-edited-26.04"
+SITE = "l3wordpress"
+
+
+class RecordedObjectCacheTests(SimpleTestCase):
+    def test_a_fresh_controller_reconstructs_a_connected_site_cache(self) -> None:
+        shell = ReplayShell(load(OBJECT_CACHE_STATE))
+        collected = collect(shell)
+        if observation.installed(collected) is None:
+            self.fail("The transcript does not reconstruct Valkey as installed.")
+        row = next(row for row in collected.cache.value if row.identifier == SITE)
+        self.assertEqual(row.state, "on", row.problem)
+        self.assertEqual(row.memory_mib, 64)
+        self.assertEqual(row.plugin_version, "3.0.0")
+        self.assertEqual(row.client, "phpredis")
+
+    def test_a_repeated_review_proposes_nothing(self) -> None:
+        from . import instance
+
+        inputs = PreparationInputs(identifier=SITE, object_cache=True, cache_mib=64)
+        shell = ReplayShell(load(OBJECT_CACHE_STATE))
+        draft = instance.review(instance.inspect(shell, inputs), inputs)
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertTrue(draft.no_changes)
+
+    def test_a_changed_user_is_reported_once_and_blocks_turning_it_on(self) -> None:
+        from . import instance
+
+        shell = ReplayShell(load(OBJECT_CACHE_EDITED_STATE))
+        collected = collect(shell)
+        row = next(row for row in collected.cache.value if row.identifier == SITE)
+        self.assertEqual(row.state, "unsupported")
+        self.assertIn("outside the supported convention", row.problem)
+        on = PreparationInputs(identifier=SITE, object_cache=True, cache_mib=64)
+        draft = instance.review(instance.inspect(shell, on), on)
+        self.assertFalse(draft.eligible)
+        off = PreparationInputs(identifier=SITE, object_cache=False)
+        self.assertTrue(instance.review(instance.inspect(shell, off), off).eligible)

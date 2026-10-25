@@ -5,13 +5,13 @@ from django.views.generic import RedirectView
 from automation.views import prepare_schedule
 from automation.worker_views import prepare_workers
 from bootstrap.certificate_email_views import prepare_certificate_email
-from cache.views import object_cache_prepare
+from cache.views import object_cache_prepare, prepare_site_cache, read_site_cache
 from dashboard.forms import SignInForm
 from dashboard.settings_views import settings_page
 from databases.site_views import prepare_site_database
 from databases.views import database_prepare
 from laravel.settings_views import prepare_environment
-from logs.views import log_page, prepare_rotation, read_log
+from logs.views import live_log, log_page, prepare_rotation, read_log
 from operations.views import (
     change_apply,
     change_detail,
@@ -199,6 +199,11 @@ urlpatterns = [
         name="site_log_page",
     ),
     path(
+        "servers/<int:pk>/sites/<str:identifier>/logs/live/",
+        live_log,
+        name="site_log_live",
+    ),
+    path(
         "servers/<int:pk>/sites/<str:identifier>/logs/rotation/prepare/",
         prepare_rotation,
         name="site_log_rotation_prepare",
@@ -240,6 +245,16 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/settings/domains/prepare/",
         prepare_domains,
         name="site_domains_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/settings/object-cache/prepare/",
+        prepare_site_cache,
+        name="site_object_cache_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/settings/object-cache/read/",
+        read_site_cache,
+        name="site_object_cache_read",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/settings/remove/prepare/",

@@ -34,9 +34,16 @@ class AutomationValidators(ScenarioTestCase):
             self.native,
             f"pkill -u {ACCOUNT} 2>/dev/null || true; userdel {ACCOUNT} 2>/dev/null || true",
         )
-        self.native(f"install -d -m 0755 /var/www/{IDENTIFIER}/current /var/www/{IDENTIFIER}/bin")
+        # The lane runs with umask 0000. Create /var/www explicitly first, so the
+        # implicit parent cannot appear world-writable and break later validators.
+        self.native(
+            "umask 0022; test -d /var/www || install -d -m 0755 /var/www; "
+            f"install -d -m 0755 /var/www/{IDENTIFIER} "
+            f"/var/www/{IDENTIFIER}/current /var/www/{IDENTIFIER}/bin"
+        )
         self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/bin/wp")
         self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/bin/php")
+        self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/current/artisan")
         self.addCleanup(self.native, f"rm -rf /var/www/{IDENTIFIER}")
         self.native(f"rm -rf {SCRATCH} && install -d -m 0755 {SCRATCH}")
         self.addCleanup(self.native, f"rm -rf {SCRATCH}")
@@ -56,6 +63,10 @@ class AutomationValidators(ScenarioTestCase):
             ("timer", convention.timer_name(IDENTIFIER, convention.ROLE_WPCRON)),
         ]
 
+    def test_the_shared_parent_is_not_made_world_writable(self) -> None:
+        self.prepare()
+        self.assertEqual(self.native("stat -c %a /var/www").strip(), "755")
+
     def test_the_rendered_slice_service_and_timer_load_in_systemd(self) -> None:
         self.prepare()
         with self.shell() as shell:
@@ -73,6 +84,25 @@ class AutomationValidators(ScenarioTestCase):
         units = workers.render_worker_units(IDENTIFIER, definition)
         with self.shell() as shell:
             paths = [self.write(shell, name, text) for _kind, name, text in units]
+        self.native(
+            "systemd-analyze verify " + " ".join(shlex.quote(path) for path in paths) + " 2>&1"
+        )
+
+    def test_the_rendered_laravel_scheduler_loads_in_systemd(self) -> None:
+        self.prepare()
+        with self.shell() as shell:
+            paths = [
+                self.write(
+                    shell,
+                    name,
+                    convention.render(IDENTIFIER, convention.ROLE_SCHEDULE, kind),
+                )
+                for kind, name in (
+                    ("slice", convention.slice_name(IDENTIFIER)),
+                    ("service", convention.service_name(IDENTIFIER, convention.ROLE_SCHEDULE)),
+                    ("timer", convention.timer_name(IDENTIFIER, convention.ROLE_SCHEDULE)),
+                )
+            ]
         self.native(
             "systemd-analyze verify " + " ".join(shlex.quote(path) for path in paths) + " 2>&1"
         )

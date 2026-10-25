@@ -29,7 +29,7 @@ from .test_laravel_deploy import LaravelDeployCase
 from .test_wordpress_create import CANARY, DOMAIN, IDENTIFIER, WordPressCreateCase
 
 STATE = "automation-wordpress-26.04"
-QUEUE_STATE = "automation-laravel-26.04"
+QUEUE_STATE = "automation-laravel-workers-26.04"
 DUE_EVENT = "barectl_probe"
 ON_EVENT = "barectl_probe_on"
 OFF_EVENT = "barectl_probe_off"

@@ -64,6 +64,7 @@ POSTGRESQL = "postgresql"
 
 
 def site_paths(identifier: str) -> list[str]:
+    """Every reviewed site artifact; the last four belong to its own object cache (#392)."""
     return [
         f"/etc/caddy/sites/{identifier}.caddy",
         f"/etc/haproxy/sites/{identifier}.cfg",
@@ -73,6 +74,10 @@ def site_paths(identifier: str) -> list[str]:
         f"/var/lib/php-fpm/sites/{identifier}",
         f"/run/php-fpm/sites/{identifier}",
         f"/var/www/{identifier}",
+        f"/etc/valkey/{identifier}.conf",
+        f"/var/lib/valkey/{identifier}",
+        f"/run/valkey/{identifier}",
+        f"/etc/systemd/system/valkey-server@{identifier}.service.d",
     ]
 
 
@@ -80,6 +85,7 @@ def service_units(identifier: str) -> list[str]:
     return [
         f"haproxy-site@{identifier}.service",
         *(f"php-fpm-site-{entry}@{identifier}.service" for entry in RUNTIMES),
+        f"valkey-server@{identifier}.service",
     ]
 
 
@@ -604,7 +610,8 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
         stop_services(identifier)
         changed = True
         stage("configuration")
-        for path in site_paths(identifier)[1:7]:
+        paths = site_paths(identifier)
+        for path in [*paths[1:7], *paths[8:]]:
             remove_path(path)
         stage("database")
         reason = drop_database(document)

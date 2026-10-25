@@ -1,4 +1,6 @@
-{% if scheduled_tasks %}
+{% if scheduled_tasks and scheduled_tasks_kind == "laravel" %}
+  {% include "sites/_site_laravel_scheduler.html" %}
+{% elif scheduled_tasks %}
   <section class="barectl-card" aria-labelledby="scheduled-tasks">
     <h2 id="scheduled-tasks">Scheduled tasks</h2>
     <dl class="barectl-facts">

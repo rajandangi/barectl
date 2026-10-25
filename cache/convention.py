@@ -35,6 +35,8 @@ class InstancePaths:
     run_directory: str
     socket: str
     data_directory: str
+    drop_in_directory: str
+    drop_in: str
 
 
 def instance_paths(identifier: str) -> InstancePaths:
@@ -42,12 +44,15 @@ def instance_paths(identifier: str) -> InstancePaths:
     if _IDENTIFIER.fullmatch(identifier) is None:
         raise ValueError("Not a valid site identifier.")
     run_directory = f"{RUNTIME_ROOT}/{identifier}"
+    drop_in_directory = f"/etc/systemd/system/{PACKAGE}@{identifier}.service.d"
     return InstancePaths(
         unit=f"{PACKAGE}@{identifier}.service",
         config=f"{CONFIG_ROOT}/{identifier}.conf",
         run_directory=run_directory,
         socket=f"{run_directory}/{SOCKET_NAME}",
         data_directory=f"{DATA_ROOT}/{identifier}",
+        drop_in_directory=drop_in_directory,
+        drop_in=f"{drop_in_directory}/barectl.conf",
     )
 
 
@@ -68,6 +73,8 @@ def render_config(identifier: str, maxmemory_mib: int = DEFAULT_MAXMEMORY_MIB) -
             "protected-mode yes",
             "daemonize no",
             "supervised no",
+            'logfile ""',
+            f"pidfile {paths.run_directory}/valkey-server.pid",
             f"dir {paths.data_directory}",
             f"unixsocket {paths.socket}",
             "unixsocketperm 600",
@@ -77,4 +84,73 @@ def render_config(identifier: str, maxmemory_mib: int = DEFAULT_MAXMEMORY_MIB) -
             "maxmemory-policy allkeys-lru",
             "user default on nopass ~* &* +@all -@admin -debug -module",
         )
+    )
+
+
+def render_drop_in(identifier: str) -> str:
+    """The root-owned drop-in that makes the packaged template run the site's own instance.
+
+    Ubuntu's ``valkey-server@.service`` reads ``/etc/valkey/valkey-%i.conf`` and runs as
+    the ``valkey`` user with a shared runtime directory. The drop-in names this site's
+    configuration and account, and gives the process only its own runtime and data
+    directories. ``ExecStart`` must be reset before it changes.
+    """
+    paths = instance_paths(identifier)
+    return "\n".join(
+        (
+            "[Service]",
+            f"User=s{identifier}",
+            f"Group=s{identifier}",
+            "ExecStart=",
+            (
+                f"ExecStart=/usr/bin/valkey-server {paths.config} "
+                "--supervised systemd --daemonize no"
+            ),
+            f"PIDFile={paths.run_directory}/valkey-server.pid",
+            f"RuntimeDirectory=valkey/{identifier}",
+            "RuntimeDirectoryMode=0700",
+            f"ReadWritePaths={paths.run_directory} {paths.data_directory}",
+        )
+    )
+
+
+@dataclass(frozen=True)
+class ConfigShape:
+    """One observed configuration: the reviewed limit, or why it is outside."""
+
+    memory_mib: int | None
+    # Empty when the file is exactly a reviewed configuration.
+    problem: str
+    # Why the limit itself is outside the reviewed sizes; empty when it is not.
+    outside: str
+
+
+def config_shape(identifier: str, text: str) -> ConfigShape:
+    """Recognize a hand-edited instance configuration.
+
+    A reviewed configuration with any of the reviewed memory limits is supported, so an
+    operator who resizes a cache inside the bounds keeps a recognized instance. Any other
+    change is reported once as outside supported settings.
+    """
+    for size in MAXMEMORY_MIB:
+        if text == render_config(identifier, size):
+            return ConfigShape(size, "", "")
+    limit: int | None = None
+    for line in text.splitlines():
+        if line.startswith("maxmemory "):
+            raw = line.removeprefix("maxmemory ").strip()
+            if raw.isdigit():
+                value = int(raw)
+                if value % 1024**2 == 0:
+                    limit = value // 1024**2
+    if limit is not None and limit not in MAXMEMORY_MIB:
+        return ConfigShape(
+            limit,
+            "The cache's memory limit is outside the reviewed sizes.",
+            "The cache's memory limit is outside the reviewed sizes.",
+        )
+    return ConfigShape(
+        limit,
+        "The cache configuration is outside the supported settings.",
+        "",
     )

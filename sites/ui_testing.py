@@ -7,9 +7,10 @@ from django.utils import timezone
 from bootstrap.standing import HostJudgment, Standing
 from databases import observation as database_observation
 from discovery.fakes import COLLECTED, record_attempt
-from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
+from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState, WebStackComponent
 from discovery.snapshot import (
     Observation,
+    ObservedCache,
     ObservedRelease,
     ObservedSetting,
     ObservedSite,
@@ -222,6 +223,28 @@ def record_laravel_releases(server: Server, *, identifier: str = "alpha", count:
     save_snapshot(attempt, collected, timezone.now())
 
 
+def valkey_component() -> WebStackComponentObservation:
+    """An installed, masked and inactive distribution Valkey (Phase C #391)."""
+    return WebStackComponentObservation(
+        WebStackComponent.VALKEY,
+        Observation(
+            ObservationOutcome.OBSERVED,
+            ("dpkg-query",),
+            "",
+            (
+                Package("valkey-server", "9.0.4-0ubuntu0.2"),
+                Package("valkey-tools", "9.0.4-0ubuntu0.2"),
+            ),
+        ),
+        Observation(
+            ObservationOutcome.OBSERVED,
+            ("systemctl show valkey-server.service",),
+            "",
+            (ServiceUnit("valkey-server.service", "masked", "inactive", "dead", "masked"),),
+        ),
+    )
+
+
 def record_site_settings(
     server: Server,
     *,
@@ -231,6 +254,9 @@ def record_site_settings(
     certificate: SiteCertificate | None = None,
     releases: tuple[ObservedRelease, ...] = (),
     https: bool | None = None,
+    cache: tuple[ObservedCache, ...] = (),
+    installed_valkey: bool = False,
+    client: str = "",
 ) -> None:
     """A target host with one site whose private settings the dashboard may show."""
     sites = (
@@ -246,6 +272,7 @@ def record_site_settings(
             certificate=certificate,
             application=application,
             application_version="7.1.3" if application == "wordpress" else "",
+            client=client,
         ),
     )
     runtimes = (
@@ -262,11 +289,12 @@ def record_site_settings(
     )
     collected = replace(
         COLLECTED,
-        components=(),
+        components=(valkey_component(),) if installed_valkey else (),
         sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
         runtimes=runtimes,
         settings=Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", settings),
+        cache=Observation(ObservationOutcome.OBSERVED, ("/etc/valkey",), "", cache),
         releases=Observation(
             ObservationOutcome.OBSERVED,
             ("/var/www",),

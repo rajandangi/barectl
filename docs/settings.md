@@ -30,13 +30,20 @@ The WordPress settings section lists the extra named constants in `private/wp-co
 The values are never shown and are write-only. Barectl owns the fixed part of that file and
 refuses these names in the extra block: the eight salts, the database settings, `ABSPATH`,
 `DISABLE_WP_CRON` and every `WP_REDIS_*` constant reserved for Phase C
-([automation specification](https://github.com/rajandangi/barectl/issues/357)).
+([automation specification](https://github.com/rajandangi/barectl/issues/357)). The three
+cache constants (`WP_REDIS_SCHEME`, `WP_REDIS_PATH`, `WP_REDIS_PREFIX`) are written and
+removed only by the site's Object cache change, with fixed values, and are never editable
+here ([object cache](object-cache.md#wordpress-wiring-and-ordering)).
 
 The same review and confidential-channel path applies. The apply rewrites only the changed
 constant lines, leaves the fixed Barectl block and every untouched line byte-identical, and
 writes the configuration atomically as the site user at 0600. WordPress's extra constants
 must follow a strict uppercase key grammar and a single-quoted string value; a line outside
 that grammar is reported as unsupported and is never rewritten.
+
+## Scheduled tasks
+
+A Laravel site's **Settings > Scheduled tasks** turns its scheduler on or off and offers **Run now**. Turning on and Run now need a verified Deploy or Roll back outcome for the current release, with no maintenance gate and no pending migrations; turning off is always available. The review states the one-hour run limit, the no-catch-up behaviour and the sub-minute and `runInBackground` limits in plain words ([automation](automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
 
 ## Permissions and discovery
 

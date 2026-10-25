@@ -144,6 +144,10 @@ _Avoid_: Redis, cache service
 A site's use of its own Valkey instance for application caching. Enabling it is a Site change; the server-wide Valkey install is its prerequisite.
 _Avoid_: Shared cache, Redis cache
 
+**Object cache instance**:
+The packaged `valkey-server@<identifier>` service that runs one site's cache as that site's Linux account, on a private Unix socket with no TCP, password or persistence, a reviewed memory limit and `allkeys-lru`. It stays outside the site's automation slice, and removing the site removes it.
+_Avoid_: Cache server, Redis instance
+
 ### Sites
 
 **Site**:
@@ -191,8 +195,12 @@ One explicit, Read-consent remote operation that returns a bounded, scrubbed pag
 _Avoid_: Log fetch, tail, download
 
 **Log page**:
-The typed evidence of one log read: at most 500 lines and 256 KiB of text, a cursor for older lines, and the names of the files it came from. It is deleted after 24 hours or at the next read of that log.
+The typed evidence of one log read: at most 500 lines and 256 KiB of text, a cursor for older lines, a cursor for the next live line when the source is a journal, and the names of the files or units it came from. It is deleted after 24 hours or at the next read of that log.
 _Avoid_: Log file, cached log
+
+**Live view**:
+A journal log's open panel that asks for lines after its newest cursor while the page is visible, and stops asking while the page is hidden or closed. It appends lines without moving focus and announces each batch through the Logs status region. It is operator reading, not monitoring.
+_Avoid_: Log streaming, tail -f, real-time monitoring
 
 **Log rotation**:
 The root-owned `/etc/logrotate.d/barectl-site-<identifier>` file that rotates the logs Barectl creates in a site's log directory daily or at 20 MiB, keeping five compressed files for 14 days. Caddy and Laravel rotate their own logs.
@@ -376,6 +384,10 @@ _Avoid_: Cron job, background process
 **Server cron**:
 A WordPress site's scheduled events run every minute by the managed server instead of by page loads. Barectl sets the site's `DISABLE_WP_CRON` only after one server run has succeeded and clears it before the server task stops.
 _Avoid_: WP-Cron, system cron
+
+**Laravel scheduler**:
+A Laravel site's schedule, run by one native timer and bounded oneshot service every minute as the site account from its current release and selected PHP. Barectl can turn it on or off and run one tick now; turning on and running now need a verified ungated release with no pending migrations ([automation](docs/automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
+_Avoid_: Cron job, `schedule:work`, queue worker
 
 **Skipped tick**:
 A calendar elapse that did not start a run because the previous run of the same scheduled task was still active, inferred from the run's native start and end timestamps. It is shown as skipped, never as success.

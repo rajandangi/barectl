@@ -45,6 +45,10 @@ def _layer(layer: str) -> tuple[str, str, str]:
         return RELEASE, "l1", "l1"
     if layer == "L2":
         return RELEASE, "l2", "l2"
+    if layer == "L3":
+        return RELEASE, "l3", "l3"
+    if layer == "L4":
+        return RELEASE, "l4", "l4"
     if layer == "L0-standing":
         return RELEASE, "l0-standing", "standing-26.04"
     if layer == "fixture":
@@ -62,17 +66,63 @@ def key(layer: str = "L0") -> str:
         digest.update(foundation_inputs())
     if layer == "L2":
         digest.update(prepared_sites_inputs())
+    if layer == "L3":
+        digest.update(prepared_wordpress_inputs())
+    if layer == "L4":
+        digest.update(prepared_cache_inputs())
     certificate, _ = mirror.fixture_ca()
     digest.update(certificate.read_bytes())
     return digest.hexdigest()[:12]
 
 
+def _django() -> None:
+    """Configure Django for a snapshot key that hashes a change body (CLI and tests alike)."""
+    from django.apps import apps
+
+    if not apps.ready:
+        import django
+
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+        django.setup()
+
+
 def prepared_sites_inputs(l1_key: str | None = None) -> bytes:
     """The prepared-sites layer follows the product's Create site body and the L1 key."""
+    _django()
     from sites import change
 
     digest = hashlib.sha256((key("L1") if l1_key is None else l1_key).encode())
     digest.update(change.BODY_BYTES)
+    return digest.digest()
+
+
+def prepared_wordpress_inputs(l1_key: str | None = None) -> bytes:
+    """The WordPress layer follows L1 and the database and WordPress bodies it applies."""
+    _django()
+    from databases import engine as database_engine
+    from wordpress import convention as wordpress_convention
+    from wordpress import create
+
+    digest = hashlib.sha256((key("L1") if l1_key is None else l1_key).encode())
+    digest.update(database_engine.BODY_BYTES)
+    digest.update(create.BODY_BYTES)
+    digest.update(
+        f"{wordpress_convention.CORE_VERSION} {wordpress_convention.CORE_ARCHIVE_SIZE}".encode()
+    )
+    return digest.digest()
+
+
+def prepared_cache_inputs(l3_key: str | None = None) -> bytes:
+    """The prepared-cache layer follows L3 and the two installs it carries."""
+    _django()
+    from cache import engine as cache_engine
+    from sites import client_change
+
+    digest = hashlib.sha256((key("L3") if l3_key is None else l3_key).encode())
+    digest.update(cache_engine.BODY_BYTES)
+    digest.update(client_change.BODY_BYTES)
+    # The layer also carries a second site, so a per-site cache can be proved isolated.
+    digest.update(b"l4-other-site-v1")
     return digest.digest()
 
 
@@ -225,6 +275,14 @@ def ensure(layer: str = "L0") -> str:
         raise DockerError(
             "The prepared-sites L2 snapshot is missing. Run its preparation scenario first."
         )
+    if layer == "L3":
+        raise DockerError(
+            "The prepared-WordPress L3 snapshot is missing. Run its preparation scenario first."
+        )
+    if layer == "L4":
+        raise DockerError(
+            "The prepared-cache L4 snapshot is missing. Run its preparation scenario first."
+        )
     build(layer)
     store(layer)
     return image
@@ -236,7 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="images", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("cache-key", "build"))
-    parser.add_argument("--layer", default="L0", choices=("L0", "L1", "L2", "fixture"))
+    parser.add_argument("--layer", default="L0", choices=("L0", "L1", "L2", "L3", "L4", "fixture"))
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if options.command == "cache-key":
         print(cache_key(options.layer))  # noqa: T201

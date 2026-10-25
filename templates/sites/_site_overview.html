@@ -65,6 +65,16 @@
         </dd>
       </div>
     </dl>
+    {% if site_cache_line %}
+      <p id="site-cache-line">{{ site_cache_line }}</p>
+      {% if site_cache_can_read %}
+        <form method="post"
+              action="{% url 'site_object_cache_read' server.pk identifier %}">
+          {% csrf_token %}
+          <button type="submit" class="usa-button usa-button--outline">Check the cache</button>
+        </form>
+      {% endif %}
+    {% endif %}
     {% for line in site_schedule_lines %}
       {% if line.attention %}
         <div class="usa-alert usa-alert--warning usa-alert--slim">
@@ -79,7 +89,7 @@
         {% if line.checked_at %}
           Checked <time datetime="{{ line.checked_at|date:'c' }}">{{ line.checked_at|date:'M j, Y, H:i:s T' }}</time>.
         {% endif %}
-        <a href="{% url 'site_settings' server.pk identifier %}#scheduled-tasks">Review</a>
+        <a href="{% url 'site_settings' server.pk identifier %}#scheduled-tasks">Open settings</a>
       </p>
     {% endfor %}
     {% for line in site_worker_lines %}

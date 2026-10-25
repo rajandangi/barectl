@@ -20,6 +20,7 @@ class InputShape(StrEnum):
     SITE_DOMAINS = "site_domains"
     SITE_POOL = "site_pool"
     SITE_CLIENT = "site_client"
+    SITE_OBJECT_CACHE = "site_object_cache"
     SITE_DATABASE = "site_database"
     SITE_REMOVE = "site_remove"
     LARAVEL_DEPLOY = "laravel_deploy"
@@ -56,6 +57,10 @@ class PreparationInputs:
     # Whether the site's own cache PHP client (phpredis) is enabled (Phase C #390);
     # ``None`` means this is not a client change.
     php_client: bool | None = None
+    # Whether the site's own object cache is on (Phase C #392), and its reviewed memory
+    # limit in MiB when it is.
+    object_cache: bool | None = None
+    cache_mib: int = 0
     # The primary domain a site-removal preparation uses when the server no longer names it.
     primary: str = ""
     # A database engine request that installs Git in the same reviewed transaction.
@@ -75,7 +80,7 @@ class PreparationInputs:
     settings_changes: tuple[tuple[str, str], ...] = ()
     # A certificate contact email change: the optional address, or "" to remove the line.
     certificate_email: str | None = None
-    # A site's scheduled-task change: "on" or "off" (Phase C #357).
+    # A site's scheduled-task change: "on", "off" or "run" (Phase C #357).
     schedule_state: str = ""
     # A Laravel site's queue-worker action ("start", "stop", "restart") and, for a start,
     # the reviewed definition (Phase C #266).
@@ -117,7 +122,7 @@ class PreparationInputs:
             laravel["fingerprint"] = self.fingerprint
         return laravel
 
-    def document(self) -> dict[str, object]:
+    def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
         if self.worker_action:
             value: dict[str, object] = {
                 "version": 1,
@@ -144,6 +149,13 @@ class PreparationInputs:
                 "version": 1,
                 "identifier": self.identifier,
                 "php_client": self.php_client,
+            }
+        if self.object_cache is not None:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "object_cache": self.object_cache,
+                "maxmemory_mib": self.cache_mib if self.object_cache else 0,
             }
         if self.pool is not None:
             return {
@@ -480,6 +492,30 @@ def _site_client_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> 
     return PreparationInputs("", identifier, php_client=enabled)
 
 
+def _site_object_cache_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from cache.convention import MAXMEMORY_MIB
+    from sites.names import request
+
+    if set(value) != {"version", "identifier", "object_cache", "maxmemory_mib"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, enabled, memory = value["identifier"], value["object_cache"], value["maxmemory_mib"]
+    if not isinstance(identifier, str) or type(enabled) is not bool or type(memory) is not int:
+        raise ValueError(INVALID_INPUTS)
+    if enabled and memory not in MAXMEMORY_MIB:
+        raise ValueError(INVALID_INPUTS)
+    if not enabled and memory != 0:
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, object_cache=enabled, cache_mib=memory)
+
+
 def _database_engine_inputs(
     value: dict[str, object], choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -644,7 +680,7 @@ def _schedule_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> Pre
     if (
         not isinstance(identifier, str)
         or not valid_identifier(identifier)
-        or state not in ("on", "off")
+        or state not in ("on", "off", "run")
         or not isinstance(state, str)
     ):
         raise ValueError(INVALID_INPUTS)
@@ -730,6 +766,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.SITE_DOMAINS: _domains_inputs,
     InputShape.SITE_POOL: _site_pool_inputs,
     InputShape.SITE_CLIENT: _site_client_inputs,
+    InputShape.SITE_OBJECT_CACHE: _site_object_cache_inputs,
     InputShape.SITE_DATABASE: _site_database_inputs,
     InputShape.SITE_REMOVE: _site_remove_inputs,
     InputShape.DATABASE_ENGINE: _database_engine_inputs,

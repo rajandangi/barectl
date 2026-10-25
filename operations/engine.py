@@ -258,6 +258,27 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not prove the site's new PHP settings after reloading its own master, "
         "so it restored the previous pool. Check the run's journal, then prepare a new review."
     ),
+    "object_cache": (
+        "The object cache change stopped before it finished. Nothing on the server was "
+        "rolled back; read the run's journal, then prepare a new review that proposes only "
+        "what remains."
+    ),
+    "object_cache_instance": (
+        "The site's own cache instance did not start or is not the reviewed shape. Read the "
+        "run's journal on the server, then prepare a new review."
+    ),
+    "object_cache_wiring": (
+        "The cache instance is running, but Barectl could not finish the site's WordPress "
+        "connection. Read the run's journal, then prepare a new review."
+    ),
+    "object_cache_plugin": (
+        "The pinned Redis Object Cache plugin could not be installed, activated or connected. "
+        "Read the run's journal on the server, then prepare a new review."
+    ),
+    "object_cache_verify": (
+        "The object cache changed, but the site did not report the reviewed state afterwards. "
+        "Read the run's journal, then prepare a new review that proposes only what remains."
+    ),
     "site_client": (
         "Barectl could not prove the site's cache PHP client after restarting its own master. "
         "Check the run's journal, then prepare a new review."
@@ -473,6 +494,20 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "time. They may still be running the previous environment; check the run's journal "
         "and restart them."
     ),
+    "automation_scheduler": (
+        "The site's Laravel files, account or scheduler units were not the reviewed ones, so "
+        "the run stopped before changing anything. Run discovery again and prepare a new "
+        "review."
+    ),
+    "automation_run": (
+        "The scheduler started one run, but it did not finish successfully. Nothing else was "
+        "changed. Scheduled tasks shows the run's result; check the application and prepare a "
+        "new review."
+    ),
+    "automation_running": (
+        "The scheduler run is still going after the reviewed wait, so Barectl stopped waiting. "
+        "It keeps running on the server; Scheduled tasks shows its result when it finishes."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -686,6 +721,11 @@ RESULT_REASONS: Final = frozenset(
         "valkey_mask",
         "valkey_reload",
         "site_client",
+        "object_cache",
+        "object_cache_instance",
+        "object_cache_wiring",
+        "object_cache_plugin",
+        "object_cache_verify",
         "site_database",
         "site_database_driver",
         "site_database_principal",
@@ -739,6 +779,9 @@ RESULT_REASONS: Final = frozenset(
         "queue_workers_start",
         "queue_workers_stop",
         "laravel_worker",
+        "automation_scheduler",
+        "automation_run",
+        "automation_running",
         "logrotate_missing",
         "rotation_invalid",
     }

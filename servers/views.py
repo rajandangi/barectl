@@ -530,7 +530,9 @@ def _site_overview_context(
     context["site_upload_path"] = f"/var/www/{site.identifier}/current/public"
     context["site_user"] = f"s{site.identifier}"
     context["site_checked_at"] = state.snapshot.collected_at if state.snapshot else None
-    if context.get("has_wordpress") and state.snapshot is not None:
+    if state.snapshot is not None and any(
+        row.identifier == site.identifier for row in state.snapshot.collected.automation.value
+    ):
         from automation import presentation
 
         context["site_schedule_lines"] = presentation.lines(
@@ -590,9 +592,11 @@ def site_page_response(
     context["target_site"] = target_site
     _target_site_context(page, state, section, context)
     if target_site and section == "overview":
+        from cache.presentation import overview_context as cache_overview_context
         from sites.php_views import context_for_site as php_overview_context
 
         context.update(php_overview_context(server, identifier, request.user))
+        context.update(cache_overview_context(server, identifier, request.user))
     if target_site and section == "settings":
         from automation.views import context_for_site as automation_context_for_site
         from automation.worker_views import context_for_site as worker_context_for_site
@@ -615,6 +619,9 @@ def site_page_response(
             )
         )
         context.update(domains_context_for_site(server, identifier, request.user))
+        from cache.presentation import site_context as cache_context_for_site
+
+        context.update(cache_context_for_site(server, identifier, request.user))
         context.update(remove_context_for_site(server, identifier, request.user))
         context.update(automation_context_for_site(server, identifier, request.user))
         context.update(worker_context_for_site(server, identifier, request.user))
@@ -654,7 +661,11 @@ def site_page_response(
 
         context.update(
             logs_context_for_site(
-                server, identifier, request.user, selected=request.GET.get("log", "")
+                server,
+                identifier,
+                request.user,
+                selected=request.GET.get("log", ""),
+                live=request.GET.get("live") == "1",
             )
         )
     return render(request, "sites/detail.html", context, status=status)

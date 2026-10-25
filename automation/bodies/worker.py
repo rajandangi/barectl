@@ -6,6 +6,7 @@ survives a reboot. A restart is ``systemctl restart``: SIGTERM lets each process
 current job within its own stop budget.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -22,19 +23,27 @@ from automation.bodies.units import (
     disable_and_stop_service,
     enable_service,
     load_state,
-    publish_worker_units,
-    remove_worker_service,
+    publish,
     reset_failed,
     restart_service,
     systemctl,
     wait_services_active,
 )
-from automation.convention import SITE_IDENTIFIER, digest, service_name, slice_name, unit_file
+from automation.convention import (
+    SITE_IDENTIFIER,
+    SYSTEMD_DIRECTORY,
+    digest,
+    role_of,
+    service_name,
+    slice_name,
+    unit_file,
+)
 from automation.workers import (
     RETRY_AFTER_KEY,
     WORKER_ROLES,
     WorkerDefinition,
     checked_definition,
+    render_worker_units,
 )
 from laravel.bodies.common import (
     _private_file_ok,
@@ -50,6 +59,33 @@ RELEASE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 MAX_NAMES = 64
 MAX_WAIT = 15
 UNIT_KEYS = ("slice", *WORKER_ROLES)
+
+
+def _reviewed_preimage(path: str, reviewed: str) -> str | None:
+    text = current_text(pathlib.Path(path))
+    now = "absent" if text is None else digest(text)
+    if now != reviewed:
+        raise ValueError("The reviewed automation evidence changed before publication.")
+    return text
+
+
+def publish_worker_units(identifier: str, definition: object, expected: dict[str, str]) -> None:
+    value = checked_definition(definition)
+    for kind, name, text in render_worker_units(identifier, value):
+        role = "slice" if kind == "slice" else role_of(name, identifier) or ""
+        path = f"{SYSTEMD_DIRECTORY}/{name}"
+        publish(path, text, _reviewed_preimage(path, expected.get(role, "")))
+
+
+def remove_worker_service(identifier: str, role: str, expected: str) -> None:
+    path = unit_file(identifier, role, "service")
+    _reviewed_preimage(path, expected)
+    if pathlib.Path(path).exists():
+        pathlib.Path(path).unlink()
+    with contextlib.suppress(ValueError):
+        systemctl("reset-failed", service_name(identifier, role))
+
+
 WRITE_SCRIPT = (
     "import json,os,sys,tempfile\n"
     "payload=json.load(sys.stdin)\n"

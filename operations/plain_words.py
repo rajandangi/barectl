@@ -156,6 +156,31 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to the site",
         after_home=Home.SITE,
     ),
+    "set_site_object_cache": ChangeWords(
+        title="Turn on the object cache for {site}",
+        summary=(
+            (
+                "{site} gets its own private cache, with the pinned WordPress cache plugin "
+                "installed and connected."
+            ),
+            "No other site can read, clear or fill this cache.",
+            (
+                "The site keeps serving; WordPress may refuse a request while its cache "
+                "connection and plugin are prepared."
+            ),
+        ),
+        action="Turn on object cache",
+        steps={
+            "preflight": "Checking the server",
+            "instance": "Starting the site's cache",
+            "wiring": "Connecting WordPress",
+            "plugin": "Installing the cache plugin",
+            "verify": "Checking the cache connects",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
     "set_site_node": ChangeWords(
         title="Switch {site} to {selection}",
         summary=(
@@ -281,6 +306,30 @@ _WORDS: Final[dict[str, ChangeWords]] = {
             "install": "Starting the scheduled task",
             "tick": "Waiting for one successful run",
             "configuration": "Changing when scheduled events run",
+            "verify": "Checking it works",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
+    "set_laravel_scheduler": ChangeWords(
+        title="Change scheduled tasks for {site}",
+        summary=(
+            (
+                "Laravel runs the tasks in the site's schedule from the server, every "
+                "minute, as the site's own account and from its current release."
+            ),
+            (
+                "Each run is limited to one hour; a slow run delays the next one instead of "
+                "overlapping it, and missed runs while the server is down are not caught up."
+            ),
+            "Run now starts one run immediately so you can check the schedule after a deploy.",
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the site",
+            "install": "Changing the scheduled task",
+            "run": "Running the schedule once",
             "verify": "Checking it works",
         },
         home=Home.SITE,

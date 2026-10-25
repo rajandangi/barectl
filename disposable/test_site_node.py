@@ -138,6 +138,7 @@ class SiteNodeValidators(DefaultChangeCase):
     layer = "L1"
     validator = True
     prefix = "s7nodevalidate"
+    repair_masters = True
     prepared = False
 
     def prepare(self) -> None:

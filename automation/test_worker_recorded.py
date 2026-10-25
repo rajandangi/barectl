@@ -15,7 +15,7 @@ from . import worker_change
 from .worker_status import WorkerStatus
 from .workers import WorkerDefinition
 
-STATE = "automation-laravel-26.04"
+STATE = "automation-laravel-workers-26.04"
 IDENTIFIER = "sqwalpha"
 
 

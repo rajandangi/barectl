@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from django import forms
 
 STATES = (("on", "Turn on"), ("off", "Turn off"))
+SCHEDULER_STATES = (("on", "Turn on"), ("off", "Turn off"), ("run", "Run now"))
 
 
 class ScheduleForm(forms.Form):

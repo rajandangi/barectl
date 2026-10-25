@@ -16,10 +16,14 @@ import pathlib
 import pwd
 import re
 import stat
+import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
+from typing import Protocol
 
+from automation.convention import ROLE_SCHEDULE, ROLE_WPCRON, queue_roles, service_name
+from cache.convention import instance_paths
 from sites.bodies.logrotate import logrotate_present, logrotate_state
 
 MAX_LINES = 500
@@ -33,7 +37,19 @@ MAX_LINE_BYTES = 8192
 # The window scanned for one page. Bounded, so a huge file never fills the controller.
 SCAN_BYTES = 1024 * 1024
 # Site log sources this reader knows. The controller's catalogue mirrors these names.
-SOURCES = ("visits", "php_errors", "php_slow", "application", "wordpress")
+SOURCES = (
+    "visits",
+    "php_errors",
+    "php_slow",
+    "application",
+    "wordpress",
+    "scheduled_tasks",
+    "queue_workers",
+    "object_cache",
+)
+JOURNAL_SOURCES = ("scheduled_tasks", "queue_workers", "object_cache")
+JOURNAL_TIMEOUT = 20
+MAX_JOURNAL_UNITS = 8
 SECRET_NAME = re.compile(r"(PASSWORD|SECRET|TOKEN|KEY|SALT)")
 DEFINE = re.compile(r"^\s*define\(\s*'([A-Z][A-Z0-9_]{0,63})'\s*,\s*'((?:[^'\\]|\\.)*)'\s*\);")
 STAMP = re.compile(r"^\[?(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})")
@@ -53,6 +69,20 @@ MONTHS = {
     "Dec": 12,
 }
 REDACTED = "<secret>"
+
+
+class JournalReader(Protocol):
+    """The journalctl boundary: one mode, one raw cursor, bounded entries."""
+
+    def __call__(
+        self,
+        units: Sequence[str],
+        *,
+        mode: str,
+        cursor: str,
+        since: str,
+        until: str,
+    ) -> tuple[list[tuple[str, int, str]], bool]: ...
 
 
 def main(argv: list[str]) -> int:
@@ -104,6 +134,9 @@ def read_page(
     since: str = "",
     until: str = "",
     cursor: str = "",
+    systemd_root: str = "/etc/systemd/system",
+    cache_root: str = "/etc/valkey",
+    journal_entries: JournalReader | None = None,
 ) -> dict[str, object]:
     """One page of ``source`` for ``identifier``, newest lines first in file order."""
     if (
@@ -114,7 +147,20 @@ def read_page(
         or len(cursor) > 200
     ):
         raise ValueError("Not a supported log read.")
-    if source == "application":
+    if source in JOURNAL_SOURCES:
+        page = _journal_page(
+            identifier,
+            source,
+            term,
+            since,
+            until,
+            cursor,
+            root=root,
+            systemd_root=systemd_root,
+            cache_root=cache_root,
+            journal_entries=journal_entries,
+        )
+    elif source == "application":
         page = _application_page(identifier, root, term, since, until, cursor)
     else:
         path = _source_path(identifier, source, root)
@@ -132,6 +178,259 @@ def _source_path(identifier: str, source: str, root: str) -> str:
         "php_slow": directory + "/php-slow.log",
         "wordpress": directory + "/wp-debug.log",
     }[source]
+
+
+def _journal_units(
+    identifier: str, source: str, systemd_root: str, cache_root: str
+) -> tuple[str, ...]:
+    """The fixed units of one journal source, resolved through its owning convention.
+
+    Nothing here accepts a name from the request: scheduled work comes from the automation
+    roles, workers from every installed ``queue<N>`` unit in the convention's order, and the
+    cache from the site's own packaged instance path.
+    """
+    if source == "scheduled_tasks":
+        names = (service_name(identifier, ROLE_WPCRON), service_name(identifier, ROLE_SCHEDULE))
+        return tuple(name for name in names if (pathlib.Path(systemd_root) / name).is_file())
+    if source == "queue_workers":
+        try:
+            installed = sorted(pathlib.Path(systemd_root).glob(f"barectl-site-{identifier}-queue*"))
+        except OSError:
+            installed = []
+        roles = queue_roles([entry.name for entry in installed], identifier)
+        return tuple(service_name(identifier, role) for role in roles[:MAX_JOURNAL_UNITS])
+    paths = instance_paths(identifier)
+    drop_in = pathlib.Path(systemd_root) / f"{paths.unit}.d"
+    if (pathlib.Path(cache_root) / f"{identifier}.conf").is_file() or drop_in.is_dir():
+        return (paths.unit,)
+    return ()
+
+
+def _journal_page(  # noqa: C901 - one bounded page path
+    identifier: str,
+    source: str,
+    term: str,
+    since: str,
+    until: str,
+    cursor: str,
+    *,
+    root: str,
+    systemd_root: str,
+    cache_root: str,
+    journal_entries: JournalReader | None,
+) -> dict[str, object]:
+    units = _journal_units(identifier, source, systemd_root, cache_root)
+    if not units:
+        return _state("not_configured", "This log is not configured for this site.")
+    mode, raw = _journal_cursor(cursor)
+    run = journal_entries or _journal_entries
+    entries, complete = run(units, mode=mode, cursor=raw, since=since, until=until)
+    newest = entries[0][0] if entries and mode != "live" else ""
+    since_time = _parse(since) if since else None
+    until_time = _parse(until) if until else None
+    secrets = _secret_values(identifier, root)
+    kept: list[dict[str, object]] = []
+    used = 0
+    # Page modes ask journalctl for newest first, so the first entries are kept and the
+    # oldest of them becomes the next cursor. A live read asks for oldest first, so it can
+    # keep a whole page and continue from its last line on the next poll.
+    for entry_cursor, usec, message in entries:
+        moment = _journal_moment(usec)
+        if not message or not _journal_wanted(message, moment, term, since_time, until_time):
+            continue
+        scrubbed = _scrub(message, secrets)
+        entry = _journal_entry(scrubbed[:MAX_LINE_BYTES], moment)
+        entry["truncated"] = len(scrubbed.encode()) > MAX_LINE_BYTES
+        size = len(str(entry["raw"]).encode()) + 80
+        if len(kept) >= MAX_LINES or used + size > MAX_PAGE_BYTES:
+            break
+        entry["_cursor"] = entry_cursor
+        kept.append(entry)
+        used += size
+    if not complete and not kept:
+        return _state("unreadable", "This log could not be read.")
+    if mode != "live":
+        kept.reverse()
+    at_end = complete and len(entries) <= MAX_LINES
+    page: dict[str, object] = {
+        "version": 1,
+        "state": "observed" if kept or mode == "live" else "empty",
+        "lines": kept,
+        "cursor": "",
+        "at_end": at_end if mode != "live" else True,
+        "files": list(units),
+        "file": "",
+        "bytes": used,
+        "newest": "",
+        "live": mode == "live",
+    }
+    if mode == "live":
+        next_cursor = str(kept[-1].get("_cursor", "")) if kept else raw
+        page["note"] = "" if kept else "No new lines yet."
+        page["newest"] = _encode_journal("live", next_cursor) if next_cursor else ""
+    else:
+        if kept and not at_end:
+            page["cursor"] = _encode_journal("older", str(kept[0].get("_cursor", "")))
+        if mode == "newest":
+            page["newest"] = _encode_journal("live", newest) if newest else ""
+    for line in kept:
+        line.pop("_cursor", None)
+    if not kept and mode != "live":
+        page["note"] = "No lines in this log match the filter."
+    return _fit_journal(page)
+
+
+def _journal_entry(raw: str, moment: datetime | None) -> dict[str, object]:
+    return {
+        "raw": raw,
+        "time": moment.strftime("%Y-%m-%d %H:%M:%S") if moment is not None else "",
+        "method": "",
+        "path": "",
+        "status": None,
+        "duration": "",
+    }
+
+
+def _journal_moment(usec: int) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(usec / 1_000_000, UTC)
+    except OverflowError, OSError, ValueError:
+        return None
+
+
+def _journal_wanted(
+    message: str,
+    moment: datetime | None,
+    term: str,
+    since: datetime | None,
+    until: datetime | None,
+) -> bool:
+    if term and term.casefold() not in message.casefold():
+        return False
+    if moment is None:
+        return True
+    return (since is None or moment >= since) and (until is None or moment <= until)
+
+
+def _journal_cursor(cursor: str) -> tuple[str, str]:
+    """The mode and raw journal cursor an opaque continuation names."""
+    for mode in ("older", "live"):
+        prefix = mode + ":"
+        if cursor.startswith(prefix):
+            return mode, cursor[len(prefix) :]
+    return "newest", ""
+
+
+def _encode_journal(mode: str, cursor: str) -> str:
+    if not cursor:
+        return ""
+    value = f"{mode}:{cursor}"
+    # A journal cursor is far shorter than this; a longer one would be cut by the row's
+    # bound and must not silently become a different location.
+    return value if len(value) <= 200 else ""
+
+
+def _fit_journal(page: dict[str, object]) -> dict[str, object]:
+    """Shrink a journal page until its compressed answer fits one SSH command."""
+    lines = page["lines"]
+    while isinstance(lines, list) and lines and len(encode(page)) > COMPRESSED_LIMIT:
+        lines.pop(0)
+    if isinstance(lines, list) and not lines:
+        if page.get("live") is not True:
+            page["state"] = "empty"
+            page["note"] = "No lines in this log match the filter."
+        page["cursor"] = ""
+        page["at_end"] = True
+    return page
+
+
+def _journal_entries(  # noqa: C901 - one fixed journal command
+    units: Sequence[str],
+    *,
+    mode: str,
+    cursor: str,
+    since: str,
+    until: str,
+) -> tuple[list[tuple[str, int, str]], bool]:
+    """One bounded journalctl answer as ``(cursor, realtime_usec, message)`` entries.
+
+    ``--reverse`` gives the newest first for a page; ``--after-cursor`` walks forward for a
+    live view. Only the matching units are named, and the answer is read up to the same scan
+    bound as a file page so a burst cannot fill the controller.
+    """
+    command = [
+        "journalctl",
+        "--no-pager",
+        "--quiet",
+        "--output=json",
+        "--output-fields=__CURSOR,__REALTIME_TIMESTAMP,MESSAGE",
+    ]
+    for unit in units[:MAX_JOURNAL_UNITS]:
+        command.extend(["-u", unit])
+    if mode == "older":
+        command.extend(["--cursor", cursor, "--reverse", "-n", str(MAX_LINES + 1)])
+    elif mode == "live":
+        command.extend(["--after-cursor", cursor, "-n", str(MAX_LINES + 1)])
+    else:
+        command.extend(["--reverse", "-n", str(MAX_LINES + 1)])
+    if since:
+        command.extend(["--since", since.replace("T", " ")])
+    if until:
+        command.extend(["--until", until.replace("T", " ")])
+    text, complete = _journal_output(command)
+    parsed: list[tuple[str, int, str]] = []
+    for line in text.splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        entry_cursor = value.get("__CURSOR")
+        stamp = value.get("__REALTIME_TIMESTAMP")
+        message = _journal_message(value.get("MESSAGE"))
+        if not isinstance(entry_cursor, str) or not isinstance(stamp, str) or not message:
+            continue
+        try:
+            usec = int(stamp)
+        except ValueError:
+            continue
+        parsed.append((entry_cursor, usec, message))
+    return parsed, complete
+
+
+def _journal_message(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list) and all(type(item) is int and 0 <= item <= 255 for item in value):
+        return bytes(value).decode("utf-8", "replace")
+    return ""
+
+
+def _journal_output(command: Sequence[str]) -> tuple[str, bool]:
+    """Run journalctl and read at most the page's scan window of its answer."""
+    limit = SCAN_BYTES + MAX_LINE_BYTES
+    try:
+        process = subprocess.Popen(  # noqa: S603 - fixed native argv
+            list(command),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return "", False
+    stream = process.stdout
+    data = stream.read(limit + 1) if stream is not None else b""
+    more = len(data) > limit
+    data = data[:limit]
+    if process.poll() is None:
+        process.terminate()
+    try:
+        process.wait(timeout=JOURNAL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+    complete = not more and process.returncode == 0
+    return data.decode("utf-8", "replace"), complete
 
 
 def _application_page(
@@ -444,12 +743,20 @@ def _secrets(text: str, environment: bool) -> set[str]:
             value = raw.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
                 value = value[1:-1]
-            found.add(value)
+            _add_secret(found, value)
         else:
             match = DEFINE.match(line)
             if match is not None and SECRET_NAME.search(match.group(1)):
-                found.add(match.group(2).replace("\\'", "'").replace("\\\\", "\\"))
+                _add_secret(found, match.group(2).replace("\\'", "'").replace("\\\\", "\\"))
     return found
+
+
+def _add_secret(found: set[str], value: str) -> None:
+    """A secret value and the key material inside a Laravel ``base64:`` value."""
+    if 4 <= len(value) <= 512:
+        found.add(value)
+    if value.startswith("base64:") and 4 <= len(value) - len("base64:") <= 512:
+        found.add(value[len("base64:") :])
 
 
 def _scrub(raw: str, secrets: tuple[str, ...]) -> str:
