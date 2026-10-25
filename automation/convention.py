@@ -60,7 +60,9 @@ WPCRON: Final = Renderable(
 )
 SCHEDULE: Final = Renderable(
     ROLE_SCHEDULE,
-    "{directory}/bin/php artisan schedule:run",
+    # The absolute paths keep the selected runtime and the release the ``current`` link
+    # points at, even if systemd's working directory is ever changed.
+    "{directory}/bin/php {directory}/current/artisan schedule:run",
     "{directory}/bin/php",
     SCHEDULE_TIMEOUT,
 )

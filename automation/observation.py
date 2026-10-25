@@ -9,6 +9,7 @@ reads the server.
 import importlib.resources
 import json
 import shlex
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -71,6 +72,11 @@ MAX_TEXT: Final = 16384
 MAX_SITES: Final = 64
 ENABLED_STATES: Final = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
 TIMESTAMP: Final = "@"
+# The one scheduled role each supported application has (Phase C #357).
+ROLE_BY_APPLICATION: Final = {
+    "wordpress": convention.ROLE_WPCRON,
+    "laravel": convention.ROLE_SCHEDULE,
+}
 
 
 @dataclass(frozen=True)
@@ -145,7 +151,7 @@ def read(shell: RemoteShell) -> dict[str, object] | None:
 
 
 def valid(value: dict[str, object]) -> bool:
-    if set(value) != {"version", "sites"} or value.get("version") != 1:
+    if set(value) != {"version", "sites"} or value.get("version") != 2:
         return False
     sites = value.get("sites")
     return (
@@ -159,26 +165,45 @@ def _valid_site(value: object) -> bool:
     if not isinstance(value, dict) or set(value) != {
         "identifier",
         "units",
-        "show",
+        "roles",
+        "slice",
         "slice_populated",
         "unreadable",
-        "duplicate",
+        "duplicates",
     }:
         return False
-    identifier, units, show = value["identifier"], value["units"], value["show"]
+    identifier, units, roles = value["identifier"], value["units"], value["roles"]
     return (
         isinstance(identifier, str)
         and convention.SITE_IDENTIFIER.fullmatch(identifier) is not None
         and isinstance(units, list)
         and len(units) <= 2 * len(convention.ROLES) + 1
         and all(_valid_unit(unit) for unit in units)
-        and isinstance(show, dict)
-        and set(show) == {"service", "timer", "slice"}
-        and all(row is None or _valid_show(row) for row in show.values())
+        and _valid_roles(roles)
+        and (value["slice"] is None or _valid_show(value["slice"]))
         and type(value["slice_populated"]) is bool
-        and type(value["unreadable"]) is bool
-        and isinstance(value["duplicate"], str)
-        and len(value["duplicate"]) <= 200
+        and isinstance(value["unreadable"], list)
+        and len(value["unreadable"]) <= len(convention.ROLES)
+        and all(isinstance(role, str) and role in convention.ROLES for role in value["unreadable"])
+        and isinstance(value["duplicates"], dict)
+        and set(value["duplicates"]) == set(convention.ROLES)
+        and all(
+            isinstance(finding, str) and len(finding) <= 200
+            for finding in value["duplicates"].values()
+        )
+    )
+
+
+def _valid_roles(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == set(convention.ROLES)
+        and all(
+            isinstance(row, dict)
+            and set(row) == {"service", "timer"}
+            and all(item is None or _valid_show(item) for item in row.values())
+            for row in value.values()
+        )
     )
 
 
@@ -207,8 +232,13 @@ def observations(
     *,
     sites: tuple[ObservedSite, ...],
     disable_wp_cron: dict[str, str],
+    laravel: Collection[str] = (),
 ) -> tuple[ObservedSchedule, ...] | None:
-    """Project each site's wpcron role; ``None`` when the native answer is unavailable."""
+    """Project each site's scheduled role; ``None`` when the native answer is unavailable.
+
+    A Laravel site's application is recognised from its environment inventory, because the
+    passive site record names only WordPress and plain sites without running PHP.
+    """
     if value is None:
         return None
     rows = value.get("sites")
@@ -226,39 +256,60 @@ def observations(
         if not identifier:
             continue
         row = by_identifier.get(identifier)
+        role = ROLE_BY_APPLICATION.get(site.application)
+        if role is None and (identifier in laravel or _has_schedule_units(row, identifier)):
+            role = convention.ROLE_SCHEDULE
+        if role is None:
+            continue
         schedules.append(
             _project(
                 identifier,
+                role,
                 row,
-                disable_wp_cron.get(identifier, ""),
+                disable_wp_cron.get(identifier, "") if role == convention.ROLE_WPCRON else "",
                 identifier in gated,
             )
         )
     return tuple(schedules)
 
 
+def _has_schedule_units(row: dict[str, object] | None, identifier: str) -> bool:
+    units = row.get("units") if row is not None else None
+    if not isinstance(units, list):
+        return False
+    return any(
+        isinstance(unit, dict)
+        and convention.role_of(str(unit.get("name", "")), identifier) == convention.ROLE_SCHEDULE
+        for unit in units
+    )
+
+
 def schedule_for(
     value: dict[str, object] | None,
     identifier: str,
     *,
+    role: str = convention.ROLE_WPCRON,
     disable_wp_cron: str = "",
     gate: bool = False,
 ) -> ObservedSchedule:
     """One site's projected schedule from an already validated native answer."""
     rows = value.get("sites") if value is not None else None
     if not isinstance(rows, list):
-        return _project(identifier, None, disable_wp_cron, gate)
+        return _project(identifier, role, None, disable_wp_cron, gate)
     row = next(
         (item for item in rows if isinstance(item, dict) and item.get("identifier") == identifier),
         None,
     )
-    return _project(identifier, row, disable_wp_cron, gate)
+    return _project(identifier, role, row, disable_wp_cron, gate)
 
 
 def _project(
-    identifier: str, row: dict[str, object] | None, disable: str, gate: bool
+    identifier: str,
+    role: str,
+    row: dict[str, object] | None,
+    disable: str,
+    gate: bool,
 ) -> ObservedSchedule:
-    role = convention.ROLE_WPCRON
     if row is None:
         evidence = ScheduleEvidence(
             identifier=identifier,
@@ -268,7 +319,8 @@ def _project(
             gate=gate,
         )
         return _stored(evidence, project(evidence))
-    unreadable = bool(row.get("unreadable"))
+    reported = row.get("unreadable")
+    unreadable = isinstance(reported, list) and role in reported
     units = row.get("units")
     unit_rows = units if isinstance(units, list) else []
     problems: list[str] = []
@@ -280,18 +332,22 @@ def _project(
         name = str(unit.get("name", ""))
         if kind not in ("service", "timer", "slice"):
             continue
+        if kind != "slice" and convention.role_of(name, identifier) != role:
+            continue
         shape = convention.parse_unit(name, str(unit.get("text", "")), identifier, role, kind)
         if not shape.supported:
             problems.append(shape.problem)
         present.add(kind)
-    show = row.get("show")
-    shows = show if isinstance(show, dict) else {}
-    service = _values(shows.get("service"))
-    timer = _values(shows.get("timer"))
-    slice_values = _values(shows.get("slice"))
-    if service is None or timer is None or slice_values is None:
+    roles = row.get("roles")
+    shows = roles.get(role) if isinstance(roles, dict) else None
+    shown = shows if isinstance(shows, dict) else {}
+    service = _values(shown.get("service"))
+    timer = _values(shown.get("timer"))
+    if service is None or timer is None:
         unreadable = True
         service, timer = {}, {}
+    duplicates = row.get("duplicates")
+    duplicate = str(duplicates.get(role, "")) if isinstance(duplicates, dict) else ""
     evidence = ScheduleEvidence(
         identifier=identifier,
         role=role,
@@ -312,7 +368,7 @@ def _project(
         next_elapse_us=_timestamp(timer.get("NextElapseUSecRealtime", "")),
         slice_populated=bool(row.get("slice_populated")),
         disable_wp_cron=disable,
-        duplicate=str(row.get("duplicate", "")),
+        duplicate=duplicate,
         gate=gate,
     )
     return _stored(evidence, project(evidence))

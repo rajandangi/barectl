@@ -530,7 +530,9 @@ def _site_overview_context(
     context["site_upload_path"] = f"/var/www/{site.identifier}/current/public"
     context["site_user"] = f"s{site.identifier}"
     context["site_checked_at"] = state.snapshot.collected_at if state.snapshot else None
-    if context.get("has_wordpress") and state.snapshot is not None:
+    if state.snapshot is not None and any(
+        row.identifier == site.identifier for row in state.snapshot.collected.automation.value
+    ):
         from automation import presentation
 
         context["site_schedule_lines"] = presentation.lines(

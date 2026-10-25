@@ -463,6 +463,20 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not remove the site's scheduled task, so it may still be installed. "
         "Check the run's journal, then prepare a new review."
     ),
+    "automation_scheduler": (
+        "The site's Laravel files, account or scheduler units were not the reviewed ones, so "
+        "the run stopped before changing anything. Run discovery again and prepare a new "
+        "review."
+    ),
+    "automation_run": (
+        "The scheduler started one run, but it did not finish successfully. Nothing else was "
+        "changed. Scheduled tasks shows the run's result; check the application and prepare a "
+        "new review."
+    ),
+    "automation_running": (
+        "The scheduler run is still going after the reviewed wait, so Barectl stopped waiting. "
+        "It keeps running on the server; Scheduled tasks shows its result when it finishes."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -727,6 +741,9 @@ RESULT_REASONS: Final = frozenset(
         "automation_tick",
         "automation_configuration",
         "automation_units",
+        "automation_scheduler",
+        "automation_run",
+        "automation_running",
         "logrotate_missing",
         "rotation_invalid",
     }

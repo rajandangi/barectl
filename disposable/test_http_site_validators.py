@@ -16,6 +16,7 @@ class HttpSiteValidators(ScenarioTestCase):
     layer = "L1"
     prefix = "v338"
     validator = True
+    repair_masters = True
 
     def stable_state(self, command: str) -> str:
         """The command's output without systemd's transient credential mounts.

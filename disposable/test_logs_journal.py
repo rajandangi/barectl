@@ -88,4 +88,5 @@ class JournalLogValidators(ScenarioTestCase):
             self.assertNotIn(CANARY, json.dumps(live.document()))
             self.assertLessEqual(len(live.lines), read.MAX_LINES)
 
+
 __all__ = ["JournalLogValidators"]

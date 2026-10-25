@@ -249,6 +249,7 @@ def _automation(
         value,
         sites=hosting.value,
         disable_wp_cron=automation_observation.cron_values(settings),
+        laravel={row.identifier for row in settings.value if row.application == "laravel"},
     )
     if schedules is None:
         return Observation(

@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 from automation.convention import (
+    ROLE_WPCRON,
     ROLES,
     SITE_IDENTIFIER,
     service_name,
@@ -22,7 +23,13 @@ from automation.convention import (
     timer_name,
     unit_file,
 )
-from automation.duplicates import crontab_problem, foreign_unit_problem, supervisor_problem
+from automation.duplicates import (
+    crontab_problem,
+    foreign_unit_problem,
+    schedule_crontab_problem,
+    schedule_supervisor_problem,
+    supervisor_problem,
+)
 
 SYSTEMD_DIRECTORY = "/etc/systemd/system"
 RUNTIME_DIRECTORY = "/run/systemd/system"
@@ -46,7 +53,7 @@ SHOW_PROPERTIES = (
     "NextElapseUSecRealtime",
     "ControlGroup",
 )
-SHOW_NAMES = ("service", "timer", "slice")
+SHOW_NAMES = ("service", "timer")
 SITE_NAME = re.compile(
     r"barectl-site-([a-z][a-z0-9]{2,23})-(?:[a-z][a-z0-9]{2,20})\.(?:service|timer)\Z"
 )
@@ -78,14 +85,15 @@ def _files(directory: str | pathlib.Path) -> list[pathlib.Path]:
         return []
 
 
-def _wordpress_sites() -> set[str]:
+def _application_sites() -> set[str]:
+    """Every WordPress or Laravel site, recognised without running either application."""
     sites = set()
     for entry in _files(SITE_ROOT):
         if entry.is_symlink() or not entry.is_dir():
             continue
         if SITE_IDENTIFIER.fullmatch(entry.name) is None:
             continue
-        if (entry / "bin" / "wp").exists():
+        if (entry / "bin" / "wp").exists() or (entry / "current" / "artisan").is_file():
             sites.add(entry.name)
     return sites
 
@@ -140,20 +148,41 @@ def _duplicate(
     shared_crontabs: list[str],
     supervisor: list[str],
     foreign: dict[str, str],
-) -> str:
+) -> dict[str, str]:
+    """A second scheduler for each role, or an empty sentence when there is none."""
     # A site's own crontab runs as its account, so naming the site is not required there.
     sources = [(own_crontabs.get(identifier, ""), True)]
     sources += [(text, False) for text in shared_crontabs]
-    for text, own in sources:
-        if problem := crontab_problem(text, identifier, own_crontab=own):
-            return problem
-    for text in supervisor:
-        if problem := supervisor_problem(text, identifier):
-            return problem
+    duplicates = {
+        ROLE_WPCRON: next(
+            (
+                found
+                for text, own in sources
+                if (found := crontab_problem(text, identifier, own_crontab=own))
+            ),
+            "",
+        ),
+        "schedule": next(
+            (
+                found
+                for text, own in sources
+                if (found := schedule_crontab_problem(text, identifier, own_crontab=own))
+            ),
+            "",
+        ),
+    }
+    duplicates[ROLE_WPCRON] = duplicates[ROLE_WPCRON] or next(
+        (found for text in supervisor if (found := supervisor_problem(text, identifier))), ""
+    )
+    duplicates["schedule"] = duplicates["schedule"] or next(
+        (found for text in supervisor if (found := schedule_supervisor_problem(text, identifier))),
+        "",
+    )
     for name, text in foreign.items():
         if problem := foreign_unit_problem(name, text, identifier):
-            return problem
-    return ""
+            for role in ROLES:
+                duplicates[role] = duplicates[role] or problem
+    return duplicates
 
 
 def _show(name: str) -> dict[str, str] | None:
@@ -214,37 +243,42 @@ def _records() -> dict[str, object]:
     foreign = _foreign_units()
     budget = TEXT_BUDGET
     rows = []
-    for identifier in sorted(_wordpress_sites() | _named_sites())[:MAX_SITES]:
+    for identifier in sorted(_application_sites() | _named_sites())[:MAX_SITES]:
         units = _unit_files(identifier)
         size = sum(len(unit["text"]) for unit in units)
-        unreadable = False
+        unreadable: list[str] = []
         if size > budget:
-            units, unreadable = [], True
+            units, unreadable = [], list(ROLES)
         budget -= size
-        show = {}
-        names = (
-            service_name(identifier, ROLES[0]),
-            timer_name(identifier, ROLES[0]),
-            slice_name(identifier),
-        )
-        for kind, name in zip(SHOW_NAMES, names, strict=True):
-            values = _show(name)
-            if values is None:
-                unreadable = True
-            show[kind] = values
+        roles: dict[str, dict[str, dict[str, str] | None]] = {}
+        for role in ROLES:
+            values: dict[str, dict[str, str] | None] = {}
+            for kind in SHOW_NAMES:
+                name = (
+                    service_name(identifier, role)
+                    if kind == "service"
+                    else timer_name(identifier, role)
+                )
+                shown = _show(name)
+                if shown is None and role not in unreadable:
+                    unreadable.append(role)
+                values[kind] = shown
+            roles[role] = values
+        slice_values = _show(slice_name(identifier))
+        if slice_values is None:
+            unreadable = list(ROLES)
         rows.append(
             {
                 "identifier": identifier,
                 "units": units,
-                "show": show,
-                "slice_populated": _slice_populated(
-                    (show.get("slice") or {}).get("ControlGroup", "")
-                ),
+                "roles": roles,
+                "slice": slice_values,
+                "slice_populated": _slice_populated((slice_values or {}).get("ControlGroup", "")),
                 "unreadable": unreadable,
-                "duplicate": _duplicate(identifier, own_crontabs, shared, supervisor, foreign),
+                "duplicates": _duplicate(identifier, own_crontabs, shared, supervisor, foreign),
             }
         )
-    return {"version": 1, "sites": rows}
+    return {"version": 2, "sites": rows}
 
 
 def main() -> None:

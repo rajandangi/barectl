@@ -74,6 +74,19 @@ class RenderingTests(SimpleTestCase):
         )
         self.assertNotIn("RuntimeMaxSec", text)
 
+    def test_the_laravel_scheduler_uses_the_site_php_and_current_release(self) -> None:
+        text = convention.render_service("shop", "schedule")
+        self.assertIn("Type=oneshot\n", text)
+        self.assertIn("User=sshop\n", text)
+        self.assertIn("WorkingDirectory=/var/www/shop/current\n", text)
+        self.assertIn("TimeoutStartSec=1h\n", text)
+        self.assertIn("KillMode=control-group\n", text)
+        self.assertIn(
+            "ExecStart=/var/www/shop/bin/php /var/www/shop/current/artisan schedule:run\n",
+            text,
+        )
+        self.assertNotIn("RuntimeMaxSec", text)
+
     def test_the_timer_runs_every_minute_without_catch_up_or_delay(self) -> None:
         text = convention.render_timer("shop", "wpcron")
         for line in (
