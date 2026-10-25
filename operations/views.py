@@ -35,7 +35,14 @@ from .models import (
     ChangeReview,
     Consent,
 )
-from .presentation import ChangeView, NextAction, RunView, change_view, run_view
+from .presentation import (
+    ChangeView,
+    NextAction,
+    RunView,
+    blocking_operation,
+    change_view,
+    run_view,
+)
 
 if TYPE_CHECKING:
     from sites.continuation import StepBanner
@@ -173,12 +180,22 @@ def _change_context(
         and review.run_id is None
         and (review.expired or review.connection_changed)
     )
+    other = (
+        blocking_operation(server_state(preparation.server).other_operation)
+        if preparation.server is not None
+        else None
+    )
     context: dict[str, object] = {
         "change": view,
         "server": preparation.server,
-        "can_apply": can_apply,
+        "other_operation": other,
+        "can_apply": can_apply and other is None,
         "out_of_date": out_of_date,
-        "apply_reason": "" if can_apply or out_of_date else _apply_reason(request, view),
+        "apply_reason": (
+            "Another computer is changing this server."
+            if other is not None
+            else "" if can_apply or out_of_date else _apply_reason(request, view)
+        ),
         "can_prepare_again": _can_prepare_again(request, preparation),
         "shared_form": SharedApplyForm(),
         "kind_form": ChangeApplyForm(),

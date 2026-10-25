@@ -218,7 +218,7 @@ def plain_run(run: ChangeRun, outcome: RunOutcome, kind_label: str) -> PlainRun:
         finished=outcome == RunOutcome.SUCCEEDED,
         stopped=stopped,
     )
-    result, sentence = _run_words(outcome, server_name, run)
+    result, sentence = _run_words(outcome, server_name, run, steps)
     return PlainRun(
         title=after.title,
         result=result,
@@ -228,7 +228,16 @@ def plain_run(run: ChangeRun, outcome: RunOutcome, kind_label: str) -> PlainRun:
     )
 
 
-def _run_words(outcome: RunOutcome, server_name: str, run: ChangeRun) -> tuple[str, str]:
+def _stopped_step(steps: tuple[PlainStep, ...]) -> str:
+    return next(
+        (step.label for step in steps if step.current and step.state_label == "Stopped here"),
+        "",
+    )
+
+
+def _run_words(
+    outcome: RunOutcome, server_name: str, run: ChangeRun, steps: tuple[PlainStep, ...]
+) -> tuple[str, str]:
     if outcome == RunOutcome.QUEUED:
         return "Queued", f"Barectl will start this change on {server_name} in a moment."
     if outcome == RunOutcome.RUNNING:
@@ -242,8 +251,21 @@ def _run_words(outcome: RunOutcome, server_name: str, run: ChangeRun) -> tuple[s
     if outcome == RunOutcome.SUCCEEDED:
         return "Done", "Barectl finished this change and checked it on the server."
     if outcome == RunOutcome.RECONCILING:
-        return "Checking what happened", run.failure
-    return ("Outcome unknown" if outcome == RunOutcome.UNKNOWN else "Stopped"), run.failure
+        return (
+            "Checking what happened",
+            "Barectl lost contact while this was running. It may have changed the server.",
+        )
+    if outcome == RunOutcome.UNKNOWN:
+        return (
+            "Outcome unknown",
+            "Barectl lost contact while this was running. It may have changed the server.",
+        )
+    if run.execution in Result.refused_before_changes():
+        return "Nothing changed", f"Nothing changed: {run.failure}"
+    stopped = _stopped_step(steps)
+    if stopped:
+        return "Stopped", f"This stopped after {stopped.lower()}. Nothing after it ran."
+    return "Stopped", run.failure
 
 
 @dataclass(frozen=True)

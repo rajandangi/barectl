@@ -44,6 +44,20 @@
              href="{{ change.plain.home_url }}">Cancel</a>
         </div>
       {% else %}
+        {% if other_operation %}
+          <div class="usa-alert usa-alert--warning" id="another-computer">
+            <div class="usa-alert__body">
+              <p class="usa-alert__text">
+                <strong>Another computer is changing this server.</strong> Barectl waits
+                until that finishes and then checks again.
+              </p>
+              <p>
+                <a class="usa-button usa-button--outline"
+                   href="{% url 'change_detail' change.operation_id %}">Check again</a>
+              </p>
+            </div>
+          </div>
+        {% endif %}
         {% for sentence in change.plain.summary %}<p>{{ sentence }}</p>{% endfor %}
         {% if review.shared %}
           <p>

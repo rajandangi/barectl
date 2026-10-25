@@ -20,6 +20,7 @@ from operations.models import (
     ChangeReview,
     ChangeRun,
     RemoteOperation,
+    Result,
 )
 from operations.plain_words import ChangeWords, Home
 from operations.presentation import plain_change
@@ -355,6 +356,17 @@ class ConfirmScreenTests(ScreenTestCase):
         self.assertNotIn(f'action="/changes/{review.preparation_id}/apply/"', content)
         self.assertIn("Your role may view this change but not apply it.", content)
 
+    def test_another_active_change_is_named_and_offers_check_again(self) -> None:
+        review = self.change("fixture_site")
+        self.sign_in_with(*PREPARE_PERMISSIONS, "view_changes", "change_site", "change_shared")
+        self.client.post(
+            f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
+        )
+        content = self.client.get(f"/changes/{review.preparation_id}/").content.decode()
+        self.assertIn("Another computer is changing this server.", content)
+        self.assertIn("Check again", content)
+        self.assertNotIn(f'action="/changes/{review.preparation_id}/apply/"', content)
+
     def test_the_old_review_url_resolves_to_the_confirm_screen(self) -> None:
         review = self.change("fixture_site")
         self.sign_in_with("view_changes", "change_site")
@@ -438,9 +450,36 @@ class RunScreenTests(ScreenTestCase):
         self.sign_in_with(*PREPARE_PERMISSIONS, "view_changes", "change_shared")
         page = self.client.get(f"/runs/{run.pk}/")
         content = page.content.decode()
-        self.assertIn("Stopped", content)
+        self.assertIn("Nothing changed", content)
         self.assertIn("Try again", content)
         self.assertEqual(content.count('class="usa-button"'), 1)
+
+    def test_a_partly_applied_run_names_the_step_and_nothing_after_it(self) -> None:
+        review = self.change("fixture_site")
+        self.systemd.result_class = "failed"
+        run = self.apply(review)
+        ChangeRun.objects.filter(pk=run.pk).update(
+            status=RemoteOperation.Status.FAILED,
+            execution=Result.FAILED,
+            progress_stage="account",
+        )
+        self.sign_in_with(*PREPARE_PERMISSIONS, "view_changes", "change_shared")
+        content = self.client.get(f"/runs/{run.pk}/").content.decode()
+        self.assertIn("This stopped after", content)
+        self.assertIn("Nothing after it ran.", content)
+        self.assertIn("Try again", content)
+
+    def test_a_lost_run_says_so_and_offers_a_check_of_the_original(self) -> None:
+        run = self.running(self.change("fixture_site"))
+        ChangeRun.objects.filter(pk=run.pk).update(status=RemoteOperation.Status.RECONCILING)
+        self.sign_in_with(*PREPARE_PERMISSIONS, "view_changes", "change_shared")
+        content = self.client.get(f"/runs/{run.pk}/").content.decode()
+        self.assertIn(
+            "Barectl lost contact while this was running. It may have changed the server.",
+            content,
+        )
+        self.assertIn("Check what happened", content)
+        self.assertNotIn("Try again", content)
 
     def test_the_old_run_url_resolves_to_progress(self) -> None:
         run = self.running(self.change("fixture_site"))
