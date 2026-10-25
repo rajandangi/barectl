@@ -30,6 +30,7 @@ class InputShape(StrEnum):
     LARAVEL_ENVIRONMENT = "laravel_environment"
     WORDPRESS_SETTINGS = "wordpress_settings"
     CERTIFICATE_EMAIL = "certificate_email"
+    SITE_LOG_ROTATION = "site_log_rotation"
 
 
 @dataclass(frozen=True)
@@ -605,6 +606,19 @@ def _laravel_rollback_inputs(value: dict[str, object]) -> PreparationInputs:
     return PreparationInputs("", identifier, (), release)
 
 
+def _site_log_rotation_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier = value["identifier"]
+    if not isinstance(identifier, str) or not valid_identifier(identifier):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier)
+
+
 def _certificate_email_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -637,4 +651,5 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.LARAVEL_ENVIRONMENT: _settings_inputs,
     InputShape.WORDPRESS_SETTINGS: _settings_inputs,
     InputShape.CERTIFICATE_EMAIL: _certificate_email_inputs,
+    InputShape.SITE_LOG_ROTATION: _site_log_rotation_inputs,
 }

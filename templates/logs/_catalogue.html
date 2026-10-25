@@ -1,0 +1,21 @@
+<div id="log-catalogue">
+  <p class="barectl-note">Barectl reads a log only when you ask for it.</p>
+  <ul class="usa-list">
+    {% for entry in logs_sources %}
+      <li>
+        <a href="?log={{ entry.source.slug }}"
+           {% if logs_selected.source.slug == entry.source.slug %}aria-current="page"{% endif %}>{{ entry.source.label }}</a>
+        — {{ entry.source.summary }}
+        {% if entry.active %}
+          <span class="barectl-note">Reading now…</span>
+        {% elif entry.page and entry.page.state == "observed" %}
+          <span class="barectl-note">{{ entry.page.lines|length }} newest line{{ entry.page.lines|length|pluralize }}</span>
+        {% elif entry.read %}
+          <span class="barectl-note">{{ entry.page.wording|default:"No lines in the last read." }}</span>
+        {% else %}
+          <span class="barectl-note">Not read yet.</span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</div>

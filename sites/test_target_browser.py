@@ -780,13 +780,15 @@ class HttpSiteBrowserTests(BrowserTestCase):
             certificate=SiteCertificate("issued", "CN=Pebble", 1_800_000_000),
             https=True,
         )
-        self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
+        for codename in ("view_siteobservation", "view_evidence"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
             self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/")
             expect(self.page.get_by_role("heading", name="Site", level=2)).to_be_visible()
             expect(self.page.get_by_text("over HTTPS")).to_be_visible()
             self.page.get_by_role("link", name="Logs", exact=True).click()
+            self.page.locator("summary", has_text="Advanced").click()
             expect(self.page.get_by_text("Certificate", exact=True)).to_be_visible()
             expect(
                 self.page.get_by_text(
@@ -799,5 +801,6 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/")
             expect(self.page.get_by_text("over HTTP").first).to_be_visible()
             self.page.get_by_role("link", name="Logs", exact=True).click()
+            self.page.locator("summary", has_text="Advanced").click()
             expect(self.page.get_by_text("Not used (HTTP only)", exact=True)).to_be_visible()
         self.assert_phone_layout()

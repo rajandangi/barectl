@@ -49,6 +49,26 @@ def selection_label(selection: str) -> str:
 
 
 _WORDS: Final[dict[str, ChangeWords]] = {
+    "set_up_log_rotation": ChangeWords(
+        title="Set up log rotation for {site}",
+        summary=(
+            ("Barectl will write {site}'s own rotation file and test it before keeping it."),
+            (
+                "The site's error and slow-request logs are rotated daily or at 20 MiB, "
+                "keeping five compressed files for fourteen days."
+            ),
+            "The visit log and the application's own daily log keep their own rotation.",
+        ),
+        action="Set up rotation",
+        steps={
+            "preflight": "Checking the server",
+            "publish": "Writing the rotation file",
+            "verify": "Verifying",
+        },
+        home=Home.SITE,
+        after="Open the logs",
+        after_home=Home.SITE,
+    ),
     "host_foundation": ChangeWords(
         title="Set up {server}",
         summary=(
