@@ -40,10 +40,18 @@ LARAVEL_IMPORT: Final = (
 LARAVEL_SOURCE: Final = (
     site_observation.COMMON_SOURCE
     + "\n"
+    + importlib.resources.files("cache").joinpath("convention.py").read_text()
+    + "\n"
+    + importlib.resources.files("cache")
+    .joinpath("laravel.py")
+    .read_text()
+    .replace("from .convention import instance_paths\n", "")
+    + "\n"
     + importlib.resources.files("laravel.bodies")
     .joinpath("common.py")
     .read_text()
     .replace(LARAVEL_IMPORT, "")
+    .replace("from cache.laravel import laravel_managed\n", "")
 )
 READ_SOURCE: Final = LARAVEL_SOURCE + "\nlaravel_read()\n"
 READ_COMMAND: Final = site_observation.python_command(READ_SOURCE, ())
@@ -303,19 +311,30 @@ def settings_from(value: dict[str, object]) -> tuple[ObservedSetting, ...]:
         details = row.get("environment_details", [])
         if not isinstance(details, list):
             continue
+        from cache.laravel import laravel_managed_digests
         from laravel.bodies.common import NON_SECRET_KEYS
 
+        identifier = str(row["identifier"])
+        digests = {
+            str(detail["key"]): str(detail["digest"])
+            for detail in details
+            if isinstance(detail, dict)
+            and isinstance(detail.get("key"), str)
+            and isinstance(detail.get("digest"), str)
+        }
+        managed = laravel_managed_digests(identifier, digests)
         for detail in details:
             if not isinstance(detail, dict):
                 continue
             key = str(detail["key"])
+            exposed = key in NON_SECRET_KEYS and key not in managed
             records.append(
                 ObservedSetting(
-                    str(row["identifier"]),
+                    identifier,
                     "laravel",
                     key,
                     str(detail["digest"]),
-                    str(detail.get("value", "")) if key in NON_SECRET_KEYS else "",
+                    str(detail.get("value", "")) if exposed else "",
                 )
             )
     return tuple(records)

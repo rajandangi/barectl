@@ -15,7 +15,7 @@ import sys
 import tempfile
 import time
 from types import SimpleNamespace
-from typing import Final, TypedDict
+from typing import TYPE_CHECKING, Final, NotRequired, TypedDict
 
 from runtimes.live import live_values, master_identity, protected
 from sites.bodies.admission import (
@@ -26,7 +26,16 @@ from sites.bodies.admission import (
     haproxy_state,
     persist_proxy_state,
 )
-from sites.bodies.pool import SitePool, parse_pool, render_pool_settings, supported_pool
+from sites.bodies.logrotate import logrotate_state
+from sites.bodies.pool import (
+    SitePool,
+    extension_line,
+    parse_pool,
+    pool_extension,
+    render_pool_settings,
+    supported_pool,
+    without_extension,
+)
 from sites.bodies.pool_boundary import safe_pool_boundary
 from sites.bodies.site_fpm import RetainedEntry, sfp_file, sfp_retained_shape, site_fpm_evidence
 from sites.names import readiness_directive, readiness_ok, readiness_path, request
@@ -51,6 +60,11 @@ SITE_GATED: Final[str] = (
 )
 
 
+if TYPE_CHECKING:
+    from automation.bodies.units import fence, restore
+    from sites.configuration import SiteSettings
+
+
 class SiteRecord(TypedDict):
     identifier: str
     names: list[str]
@@ -68,6 +82,9 @@ class SiteRecord(TypedDict):
     application_version: str
     application_problem: str
     serving_form: str
+    client: NotRequired[str]
+    # The supported state of the site's root-owned logrotate file (Phase C #389).
+    log_rotation: NotRequired[str]
 
 
 class NativeState(TypedDict):
@@ -103,6 +120,9 @@ POOL_TEMPLATE = ""
 KNOWN_CADDY: dict[str, tuple[str, ...]] = {}
 KNOWN_PHP: dict[str, dict[str, tuple[str, ...]]] = {}
 KNOWN_NODE: dict[str, dict[str, tuple[str, ...]]] = {}
+# The locked phpredis shared object per machine and PHP runtime (#390), baked into the
+# native source from the catalog lock so recognition never guesses a store path.
+KNOWN_REDIS: dict[str, dict[str, str]] = {}
 NATIVE_MASTER_FILES: dict[str, dict[str, str]] = {}
 ADMIN = "unix//run/caddy/admin.sock"
 RUNTIME_READ_SOURCE = ""
@@ -336,8 +356,14 @@ def certificate_state(names: list[str], https: bool) -> dict[str, object]:
     return {"state": "failing", "error": error} if error else {"state": "waiting"}
 
 
-def pool_file(settings: SimpleNamespace) -> str:
-    return POOL_TEMPLATE.format(settings=settings)
+def pool_file(settings: SiteSettings | SimpleNamespace, extension: str = "") -> str:
+    pool = POOL_TEMPLATE.format(settings=settings)
+    return pool + (extension_line(extension) if extension else "")
+
+
+def known_redis(runtime: str) -> str:
+    """The locked phpredis shared object for ``runtime`` on this machine, or ``""``."""
+    return KNOWN_REDIS.get(os.uname().machine, {}).get(runtime, "")
 
 
 def caddy_binary() -> str:
@@ -556,16 +582,20 @@ def metadata_matches(path: str, uid: int, gid: int, mode: int, kind: int) -> boo
     )
 
 
-def wrapper(settings: SimpleNamespace, name: str) -> str:
+def wrapper(settings: SiteSettings | SimpleNamespace, name: str, extension: str = "") -> str:
     executable = {
         "php": f"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php",
         "composer": "/nix/var/nix/profiles/barectl/composer/share/php/composer/bin/composer",
         "wp": "/nix/var/nix/profiles/barectl/wp-cli/share/wp-cli/wp-cli.phar",
     }[name]
+    # The build's own ini is loaded before the command line, so phpredis must be named on the
+    # command line: the extension needs session, which the build's ini loads after a ``-c``
+    # ini would have requested redis (#390). CLI commands get the same client as the master.
+    client = f" -dextension={extension}" if extension else ""
     command = (
-        f'"{executable}"'
+        f'"{executable}"{client}'
         if name == "php"
-        else f'"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php" "{executable}"'
+        else f'"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php"{client} "{executable}"'
     )
     return "#!/bin/sh\nexec " + command + ' "$@"\n'
 
@@ -704,7 +734,9 @@ def set_site_node(document: dict[str, object]) -> None:
         os.close(descriptor)
 
 
-def node_locked_change(document: dict[str, object], descriptor: int) -> None:
+def node_locked_change(  # noqa: C901 - reviewed stages
+    document: dict[str, object], descriptor: int
+) -> None:
     changed = False
     identifier, selection = str(document["identifier"]), str(document["selection"])
     try:
@@ -723,6 +755,9 @@ def node_locked_change(document: dict[str, object], descriptor: int) -> None:
         if not safe(str(directory), directory=True) or not same_site_lock(descriptor, identifier):
             result("refused", "evidence")
             return
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
+            return
         stage("links")
         with tempfile.TemporaryDirectory(prefix=".node-", dir=directory) as temporary:
             for name in ("node", "npm", "npx"):
@@ -735,6 +770,9 @@ def node_locked_change(document: dict[str, object], descriptor: int) -> None:
         selected, problem, _ = node_command_links(identifier)
         if selected != selection or problem or not same_site_lock(descriptor, identifier):
             raise ValueError("The selected native command links could not be verified.")
+        if not restore(document, identifier):
+            result("partial", "automation_restore")
+            return
         result("succeeded")
     except OSError, ValueError, KeyError, StopIteration, subprocess.TimeoutExpired:
         result("partial", "runtime_config") if changed else result("refused", "evidence")
@@ -834,28 +872,37 @@ def laravel_sources(release: str) -> tuple[str, ...]:
     return (release + "/artisan", release + "/public/index.php")
 
 
-def php_wrapper_selections(settings: SimpleNamespace) -> dict[str, str] | None:
-    selections: dict[str, str] = {}
+def php_wrapper_variant(settings: SimpleNamespace) -> tuple[str, str] | None:
+    """The runtime and cache client every site PHP command agrees on, or ``None``."""
+    chosen: tuple[str, str] | None = None
     for name in ("php", "composer", "wp"):
         path = settings.directory + "/bin/" + name
         if not safe(path) or not metadata_matches(path, 0, 0, 0o755, stat.S_IFREG):
             return None
         contents = pathlib.Path(path).read_text()
-        matches = [
-            entry
-            for entry in ("php84", "php85")
-            if contents == wrapper(setting(settings.identifier, settings.names, entry), name)
-        ]
-        if len(matches) != 1:
+        matches = list(
+            dict.fromkeys(
+                (entry, extension)
+                for entry in ("php84", "php85")
+                for extension in ("", known_redis(entry))
+                if contents
+                == wrapper(setting(settings.identifier, settings.names, entry), name, extension)
+            )
+        )
+        if len(matches) != 1 or (chosen is not None and matches[0] != chosen):
             return None
-        selections[name] = matches[0]
-    return selections
+        chosen = matches[0]
+    return chosen
+
+
+def php_wrapper_selections(settings: SimpleNamespace) -> dict[str, str] | None:
+    variant = php_wrapper_variant(settings)
+    return None if variant is None else dict.fromkeys(("php", "composer", "wp"), variant[0])
 
 
 def php_wrapper_runtime(settings: SimpleNamespace) -> str:
-    selections = php_wrapper_selections(settings)
-    versions = set(selections.values()) if selections is not None else set()
-    return next(iter(versions)) if len(versions) == 1 else ""
+    variant = php_wrapper_variant(settings)
+    return "" if variant is None else variant[0]
 
 
 def configuration_shape(
@@ -936,14 +983,26 @@ def retained_php_shape(settings: SimpleNamespace, *, active: bool) -> str:
     return sfp_retained_shape(expected, observed, active)
 
 
-def serving_shape(settings: SimpleNamespace, *, protections: bool = True) -> tuple[str, str]:
+def serving_shape(  # noqa: C901 - one recognition path for the whole serving convention
+    settings: SimpleNamespace, *, protections: bool = True
+) -> tuple[str, str]:
     pool = pathlib.Path(site_pool_path(settings.identifier, settings.runtime))
     if not pool.exists() or not pathlib.Path(settings.socket).exists():
         return "partial", "The site's independent PHP service or socket is absent."
+    try:
+        tuned = pool.read_text()
+    except OSError:
+        return "unsupported", POOL_OUTSIDE
+    extension = pool_extension(tuned, settings.identifier)
+    if extension and extension != known_redis(settings.runtime):
+        return "unsupported", POOL_OUTSIDE
     if not safe(str(pool)) or not supported_pool(
-        settings.identifier, settings.runtime, pool.read_text()
+        settings.identifier, settings.runtime, tuned, extension
     ):
         return "unsupported", POOL_OUTSIDE
+    variant = php_wrapper_variant(settings)
+    if variant is None or variant[1] != extension:
+        return "unsupported", "The site's PHP commands and pool disagree on the cache client."
     proxy = pwd.getpwnam(settings.proxy)
     if not metadata_matches(settings.socket, 0, proxy.pw_gid, 0o660, stat.S_IFSOCK):
         return "unsupported", "The application's private admission socket is unsafe."
@@ -1094,6 +1153,8 @@ def partial_sites(
                 "application_version": application_version,
                 "application_problem": application_problem,
                 "serving_form": "maintenance" if runtime else "partial",
+                "client": "",
+                "log_rotation": logrotate_state(identifier)[0],
             }
         )
     return rows
@@ -1113,7 +1174,10 @@ def site_pool_record(settings: SimpleNamespace) -> SitePool | None:
         text = path.read_text()
     except OSError:
         return None
-    return parse_pool(settings.identifier, settings.runtime, text)
+    extension = pool_extension(text, settings.identifier)
+    if extension and extension != known_redis(settings.runtime):
+        return None
+    return parse_pool(settings.identifier, settings.runtime, text, extension)
 
 
 def native_directories(entry: str) -> list[str]:
@@ -1290,6 +1354,8 @@ def native_site_record(  # noqa: C901 - one record per recognized serving form
         "application_version": application_version,
         "application_problem": application_problem,
         "serving_form": form,
+        "client": site_client(settings) if state == "complete" else "",
+        "log_rotation": logrotate_state(settings.identifier)[0],
     }
 
 
@@ -1311,6 +1377,188 @@ def site_records(
         seen.update(record["names"])
         records.append(record)
     return records
+
+
+def publish_wrapper(path: pathlib.Path, contents: str) -> None:
+    """Atomically publish one of a site's PHP command wrappers, fsynced."""
+    before = fingerprint(str(path))
+    if before is None or not safe(str(path)):
+        raise ValueError("A PHP command preimage is unavailable.")
+    descriptor, staged_name = tempfile.mkstemp(prefix=".php-runtime-", dir=path.parent)
+    staged = pathlib.Path(staged_name)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            stream.write(contents)
+            stream.flush()
+            os.fchmod(stream.fileno(), 0o755)
+            os.fsync(stream.fileno())
+        if fingerprint(str(path)) != before:
+            raise ValueError("A PHP command changed during staging.")
+        os.replace(staged, path)
+        parent = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(parent)
+        finally:
+            os.close(parent)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def realise_locked(path: str) -> None:
+    """Realise one reviewed store path the way every Barectl body does: no builds."""
+    process = subprocess.Popen(  # noqa: S603 - fixed native argv and a validated store path
+        [
+            "/nix/var/nix/profiles/default/bin/nix-store",
+            "--realise",
+            path,
+            "--option",
+            "max-jobs",
+            "0",
+            "--option",
+            "fallback",
+            "false",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        _, stderr = process.communicate(timeout=180)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        raise ValueError("The locked extension closure did not realise in time.") from None
+    if process.returncode:
+        raise ValueError("The locked extension closure is unavailable: " + stderr[:500])
+
+
+def restart_site_fpm(settings: SimpleNamespace) -> dict[str, object]:
+    """Restart one site's own master and wait for its completed load and protection read."""
+    unit = php_site_unit(settings.identifier, settings.runtime)
+    command = ["systemctl", "show", unit, "--property=MainPID,InvocationID"]
+    before = unit_properties(run(command, check=False))
+    run(["systemctl", "restart", unit])
+    evidence = wait_site_fpm(settings)
+    after = unit_properties(run(command, check=False))
+    if after.get("MainPID") == before.get("MainPID") and after.get("InvocationID") == before.get(
+        "InvocationID"
+    ):
+        raise ValueError("The site's own PHP master was not restarted.")
+    return evidence
+
+
+def set_site_client(document: dict[str, object]) -> None:
+    """Enable or disable one site's object-cache PHP client and restart only its master."""
+    try:
+        descriptor = open_site_lock(str(document.get("identifier", "")))
+    except BlockingIOError:
+        result("lock_busy")
+        return
+    except OSError, ValueError:
+        result("refused", "unsafe_lock")
+        return
+    try:
+        client_locked_change(document, descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def client_locked_change(document: dict[str, object], descriptor: int) -> None:  # noqa: C901
+    identifier = str(document.get("identifier", ""))
+    enabled = document.get("enabled") is True
+    extension = str(document.get("extension", ""))
+    stage("preflight")
+    changed = False
+    try:
+        before = native_state("observed", "", protections=False)
+        if before["digest"] != document.get("precondition_digest"):
+            result("refused", "evidence")
+            return
+        site = next((row for row in before["sites"] if row["identifier"] == identifier), None)
+        if site is None or site["state"] != "complete" or not site["runtime"]:
+            result("refused", "evidence")
+            return
+        settings = setting(
+            identifier,
+            site["names"],
+            site["runtime"],
+            https=site["https"],
+            readiness=site["readiness"],
+        )
+        if site_client(settings) != document.get("current"):
+            result("refused", "evidence")
+            return
+        wanted = extension if enabled else ""
+        if enabled and (not extension or extension != known_redis(settings.runtime)):
+            result("refused", "evidence")
+            return
+        if not enabled and extension:
+            result("refused", "evidence")
+            return
+        if site_client(settings) == ("phpredis" if wanted else ""):
+            result("refused", "evidence")
+            return
+        build = str(document.get("build", ""))
+        if enabled and not build.startswith("/nix/store/"):
+            result("refused", "evidence")
+            return
+        if not same_site_lock(descriptor, identifier):
+            result("refused", "evidence")
+            return
+        stage("realise")
+        if enabled:
+            try:
+                realise_locked(build)
+            except ValueError:
+                result("refused", "runtime_cache")
+                return
+        if native_state("observed", "", protections=False)["digest"] != before["digest"]:
+            result("refused", "evidence")
+            return
+        root = php_directory(identifier, settings.runtime)
+        pool_path = pathlib.Path(site_pool_path(identifier, settings.runtime))
+        pool_preimage = current_bytes(pool_path)
+        diagnostic_path = pathlib.Path(root + "/pools/diagnostic.conf")
+        diagnostic_preimage = current_bytes(diagnostic_path)
+        if pool_preimage is None or diagnostic_preimage is None:
+            result("refused", "evidence")
+            return
+        candidate = without_extension(pool_preimage) + (extension_line(wanted) if wanted else "")
+        expected = site_fpm_files(settings, wanted)
+        account = pwd.getpwnam(settings.account)
+        validate_pool_candidate(settings, account.pw_uid, candidate)
+        stage("pool")
+        replace_site_file(pool_path, candidate, pool_preimage)
+        changed = True
+        replace_site_file(diagnostic_path, expected[str(diagnostic_path)], diagnostic_preimage)
+        stage("commands")
+        for name in ("php", "composer", "wp"):
+            publish_wrapper(
+                pathlib.Path(settings.directory) / "bin" / name,
+                wrapper(settings, name, wanted),
+            )
+        stage("restart")
+        restart_site_fpm(settings)
+        stage("verify")
+        after = native_state("observed", "", protections=False)
+        current = next((item for item in after["sites"] if item["identifier"] == identifier), None)
+        evidence = site_fpm_read(settings)
+        extension_names = evidence.get("extensions") if evidence is not None else None
+        if (
+            current is None
+            or current["state"] != "complete"
+            or site_client(settings) != ("phpredis" if wanted else "")
+            or evidence is None
+            or evidence.get("client") != ("phpredis" if wanted else "")
+            or not isinstance(extension_names, list)
+            or (("redis" in extension_names) != bool(wanted))
+        ):
+            raise ValueError("The restarted site master did not report the reviewed client.")
+        result("succeeded")
+    except ValueError, OSError, KeyError, subprocess.TimeoutExpired:
+        result("partial" if changed else "refused", "site_client" if changed else "evidence")
 
 
 def native_state(
@@ -1811,19 +2059,34 @@ def serving_directory(path: str, mode: int = 0o755) -> None:
     target.mkdir(mode=mode)
 
 
-def site_fpm_files(settings: SimpleNamespace) -> dict[str, str]:
+def site_fpm_files(
+    settings: SiteSettings | SimpleNamespace, extension: str | None = None
+) -> dict[str, str]:
+    if extension is None:
+        extension = getattr(settings, "client", "")
     root = php_directory(settings.identifier, settings.runtime)
     return {
         root + "/php.ini": NATIVE_MASTER_FILES[settings.runtime]["php.ini"],
         root + "/php-fpm.conf": master_config(settings),
-        site_pool_path(settings.identifier, settings.runtime): pool_file(settings),
-        root + "/pools/diagnostic.conf": diagnostic_pool(settings),
+        site_pool_path(settings.identifier, settings.runtime): pool_file(settings, extension),
+        root + "/pools/diagnostic.conf": diagnostic_pool(settings, extension),
     }
 
 
 def site_fpm_read(settings: SimpleNamespace) -> dict[str, object] | None:
+    pool = site_pool_path(settings.identifier, settings.runtime)
+    try:
+        tuned = pathlib.Path(pool).read_text()
+    except OSError:
+        return None
+    # The object cache's client is site-local native state: the site pool and its diagnostic
+    # pool name the same locked phpredis build, or neither names one. A known path enables the
+    # client; any other value is outside the convention and recognition refuses it.
+    extension = pool_extension(tuned, settings.identifier)
+    if extension and extension != known_redis(settings.runtime):
+        return None
     expected = {
-        **site_fpm_files(settings),
+        **site_fpm_files(settings, extension),
         f"/etc/systemd/system/php-fpm-site-{settings.runtime}@.service": fpm_unit(settings.runtime),
         "/etc/php-fpm/diagnostics/probe.php": NATIVE_PROBE,
     }
@@ -1831,12 +2094,7 @@ def site_fpm_read(settings: SimpleNamespace) -> dict[str, object] | None:
     # the pool's actual bytes once ``supported_pool`` accepts them rather than the template's
     # (docs/site-conventions.md#supported-configuration-grammar). Every other key must equal
     # the convention, so a bounded tuning stays supported and anything else is refused.
-    pool = site_pool_path(settings.identifier, settings.runtime)
-    try:
-        tuned = pathlib.Path(pool).read_text()
-    except OSError:
-        return None
-    selected = parse_pool(settings.identifier, settings.runtime, tuned)
+    selected = parse_pool(settings.identifier, settings.runtime, tuned, extension)
     if selected is None:
         return None
     expected[pool] = tuned
@@ -1844,7 +2102,7 @@ def site_fpm_read(settings: SimpleNamespace) -> dict[str, object] | None:
     if fcgi not in KNOWN_FCGI.get(os.uname().machine, ()):
         return None
     minimum, maximum = pool_child_range(selected)
-    return site_fpm_evidence(
+    evidence = site_fpm_evidence(
         settings.identifier,
         settings.runtime,
         expected,
@@ -1852,6 +2110,23 @@ def site_fpm_read(settings: SimpleNamespace) -> dict[str, object] | None:
         fcgi,
         minimum,
         maximum,
+    )
+    if evidence is not None:
+        evidence["client"] = "phpredis" if extension else ""
+    return evidence
+
+
+def site_client(settings: SimpleNamespace) -> str:
+    """The site's recognized PHP cache client, ``""`` when none is enabled."""
+    try:
+        tuned = pathlib.Path(site_pool_path(settings.identifier, settings.runtime)).read_text()
+    except OSError:
+        return ""
+    return (
+        "phpredis"
+        if pool_extension(tuned, settings.identifier) == known_redis(settings.runtime)
+        and known_redis(settings.runtime)
+        else ""
     )
 
 
@@ -2428,6 +2703,9 @@ def pool_locked_change(document: dict[str, object], descriptor: int) -> None:  #
         if native_state("observed", "", protections=False)["digest"] != before["digest"]:
             result("refused", "evidence")
             return
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
+            return
         stage("pool")
         replace_site_file(path, candidate, preimage)
         changed = True
@@ -2445,6 +2723,9 @@ def pool_locked_change(document: dict[str, object], descriptor: int) -> None:  #
             or SitePool.from_document(current["pool"]) != pool
         ):
             raise ValueError("The reloaded pool did not verify.")
+        if not restore(document, identifier):
+            result("partial", "automation_restore")
+            return
         result("succeeded")
     except ValueError, OSError, KeyError, subprocess.TimeoutExpired:
         if (

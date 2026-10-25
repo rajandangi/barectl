@@ -14,6 +14,17 @@ WordPress, WP-CLI and the site's plugins run only as the site user. Root writes 
 
 Passive discovery reads bounded native files only: `current/public/wp-includes/version.php` for the core version literal and the fixed loader and private configuration's shape. It never runs PHP, and a fresh controller reconstructs the site and its core version from the server alone.
 
+## Object cache
+
+A WordPress site's **Settings > Object cache** turns on the site's own Valkey instance,
+writes the reserved `WP_REDIS_SCHEME`, `WP_REDIS_PATH` and `WP_REDIS_PREFIX` constants into
+the private configuration, installs and activates the pinned Redis Object Cache plugin and
+enables its drop-in. The review refuses when Valkey is not installed, the site is not a
+verified WordPress installation, or the site does not load phpredis; turning off disables
+the drop-in and clears the constants before the instance stops. Discovery recognizes the
+state from the instance, the constants and the plugin files; a fresh controller
+reconstructs it without a Barectl marker ([object cache](object-cache.md#a-sites-own-cache-implemented-392)).
+
 ## Actions
 
 A WordPress site's **WordPress** section offers two actions. Each is one Site review, runs WP-CLI as the site user in the transient unit, and reports one bounded, sanitized result line: WP-CLI's own output is never stored in the controller or written to the journal.
@@ -31,6 +42,15 @@ A run that stops before verification leaves the maintenance gate in place. A fre
 
 Barectl does not manage plugins, themes or core updates; WordPress keeps updating itself as
 the site user. Extra named constants are edited under **WordPress settings**, with
-Barectl-owned names kept fixed ([settings](settings.md)). WordPress cron is the
-[Phase C specification](https://github.com/rajandangi/barectl/issues/357).
+Barectl-owned names kept fixed ([settings](settings.md)).
+
+## Scheduled events
+
+A WordPress site's Settings gains **Scheduled tasks**, which moves WP-Cron to the server
+([automation](automation.md)). Turning it on runs due events every minute as the site's own
+account, waits for one successful run, and only then sets `DISABLE_WP_CRON` in the private
+configuration so page loads stop running cron. Turning it off clears the constant first and
+then stops the server task. A hand-made crontab entry, Supervisor program or other service
+already running cron for the site blocks turning it on, and a `DISABLE_WP_CRON` set by hand
+with no server task is shown as "No cron is running".
 

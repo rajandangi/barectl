@@ -53,8 +53,9 @@ SNAPSHOT_TIMESTAMP = "20261017T000000Z"
 SNAPSHOT_ROOT = f"ubuntu/{SNAPSHOT_TIMESTAMP}"
 SNAPSHOT_SUITES = ("resolute", "resolute-updates", "resolute-security")
 SNAPSHOT_COMPONENT = "main"
-# The database engines and Git #356 names, installed from the Ubuntu 26.04 archive.
-UBUNTU_FIXTURES = ("mariadb-server", "postgresql", "git")
+# The database engines and Git #356 names, the object cache #391 names and logrotate #389,
+# installed from the Ubuntu 26.04 archive.
+UBUNTU_FIXTURES = ("mariadb-server", "postgresql", "git", "valkey-server", "logrotate")
 _DEB_ARCH = {"x86_64-linux": "amd64", "aarch64-linux": "arm64"}
 _DOCKER_PLATFORM = {"x86_64-linux": "linux/amd64", "aarch64-linux": "linux/arm64"}
 _IMAGETOOLS_FORMAT = (
@@ -76,6 +77,10 @@ _PEBBLE_CERTS = (
 WORDPRESS_VERSION = "7.1.3"
 WORDPRESS_HOST = "downloads.wordpress.org"
 WORDPRESS_ARCHIVE = f"release/wordpress-{WORDPRESS_VERSION}.zip"
+# The one plugin Barectl manages (#392): pinned in cache/plugin.py and refreshed by the
+# same drift watch as the core archive.
+WORDPRESS_PLUGIN_VERSION = "3.0.0"
+WORDPRESS_PLUGIN_ARCHIVE = f"plugin/redis-cache.{WORDPRESS_PLUGIN_VERSION}.zip"
 # WP-CLI's ``core verify-checksums`` reads this endpoint; the mirror serves the response as
 # the directory's index so the query string WP-CLI adds still reaches it (Phase B #381).
 WORDPRESS_API_HOST = "api.wordpress.org"
@@ -485,6 +490,7 @@ def _pebble_entries(architecture: str, store: _StoreFn) -> None:
 
 def _wordpress_entries(architecture: str, store: _StoreFn) -> None:
     store(WORDPRESS_HOST, WORDPRESS_ARCHIVE, architecture)
+    store(WORDPRESS_HOST, WORDPRESS_PLUGIN_ARCHIVE, architecture)
     store(
         WORDPRESS_API_HOST,
         WORDPRESS_CHECKSUMS,

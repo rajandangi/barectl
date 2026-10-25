@@ -7,8 +7,12 @@ if TYPE_CHECKING:
 
     from django.db.migrations import Migration
 
+    from automation.apps import AutomationConfig
+    from automation.presentation import ScheduleView
     from bootstrap.apps import BootstrapConfig
     from bootstrap.certificate_email_views import CertificateEmailForm
+    from cache.apps import CacheConfig
+    from cache.models import CacheState
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
     from dashboard.checks import check_built_assets
@@ -28,6 +32,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
+    from disposable.test_cache import LaravelObjectCache, SiteObjectCache, ValkeyInstall
     from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
     from disposable.test_confidential_channel import ConfidentialChannelLifecycle
     from disposable.test_database_engine import (
@@ -78,6 +83,7 @@ if TYPE_CHECKING:
         LaravelDeployPostgreSQL,
     )
     from disposable.test_laravel_releases import LaravelReleaseReconstruction
+    from disposable.test_logs_validators import LogRotationValidators
     from disposable.test_mirror_nix import MirrorNixSignature
     from disposable.test_native_fixtures import NativeFixtures
     from disposable.test_native_qualification import ProfileSwitchAtomicity, SitePHPMasterRestart
@@ -94,7 +100,9 @@ if TYPE_CHECKING:
         SitePHPIsolation,
         SitePHPServing,
     )
+    from disposable.test_prepared_laravel import PrepareLaravel
     from disposable.test_prepared_sites import PreparedSitesReuse, PrepareSites
+    from disposable.test_prepared_wordpress import PrepareWordPress, PrepareWordPressCache
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
@@ -112,6 +120,7 @@ if TYPE_CHECKING:
     from laravel.apps import LaravelConfig
     from laravel.bodies import settings as laravel_settings_body
     from laravel.bodies.common import laravel_read
+    from logs.apps import LogsConfig
     from operations.activity import ActivityRow
     from operations.apps import OperationsConfig
     from operations.forms import (
@@ -204,9 +213,13 @@ if TYPE_CHECKING:
         RuntimesConfig,
         SitesConfig,
         LaravelConfig,
+        LogsConfig,
         WordPressConfig,
         DatabasesConfig,
+        CacheConfig,
     )
+    # The log rotation validator is found by the runner's --validators selection.
+    _log_rotation_validator = LogRotationValidators.test_the_supported_file_passes_logrotate_debug
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
     _dashboard = (
@@ -536,6 +549,13 @@ if TYPE_CHECKING:
         laravel_configuration.KNOWN_HOSTS_FILE,
         laravel_configuration.INITIAL_RELEASE,
     )
+    # The Scheduled tasks section is rendered by Django templates, which read these fields
+    # by name; the app config is Django's, and the fence plan is the exported extension
+    # point later Phase C kinds call (#395).
+    _automation_templates_and_extension_points = (
+        AutomationConfig,
+        ScheduleView("", "", "", "", None, "", False, False).last_run,
+    )
     # Django's form validation calls the settings form's clean_<field> by name, and the
     # settings bodies are read as resources by their change kinds.
     _settings_form_and_bodies = (
@@ -550,3 +570,14 @@ if TYPE_CHECKING:
         LaravelDeployBootFailure.test_a_release_whose_readiness_fails_is_never_reached,
         LaravelDeployPostgreSQL.test_a_deploy_on_postgresql,
     )
+    # The Phase C cache scenarios are found by Django's test discovery.
+    _cache_scenarios = (
+        ValkeyInstall,
+        SiteObjectCache,
+        LaravelObjectCache,
+        PrepareWordPress,
+        PrepareWordPressCache,
+        PrepareLaravel,
+    )
+    # The cache state choices are Django field choices, read through the field.
+    _cache_states = (CacheState.OFF, CacheState.ON, CacheState.PARTIAL, CacheState.UNSUPPORTED)

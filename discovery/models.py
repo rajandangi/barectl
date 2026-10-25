@@ -91,6 +91,24 @@ class DiscoverySnapshot(models.Model):
     )
     settings_source = models.TextField(blank=True, default="")
     settings_warning = models.TextField(blank=True, default="")
+    # Each site's object cache instance and application wiring (Phase C #392).
+    cache_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    cache_source = models.TextField(blank=True, default="")
+    cache_warning = models.TextField(blank=True, default="")
+    # Each WordPress site's scheduled work and its last result (Phase C #357).
+    automation_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    automation_source = models.TextField(blank=True, default="")
+    automation_warning = models.TextField(blank=True, default="")
+    # Each Laravel site's queue-worker definition and state (Phase C #266).
+    workers_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    workers_source = models.TextField(blank=True, default="")
+    workers_warning = models.TextField(blank=True, default="")
     host_standing = models.CharField(max_length=32, blank=True)
     host_standing_reasons = models.TextField(blank=True)
     host_standing_warnings = models.TextField(blank=True)
@@ -135,6 +153,7 @@ class WebStackComponent(models.TextChoices):
     MARIADB = "mariadb", "MariaDB"
     POSTGRESQL = "postgresql", "PostgreSQL"
     CERTBOT = "certbot", "Certbot"
+    VALKEY = "valkey", "Valkey"
 
 
 class ComponentObservation(models.Model):
@@ -244,6 +263,10 @@ class SiteObservation(models.Model):
     application = models.CharField(max_length=20, default="plain")
     application_version = models.CharField(max_length=40, blank=True)
     application_problem = models.TextField(blank=True)
+    # The site's own cache PHP client (Phase C #390), read from its own pool and commands.
+    client = models.CharField(max_length=16, blank=True)
+    # The supported state of the site's root-owned logrotate file (Phase C #389).
+    log_rotation = models.CharField(max_length=12, blank=True)
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [

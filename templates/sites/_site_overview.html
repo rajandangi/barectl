@@ -65,6 +65,49 @@
         </dd>
       </div>
     </dl>
+    {% if site_cache_line %}
+      <p id="site-cache-line">{{ site_cache_line }}</p>
+      {% if site_cache_can_read %}
+        <form method="post"
+              action="{% url 'site_object_cache_read' server.pk identifier %}">
+          {% csrf_token %}
+          <button type="submit" class="usa-button usa-button--outline">Check the cache</button>
+        </form>
+      {% endif %}
+    {% endif %}
+    {% for line in site_schedule_lines %}
+      {% if line.attention %}
+        <div class="usa-alert usa-alert--warning usa-alert--slim">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">{{ line.detail }}</p>
+          </div>
+        </div>
+      {% endif %}
+      <p class="barectl-schedule-line">
+        {{ line.label }}: {{ line.state }}
+        {% if line.last_run %}, {{ line.last_run }}{% endif %}.
+        {% if line.checked_at %}
+          Checked <time datetime="{{ line.checked_at|date:'c' }}">{{ line.checked_at|date:'M j, Y, H:i:s T' }}</time>.
+        {% endif %}
+        <a href="{% url 'site_settings' server.pk identifier %}#scheduled-tasks">Open settings</a>
+      </p>
+    {% endfor %}
+    {% for line in site_worker_lines %}
+      {% if line.attention %}
+        <div class="usa-alert usa-alert--warning usa-alert--slim">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">{{ line.detail }}</p>
+          </div>
+        </div>
+      {% endif %}
+      <p class="barectl-schedule-line">
+        {{ line.label }}: {{ line.state }}.
+        {% if line.checked_at %}
+          Checked <time datetime="{{ line.checked_at|date:'c' }}">{{ line.checked_at|date:'M j, Y, H:i:s T' }}</time>.
+        {% endif %}
+        <a href="{% url 'site_settings' server.pk identifier %}#queue-workers">Open settings</a>
+      </p>
+    {% endfor %}
     <p>
       Upload your code to <code>{{ site_upload_path }}</code> as <code>{{ site_user }}</code>.
     </p>
@@ -81,7 +124,7 @@
           <code>{{ site_current_release.commit }}</code>.
         </p>
       {% else %}
-        <p>Barectl has no current release evidence for this site yet.</p>
+        <p>Barectl has no current release information for this site yet.</p>
       {% endif %}
       {% if blocking %}
         <p class="barectl-note">Wait for the active operation before preparing a Deploy.</p>

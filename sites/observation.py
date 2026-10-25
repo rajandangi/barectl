@@ -14,6 +14,7 @@ from operations import native
 from runtimes.catalog import Architecture, load
 from runtimes.configuration import MANDATORY, PROBE
 from runtimes.configuration import render as render_master
+from runtimes.extensions import path as redis_path
 from runtimes.observation import with_bounded
 
 from .bodies.common import PHP_TRANSITION_INCOMPLETE as PHP_TRANSITION_INCOMPLETE
@@ -91,6 +92,7 @@ COMMON_SOURCE: Final = with_bounded(
     LIVE_SOURCE,
     NAMES_SOURCE,
     POOL_SOURCE,
+    importlib.resources.files("sites.bodies").joinpath("logrotate.py").read_text(),
     SERVING_SOURCE,
     ADMISSION_SOURCE,
     FPM_SOURCE,
@@ -98,11 +100,19 @@ COMMON_SOURCE: Final = with_bounded(
     .joinpath("common.py")
     .read_text()
     .replace(
-        "from sites.bodies.pool import SitePool, parse_pool, render_pool_settings, "
-        "supported_pool\n",
+        "from sites.bodies.pool import (\n"
+        "    SitePool,\n"
+        "    extension_line,\n"
+        "    parse_pool,\n"
+        "    pool_extension,\n"
+        "    render_pool_settings,\n"
+        "    supported_pool,\n"
+        "    without_extension,\n"
+        ")\n",
         "",
     )
     .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
+    .replace("from sites.bodies.logrotate import logrotate_state\n", "")
     .replace(
         "from sites.names import readiness_directive, readiness_ok, readiness_path, request\n",
         "",
@@ -202,6 +212,23 @@ COMMON_SOURCE: Final = with_bounded(
                         if build.entry == entry and build.architecture == architecture
                     )
                     for entry in ("nodejs_22", "nodejs_24")
+                }
+                for machine, architecture in (
+                    ("x86_64", Architecture.X86_64),
+                    ("aarch64", Architecture.AARCH64),
+                )
+            }
+        ),
+    )
+    .replace(
+        "KNOWN_REDIS: dict[str, dict[str, str]] = {}",
+        "KNOWN_REDIS: dict[str, dict[str, str]] = "
+        + repr(
+            {
+                machine: {
+                    entry: shared
+                    for entry in ("php84", "php85")
+                    if (shared := redis_path(architecture, entry))
                 }
                 for machine, architecture in (
                     ("x86_64", Architecture.X86_64),
@@ -382,8 +409,14 @@ def valid_site(site: object) -> bool:
         "application_problem",
         "pool",
         "serving_form",
+        "client",
+        "log_rotation",
     }
     if not isinstance(site, dict) or not required <= set(site) <= required | optional:
+        return False
+    if site.get("client", "") not in ("", "phpredis"):
+        return False
+    if site.get("log_rotation", "") not in ("", *LOG_ROTATION_STATES):
         return False
     if not _valid_application(site) or not _valid_site_scalars(site):
         return False
@@ -522,10 +555,13 @@ def observed_site(site: dict[str, object]) -> ObservedSite:
         application_version=str(site.get("application_version", "")),
         application_problem=str(site.get("application_problem", "")),
         pool=SitePool.from_document(site.get("pool")),
+        client=str(site.get("client", "")),
+        log_rotation=str(site.get("log_rotation", "")),
     )
 
 
 UNREADABLE_SITE: Final = "The site's live PHP protection evidence could not be read."
+LOG_ROTATION_STATES: Final = ("supported", "partial", "outside", "missing", "unavailable")
 
 
 def observed_sites(shell: RemoteShell) -> Observation[tuple[ObservedSite, ...]]:

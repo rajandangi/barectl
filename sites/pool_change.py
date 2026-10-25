@@ -9,6 +9,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
@@ -22,7 +23,9 @@ from .bodies.pool import SitePool
 
 SLUG: Final = "set_site_pool"
 BODY_SOURCE: Final = (
-    observation.COMMON_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + observation.COMMON_SOURCE
     + "\n"
     + importlib.resources.files("sites.bodies")
     .joinpath("pool_change.py")

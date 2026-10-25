@@ -11,6 +11,7 @@ from django.test import override_settings, tag
 from django.utils import timezone
 from playwright.sync_api import expect
 
+from automation.testing import AutomationReplay
 from dashboard.browser_testing import BrowserTestCase
 from discovery.fakes import record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
@@ -62,7 +63,9 @@ class SiteNodeBrowserTests(BrowserTestCase):
         )
         with mock.patch(
             "discovery.ssh.connect_operation",
-            return_value=contextlib.nullcontext(ReplayShell(transcript)),
+            return_value=contextlib.nullcontext(
+                AutomationReplay(ReplayShell(transcript), {"version": 2, "sites": []})
+            ),
         ):
             run_worker()
         self.page.reload()

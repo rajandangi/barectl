@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import TYPE_CHECKING
 
 from sites.bodies.admission import haproxy_state
 from sites.bodies.common import (
@@ -53,6 +54,10 @@ from sites.bodies.common import (
     walk_routes,
 )
 
+if TYPE_CHECKING:
+    # Assembled into this body by automation/bodies/source.py (Phase C #395).
+    from automation.bodies.units import daemon_reload, fence, forget, reviewed_units
+
 # The ``databases.binding`` source, injected at assembly time.
 BINDING_SOURCE = ""
 
@@ -64,6 +69,7 @@ POSTGRESQL = "postgresql"
 
 
 def site_paths(identifier: str) -> list[str]:
+    """Every reviewed site artifact; the last four belong to its own object cache (#392)."""
     return [
         f"/etc/caddy/sites/{identifier}.caddy",
         f"/etc/haproxy/sites/{identifier}.cfg",
@@ -73,6 +79,10 @@ def site_paths(identifier: str) -> list[str]:
         f"/var/lib/php-fpm/sites/{identifier}",
         f"/run/php-fpm/sites/{identifier}",
         f"/var/www/{identifier}",
+        f"/etc/valkey/{identifier}.conf",
+        f"/var/lib/valkey/{identifier}",
+        f"/run/valkey/{identifier}",
+        f"/etc/systemd/system/valkey-server@{identifier}.service.d",
     ]
 
 
@@ -80,6 +90,7 @@ def service_units(identifier: str) -> list[str]:
     return [
         f"haproxy-site@{identifier}.service",
         *(f"php-fpm-site-{entry}@{identifier}.service" for entry in RUNTIMES),
+        f"valkey-server@{identifier}.service",
     ]
 
 
@@ -234,6 +245,22 @@ def inventory(identifier: str) -> dict[str, object]:
     stable = {key: item for key, item in value.items() if key not in ("uptime", "services")}
     value["digest"] = hashlib.sha256(canonical(stable).encode()).hexdigest()
     return value
+
+
+def remove_automation(document: dict[str, object], identifier: str) -> None:
+    """Remove the reviewed automation unit files and clear their runtime masks.
+
+    The fence already masked and stopped them; removal never starts them again
+    (docs/automation.md#fencing).
+    """
+    names = reviewed_units(document, identifier)
+    for name in names:
+        remove_path(f"/etc/systemd/system/{name}")
+    daemon_reload()
+    forget(document, identifier)
+    for name in names:
+        if exists(f"/etc/systemd/system/{name}"):
+            raise ValueError("An automation unit file is still present.")
 
 
 def remove_path(path: str) -> None:
@@ -586,6 +613,9 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
             return 1
     changed = False
     try:
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
+            return 1
         if not current["caddy_matches"]:
             # A previous attempt may have left Caddy serving its old in-memory
             # configuration after the file changed. Make disk and memory agree before
@@ -604,8 +634,13 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
         stop_services(identifier)
         changed = True
         stage("configuration")
-        for path in site_paths(identifier)[1:7]:
-            remove_path(path)
+        remove_automation(document, identifier)
+        # The Caddy file is gone already and the site directory is removed after the
+        # database; every other reviewed path is removed by name, never by position.
+        keep = {f"/etc/caddy/sites/{identifier}.caddy", f"/var/www/{identifier}"}
+        for path in site_paths(identifier):
+            if path not in keep:
+                remove_path(path)
         stage("database")
         reason = drop_database(document)
         if reason:

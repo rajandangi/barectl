@@ -9,6 +9,8 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation import fence as automation_fence
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
@@ -25,12 +27,16 @@ from .configuration import GATE_TEMPLATE, ROLLBACK_ACKNOWLEDGEMENT
 
 SLUG: Final = "rollback_laravel_site"
 BODY_SOURCE: Final = (
-    observation.LARAVEL_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + observation.LARAVEL_SOURCE
     + "\n"
     + importlib.resources.files("laravel.bodies")
     .joinpath("rollback.py")
     .read_text()
     .replace("from laravel.bodies.common import roll_back\n", "")
+    + "\n"
+    + AUTOMATION_SOURCE
 )
 BODY_BYTES: Final = (
     (
@@ -203,6 +209,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     ):
         raise ValueError("The roll back review is not a valid immutable selection.")
     value = {key: document.get(key) for key in _DOCUMENT_KEYS}
+    value["automation_fence"] = automation_fence.checked(document)
     encoded = base64.b64encode(gzip.compress(json.dumps(value).encode(), mtime=0)).decode()
     return NativeBody(BODY_BYTES.rstrip(b"\n"), (encoded,))
 

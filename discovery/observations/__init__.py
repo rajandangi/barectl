@@ -1,9 +1,15 @@
 """Read-only observations (docs/ssh-connections.md#bounds-and-read-only-commands)."""
 
+import hashlib
 import re
 import shlex
 
+from automation import observation as automation_observation
+from automation import worker_observation
+from automation.observation import ObservedSchedule
+from automation.worker_observation import ObservedWorker
 from bootstrap.standing import HostJudgment, Standing
+from cache import instance as cache_instance
 from laravel import observation as laravel_observation
 from runtimes import defaults as runtime_defaults
 from runtimes import observation as runtime_observation
@@ -17,6 +23,7 @@ from ..snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedCache,
     ObservedRelease,
     ObservedSetting,
     ObservedSite,
@@ -89,6 +96,30 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     release_observation, settings_observation = _hosting_inventories(
         shell, standing, sites=sites, releases=releases
     )
+    cache_observation = _hosting_cache(
+        shell,
+        standing,
+        hosting,
+        settings_observation,
+        sites_requested=sites,
+    )
+    scheduled = _automation(
+        shell,
+        standing,
+        hosting,
+        settings_observation,
+        sites=sites,
+        releases=releases,
+    )
+    workers = _workers(
+        shell,
+        standing,
+        hosting,
+        release_observation,
+        settings_observation,
+        sites=sites,
+        release_inventory=releases,
+    )
     certificate_email, certificate_email_state = "", ""
     if sites and standing.standing == Standing.TARGET_STACK:
         certificate_email_state, certificate_email = caddy_email.read(shell)
@@ -106,6 +137,9 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         runtime_defaults=defaults,
         releases=release_observation,
         settings=settings_observation,
+        cache=cache_observation,
+        automation=scheduled,
+        workers=workers,
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
     )
@@ -171,8 +205,132 @@ def _hosting_inventories(
                 for entry in constants
                 if isinstance(entry, dict)
             )
+            cron = row.get("cron")
+            if isinstance(cron, dict) and cron.get("disable") in ("true", "false"):
+                value = str(cron["disable"])
+                records.append(
+                    ObservedSetting(
+                        identifier,
+                        "wordpress",
+                        "DISABLE_WP_CRON",
+                        hashlib.sha256(value.encode()).hexdigest(),
+                        value,
+                    )
+                )
         settings = Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", tuple(records))
     return laravel_observation.releases_from(inventory), settings
+
+
+def _laravel_wiring(settings: Observation[tuple[ObservedSetting, ...]]) -> dict[str, str]:
+    """Each Laravel site's `.env` cache wiring, from digests only."""
+    from cache.laravel import laravel_wiring_digests
+
+    digests: dict[str, dict[str, str]] = {}
+    for row in settings.value if settings.observed else ():
+        if row.application != "laravel":
+            continue
+        digests.setdefault(row.identifier, {})[row.key] = row.digest
+    return {
+        identifier: laravel_wiring_digests(identifier, values)
+        for identifier, values in digests.items()
+    }
+
+
+def _hosting_cache(
+    shell: RemoteShell,
+    standing: HostJudgment,
+    sites: Observation[tuple[ObservedSite, ...]],
+    settings: Observation[tuple[ObservedSetting, ...]],
+    *,
+    sites_requested: bool,
+) -> Observation[tuple[ObservedCache, ...]]:
+    if not sites_requested:
+        return Observation(ObservationOutcome.OBSERVED, (), "", ())
+    if standing.standing != Standing.TARGET_STACK:
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+    value = cache_instance.read(shell)
+    if value is None:
+        return Observation(
+            ObservationOutcome.INACCESSIBLE,
+            ("/etc/valkey", "/var/www"),
+            "The object cache could not be reconstructed.",
+            (),
+        )
+    return Observation(
+        ObservationOutcome.OBSERVED,
+        ("/etc/valkey", "/var/www"),
+        "",
+        cache_instance.observed(value, sites.value, _laravel_wiring(settings)),
+    )
+
+
+def _automation(
+    shell: RemoteShell,
+    standing: HostJudgment,
+    hosting: Observation[tuple[ObservedSite, ...]],
+    settings: Observation[tuple[ObservedSetting, ...]],
+    *,
+    sites: bool,
+    releases: bool,
+) -> Observation[tuple[ObservedSchedule, ...]]:
+    """The scheduled-work inventory, read only on a full discovery of a target host."""
+    if not (sites and releases):
+        return Observation(ObservationOutcome.OBSERVED, (), "", ())
+    if standing.standing != Standing.TARGET_STACK:
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+    value = automation_observation.read(shell)
+    schedules = automation_observation.observations(
+        value,
+        sites=hosting.value,
+        disable_wp_cron=automation_observation.cron_values(settings),
+        laravel={row.identifier for row in settings.value if row.application == "laravel"},
+    )
+    if schedules is None:
+        return Observation(
+            ObservationOutcome.INACCESSIBLE,
+            ("/etc/systemd/system",),
+            "The scheduled tasks could not be read.",
+            (),
+        )
+    return Observation(ObservationOutcome.OBSERVED, ("/etc/systemd/system",), "", schedules)
+
+
+def _workers(
+    shell: RemoteShell,
+    standing: HostJudgment,
+    hosting: Observation[tuple[ObservedSite, ...]],
+    releases: Observation[tuple[ObservedRelease, ...]],
+    settings: Observation[tuple[ObservedSetting, ...]],
+    *,
+    sites: bool,
+    release_inventory: bool,
+) -> Observation[tuple[ObservedWorker, ...]]:
+    """Each Laravel site's queue workers, read only on a full target-host discovery."""
+    if not (sites and release_inventory):
+        return Observation(ObservationOutcome.OBSERVED, (), "", ())
+    if standing.standing != Standing.TARGET_STACK:
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+    laravel = frozenset(
+        site.identifier
+        for site in hosting.value
+        if any(release.identifier == site.identifier for release in releases.value)
+        or any(
+            setting.identifier == site.identifier and setting.application == "laravel"
+            for setting in settings.value
+        )
+    )
+    if not laravel:
+        return Observation(ObservationOutcome.OBSERVED, ("/etc/systemd/system",), "", ())
+    value = worker_observation.read(shell)
+    workers = worker_observation.observations(value, sites=hosting.value, laravel=laravel)
+    if workers is None:
+        return Observation(
+            ObservationOutcome.INACCESSIBLE,
+            ("/etc/systemd/system",),
+            "The queue workers could not be read.",
+            (),
+        )
+    return Observation(ObservationOutcome.OBSERVED, ("/etc/systemd/system",), "", workers)
 
 
 def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:

@@ -196,6 +196,34 @@ class EnvironmentReviewTests(SimpleTestCase):
         self.assertFalse(draft.eligible)
         self.assertIn("NOPE is not in this site's environment.", draft.refusals)
 
+    def test_object_cache_keys_are_managed_and_cannot_be_edited_here(self) -> None:
+        import hashlib
+
+        from cache.laravel import laravel_values
+
+        value = inventory()
+        row = cast(list[dict[str, object]], value["sites"])[0]
+        details = [
+            {
+                "key": key,
+                "digest": hashlib.sha256(item.encode()).hexdigest(),
+            }
+            for key, item in laravel_values("shop").items()
+        ]
+        row["environment_details"] = details
+        managed = settings.EnvironmentEvidence(Standing.TARGET_STACK, native(), value)
+        refused = settings.review(
+            managed,
+            PreparationInputs("", "shop", settings_changes=(("CACHE_STORE", "set"),)),
+        )
+        self.assertFalse(refused.eligible)
+        self.assertIn("managed by the object cache", " ".join(refused.refusals))
+        allowed = settings.review(
+            managed,
+            PreparationInputs("", "shop", settings_changes=(("APP_URL", "set"),)),
+        )
+        self.assertTrue(allowed.eligible, allowed.refusals)
+
     def test_a_plain_php_site_is_refused(self) -> None:
         state = native()
         plain = inventory()

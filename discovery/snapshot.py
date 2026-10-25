@@ -5,17 +5,23 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet
 
+from automation.observation import ObservedSchedule
+from automation.worker_observation import ObservedWorker
+from automation.workers import WorkerDefinition
 from bootstrap.standing import HostJudgment, Standing
 from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
 from servers.models import Server
 from sites.bodies.pool import SitePool
+
+if TYPE_CHECKING:
+    from cache.models import CacheObservation
 
 from .models import (
     ComponentObservation,
@@ -141,6 +147,10 @@ class ObservedSite:
     application: str = "plain"
     application_version: str = ""
     application_problem: str = ""
+    # The PHP object-cache client enabled for this site's own master (Phase C #390).
+    client: str = ""
+    # The supported state of the site's root-owned logrotate file (Phase C #389).
+    log_rotation: str = ""
 
 
 @dataclass(frozen=True)
@@ -171,6 +181,23 @@ class ObservedRelease:
 
 
 @dataclass(frozen=True)
+class ObservedCache:
+    """One site's object cache, from the instance and the application's own files.
+
+    ``state`` is ``off``, ``on``, ``partial`` or ``unsupported``; the controller never
+    keeps a cache's contents, only this observation and an on-demand reading.
+    """
+
+    identifier: str
+    state: str
+    memory_mib: int | None = None
+    problem: str = ""
+    plugin_version: str = ""
+    client: str = ""
+    unit_state: str = ""
+
+
+@dataclass(frozen=True)
 class CollectedSnapshot:
     """Scalar values are ``None`` unless observed."""
 
@@ -190,6 +217,20 @@ class CollectedSnapshot:
     )
     # The keys and server-computed digests of each site's private settings file.
     settings: Observation[tuple[ObservedSetting, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
+    # Each site's object cache instance and application wiring (Phase C #392).
+    cache: Observation[tuple[ObservedCache, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
+    # Each WordPress site's scheduled work, as native evidence and the pure projection
+    # record it (docs/automation.md, Phase C #357).
+    automation: Observation[tuple[ObservedSchedule, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
+    # Each Laravel site's queue-worker definition and state, read from its units
+    # (docs/automation.md, Phase C #266).
+    workers: Observation[tuple[ObservedWorker, ...]] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
     )
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
@@ -256,6 +297,15 @@ def save_snapshot(
         settings_status=collected.settings.outcome,
         settings_source=_joined(collected.settings.source),
         settings_warning=collected.settings.warning,
+        cache_status=collected.cache.outcome,
+        cache_source=_joined(collected.cache.source),
+        cache_warning=collected.cache.warning,
+        automation_status=collected.automation.outcome,
+        automation_source=_joined(collected.automation.source),
+        automation_warning=collected.automation.warning,
+        workers_status=collected.workers.outcome,
+        workers_source=_joined(collected.workers.source),
+        workers_warning=collected.workers.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -338,8 +388,11 @@ def save_snapshot(
         for unit in observed.service.value
     )
     _save_sites(snapshot, collected.sites.value)
+    _save_cache(snapshot, collected.cache.value)
     _save_releases(snapshot, collected.releases.value)
     _save_settings(snapshot, collected.settings.value)
+    _save_automation(snapshot, collected.automation.value)
+    _save_workers(snapshot, collected.workers.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -383,8 +436,28 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             application=site.application,
             application_version=site.application_version,
             application_problem=site.application_problem,
+            client=site.client,
+            log_rotation=site.log_rotation,
         )
         for site in sites
+    )
+
+
+def _save_cache(snapshot: DiscoverySnapshot, cache: tuple[ObservedCache, ...]) -> None:
+    from cache.models import CacheObservation
+
+    CacheObservation.objects.bulk_create(
+        CacheObservation(
+            snapshot=snapshot,
+            identifier=row.identifier,
+            state=row.state,
+            memory_mib=row.memory_mib,
+            problem=row.problem,
+            plugin_version=row.plugin_version,
+            client=row.client,
+            unit_state=row.unit_state,
+        )
+        for row in cache
     )
 
 
@@ -417,6 +490,64 @@ def _save_settings(snapshot: DiscoverySnapshot, settings: tuple[ObservedSetting,
     )
 
 
+def _save_automation(snapshot: DiscoverySnapshot, schedules: tuple[ObservedSchedule, ...]) -> None:
+    from automation.models import AutomationObservation
+
+    AutomationObservation.objects.bulk_create(
+        AutomationObservation(
+            snapshot=snapshot,
+            identifier=schedule.identifier,
+            role=schedule.role,
+            status=schedule.status,
+            problem=schedule.problem,
+            duplicate=schedule.duplicate,
+            disable_wp_cron=schedule.disable_wp_cron,
+            installed=schedule.installed,
+            timer_active=schedule.timer_active,
+            timer_enabled=schedule.timer_enabled,
+            service_active=schedule.service_active,
+            masked=schedule.masked,
+            result=schedule.result,
+            exec_status=schedule.exec_status,
+            last_start_us=schedule.last_start_us,
+            last_exit_us=schedule.last_exit_us,
+            last_trigger_us=schedule.last_trigger_us,
+            next_elapse_us=schedule.next_elapse_us,
+            slice_populated=schedule.slice_populated,
+        )
+        for schedule in schedules
+    )
+
+
+def _save_workers(snapshot: DiscoverySnapshot, workers: tuple[ObservedWorker, ...]) -> None:
+    from automation.models import WorkerObservation
+
+    WorkerObservation.objects.bulk_create(
+        WorkerObservation(
+            snapshot=snapshot,
+            identifier=worker.identifier,
+            status=worker.status,
+            queues="\n".join(worker.queues),
+            processes=worker.processes,
+            timeout=worker.timeout,
+            active_processes=worker.active_processes,
+            installed=worker.installed,
+            enabled=worker.enabled,
+            masked=worker.masked,
+            start_limited=worker.start_limited,
+            slice_populated=worker.slice_populated,
+            result=worker.result,
+            exec_status=worker.exec_status,
+            last_start_us=worker.last_start_us,
+            last_exit_us=worker.last_exit_us,
+            nrestarts=worker.nrestarts,
+            duplicate=worker.duplicate,
+            problem=worker.problem,
+        )
+        for worker in workers
+    )
+
+
 class AttemptSnapshot(NamedTuple):
     attempt: DiscoveryAttempt
     snapshot: Snapshot | None
@@ -427,8 +558,11 @@ _OBSERVATION_ROWS = (
     "components",
     "components__service_units",
     "sites",
+    "cache",
     "releases",
     "settings",
+    "automation",
+    "workers",
 )
 
 
@@ -530,6 +664,12 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             row.sites_warning,
             tuple(_read_site(site) for site in row.sites.all()),
         ),
+        cache=Observation(
+            ObservationOutcome(row.cache_status),
+            _reads(row.cache_source),
+            row.cache_warning,
+            tuple(_read_cache(item) for item in row.cache.all()),
+        ),
         releases=Observation(
             ObservationOutcome(row.releases_status),
             _reads(row.releases_source),
@@ -541,6 +681,18 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             _reads(row.settings_source),
             row.settings_warning,
             tuple(_read_setting(setting) for setting in row.settings.all()),
+        ),
+        automation=Observation(
+            ObservationOutcome(row.automation_status),
+            _reads(row.automation_source),
+            row.automation_warning,
+            tuple(_read_automation(automation) for automation in row.automation.all()),
+        ),
+        workers=Observation(
+            ObservationOutcome(row.workers_status),
+            _reads(row.workers_source),
+            row.workers_warning,
+            tuple(_read_worker(worker) for worker in row.workers.all()),
         ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
@@ -595,6 +747,18 @@ def _read_pairs(text: str) -> tuple[tuple[str, str], ...]:
     )
 
 
+def _read_cache(row: CacheObservation) -> ObservedCache:
+    return ObservedCache(
+        row.identifier,
+        row.state,
+        row.memory_mib,
+        row.problem,
+        row.plugin_version,
+        row.client,
+        row.unit_state,
+    )
+
+
 def _read_site(row: SiteObservation) -> ObservedSite:
     account = (
         SiteAccount(row.uid, row.gid, row.home, row.shell)
@@ -618,6 +782,8 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         application=row.application,
         application_version=row.application_version,
         application_problem=row.application_problem,
+        client=row.client,
+        log_rotation=row.log_rotation,
     )
 
 
@@ -653,6 +819,70 @@ def _read_certificate(row: SiteObservation) -> SiteCertificate | None:
 
 def _read_setting(row: SettingObservation) -> ObservedSetting:
     return ObservedSetting(row.identifier, row.application, row.name, row.digest, row.value)
+
+
+def _read_automation(row: object) -> ObservedSchedule:
+    from automation.models import AutomationObservation
+    from automation.status import ScheduleStatus
+
+    if not isinstance(row, AutomationObservation):
+        raise TypeError("Not an automation observation.")
+    return ObservedSchedule(
+        identifier=row.identifier,
+        role=row.role,
+        status=ScheduleStatus(row.status),
+        problem=row.problem,
+        duplicate=row.duplicate,
+        disable_wp_cron=row.disable_wp_cron,
+        installed=row.installed,
+        timer_active=row.timer_active,
+        timer_enabled=row.timer_enabled,
+        service_active=row.service_active,
+        masked=row.masked,
+        result=row.result,
+        exec_status=row.exec_status,
+        last_start_us=row.last_start_us,
+        last_exit_us=row.last_exit_us,
+        last_trigger_us=row.last_trigger_us,
+        next_elapse_us=row.next_elapse_us,
+        slice_populated=row.slice_populated,
+    )
+
+
+def _read_worker(row: object) -> ObservedWorker:
+    from automation.models import WorkerObservation
+    from automation.worker_status import WorkerStatus
+
+    if not isinstance(row, WorkerObservation):
+        raise TypeError("Not a queue-worker observation.")
+    definition = (
+        WorkerDefinition(
+            tuple(line for line in row.queues.splitlines() if line),
+            row.processes,
+            row.timeout,
+        )
+        if row.queues and row.timeout
+        else None
+    )
+    return ObservedWorker(
+        identifier=row.identifier,
+        status=WorkerStatus(row.status),
+        definition=definition,
+        processes=row.processes,
+        active_processes=row.active_processes,
+        installed=row.installed,
+        enabled=row.enabled,
+        masked=row.masked,
+        result=row.result,
+        exec_status=row.exec_status,
+        start_limited=row.start_limited,
+        last_start_us=row.last_start_us,
+        last_exit_us=row.last_exit_us,
+        nrestarts=row.nrestarts,
+        slice_populated=row.slice_populated,
+        duplicate=row.duplicate,
+        problem=row.problem,
+    )
 
 
 def _read_release(row: ReleaseObservation) -> ObservedRelease:

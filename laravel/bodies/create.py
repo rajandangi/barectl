@@ -47,6 +47,7 @@ from sites.bodies.common import (
     verify_http,
     write_new,
 )
+from sites.bodies.logrotate import logrotate_install, logrotate_present
 
 # The ``databases.bodies.site`` source, injected at assembly time. It is executed in an
 # isolated namespace so its ``run``/``result``/``stage`` helpers do not shadow the site
@@ -292,6 +293,7 @@ def create_laravel(document: dict[str, object]) -> None:
         account = create_account(settings, identity)
         stage("layout")
         deployment_lock = create_layout(settings)
+        logrotate_install(settings.identifier, logrotate_present(settings.identifier))
         stage("pool")
         configure_pool(settings, account, int(str(document["proxy_identity"])))
         stage("caddy")

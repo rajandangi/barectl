@@ -9,8 +9,10 @@ checkpoint states it records a transcript for.
 The harness sets the environment below; a scenario reads nothing else from its host.
 """
 
+import contextlib
 import os
 import shlex
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -31,6 +33,28 @@ def _setting(name: str) -> str:
     return os.environ[f"BARECTL_SSH_TEST_{name}"]
 
 
+_RUNTIME_REPAIRED: set[str] = set()
+
+
+def repair_runtime_masters(test: ScenarioTestCase) -> None:
+    """Restart the shared PHP runtime masters once per validator process.
+
+    A package transaction, a unit write or systemd-analyze's manager interaction can clear
+    the running masters' ExecStart metadata (issue #428). The next validator class then
+    cannot verify the master or its diagnostic socket. Restarting them once at the start of
+    the validator process restores the evidence without changing the product; a failed
+    restart or a missing socket fails the class instead of hiding the defect.
+    """
+    if "php-masters" in _RUNTIME_REPAIRED:
+        return
+    test.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
+    test.native(
+        "timeout 20 sh -c 'until [ -S /run/php-fpm/php84/diagnostic.sock ] "
+        "&& [ -S /run/php-fpm/php85/diagnostic.sock ]; do sleep 0.2; done'"
+    )
+    _RUNTIME_REPAIRED.add("php-masters")
+
+
 class ScenarioTestCase(TestCase):
     """One native lifecycle scenario; subclasses set the declarations below."""
 
@@ -41,12 +65,18 @@ class ScenarioTestCase(TestCase):
     # A preparation scenario is excluded from ordinary discovery; the runner selects it by
     # name only to build a missing snapshot layer (scenarios.prepare_layers).
     preparation = False
+    validator = False
+    breadth = False
+    memory_gib = 0
+    repair_masters = False
 
     @override
     def setUp(self) -> None:
         self.record_state = os.environ.get(_RECORD_ENV, "")
         if self.record_state:
             self._seed_secret()
+        if getattr(self, "validator", False) and getattr(self, "repair_masters", False):
+            repair_runtime_masters(self)
 
     def target(self) -> ConnectionTarget:
         return ConnectionTarget(
@@ -74,6 +104,24 @@ class ScenarioTestCase(TestCase):
     def native(self, command: str, *, timeout: float = 300) -> str:
         """Run a harness command in the server container (teardown, probes)."""
         return docker("exec", _setting("CONTAINER"), "sh", "-c", command, timeout=timeout)
+
+    def stop_for(self, seconds: float) -> None:
+        """Stop the container, leave it down for ``seconds``, then start it again."""
+        docker("stop", "--time", "5", _setting("CONTAINER"), timeout=60)
+        time.sleep(seconds)
+        docker("start", _setting("CONTAINER"), timeout=60)
+        self._wait_for_systemd(90)
+
+    def _wait_for_systemd(self, timeout: float) -> None:
+        end = time.monotonic() + timeout
+        state = ""
+        while time.monotonic() < end:
+            with contextlib.suppress(Exception):
+                state = self.native("systemctl is-system-running || true").strip()
+            if state in {"running", "degraded"}:
+                return
+            time.sleep(0.3)
+        raise AssertionError(f"systemd did not return in {timeout:.0f} s ({state!r})")
 
     def checkpoint(self, state: str, shell: ssh.RemoteShell) -> None:
         """Write the transcript of ``state`` while recording it; otherwise do nothing."""

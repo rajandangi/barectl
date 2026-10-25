@@ -15,6 +15,8 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation import fence as automation_fence
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
@@ -31,12 +33,42 @@ from .bodies.common import ENVIRONMENT_KEY, NON_SECRET_KEYS
 
 SLUG: Final = "edit_laravel_environment"
 LABEL: Final = "Edit Laravel environment"
+
+
+def _without_automation_imports(text: str) -> str:
+    """Drop the imports the assembled body receives from its concatenated neighbours."""
+    kept: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        if line.startswith(("from automation.", "from .")):
+            skipping = line.rstrip().endswith("(")
+            continue
+        if skipping:
+            skipping = not line.strip().endswith(")")
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 BODY_SOURCE: Final = (
-    observation.LARAVEL_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + observation.LARAVEL_SOURCE
+    + "\n"
+    + importlib.resources.files("automation").joinpath("convention.py").read_text()
+    + "\n"
+    + _without_automation_imports(
+        importlib.resources.files("automation").joinpath("workers.py").read_text()
+    )
+    + "\n"
+    + _without_automation_imports(
+        importlib.resources.files("automation.bodies").joinpath("worker_env.py").read_text()
+    )
     + "\n"
     + importlib.resources.files("laravel.bodies")
     .joinpath("settings.py")
     .read_text()
+    .replace("from automation.bodies.worker_env import restart_workers\n", "")
     .replace(
         "from laravel.bodies.common import (\n"
         "    ENVIRONMENT_KEY,\n"
@@ -53,6 +85,7 @@ BODY_SOURCE: Final = (
         "from sites.bodies.common import open_site_lock, result, setting, site_account, stage\n",
         "",
     )
+    .replace("from cache.laravel import laravel_managed\n", "")
 )
 BODY_BYTES: Final = (
     (
@@ -108,6 +141,20 @@ def _entries(row: dict[str, object]) -> dict[str, dict[str, object]]:
             if isinstance(detail, dict) and isinstance(detail.get("key"), str):
                 entries[str(detail["key"])] = detail
     return entries
+
+
+def _managed_keys(identifier: str, laravel: dict[str, object] | None) -> frozenset[str]:
+    from cache.laravel import laravel_managed_digests
+
+    details = laravel.get("environment_details") if laravel is not None else None
+    digests = {
+        str(detail["key"]): str(detail["digest"])
+        for detail in (details if isinstance(details, list) else [])
+        if isinstance(detail, dict)
+        and isinstance(detail.get("key"), str)
+        and isinstance(detail.get("digest"), str)
+    }
+    return laravel_managed_digests(identifier, digests)
 
 
 def _refusals(
@@ -188,9 +235,12 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     refusals, site, laravel = _refusals(evidence, inputs.identifier)
     entries = _entries(laravel) if laravel is not None else {}
     changes = _change_list(inputs)
+    managed = _managed_keys(inputs.identifier, laravel)
     if inputs.settings_changes:
         for key, action in inputs.settings_changes:
-            if action == "remove" and key not in entries:
+            if key in managed:
+                refusals.append(f"{key} is managed by the object cache and cannot be edited here.")
+            elif action == "remove" and key not in entries:
                 refusals.append(f"{key} is not in this site's environment.")
     document: dict[str, object] = {
         "version": 1,
@@ -311,7 +361,11 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     value = _document(document)
     if value["secret_fields"] and not context.secret_path:
         raise ValueError("The environment review needs a staged confidential value.")
-    payload = {**value, "secret_path": context.secret_path}
+    payload = {
+        **value,
+        "secret_path": context.secret_path,
+        "automation_fence": automation_fence.checked(document),
+    }
     encoded = base64.b64encode(gzip.compress(json.dumps(payload).encode(), mtime=0)).decode()
     return NativeBody(BODY_BYTES.rstrip(b"\n"), (encoded,))
 

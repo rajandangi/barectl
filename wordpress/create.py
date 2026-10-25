@@ -68,6 +68,7 @@ BODY_SOURCE: Final = (
     + importlib.resources.files("wordpress.bodies")
     .joinpath("install.py")
     .read_text()
+    .replace("from sites.bodies.logrotate import logrotate_install, logrotate_present\n", "")
     .replace(
         "from sites.bodies.common import (\n"
         "    configure_pool,\n"

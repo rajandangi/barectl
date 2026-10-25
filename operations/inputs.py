@@ -19,6 +19,8 @@ class InputShape(StrEnum):
     SITE_READINESS = "site_readiness"
     SITE_DOMAINS = "site_domains"
     SITE_POOL = "site_pool"
+    SITE_CLIENT = "site_client"
+    SITE_OBJECT_CACHE = "site_object_cache"
     SITE_DATABASE = "site_database"
     SITE_REMOVE = "site_remove"
     LARAVEL_DEPLOY = "laravel_deploy"
@@ -29,6 +31,9 @@ class InputShape(StrEnum):
     LARAVEL_ENVIRONMENT = "laravel_environment"
     WORDPRESS_SETTINGS = "wordpress_settings"
     CERTIFICATE_EMAIL = "certificate_email"
+    AUTOMATION_SCHEDULE = "automation_schedule"
+    LARAVEL_QUEUE_WORKERS = "laravel_queue_workers"
+    SITE_LOG_ROTATION = "site_log_rotation"
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,19 @@ class PreparationInputs:
     domains: bool = False
     # A site pool's reviewed tunables, for the one kind that changes them.
     pool: SitePool | None = None
+    # Whether the site's own cache PHP client (phpredis) is enabled (Phase C #390);
+    # ``None`` means this is not a client change.
+    php_client: bool | None = None
+    # Whether the site's own object cache is on (Phase C #392), and its reviewed memory
+    # limit in MiB when it is.
+    object_cache: bool | None = None
+    cache_mib: int = 0
+    # The cache store a Laravel site used before Barectl turned its object cache on, from
+    # the last applied review this controller recorded. ``cache_store_known`` is false on
+    # a controller that has no such record, so turning the cache off refuses to guess.
+    cache_store: str = ""
+    cache_store_known: bool = False
+    cache_store_present: bool = True
     # The primary domain a site-removal preparation uses when the server no longer names it.
     primary: str = ""
     # A database engine request that installs Git in the same reviewed transaction.
@@ -68,6 +86,14 @@ class PreparationInputs:
     settings_changes: tuple[tuple[str, str], ...] = ()
     # A certificate contact email change: the optional address, or "" to remove the line.
     certificate_email: str | None = None
+    # A site's scheduled-task change: "on", "off" or "run" (Phase C #357).
+    schedule_state: str = ""
+    # A Laravel site's queue-worker action ("start", "stop", "restart") and, for a start,
+    # the reviewed definition (Phase C #266).
+    worker_action: str = ""
+    worker_queues: tuple[str, ...] = ()
+    worker_processes: int = 0
+    worker_timeout: int = 0
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -102,9 +128,48 @@ class PreparationInputs:
             laravel["fingerprint"] = self.fingerprint
         return laravel
 
-    def document(self) -> dict[str, object]:
+    def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
+        if self.worker_action:
+            value: dict[str, object] = {
+                "version": 1,
+                "identifier": self.identifier,
+                "action": self.worker_action,
+            }
+            if self.worker_action == "start":
+                value.update(
+                    queues=list(self.worker_queues),
+                    processes=self.worker_processes,
+                    timeout=self.worker_timeout,
+                )
+            return value
+        if self.schedule_state:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "state": self.schedule_state,
+            }
         if self.certificate_email is not None:
             return {"version": 1, "email": self.certificate_email}
+        if self.php_client is not None:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "php_client": self.php_client,
+            }
+        if self.object_cache is not None:
+            document: dict[str, object] = {
+                "version": 1,
+                "identifier": self.identifier,
+                "object_cache": self.object_cache,
+                "maxmemory_mib": self.cache_mib if self.object_cache else 0,
+            }
+            if self.cache_store_known:
+                document.update(
+                    cache_store_known=True,
+                    cache_store_present=self.cache_store_present,
+                    cache_store=self.cache_store,
+                )
+            return document
         if self.pool is not None:
             return {
                 "version": 1,
@@ -423,6 +488,70 @@ def _site_pool_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> Pr
     return PreparationInputs("", identifier, pool=pool)
 
 
+def _site_client_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import request
+
+    if set(value) != {"version", "identifier", "php_client"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, enabled = value["identifier"], value["php_client"]
+    if not isinstance(identifier, str) or type(enabled) is not bool:
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, php_client=enabled)
+
+
+def _site_object_cache_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from cache.convention import MAXMEMORY_MIB
+    from sites.names import request
+
+    base = {"version", "identifier", "object_cache", "maxmemory_mib"}
+    optional = {"cache_store_known", "cache_store_present", "cache_store"}
+    if not base <= set(value) <= base | optional:
+        raise ValueError(INVALID_INPUTS)
+    identifier, enabled, memory = value["identifier"], value["object_cache"], value["maxmemory_mib"]
+    if not isinstance(identifier, str) or type(enabled) is not bool or type(memory) is not int:
+        raise ValueError(INVALID_INPUTS)
+    if enabled and memory not in MAXMEMORY_MIB:
+        raise ValueError(INVALID_INPUTS)
+    if not enabled and memory != 0:
+        raise ValueError(INVALID_INPUTS)
+    known = value.get("cache_store_known", False)
+    present = value.get("cache_store_present", True)
+    store = value.get("cache_store", "")
+    if (
+        type(known) is not bool
+        or type(present) is not bool
+        or not isinstance(store, str)
+        or len(store) > 2048
+        or any(character in "\x00\r\n" for character in store)
+        or (not known and (present is not True or store))
+        or (not present and store)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(
+        "",
+        identifier,
+        object_cache=enabled,
+        cache_mib=memory,
+        cache_store=store,
+        cache_store_known=known,
+        cache_store_present=present,
+    )
+
+
 def _database_engine_inputs(
     value: dict[str, object], choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -578,6 +707,79 @@ def _laravel_rollback_inputs(value: dict[str, object]) -> PreparationInputs:
     return PreparationInputs("", identifier, (), release)
 
 
+def _schedule_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier", "state"} or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    identifier, state = value["identifier"], value["state"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or state not in ("on", "off", "run")
+        or not isinstance(state, str)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, schedule_state=str(state))
+
+
+def _worker_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    from automation import workers
+    from sites.names import valid_identifier
+
+    if "version" not in value or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    if set(value) not in (
+        {"version", "identifier", "action"},
+        {"version", "identifier", "action", "queues", "processes", "timeout"},
+    ):
+        raise ValueError(INVALID_INPUTS)
+    identifier, action = value["identifier"], value["action"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or action not in ("start", "stop", "restart")
+    ):
+        raise ValueError(INVALID_INPUTS)
+    if action != "start":
+        if set(value) != {"version", "identifier", "action"}:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs("", identifier, worker_action=str(action))
+    queues, processes, timeout = value["queues"], value["processes"], value["timeout"]
+    if (
+        not isinstance(queues, list)
+        or not all(isinstance(name, str) for name in queues)
+        or type(processes) is not int
+        or type(timeout) is not int
+    ):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        definition = workers.parse_definition(",".join(queues), processes, timeout)
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    return PreparationInputs(
+        "",
+        identifier,
+        worker_action="start",
+        worker_queues=definition.queues,
+        worker_processes=definition.processes,
+        worker_timeout=definition.timeout,
+    )
+
+
+def _site_log_rotation_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier = value["identifier"]
+    if not isinstance(identifier, str) or not valid_identifier(identifier):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier)
+
+
 def _certificate_email_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -599,6 +801,8 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.SITE_READINESS: _site_readiness_inputs,
     InputShape.SITE_DOMAINS: _domains_inputs,
     InputShape.SITE_POOL: _site_pool_inputs,
+    InputShape.SITE_CLIENT: _site_client_inputs,
+    InputShape.SITE_OBJECT_CACHE: _site_object_cache_inputs,
     InputShape.SITE_DATABASE: _site_database_inputs,
     InputShape.SITE_REMOVE: _site_remove_inputs,
     InputShape.DATABASE_ENGINE: _database_engine_inputs,
@@ -609,4 +813,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.LARAVEL_ENVIRONMENT: _settings_inputs,
     InputShape.WORDPRESS_SETTINGS: _settings_inputs,
     InputShape.CERTIFICATE_EMAIL: _certificate_email_inputs,
+    InputShape.AUTOMATION_SCHEDULE: _schedule_inputs,
+    InputShape.LARAVEL_QUEUE_WORKERS: _worker_inputs,
+    InputShape.SITE_LOG_ROTATION: _site_log_rotation_inputs,
 }

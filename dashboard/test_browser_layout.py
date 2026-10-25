@@ -33,6 +33,7 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
             "change_shared",
             "change_site",
             "view_changes",
+            "view_evidence",
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.server = Server.objects.get(name="Production")
@@ -76,6 +77,9 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         page.get_by_role("navigation", name="Site sections").get_by_role(
             "link", name="Logs"
         ).click()
+        expect(page.get_by_role("heading", name="Logs", level=2)).to_be_visible()
+        expect(page.get_by_role("link", name="PHP errors")).to_be_visible()
+        page.locator("summary", has_text="Advanced").click()
         expect(page.get_by_role("heading", name="Installed runtime diagnostics")).to_be_visible()
         expect(page.get_by_text("Diagnostic master state")).to_be_visible()
         expect(page.get_by_text("Site file")).to_be_visible()

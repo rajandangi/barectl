@@ -15,7 +15,7 @@ The offered PHP runtimes are `php84` and `php85`, the default builds of PHP 8.4 
 
 A switch is refused when the target runtime lacks a PHP module the site's current runtime loads, naming the module. Changing a site's PHP changes its PHP-FPM master and its `bin/php`, `bin/composer` and `bin/wp` wrappers; it does not touch the site's files, other sites or the server defaults.
 
-Extensions beyond each build's packaged set, such as phpredis or imagick, are not offered. The [competitor and package-source analysis](php-versions-competitor-analysis.md) compares per-site PHP with hosted panels, native server panels and container platforms.
+The catalog locks the packaged `redis` extension (phpredis 6.3.0) for each PHP runtime and a site can enable it for its own master ([PHP extensions](runtimes.md#php-extensions)); other extensions beyond each build's packaged set, such as imagick, are not offered. The [competitor and package-source analysis](php-versions-competitor-analysis.md) compares per-site PHP with hosted panels, native server panels and container platforms.
 
 ## Removing a runtime
 

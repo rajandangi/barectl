@@ -14,7 +14,7 @@ import pathlib
 import re
 import subprocess
 import sys
-from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 from sites.bodies.common import open_site_lock, result, site_account, stage
 from wordpress.convention import (
@@ -23,30 +23,16 @@ from wordpress.convention import (
     private_configuration_path,
     private_configuration_problem,
     valid_constant_key,
+    write_as_site,
 )
+
+if TYPE_CHECKING:
+    # Assembled into this body by automation/bodies/source.py (Phase C #395).
+    from automation.bodies.units import fence, restore
 
 SECRET_PATH = re.compile(r"/run/barectl/secrets/[0-9a-f]{32}")
 SECRET_BYTES = 4096
 MAX_CHANGE = 64
-WRITE_SCRIPT = (
-    "import json,os,sys,tempfile\n"
-    "payload=json.load(sys.stdin)\n"
-    "path=payload['path']\n"
-    "text=payload['text']\n"
-    "directory=os.path.dirname(path)\n"
-    "fd,temp=tempfile.mkstemp(prefix='.barectl-',suffix='.tmp',dir=directory)\n"
-    "try:\n"
-    "    os.fchmod(fd,0o600)\n"
-    "    with os.fdopen(fd,'w',encoding='utf-8') as output:\n"
-    "        output.write(text)\n"
-    "        output.flush()\n"
-    "        os.fsync(output.fileno())\n"
-    "    os.replace(temp,path)\n"
-    "except BaseException:\n"
-    "    try: os.unlink(temp)\n"
-    "    except OSError: pass\n"
-    "    raise\n"
-)
 
 
 def _private(path: pathlib.Path, account: str) -> bool:
@@ -126,27 +112,6 @@ def _values(secret_path: str, fields: list[dict[str, object]]) -> dict[str, str]
     return decoded
 
 
-def _write_as_site(settings: SimpleNamespace, path: pathlib.Path, text: str) -> None:
-    payload = json.dumps({"path": str(path), "text": text}).encode()
-    completed = subprocess.run(  # noqa: S603 - fixed argv as the site user
-        [
-            "/usr/sbin/runuser",
-            "-u",
-            str(settings.account),
-            "--",
-            "/usr/bin/python3",
-            "-c",
-            WRITE_SCRIPT,
-        ],
-        input=payload,
-        capture_output=True,
-        timeout=120,
-        check=False,
-    )
-    if completed.returncode:
-        raise ValueError("The private WordPress configuration could not be written.")
-
-
 def edit_constants(document: dict[str, object]) -> None:  # noqa: C901 - reviewed stages
     identifier = str(document.get("identifier", ""))
     secret_path = str(document.get("secret_path", ""))
@@ -197,6 +162,9 @@ def edit_constants(document: dict[str, object]) -> None:  # noqa: C901 - reviewe
             if action == "set" and key not in values:
                 result("refused", "settings_secret")
                 return
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
+            return
         stage("write")
         reviewed: list[dict[str, object]] = [
             {
@@ -210,11 +178,7 @@ def edit_constants(document: dict[str, object]) -> None:  # noqa: C901 - reviewe
             text = apply_constants(before, reviewed, identifier)
             if private_configuration_problem(text, identifier):
                 raise ValueError("The new configuration is outside the supported grammar.")
-            _write_as_site(
-                SimpleNamespace(account="s" + identifier, directory=f"/var/www/{identifier}"),
-                path,
-                text,
-            )
+            write_as_site("s" + identifier, str(path), text)
         except ValueError, OSError, subprocess.TimeoutExpired:
             result("refused", "wordpress_settings")
             return
@@ -223,6 +187,9 @@ def edit_constants(document: dict[str, object]) -> None:  # noqa: C901 - reviewe
             result("partial", "wordpress_settings")
             return
         stage("verify")
+        if not restore(document, identifier):
+            result("partial", "automation_restore")
+            return
         result("succeeded")
     except ValueError, OSError, subprocess.TimeoutExpired:
         sys.stderr.write("barectl-problem The private configuration could not be changed.\n")

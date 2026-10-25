@@ -136,6 +136,18 @@ _Avoid_: Shared master, PHP service
 The runtime the server's plain `php`, `composer` and `wp`, or `node`, `npm` and `npx`, commands run. Changing it never changes a site.
 _Avoid_: System PHP, global version
 
+**Valkey**:
+Ubuntu 26.04's Redis-compatible cache server. Barectl installs one package per server, keeps the distribution's shared unit masked, and later gives each site that enables an object cache its own instance. Discovery recognizes it from the package database and systemd alone.
+_Avoid_: Redis, cache service
+
+**Object cache**:
+A site's use of its own Valkey instance for application caching. Enabling it is a Site change; the server-wide Valkey install is its prerequisite.
+_Avoid_: Shared cache, Redis cache
+
+**Object cache instance**:
+The packaged `valkey-server@<identifier>` service that runs one site's cache as that site's Linux account, on a private Unix socket with no TCP, password or persistence, a reviewed memory limit and `allkeys-lru`. It stays outside the site's automation slice, and removing the site removes it.
+_Avoid_: Cache server, Redis instance
+
 ### Sites
 
 **Site**:
@@ -177,6 +189,22 @@ _Avoid_: SSH key, repository key
 **Readiness path**:
 The application path Barectl requests with a site's primary Host after a change, `/` by default. At `/` an answer below a server error passes; at another path it must be exactly 200. A custom path is native evidence in the site's Caddy file, not a Barectl marker ([readiness](docs/sites.md#readiness)).
 _Avoid_: Health endpoint, healthcheck URL
+
+**Log read**:
+One explicit, Read-consent remote operation that returns a bounded, scrubbed page of one named site log. It occupies the server's operation slot and stores its page only on its own row. Opening the Logs section is not a log read.
+_Avoid_: Log fetch, tail, download
+
+**Log page**:
+The typed evidence of one log read: at most 500 lines and 256 KiB of text, a cursor for older lines, a cursor for the next live line when the source is a journal, and the names of the files or units it came from. It is deleted after 24 hours or at the next read of that log.
+_Avoid_: Log file, cached log
+
+**Live view**:
+A journal log's open panel that asks for lines after its newest cursor while the page is visible, and stops asking while the page is hidden or closed. It appends lines without moving focus and announces each batch through the Logs status region. It is operator reading, not monitoring.
+_Avoid_: Log streaming, tail -f, real-time monitoring
+
+**Log rotation**:
+The root-owned `/etc/logrotate.d/barectl-site-<identifier>` file that rotates the logs Barectl creates in a site's log directory daily or at 20 MiB, keeping five compressed files for 14 days. Caddy and Laravel rotate their own logs.
+_Avoid_: Log cleanup, truncation
 
 **Site observation**:
 The observation of one site in a discovery snapshot, carrying exactly one state: managed, partly applied, or not following the convention. Only accounts allowed to view site observations see them.
@@ -345,9 +373,53 @@ _Avoid_: Discovery history, complete audit trail
 A managed server's dashboard section for supported running work, schedules, background services and retained native server history. It is distinct from Activity's private Barectl records and does not list individual application queue items.
 _Avoid_: Activity, complete audit trail, application job history
 
+**Automation slice**:
+The root-owned systemd slice `barectl-site-<id>.slice` that holds one site's scheduled tasks and queue workers and nothing else. Stopping it never stops the site's web serving ([ADR 0036](docs/adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md)).
+_Avoid_: Service group, worker pool
+
+**Scheduled task**:
+One reviewed, native timer and bounded service that runs a site's application work on the server under the site's own account, with no Barectl controller involved. WordPress server cron is the first one ([automation](docs/automation.md)).
+_Avoid_: Cron job, background process
+
+**Server cron**:
+A WordPress site's scheduled events run every minute by the managed server instead of by page loads. Barectl sets the site's `DISABLE_WP_CRON` only after one server run has succeeded and clears it before the server task stops.
+_Avoid_: WP-Cron, system cron
+
+**Laravel scheduler**:
+A Laravel site's schedule, run by one native timer and bounded oneshot service every minute as the site account from its current release and selected PHP. Barectl can turn it on or off and run one tick now; turning on and running now need a verified ungated release with no pending migrations ([automation](docs/automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
+_Avoid_: Cron job, `schedule:work`, queue worker
+
+**Skipped tick**:
+A calendar elapse that did not start a run because the previous run of the same scheduled task was still active, inferred from the run's native start and end timestamps. It is shown as skipped, never as success.
+_Avoid_: Dropped run, missed cron
+
+**Laravel queue worker**:
+One of the site's `queue1` to `queueN` services that runs the database queue as the site account from the current release, restarts after a crash within a start limit, and stops gracefully on a reviewed Stop. Its definition is the queue names, process count and job timeout.
+_Avoid_: Supervisor program, queue daemon
+
+**Retry interval**:
+The site's `DB_QUEUE_RETRY_AFTER`, written before its queue workers start and kept above their job timeout, so a job interrupted by a crash or forced stop is retried. Jobs must be safe to repeat.
+_Avoid_: Visibility timeout, lock timeout
+
+**Fence**:
+The step that runtime-masks a site's automation units, stops its slice, and proves the slice has no processes before a change to that site's code, schema, runtime, settings or files proceeds. Its restore starts exactly the work the review declared, and only after the change verifies ([automation](docs/automation.md#fencing-site-changes)).
+_Avoid_: Pause, maintenance mode, lockdown
+
+**Paused by an unfinished change**:
+The site's own evidence that a change fenced its background work and did not finish: its automation units carry a runtime mask, or a maintenance page is up with boot activation off. It is read from the server, never from a Barectl marker or a remembered resume set, and the Overview offers one safe next action ([automation](docs/automation.md#status)).
+_Avoid_: Fenced flag, disabled flag, stale change
+
+**Object cache instance**:
+One site's own `valkey-server@<identifier>` process, running as that site's account on a private Unix socket with its own memory limit, eviction policy and no persistence or TCP. Other sites cannot reach or flush it, and pausing the site's automation never stops it ([object cache](docs/object-cache.md#a-sites-own-cache-implemented-392)).
+_Avoid_: Shared cache, Redis server, cache cluster
+
+**Log page**:
+One bounded, scrubbed read of one of a site's logs, requested explicitly and kept only on that request for 24 hours or until the next read of the same log. A page names its cursor for older lines and its live continuation for newer ones, and a missing, empty, unreadable or rotated log is described as exactly that ([logs](docs/logs.md)).
+_Avoid_: Log download, log export, log tail
+
 ### Later phases
 
-Terms for planned WordPress and Laravel sites, site automation and backups are defined in the Phase B ([#356](https://github.com/rajandangi/barectl/issues/356)), Phase C ([#357](https://github.com/rajandangi/barectl/issues/357)) and Phase D ([#358](https://github.com/rajandangi/barectl/issues/358)) specifications.
+Terms for planned backups and Phase E operations are defined in the Phase D ([#358](https://github.com/rajandangi/barectl/issues/358)) specification and the [ROADMAP](../ROADMAP.md). Delivered Phase B and Phase C terms are defined in the [Phase B qualification record](docs/phase-b-qualification.md) and the [Phase C qualification record](docs/phase-c-qualification.md).
 
 **Security review** (planned):
 A server's plain-language findings about its firewall, SSH sign-in, automatic security updates, pending updates and restart requirement, reconstructed from native evidence with its collection time. It reports what Barectl could read; it is not a score or a statement that the server is secure.

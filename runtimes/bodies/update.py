@@ -12,6 +12,11 @@ import os
 import pathlib
 import subprocess
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Assembled into this body by automation/bodies/source.py (Phase C #395).
+    from automation.bodies.units import fence, restore
 
 # COMPOSED-SITE-PROGRAM: these names are defined by the site PHP program this source is
 # appended to; the composer removes this block before staging.
@@ -34,6 +39,15 @@ from sites.bodies.php_runtime import (
 )
 
 # END-COMPOSED-SITE-PROGRAM
+
+
+class FenceStopped(Exception):
+    """A moved site's background work could not be paused or started again (#395)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
 
 PROFILE_ROOT = "/nix/var/nix/profiles/barectl"
 NIX_BIN = "/nix/var/nix/profiles/default/bin"
@@ -161,7 +175,7 @@ def haproxy_units() -> list[str]:
     return [line.split()[0] for line in output.splitlines() if line.split()]
 
 
-def move_site(identifier: str, target: str) -> None:
+def move_site(identifier: str, target: str, document: dict[str, object]) -> None:
     descriptor = open_site_lock(identifier)
     try:
         state = php_state(identifier)
@@ -169,6 +183,8 @@ def move_site(identifier: str, target: str) -> None:
             raise ValueError("A site's target runtime profile changed during the update.")
         if missing_php_modules(state, target):
             raise ValueError("A site's target runtime would lose a loaded optional module.")
+        if not fence(document, identifier):
+            raise FenceStopped("automation_fence")
         source = other_php(target)
         settings = php_settings(identifier, state, target)
         source_evidence = start_target_php(settings, state, source)
@@ -176,7 +192,8 @@ def move_site(identifier: str, target: str) -> None:
         finish_source_php(settings, state, source, source_evidence, descriptor)
         for name in ("php", "composer", "wp"):
             replace_php_wrapper(
-                pathlib.Path(settings.directory) / "bin" / name, wrapper(settings, name)
+                pathlib.Path(settings.directory) / "bin" / name,
+                wrapper(settings, name, getattr(settings, "client", "")),
             )
         final = php_state(identifier)
         if (
@@ -186,11 +203,13 @@ def move_site(identifier: str, target: str) -> None:
         ):
             raise ValueError("A site's PHP runtime did not verify after the update.")
         verify_readiness(php_settings(identifier, final, target))
+        if not restore(document, identifier):
+            raise FenceStopped("automation_restore")
     finally:
         os.close(descriptor)
 
 
-def update_php(item: dict[str, object]) -> None:
+def update_php(item: dict[str, object], document: dict[str, object]) -> None:
     entry = str(item["entry"])
     sites = item["sites"]
     if not isinstance(sites, list):
@@ -199,14 +218,14 @@ def update_php(item: dict[str, object]) -> None:
     if len(identifiers) != len(sites):
         raise ValueError("A reviewed PHP update names an invalid site.")
     for identifier in identifiers:
-        move_site(identifier, other_php(entry))
+        move_site(identifier, other_php(entry), document)
     if active_site_units(entry):
         raise ValueError("A site's PHP service still serves from the updated runtime.")
     set_profile(entry, str(item["to"]))
     restart(f"php-fpm@{entry}.service")
     running_executable(f"php-fpm@{entry}.service", f"{item['to']!s}/bin/.php-fpm-wrapped")
     for identifier in identifiers:
-        move_site(identifier, entry)
+        move_site(identifier, entry, document)
 
 
 def update_service(item: dict[str, object]) -> None:
@@ -301,7 +320,7 @@ def update_catalog(document: dict[str, object]) -> None:  # noqa: C901 - one rev
         stage("sites")
         for item in entries:
             if isinstance(item, dict) and item.get("kind") == "php":
-                update_php(item)
+                update_php(item, document)
         stage("profiles")
         for item in entries:
             if isinstance(item, dict) and item.get("kind") != "php":
@@ -326,6 +345,8 @@ def update_catalog(document: dict[str, object]) -> None:  # noqa: C901 - one rev
         except OSError, subprocess.SubprocessError:
             sys.stderr.write("Garbage collection did not finish; older builds stay in the store.\n")
         result("succeeded")
+    except FenceStopped as error:
+        result("partial" if changed else "refused", error.reason)
     except BlockingIOError:
         result("lock_busy")
     except (ValueError, OSError, KeyError, subprocess.SubprocessError) as error:

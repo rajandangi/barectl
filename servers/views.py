@@ -22,7 +22,7 @@ from discovery.services import recorded_discovery, request_discovery
 from operations import activity as activity_read
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from operations.models import VIEW_CHANGES
+from operations.models import CHANGE_SHARED, VIEW_CHANGES
 from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog, shown_runtimes, shown_updates
 from sites import names as site_names
@@ -375,6 +375,8 @@ def server_page(
     _advanced_section(request, state, section, context)
     if section == "settings":
         from bootstrap.certificate_email_views import context_for_server
+        from cache import engine as cache_engine
+        from cache.presentation import panel as cache_panel
         from databases import engine as database_engine
         from databases.presentation import panel
         from runtimes.defaults_views import context_for_server as runtime_context_for_server
@@ -389,6 +391,13 @@ def server_page(
         )
         context["database_install_kind"] = database_engine.SLUG
         context["database_remove_kind"] = database_engine.REMOVE_SLUG
+        context["object_cache_panel"] = (
+            cache_panel(state.snapshot.collected) if state.snapshot is not None else None
+        )
+        context["object_cache_can_prepare"] = state.can_prepare_changes and request.user.has_perms(
+            (*PREPARE_PERMISSIONS, CHANGE_SHARED)
+        )
+        context["object_cache_kind"] = cache_engine.SLUG
     if section == "activity":
         context.update(
             _activity_context(
@@ -521,8 +530,25 @@ def _site_overview_context(
     context["site_upload_path"] = f"/var/www/{site.identifier}/current/public"
     context["site_user"] = f"s{site.identifier}"
     context["site_checked_at"] = state.snapshot.collected_at if state.snapshot else None
+    if state.snapshot is not None and any(
+        row.identifier == site.identifier for row in state.snapshot.collected.automation.value
+    ):
+        from automation import presentation
+
+        context["site_schedule_lines"] = presentation.lines(
+            state.snapshot.collected,
+            site.identifier,
+            state.snapshot.collected_at,
+            presentation.paused_change(server, site.identifier),
+        )
     if context.get("has_wordpress"):
         context["site_wordpress_admin"] = f"{scheme}://{primary}/wp-admin/"
+    if context.get("has_laravel") and state.snapshot is not None:
+        from automation import worker_presentation
+
+        context["site_worker_lines"] = worker_presentation.lines(
+            state.snapshot.collected, site.identifier, state.snapshot.collected_at
+        )
     if not context.get("has_laravel"):
         return
     from discovery.presentation import present_releases
@@ -569,10 +595,14 @@ def site_page_response(
     context["target_site"] = target_site
     _target_site_context(page, state, section, context)
     if target_site and section == "overview":
+        from cache.presentation import overview_context as cache_overview_context
         from sites.php_views import context_for_site as php_overview_context
 
         context.update(php_overview_context(server, identifier, request.user))
+        context.update(cache_overview_context(server, identifier, request.user))
     if target_site and section == "settings":
+        from automation.views import context_for_site as automation_context_for_site
+        from automation.worker_views import context_for_site as worker_context_for_site
         from sites.domains_views import context_for_site as domains_context_for_site
         from sites.node_views import context_for_site
         from sites.php_views import context_for_site as php_context_for_site
@@ -592,7 +622,12 @@ def site_page_response(
             )
         )
         context.update(domains_context_for_site(server, identifier, request.user))
+        from cache.presentation import site_context as cache_context_for_site
+
+        context.update(cache_context_for_site(server, identifier, request.user))
         context.update(remove_context_for_site(server, identifier, request.user))
+        context.update(automation_context_for_site(server, identifier, request.user))
+        context.update(worker_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
     if target_site and section == "database":
@@ -624,6 +659,18 @@ def site_page_response(
 
         context.update(environment_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
+    if section == "logs":
+        from logs.services import context_for_site as logs_context_for_site
+
+        context.update(
+            logs_context_for_site(
+                server,
+                identifier,
+                request.user,
+                selected=request.GET.get("log", ""),
+                live=request.GET.get("live") == "1",
+            )
+        )
     return render(request, "sites/detail.html", context, status=status)
 
 

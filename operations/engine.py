@@ -15,7 +15,7 @@ import shlex
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Final
 
@@ -33,6 +33,7 @@ from operations.models import RemoteOperation
 from .consent import (
     PREPARE_PERMISSIONS,
     DeclaredEffect,
+    Scope,
     affected_sites_of,
     consent_of,
     permissions_for,
@@ -230,6 +231,21 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The server's resolved package set differs from the reviewed one, so Barectl stopped "
         "before changing packages. Prepare a new review."
     ),
+    "valkey_server": (
+        "The server's resolved package set differs from the reviewed one, so Barectl stopped "
+        "before changing packages. Prepare a new review."
+    ),
+    "valkey_mask": (
+        "Valkey was installed, but Barectl could not stop and mask the distribution's shared "
+        "service, so it may still run. Read the run's journal on the server, stop and mask "
+        "valkey-server.service through ordinary administration, then prepare a new review."
+    ),
+    "valkey_reload": (
+        "Valkey was installed and masked, but Barectl could not restart every running PHP "
+        "master and site proxy, so discovery may report them outside supported settings until "
+        "the server is restarted. Read the run's journal on the server, then prepare a new "
+        "review."
+    ),
     "site_readiness": (
         "The site did not answer its readiness path as required: the home page must answer "
         "below 500, and a path other than / must answer exactly 200. Check the site's code or "
@@ -242,6 +258,40 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
     "site_pool": (
         "Barectl could not prove the site's new PHP settings after reloading its own master, "
         "so it restored the previous pool. Check the run's journal, then prepare a new review."
+    ),
+    "object_cache": (
+        "The object cache change stopped before it finished. Nothing on the server was "
+        "rolled back; read the run's journal, then prepare a new review that proposes only "
+        "what remains."
+    ),
+    "object_cache_instance": (
+        "The site's own cache instance did not start or is not the reviewed shape. Read the "
+        "run's journal on the server, then prepare a new review."
+    ),
+    "object_cache_wiring": (
+        "The cache instance is running, but Barectl could not finish the site's WordPress "
+        "connection. Read the run's journal, then prepare a new review."
+    ),
+    "object_cache_plugin": (
+        "The pinned Redis Object Cache plugin could not be installed, activated or connected. "
+        "Read the run's journal on the server, then prepare a new review."
+    ),
+    "object_cache_verify": (
+        "The object cache changed, but the site did not report the reviewed state afterwards. "
+        "Read the run's journal, then prepare a new review that proposes only what remains."
+    ),
+    "site_client": (
+        "Barectl could not prove the site's cache PHP client after restarting its own master. "
+        "Check the run's journal, then prepare a new review."
+    ),
+    "logrotate_missing": (
+        "This server does not run logrotate, so the run stopped before changing anything. "
+        "Install and enable it with ordinary administration, check the server again, then "
+        "prepare a new review."
+    ),
+    "rotation_invalid": (
+        "logrotate refused the reviewed rotation file, so Barectl did not keep it. Check the "
+        "run's journal, then prepare a new review."
     ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
@@ -304,6 +354,14 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The environment changed, but Laravel's cached configuration could not be rebuilt, "
         "so the site may still serve the previous configuration. Check the run's journal, "
         "then prepare a new review."
+    ),
+    "laravel_environment_managed": (
+        "The selected environment key is managed by the site's object cache, so nothing "
+        "changed. Change the object cache setting instead."
+    ),
+    "laravel_worker": (
+        "The environment changed, but a running worker did not restart cleanly. The new "
+        "configuration is written; check the worker and restart it from Settings."
     ),
     "wordpress_settings": (
         "The private WordPress configuration changed, is outside the supported grammar or "
@@ -387,6 +445,82 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not publish, reload and verify the reviewed certificate contact "
         "email. The previous main configuration was restored where it had been replaced. "
         "Check the run's journal on the server, then prepare a new review."
+    ),
+    "automation": (
+        "Barectl could not change the site's scheduled tasks, so nothing more was changed. "
+        "Check the run's journal on the server, then prepare a new review."
+    ),
+    "automation_site": (
+        "The site's account, files or private configuration were not the reviewed ones, so "
+        "the run stopped before changing anything. Run discovery again and prepare a new "
+        "review."
+    ),
+    "automation_start": (
+        "Barectl could not start the site's scheduled task. Nothing was handed over: page "
+        "loads still run cron. Check the run's journal, then prepare a new review."
+    ),
+    "automation_tick": (
+        "The first scheduled run did not finish successfully within the reviewed wait, so "
+        "Barectl did not hand cron over and page loads still run it. The server task stays "
+        "installed and reports its next result; prepare a new review to finish."
+    ),
+    "automation_configuration": (
+        "Barectl could not set or clear the site's cron setting in the private WordPress "
+        "configuration. Check the run's journal, then prepare a new review."
+    ),
+    "automation_units": (
+        "Barectl could not remove the site's scheduled task, so it may still be installed. "
+        "Check the run's journal, then prepare a new review."
+    ),
+    "queue_workers": (
+        "Barectl could not change the site's queue workers, so the run stopped. The site "
+        "may be partly changed; check the run's journal on the server, then prepare a new "
+        "review."
+    ),
+    "queue_workers_site": (
+        "The site's account, current release or private files were not the reviewed ones, "
+        "so the run stopped before changing anything. Run discovery again and prepare a new "
+        "review."
+    ),
+    "queue_workers_activation": (
+        "The site's current release changed before the workers could start, so the run "
+        "stopped without changing them. Deploy again, then prepare a new review."
+    ),
+    "queue_workers_environment": (
+        "Barectl could not write the site's retry interval, so no worker was started. Check "
+        "the run's journal, then prepare a new review."
+    ),
+    "queue_workers_start": (
+        "Barectl could not confirm that every queue worker process is running. Check the "
+        "run's journal, then prepare a new review."
+    ),
+    "queue_workers_stop": (
+        "Barectl could not confirm that every queue worker stopped. Check the run's journal, "
+        "then prepare a new review."
+    ),
+    "automation_scheduler": (
+        "The site's Laravel files, account or scheduler units were not the reviewed ones, so "
+        "the run stopped before changing anything. Run discovery again and prepare a new "
+        "review."
+    ),
+    "automation_run": (
+        "The scheduler started one run, but it did not finish successfully. Nothing else was "
+        "changed. Scheduled tasks shows the run's result; check the application and prepare a "
+        "new review."
+    ),
+    "automation_running": (
+        "The scheduler run is still going after the reviewed wait, so Barectl stopped waiting. "
+        "It keeps running on the server; Scheduled tasks shows its result when it finishes."
+    ),
+    "automation_fence": (
+        "The site's background work did not stop within its budget, so the run stopped before "
+        "changing anything and the site's background work stays paused. Check the run's "
+        "journal, then prepare a new review."
+    ),
+    "automation_restore": (
+        "The change verified, but Barectl could not prove the site's background work started "
+        "again, so it stays paused and the change is partly applied. Check the run's journal, "
+        "then prepare a new review."
     ),
 }
 _FAILURES: Final[dict[Result, str]] = {
@@ -597,6 +731,15 @@ RESULT_REASONS: Final = frozenset(
         "site_remove_accounts",
         "site_remove_verify",
         "database_engine",
+        "valkey_server",
+        "valkey_mask",
+        "valkey_reload",
+        "site_client",
+        "object_cache",
+        "object_cache_instance",
+        "object_cache_wiring",
+        "object_cache_plugin",
+        "object_cache_verify",
         "site_database",
         "site_database_driver",
         "site_database_principal",
@@ -617,7 +760,9 @@ RESULT_REASONS: Final = frozenset(
         "laravel_release",
         "laravel_shared",
         "laravel_environment",
+        "laravel_environment_managed",
         "laravel_config",
+        "laravel_worker",
         "wordpress_settings",
         "settings_secret",
         "release_absent",
@@ -637,6 +782,25 @@ RESULT_REASONS: Final = frozenset(
         "wordpress_checksums",
         "wordpress_checksums_unavailable",
         "certificate_email",
+        "automation",
+        "automation_site",
+        "automation_start",
+        "automation_tick",
+        "automation_configuration",
+        "automation_units",
+        "queue_workers",
+        "queue_workers_site",
+        "queue_workers_activation",
+        "queue_workers_environment",
+        "queue_workers_start",
+        "queue_workers_stop",
+        "automation_scheduler",
+        "automation_run",
+        "automation_running",
+        "automation_fence",
+        "automation_restore",
+        "logrotate_missing",
+        "rotation_invalid",
     }
 )
 
@@ -1013,6 +1177,37 @@ def save_review(
     )
 
 
+def _planned(shell: RemoteShell, draft: ReviewDraft) -> ReviewDraft:
+    """Record what this change pauses, read once from the sites its own effects name.
+
+    docs/adr/0036. The plan belongs to ``automation``: the engine only asks which sites a
+    Site effect names, so a change that names no site (a server-wide one) pauses nothing.
+    An unreadable answer refuses the review rather than fencing blind, because a stopped
+    unit is not a reboot fence and guessing what was on would be worse.
+    """
+    from automation import fence
+
+    sites = fence.fenced_sites(
+        draft.kind,
+        tuple(
+            sorted(
+                {
+                    site
+                    for effect in draft.effects
+                    if effect.scope is Scope.SITE
+                    for site in effect.sites
+                }
+            )
+        ),
+    )
+    if draft.refusals or not draft.effects or not sites:
+        return draft
+    plan = fence.plan(shell, sites)
+    if plan is None:
+        return replace(draft, effects=(), refusals=(*draft.refusals, fence.UNREADABLE_REFUSAL))
+    return replace(draft, document={**draft.document, "automation_fence": plan})
+
+
 def _prepare(preparation: ChangePreparation) -> None:
     requester = preparation.requested_by
     kind = kind_of(preparation.kind_slug)
@@ -1030,7 +1225,7 @@ def _prepare(preparation: ChangePreparation) -> None:
     collected_at = timezone.now()
     with ssh.connect_operation(preparation) as shell:
         evidence = kind.inspect(shell, inputs)
-        draft = kind.review(evidence, inputs)
+        draft = _planned(shell, kind.review(evidence, inputs))
         host_key = shell.host_key
         sites_digest = _sites_digest(shell, draft)
     if draft.eligible and (not draft.boot_id or draft.uptime_centiseconds is None):

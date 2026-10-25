@@ -54,7 +54,7 @@ systemctl restart php-fpm@php84             # the runtime's diagnostic master; n
 systemctl restart nix-daemon
 ```
 
-Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Settings**, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)).
+Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Settings**, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)), and restart each running `haproxy-site@<id>` so its loaded execution evidence is bound again. A restarted proxy loads its persisted server state and reports that server's check-health counter, which discovery accepts as an integer.
 
 ## After a change stopped partway
 
@@ -84,6 +84,8 @@ No output means no process holds it. Barectl's read-only commands take the lock 
 | Create HTTP site | Part of the site's accounts, directories, configuration and services. Discovery reports the site as partly applied, and a new review creates only what is missing. A failed Caddy reload already restored the previous files. |
 | Site PHP selection | An incomplete transition: both masters may run, and HAProxy's state shows which serves ([which PHP master serves a site](#which-php-master-serves-a-site)). The site's **Settings** shows it; choose the intended runtime and prepare a fresh review to finish or reverse it. Barectl never kills remaining PHP work to complete a switch. |
 | Site Node selection, server defaults | A mixed set of links. The page reports it as interrupted, and a new review repairs it. Barectl never overwrites a link or wrapper it does not recognize. |
+| Any change that pauses background work | The site's scheduled tasks stay stopped. Discovery reads the runtime mask and the site's Overview says **Paused by an unfinished change**, with the newest change to the site that did not finish when this device recorded it; a fresh controller shows only that sentence. Lifting it is the ordinary **Scheduled tasks** change, which asks what state the work should have and preselects nothing. A run that reports **partial** with the site's work stopped is the same case. |
+| A change inside the maintenance page (Deploy, Roll back) | Visitors keep the maintenance page and the site's background work stays masked with boot activation off for its timers and its worker services, so a reboot cannot restart it. Read the run's journal, then prepare a new Deploy or Roll back: it starts the work again only after `/up` answers on the switched release. Turning the work back on before the site serves again would run scheduled work against a half-migrated release. |
 
 ## Unknown outcomes and reboots
 

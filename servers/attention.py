@@ -5,6 +5,8 @@ from typing import Final
 
 from django.urls import reverse
 
+from automation.presentation import findings as automation_findings
+from automation.worker_presentation import findings as worker_findings
 from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome, SiteState
 from discovery.snapshot import CollectedSnapshot
@@ -64,7 +66,13 @@ def needs_attention(
             ),
             *_runtimes(server, collected),
         )
-    return (*host, *_sites(server, collected), *_runtimes(server, collected))
+    return (
+        *host,
+        *_sites(server, collected),
+        *_automation(server, collected),
+        *_workers(server, collected),
+        *_runtimes(server, collected),
+    )
 
 
 def _sites(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:
@@ -81,6 +89,34 @@ def _sites(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:
             action, action_url = ADMINISTRATION, ""
         items.append(Attention("Site", site.identifier, finding, action, action_url, subject_url))
     return tuple(items)
+
+
+def _automation(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:
+    return tuple(
+        Attention(
+            "Scheduled tasks",
+            identifier,
+            finding,
+            action,
+            reverse("site_settings", args=(server, identifier)) + "#scheduled-tasks",
+            reverse("site_detail", args=(server, identifier)),
+        )
+        for identifier, finding, action in automation_findings(collected)
+    )
+
+
+def _workers(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:
+    return tuple(
+        Attention(
+            "Queue workers",
+            identifier,
+            finding,
+            action,
+            reverse("site_settings", args=(server, identifier)) + "#queue-workers",
+            reverse("site_detail", args=(server, identifier)),
+        )
+        for identifier, finding, action in worker_findings(collected)
+    )
 
 
 def _runtimes(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:

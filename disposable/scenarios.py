@@ -6,7 +6,9 @@ nothing but the lane's local mirror; the harness reaches its SSH through the lan
 forwarder. Non-exclusive scenarios share one server in sequence, each with its own name
 prefix and a residue check; a failed scenario or residue check discards the server. Items
 are killed at 180 s, the build stops at 900 s naming what did not finish, and the summary
-reports the total against the 10-minute target.
+reports the total against the 10-minute target. The scheduled breadth scenarios
+(``--breadth``) are separate: a reboot, a long scheduler run and the 1/2/4 GiB memory classes
+never add to the merge build (docs/quality.md#the-scheduled-breadth-job).
 """
 
 import argparse
@@ -79,6 +81,8 @@ class Scenario:
     prefix: str
     records: tuple[str, ...]
     egress_control: bool = False
+    breadth: bool = False
+    memory_gib: int = 0
 
 
 def setup_django() -> None:
@@ -104,6 +108,7 @@ def discover(
     egress_control: bool = False,
     validators: bool = False,
     preparations: bool = False,
+    breadth: bool = False,
 ) -> list[Scenario]:
     from django.test.runner import DiscoverRunner
 
@@ -123,6 +128,7 @@ def discover(
             egress_control=egress_control,
             validators=validators,
             preparations=preparations,
+            breadth=breadth,
         )
     ]
     return sorted(scenarios, key=lambda scenario: scenario.label)
@@ -136,12 +142,17 @@ def _wanted(
     egress_control: bool,
     validators: bool = False,
     preparations: bool = False,
+    breadth: bool = False,
 ) -> bool:
     if bool(getattr(cls, "preparation", False)) != preparations:
         return False
     if bool(getattr(cls, "validator", False)) != validators:
         return False
     if bool(getattr(cls, "egress_control", False)) != egress_control:
+        return False
+    # The scheduled breadth job is selected only by ``--breadth``; the merge build never
+    # pays for a reboot, a long scheduler run or a memory-class boot (docs/quality.md).
+    if bool(getattr(cls, "breadth", False)) != breadth:
         return False
     marked = quarantine.marker_of(cls) is not None
     if only_quarantined:
@@ -151,7 +162,7 @@ def _wanted(
 
 def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
     layer = getattr(cls, "layer", None)
-    if layer not in {"L0", "L1", "L2", "L0-standing", "L0-24.04"}:
+    if layer not in {"L0", "L1", "L2", "L3", "L4", "L5", "L0-standing", "L0-24.04"}:
         raise ScenarioError(f"{cls.__name__} declares no known layer ({layer!r}).")
     return Scenario(
         label=f"{cls.__module__}.{cls.__qualname__}",
@@ -161,6 +172,8 @@ def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
         prefix=str(getattr(cls, "prefix", "")),
         records=tuple(getattr(cls, "records", ())),
         egress_control=bool(getattr(cls, "egress_control", False)),
+        breadth=bool(getattr(cls, "breadth", False)),
+        memory_gib=int(getattr(cls, "memory_gib", 0) or 0),
     )
 
 
@@ -172,6 +185,27 @@ def teardown_command(prefix: str) -> str:
     quoted = shlex.quote(prefix)
     return f"""
 prefix={quoted}
+automation_units=$(systemctl list-units --all --plain --no-legend \
+    'barectl-site-'$prefix'*' | cut -d' ' -f1)
+for unit in $automation_units; do
+    systemctl unmask --runtime "$unit" 2>/dev/null || true
+    systemctl stop "$unit" 2>/dev/null || true
+    systemctl --no-reload disable "$unit" 2>/dev/null || true
+done
+automation_slices=$(systemctl list-units --all --plain --no-legend \
+    'barectl-site-'$prefix'*.slice' | cut -d' ' -f1)
+for slice in $automation_slices; do
+    systemctl stop "$slice" 2>/dev/null || true
+done
+rm -f /etc/systemd/system/barectl-site-"$prefix"*.service \
+    /etc/systemd/system/barectl-site-"$prefix"*.timer \
+    /etc/systemd/system/barectl-site-"$prefix"*.slice 2>/dev/null
+rm -f /run/systemd/system/barectl-site-"$prefix"*.service \
+    /run/systemd/system/barectl-site-"$prefix"*.timer \
+    /run/systemd/system/barectl-site-"$prefix"*.slice 2>/dev/null
+rm -rf /run/systemd/system/barectl-site-"$prefix"*".service.d" \
+    /run/systemd/system/barectl-site-"$prefix"*".timer.d" 2>/dev/null
+systemctl daemon-reload 2>/dev/null || true
 for config in /etc/haproxy/sites/"$prefix"*.cfg; do
     [ -e "$config" ] || continue
     site=$(basename "$config" .cfg)
@@ -184,6 +218,16 @@ for config in /etc/haproxy/sites/"$prefix"*.cfg; do
     rm -rf "/etc/php-fpm/sites/$site" "/var/lib/php-fpm/sites/$site"
     rm -f "$config" "/var/lib/haproxy/sites/$site.state"
 done
+for config in /etc/valkey/"$prefix"*.conf; do
+    [ -e "$config" ] || continue
+    site=$(basename "$config" .conf)
+    systemctl stop "valkey-server@$site.service" || exit 1
+    systemctl --no-reload disable "valkey-server@$site.service" || exit 1
+    rm -rf "/etc/systemd/system/valkey-server@$site.service.d" \
+        "/var/lib/valkey/$site" "/run/valkey/$site"
+    rm -f "$config"
+done
+systemctl daemon-reload || exit 1
 for pool in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$pool" ] || continue
     version=$(basename "$(dirname "$(dirname "$pool")")")
@@ -199,6 +243,7 @@ for account in $(getent passwd | cut -d: -f1 | grep -E "^[sp]$prefix"); do
 done
 rm -rf /var/www/"$prefix"* 2>/dev/null
 rm -f /etc/caddy/sites/"$prefix"*.caddy 2>/dev/null
+rm -f /etc/logrotate.d/barectl-site-"$prefix"* 2>/dev/null
 systemctl reload caddy 2>/dev/null || true
 true
 """.strip()
@@ -223,8 +268,36 @@ done
 for path in /etc/caddy/sites/"$prefix"*.caddy; do
     [ -e "$path" ] && problems="$problems site:$path"
 done
+for path in /etc/logrotate.d/barectl-site-"$prefix"*; do
+    [ -e "$path" ] && problems="$problems rotation:$path"
+done
 for path in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$path" ] && problems="$problems pool:$path"
+done
+for path in /etc/valkey/"$prefix"*.conf /var/lib/valkey/"$prefix"* \
+    /run/valkey/"$prefix"* /etc/systemd/system/valkey-server@"$prefix"*.service.d; do
+    [ -e "$path" ] && problems="$problems cache:$path"
+done
+for unit in $(systemctl list-units --type=service --no-legend --plain 'valkey-server@*' \
+    | cut -d' ' -f1); do
+    case "$unit" in
+        "valkey-server@$prefix"*) problems="$problems cache-unit:$unit" ;;
+    esac
+done
+for path in /etc/systemd/system/barectl-site-"$prefix"*.service \
+    /etc/systemd/system/barectl-site-"$prefix"*.timer \
+    /etc/systemd/system/barectl-site-"$prefix"*.slice \
+    /run/systemd/system/barectl-site-"$prefix"*.service \
+    /run/systemd/system/barectl-site-"$prefix"*.timer \
+    /run/systemd/system/barectl-site-"$prefix"*.slice \
+    /run/systemd/system/barectl-site-"$prefix"*.service.d \
+    /run/systemd/system/barectl-site-"$prefix"*.timer.d; do
+    [ -e "$path" ] && problems="$problems automation:$path"
+done
+automation_units=$(systemctl list-units --all --plain --no-legend \
+    'barectl-site-'$prefix'*' | cut -d' ' -f1)
+for unit in $automation_units; do
+    problems="$problems automation-unit:$unit"
 done
 if command -v caddy >/dev/null 2>&1 && [ -f /etc/caddy/Caddyfile ]; then
     caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 \
@@ -290,6 +363,7 @@ class Lane:
     containers: list[str] = field(default_factory=list)
     server: Machine | None = None
     server_layer: str = ""
+    server_memory_gib: int = 0
     port: int = 0
     dns: str = ""
     git_key: Path | None = None
@@ -403,13 +477,15 @@ class Lane:
         pattern = '{{(index .NetworkSettings.Networks "' + self.network + '").IPAddress}}'
         return docker("inspect", "-f", pattern, self.dns).strip()
 
-    def boot_server(self, layer: str) -> Machine:
-        self.server = Machine.boot(
-            images.ensure(layer),
-            network=self.network,
-            extra=["--dns", self._dns_address(), "--network-alias", FIXTURE_ACME_DOMAIN],
-        )
+    def boot_server(self, layer: str, memory_gib: int = 0) -> Machine:
+        extra = ["--dns", self._dns_address(), "--network-alias", FIXTURE_ACME_DOMAIN]
+        if memory_gib:
+            # A memory-cgroup-limited container, not a 1/2/4 GiB host: the kernel and the
+            # page cache are shared with the Docker VM (docs/phase-c-qualification.md).
+            extra += [f"--memory={memory_gib}g", f"--memory-swap={memory_gib}g"]
+        self.server = Machine.boot(images.ensure(layer), network=self.network, extra=extra)
         self.server_layer = layer
+        self.server_memory_gib = memory_gib
         public = Path(f"{self.key}.pub").read_text(encoding="utf-8")
         self.server.exec(
             "install -d -m 700 /root/.ssh && "
@@ -585,9 +661,13 @@ class Runner:
             lane.remove()
 
     def _run_scenario(self, lane: Lane, scenario: Scenario) -> None:
-        if lane.server is None or lane.server_layer != scenario.layer:
+        if (
+            lane.server is None
+            or lane.server_layer != scenario.layer
+            or lane.server_memory_gib != scenario.memory_gib
+        ):
             lane.discard_server()
-            lane.boot_server(scenario.layer)
+            lane.boot_server(scenario.layer, scenario.memory_gib)
         server = lane.server
         if server is None:
             raise ScenarioError("the lane has no server to run a scenario on.")
@@ -763,6 +843,11 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--validators", action="store_true", help="run the fast snapshot validators"
     )
+    parser.add_argument(
+        "--breadth",
+        action="store_true",
+        help="run the scheduled breadth scenarios (reboot, long ticks, memory classes)",
+    )
     parser.add_argument("--include-quarantined", action="store_true", help="also run quarantined")
     parser.add_argument("--quarantined", action="store_true", help="run only quarantined")
     parser.add_argument(
@@ -806,10 +891,16 @@ def prepare_layers(
     """
     layers = {scenario.layer for scenario in scenarios}
     requirements = []
-    if layers & {"L1", "L2"}:
+    if layers & {"L1", "L2", "L3", "L4", "L5"}:
         requirements.append(("L1", "disposable.test_foundation.HostFoundation"))
-    if "L2" in layers:
+    if layers & {"L2", "L3", "L4"}:
         requirements.append(("L2", "disposable.test_prepared_sites.PrepareSites"))
+    if layers & {"L3", "L4"}:
+        requirements.append(("L3", "disposable.test_prepared_wordpress.PrepareWordPress"))
+    if "L4" in layers:
+        requirements.append(("L4", "disposable.test_prepared_wordpress.PrepareWordPressCache"))
+    if "L5" in layers:
+        requirements.append(("L5", "disposable.test_prepared_laravel.PrepareLaravel"))
     for layer, label in requirements:
         if images.load(layer):
             continue
@@ -837,6 +928,13 @@ def _prepare(
     runner.outcomes.clear()
 
 
+def _breadth_lanes(lanes: int, options: argparse.Namespace) -> int:
+    """Two lanes for the breadth job: a memory class boots its own limited container."""
+    if options.breadth and not options.lanes:
+        return min(lanes, 2)
+    return lanes
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     options = arguments(sys.argv[1:] if argv is None else argv)
     output = Output(sys.stdout)
@@ -845,6 +943,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         only_quarantined=options.quarantined,
         egress_control=options.check_egress,
         validators=options.validators,
+        breadth=options.breadth,
     )
     if options.record:
         scenarios = [scenario for scenario in scenarios if options.record in scenario.records]
@@ -869,6 +968,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if (options.record or options.check_egress or options.validators)
         else (options.lanes or default_lanes())
     )
+    lanes = _breadth_lanes(lanes, options)
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
         image = images.ensure()
@@ -891,6 +991,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         keep_logs(work, output)
         images.store("L1")
         images.store("L2")
+        images.store("L3")
+        images.store("L4")
         if options.check_egress:
             return _egress_control(runner.outcomes, output)
     finished = {outcome.scenario.label for outcome in runner.outcomes}

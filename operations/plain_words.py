@@ -49,6 +49,26 @@ def selection_label(selection: str) -> str:
 
 
 _WORDS: Final[dict[str, ChangeWords]] = {
+    "set_up_log_rotation": ChangeWords(
+        title="Set up log rotation for {site}",
+        summary=(
+            ("Barectl will write {site}'s own rotation file and test it before keeping it."),
+            (
+                "The site's error and slow-request logs are rotated daily or at 20 MiB, "
+                "keeping five compressed files for fourteen days."
+            ),
+            "The visit log and the application's own daily log keep their own rotation.",
+        ),
+        action="Set up rotation",
+        steps={
+            "preflight": "Checking the server",
+            "publish": "Writing the rotation file",
+            "verify": "Verifying",
+        },
+        home=Home.SITE,
+        after="Open the logs",
+        after_home=Home.SITE,
+    ),
     "host_foundation": ChangeWords(
         title="Set up {server}",
         summary=(
@@ -136,6 +156,37 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to the site",
         after_home=Home.SITE,
     ),
+    "set_site_object_cache": ChangeWords(
+        title="Turn on the object cache for {site}",
+        summary=(
+            (
+                "{site} gets its own private cache. A WordPress site gets the pinned cache "
+                "plugin; a Laravel site's cache store points at it, its cached configuration "
+                "is rebuilt and any running workers restart."
+            ),
+            "No other site can read, clear or fill this cache.",
+            (
+                "The site keeps serving; WordPress may refuse a request while its cache "
+                "connection and plugin are prepared."
+            ),
+        ),
+        action="Turn on object cache",
+        steps={
+            "preflight": "Checking the server",
+            "instance": "Starting the site's cache",
+            "wiring": "Connecting WordPress",
+            "plugin": "Installing the cache plugin",
+            "environment": "Pointing the site at its cache",
+            "config": "Rebuilding the site's configuration",
+            "workers": "Restarting the site's workers",
+            "disconnect": "Disconnecting the site",
+            "stop": "Stopping the site's cache",
+            "verify": "Checking the cache connects",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
     "set_site_node": ChangeWords(
         title="Switch {site} to {selection}",
         summary=(
@@ -173,6 +224,22 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Create site",
         after_home=Home.SERVER_SITE_CREATE,
         after_permission="operations.change_site",
+    ),
+    "install_valkey": ChangeWords(
+        title="Install Valkey on {server}",
+        summary=(
+            "Barectl will install Valkey on {server} and keep one shared cache from running.",
+            "Each site that uses the object cache later gets its own private cache.",
+        ),
+        action="Install Valkey",
+        steps={
+            "preflight": "Checking the server",
+            "install": "Installing",
+            "mask": "Stopping the shared cache",
+            "recover": "Restarting the site services",
+            "verify": "Verifying",
+        },
+        home=Home.SERVER_SETTINGS,
     ),
     "create_wordpress_site": ChangeWords(
         title="Create {site}",
@@ -223,6 +290,90 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         },
         home=Home.SERVER_SITES,
         after="Open the site",
+        after_home=Home.SITE,
+    ),
+    "set_wordpress_server_cron": ChangeWords(
+        title="Change scheduled tasks for {site}",
+        summary=(
+            (
+                "WordPress normally runs scheduled events when someone visits a page. "
+                "Barectl can run them on the server every minute as the site's own account, "
+                "or give them back to page loads."
+            ),
+            "Page loads keep running scheduled events until one server run has succeeded.",
+            (
+                "Each run is limited to fifteen minutes, and a slow run delays the next one "
+                "instead of overlapping it."
+            ),
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the site",
+            "install": "Starting the scheduled task",
+            "tick": "Waiting for one successful run",
+            "configuration": "Changing when scheduled events run",
+            "verify": "Checking it works",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
+    "set_laravel_scheduler": ChangeWords(
+        title="Change scheduled tasks for {site}",
+        summary=(
+            (
+                "Laravel runs the tasks in the site's schedule from the server, every "
+                "minute, as the site's own account and from its current release."
+            ),
+            (
+                "Each run is limited to one hour; a slow run delays the next one instead of "
+                "overlapping it, and missed runs while the server is down are not caught up."
+            ),
+            "Run now starts one run immediately so you can check the schedule after a deploy.",
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the site",
+            "install": "Changing the scheduled task",
+            "run": "Running the schedule once",
+            "verify": "Checking it works",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
+    "set_laravel_queue_workers": ChangeWords(
+        title="Change queue workers for {site}",
+        summary=(
+            (
+                "Barectl can run this site's queued jobs in the background on the server, "
+                "or stop them, without Supervisor or a hand-written service file."
+            ),
+            (
+                "Start sets the retry interval a little above each job's timeout, then starts "
+                "one process per reviewed process. The workers return after a reboot."
+            ),
+            (
+                "Stop keeps them stopped after a reboot. Restart lets each process finish "
+                "the job it is running before it starts again."
+            ),
+            (
+                "A crash or a forced stop can leave a job to be retried, so your jobs must be "
+                "safe to repeat."
+            ),
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the site",
+            "environment": "Saving the retry interval",
+            "units": "Saving the worker definition",
+            "start": "Starting the workers",
+            "restart": "Restarting the workers",
+            "stop": "Stopping the workers",
+            "verify": "Checking it works",
+        },
+        home=Home.SITE,
+        after="Back to the site",
         after_home=Home.SITE,
     ),
 }

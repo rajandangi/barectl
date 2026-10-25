@@ -1,0 +1,536 @@
+"""Native helpers for a site's automation units, shared by every body that needs them.
+
+docs/adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md. The body
+that writes units owns them; the fence helpers are called by other kinds after their site
+lock and before their own mutation. Nothing here takes the global mutation lock.
+"""
+
+import contextlib
+import pathlib
+import re
+import sys
+import time
+from types import SimpleNamespace
+from typing import cast
+
+from automation.convention import (
+    ENABLED_STATES,
+    SYSTEMD_DIRECTORY,
+    checked_fence_plan,
+    digest,
+    render,
+    role_of,
+    service_name,
+    slice_name,
+    timer_name,
+    unit_file,
+)
+from sites.bodies.common import replace_site_file, run, safe
+
+NAME = re.compile(
+    r"barectl-site-[a-z][a-z0-9]{2,23}(?:-[a-z][a-z0-9]{2,20})?\.(?:service|timer|slice)\Z"
+)
+POLL_SECONDS = 0.25
+
+
+# A runtime drop-in that refuses a manual start. On systemd 259 a runtime mask of an
+# already-loaded unit changes nothing until the unit is loaded again, so the mask alone
+# cannot keep a manual ``systemctl start`` out while the change runs. The drop-in is read
+# by discovery as native evidence of the pause and cleared by restore (docs/adr/0036).
+FENCE_DROPIN = "50-barectl-fence.conf"
+
+
+def systemctl(*arguments: str) -> str:
+    return run(["/usr/bin/systemctl", *arguments])
+
+
+def fence_dropin(name: str) -> pathlib.Path:
+    return pathlib.Path("/run/systemd/system") / (_checked_unit(name) + ".d") / FENCE_DROPIN
+
+
+def write_dropin(name: str) -> None:
+    path = fence_dropin(name)
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    path.write_text("[Unit]\nRefuseManualStart=yes\n", encoding="utf-8")
+
+
+def clear_dropin(name: str) -> None:
+    path = fence_dropin(name)
+    path.unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        path.parent.rmdir()
+
+
+def daemon_reload() -> None:
+    systemctl("daemon-reload")
+
+
+def current_text(path: pathlib.Path) -> str | None:
+    """The published file's text, or ``None`` when it is absent; refuses an unsafe file."""
+    if path.is_symlink():
+        raise ValueError("An automation file is not a regular root-owned file.")
+    if not path.exists():
+        return None
+    if not safe(str(path), directory=False):
+        raise ValueError("An automation file is not a regular root-owned file.")
+    return path.read_text(encoding="utf-8")
+
+
+def publish_unit_file(path: str, text: str, expected: str | None) -> None:
+    """Replace ``path`` with ``text`` only if it is still the reviewed ``expected`` text."""
+    target = pathlib.Path(path)
+    if current_text(target) != expected or not safe(str(target.parent), directory=True):
+        raise ValueError("The reviewed automation evidence changed before publication.")
+    replace_site_file(target, text, expected)
+
+
+def remove_unit_file(path: str, expected: str | None) -> None:
+    target = pathlib.Path(path)
+    if current_text(target) != expected:
+        raise ValueError("The reviewed automation evidence changed before removal.")
+    if target.exists():
+        target.unlink()
+
+
+def unit_digests(identifier: str, role: str) -> dict[str, str]:
+    """Each rendered file's digest, or ``absent``; the reviewed preimage the body rechecks."""
+    values: dict[str, str] = {}
+    for kind in ("slice", "service", "timer"):
+        text = current_text(pathlib.Path(_path(identifier, role, kind)))
+        values[kind] = "absent" if text is None else digest(text)
+    return values
+
+
+def _path(identifier: str, role: str, kind: str) -> str:
+    return (
+        f"{SYSTEMD_DIRECTORY}/{slice_name(identifier)}"
+        if kind == "slice"
+        else unit_file(identifier, role, kind)
+    )
+
+
+def _reviewed_preimage(path: str, reviewed: str) -> str | None:
+    """The live text when it is still the reviewed preimage, else a refusal."""
+    text = current_text(pathlib.Path(path))
+    now = "absent" if text is None else digest(text)
+    if now != reviewed:
+        raise ValueError("The reviewed automation evidence changed before publication.")
+    return text
+
+
+def publish_units(identifier: str, role: str, expected: dict[str, str]) -> None:
+    for kind in ("slice", "service", "timer"):
+        path = _path(identifier, role, kind)
+        preimage = _reviewed_preimage(path, expected.get(kind, ""))
+        publish_unit_file(path, render(identifier, role, kind), preimage)
+
+
+def remove_units(identifier: str, role: str, expected: dict[str, str]) -> None:
+    for kind in ("service", "timer", "slice"):
+        path = _path(identifier, role, kind)
+        remove_unit_file(path, _reviewed_preimage(path, expected.get(kind, "")))
+    daemon_reload()
+    with contextlib.suppress(ValueError):
+        # The unit is no longer loaded, so there is no failed state left to clear.
+        systemctl("reset-failed", timer_name(identifier, role))
+
+
+def enable_timer(timer: str) -> None:
+    systemctl("enable", timer)
+    systemctl("start", timer)
+
+
+def disable_and_stop(identifier: str, role: str) -> None:
+    """Stop the timer before its service, then the slice (docs/adr/0036)."""
+    timer, service = timer_name(identifier, role), service_name(identifier, role)
+    systemctl("disable", "--now", timer)
+    if load_state(service) != "not-found":
+        systemctl("stop", service)
+    if load_state(slice_name(identifier)) != "not-found":
+        systemctl("stop", slice_name(identifier))
+
+
+def load_state(name: str) -> str:
+    completed = systemctl("show", "--value", "-p", "LoadState", name)
+    return completed.strip()
+
+
+def active_state(name: str) -> str:
+    return systemctl("show", "--value", "-p", "ActiveState", name).strip()
+
+
+def unit_file_state(name: str) -> str:
+    return systemctl("show", "--value", "-p", "UnitFileState", name).strip()
+
+
+def properties(name: str) -> dict[str, str]:
+    text = systemctl(
+        "show",
+        "--no-pager",
+        "--timestamp=unix",
+        "-p",
+        "ActiveState",
+        "-p",
+        "SubState",
+        "-p",
+        "Result",
+        "-p",
+        "ExecMainStatus",
+        "-p",
+        "ExecMainStartTimestamp",
+        "-p",
+        "ExecMainExitTimestamp",
+        "-p",
+        "LastTriggerUSec",
+        "-p",
+        "NextElapseUSecRealtime",
+        "-p",
+        "UnitFileState",
+        "-p",
+        "LoadState",
+        "-p",
+        "RefuseManualStart",
+        name,
+    )
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key] = value
+    return values
+
+
+def timestamp(value: str) -> int:
+    text = value.removeprefix("@")
+    return int(text) if text.isdigit() and len(text) <= 20 else 0
+
+
+def wait_for_tick(identifier: str, role: str, budget_seconds: int) -> bool:
+    """Wait for one run started after this call to finish successfully, within ``budget``.
+
+    The timer fires at second zero; a manual start is not used, so the run that gates the
+    hand-over is the same run the server will repeat every minute.
+    """
+    service = service_name(identifier, role)
+    deadline = time.monotonic() + budget_seconds
+    baseline = timestamp(properties(service).get("ExecMainStartTimestamp", ""))
+    started = False
+    while time.monotonic() < deadline:
+        values = properties(service)
+        start = timestamp(values.get("ExecMainStartTimestamp", ""))
+        if start > baseline:
+            started = True
+            if values.get("ActiveState") in ("inactive", "failed"):
+                ok = values.get("Result") == "success" and values.get("ExecMainStatus") == "0"
+                if not ok:
+                    sys.stderr.write(
+                        "barectl-problem first run "
+                        f"state={values.get('ActiveState')} result={values.get('Result')} "
+                        f"status={values.get('ExecMainStatus')}\n"
+                    )
+                return ok
+        elif started:
+            return False
+        time.sleep(2)
+    return False
+
+
+def start_and_wait(identifier: str, role: str, budget_seconds: int) -> str:
+    """Start one installed oneshot service and wait for its result.
+
+    Returns systemd's ``Result`` when the run finished (``success``, ``timeout`` or a
+    failure), or ``running`` when it is still in progress at the reviewed budget. The
+    timer is never touched, so a Run now adds no unit and changes no schedule.
+    """
+    service = service_name(identifier, role)
+    systemctl("start", "--no-block", service)
+    deadline = time.monotonic() + budget_seconds
+    while time.monotonic() < deadline:
+        values = properties(service)
+        if values.get("ActiveState") in ("inactive", "failed"):
+            return values.get("Result") or "failed"
+        time.sleep(1)
+    return "running"
+
+
+def timer_ready(identifier: str, role: str) -> bool:
+    timer = timer_name(identifier, role)
+    return active_state(timer) == "active" and unit_file_state(timer) in ENABLED_STATES
+
+
+def slice_events(name: str) -> pathlib.Path | None:
+    """The loaded slice's ``cgroup.events``, or ``None`` when systemd has no such slice.
+
+    A slice's own name nests it: ``barectl-site-<id>.slice`` lives under the parent slices
+    systemd derives from its dashes, so the path is read from the live control group rather
+    than assumed under ``system.slice`` (docs/adr/0036).
+    """
+    control_group = systemctl("show", "--value", "-p", "ControlGroup", name).strip()
+    if not control_group.startswith("/") or ".." in control_group or "\n" in control_group:
+        return None
+    return pathlib.Path("/sys/fs/cgroup" + control_group) / "cgroup.events"
+
+
+def slice_empty(name: str) -> bool:
+    events = slice_events(name)
+    if events is None:
+        return True
+    try:
+        return "populated 1" not in events.read_text(encoding="utf-8")
+    except OSError:
+        return True
+
+
+def wait_slice_empty(name: str, budget_seconds: int) -> bool:
+    deadline = time.monotonic() + budget_seconds
+    while time.monotonic() < deadline:
+        if slice_empty(name):
+            return True
+        time.sleep(POLL_SECONDS)
+    return slice_empty(name)
+
+
+def _checked_unit(name: object) -> str:
+    if not isinstance(name, str) or NAME.fullmatch(name) is None:
+        raise ValueError("Not an automation unit name.")
+    return name
+
+
+def _checked_plan(document: object, identifier: str) -> SimpleNamespace | None:
+    """One site's reviewed fence from the change's document, or ``None`` for nothing to pause."""
+    if not isinstance(document, dict):
+        raise ValueError("The reviewed change is not valid.")
+    sites = checked_fence_plan(document.get("automation_fence"))
+    if sites is None:
+        return None
+    entry = next((site for site in sites if site["identifier"] == identifier), None)
+    if entry is None:
+        return None
+    return SimpleNamespace(
+        slice=_checked_unit(str(entry["slice"])),
+        timers=[_checked_unit(str(name)) for name in cast("list[object]", entry["timers"])],
+        services=[_checked_unit(str(name)) for name in cast("list[object]", entry["services"])],
+        resume=[_checked_unit(str(name)) for name in cast("list[object]", entry["resume"])],
+        budget_seconds=int(str(entry["budget_seconds"])),
+    )
+
+
+def installed_units(identifier: str) -> tuple[list[str], list[str]]:
+    """The site's installed timers and services, read from the unit directory."""
+    try:
+        entries = sorted(pathlib.Path(SYSTEMD_DIRECTORY).iterdir())
+    except OSError as error:
+        raise ValueError("The site's background work could not be read.") from error
+    timers: list[str] = []
+    services: list[str] = []
+    for entry in entries:
+        if not entry.is_file() or role_of(entry.name, identifier) is None:
+            continue
+        if entry.name.endswith(".timer"):
+            timers.append(entry.name)
+        elif entry.name.endswith(".service"):
+            services.append(entry.name)
+    return timers, services
+
+
+def refuse_manual_start(name: str) -> str:
+    return systemctl("show", "--value", "-p", "RefuseManualStart", name).strip()
+
+
+def unit_was_on(name: str) -> bool:
+    """Whether the installed unit is on now, as the review's resume set means it."""
+    state = unit_file_state(name)
+    return (
+        state in ENABLED_STATES
+        and load_state(name) != "masked"
+        and state not in ("masked", "masked-runtime")
+        and refuse_manual_start(name) != "yes"
+    )
+
+
+def resume_matches(plan: SimpleNamespace, identifier: str) -> bool:
+    """Whether the site's installed roles and enablement still match the reviewed plan."""
+    timers, services = installed_units(identifier)
+    if set(timers) != set(plan.timers) or set(services) != set(plan.services):
+        return False
+    roles = {role_of(name, identifier) for name in [*timers, *services]}
+    current: set[str] = set()
+    for role in roles:
+        if role is None:
+            continue
+        timer = timer_name(identifier, role)
+        service = service_name(identifier, role)
+        if timer in timers:
+            # A timer owns boot activation for its oneshot service; the service's own
+            # unit-file state is not a second "on".
+            if unit_was_on(timer):
+                current.add(timer)
+        elif service in services and unit_was_on(service):
+            current.add(service)
+    return current == set(plan.resume)
+
+
+def fence(  # noqa: C901 - one reviewed stop sequence
+    document: object, identifier: str, *, gate: bool = False
+) -> bool:
+    """Stop a site's background work and prove its slice has no processes.
+
+    Call it after the kind's site lock and before its own mutation. A runtime mask keeps the
+    work from starting again until :func:`restore` clears it. A mask does not survive a
+    reboot, so when the change enters a persistent maintenance gate, ``gate`` also removes
+    boot activation for every reviewed unit — timers and worker services alike — so a reboot
+    during the gate cannot restart work.
+    """
+    plan = _checked_plan(document, identifier)
+    if plan is None:
+        return True
+    # A unit enabled, disabled, added or removed since the review would escape the
+    # declared resume set. Refuse before any mask, and leave the site exactly as it was.
+    if not resume_matches(plan, identifier):
+        return False
+    try:
+        for name in [*plan.timers, *plan.services]:
+            if load_state(name) != "not-found":
+                systemctl("mask", "--runtime", name)
+                write_dropin(name)
+        # A loaded unit keeps its old unit-file state, and would start from the copy it
+        # loaded, until systemd reads the fence's drop-in. Reload before the stops.
+        daemon_reload()
+        if gate:
+            # A stopped unit is not a reboot fence. A runtime mask and the /run drop-in are
+            # gone after a reboot, so a persistent gate must also remove boot activation for
+            # every reviewed unit: the timers and the always-on worker services that carry
+            # their own install section (docs/adr/0036).
+            for name in [*plan.timers, *plan.services]:
+                run(["/usr/bin/systemctl", "disable", name], check=False)
+        for name in plan.timers:
+            if load_state(name) != "not-found":
+                systemctl("stop", name)
+        for name in plan.services:
+            if load_state(name) != "not-found":
+                systemctl("stop", name)
+        if load_state(plan.slice) != "not-found":
+            systemctl("stop", plan.slice)
+    except OSError, ValueError, KeyError:
+        return False
+    return wait_slice_empty(plan.slice, plan.budget_seconds)
+
+
+def restore(document: object, identifier: str) -> bool:
+    """Clear the fence and start exactly the reviewed resume set, then prove it is active.
+
+    A failed or unknown change never reaches here, so its work stays fenced. A change that
+    cannot prove one resumed unit is active reports partial and leaves the rest stopped.
+    """
+    plan = _checked_plan(document, identifier)
+    if plan is None:
+        return True
+    try:
+        for name in [*plan.timers, *plan.services]:
+            if load_state(name) == "masked":
+                systemctl("unmask", "--runtime", name)
+            clear_dropin(name)
+        daemon_reload()
+        for name in plan.resume:
+            if name.endswith(".timer"):
+                systemctl("enable", name)
+            else:
+                # An always-on worker carries its own install section; a oneshot service is
+                # started by its timer and has none.
+                run(["/usr/bin/systemctl", "enable", name], check=False)
+            systemctl("start", name)
+        return all(_active(name) for name in plan.resume)
+    except OSError, ValueError, KeyError:
+        return False
+
+
+def _active(name: str) -> bool:
+    if name.endswith(".timer"):
+        return active_state(name) == "active" and unit_file_state(name) in ENABLED_STATES
+    return active_state(name) in ("active", "activating")
+
+
+def reviewed_units(document: object, identifier: str) -> list[str]:
+    """The reviewed unit names of one site: its timers, its services and its slice."""
+    plan = _checked_plan(document, identifier)
+    if plan is None:
+        return []
+    return [*plan.timers, *plan.services, plan.slice]
+
+
+def forget(document: object, identifier: str) -> None:
+    """Clear the fence's masks once its unit files are gone, as site removal does."""
+    plan = _checked_plan(document, identifier)
+    if plan is None:
+        return
+    for name in [*plan.timers, *plan.services]:
+        clear_dropin(name)
+        for action in ("unmask --runtime", "reset-failed"):
+            run(["/usr/bin/systemctl", *action.split(), name], check=False)
+    run(["/usr/bin/systemctl", "daemon-reload"], check=False)
+
+
+def _role(name: str, identifier: str) -> str:
+    role = role_of(name, identifier)
+    if role is None:
+        raise ValueError("Not an automation unit of this site.")
+    return role
+
+
+__all__ = [
+    "_role",
+    "active_state",
+    "daemon_reload",
+    "disable_and_stop",
+    "disable_and_stop_service",
+    "enable_service",
+    "enable_timer",
+    "fence",
+    "fence_dropin",
+    "forget",
+    "load_state",
+    "properties",
+    "publish_unit_file",
+    "publish_units",
+    "remove_unit_file",
+    "remove_units",
+    "reset_failed",
+    "restart_service",
+    "restore",
+    "reviewed_units",
+    "slice_empty",
+    "start_and_wait",
+    "systemctl",
+    "timer_ready",
+    "unit_digests",
+    "unit_file_state",
+    "wait_for_tick",
+    "wait_services_active",
+    "wait_slice_empty",
+]
+
+
+def reset_failed(name: str) -> None:
+    with contextlib.suppress(ValueError):
+        systemctl("reset-failed", name)
+
+
+def restart_service(name: str) -> None:
+    systemctl("restart", name)
+
+
+def enable_service(name: str) -> None:
+    systemctl("enable", name)
+
+
+def disable_and_stop_service(name: str) -> None:
+    systemctl("disable", "--now", name)
+
+
+def wait_services_active(names: list[str], budget_seconds: int) -> bool:
+    deadline = time.monotonic() + budget_seconds
+    while time.monotonic() < deadline:
+        if all(active_state(name) == "active" for name in names):
+            return True
+        time.sleep(POLL_SECONDS)
+    return all(active_state(name) == "active" for name in names)

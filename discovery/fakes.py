@@ -23,7 +23,8 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 from django_tasks_db.models import DBTaskResultQuerySet
 
-from operations import lifecycle
+from automation import observation as automation_observation
+from operations import lifecycle, native
 from operations.apt import PROCESS_COMMAND
 from operations.models import RemoteOperation
 from servers.models import Server
@@ -46,6 +47,7 @@ from .observations import (
     OS_RELEASE_FILES,
     collect,
 )
+from .observations.components import version_query
 from .presentation import present
 from .recorded import ReplayShell, load
 from .services import STALE_AFTER
@@ -82,6 +84,9 @@ PACKAGE_QUERY = (
     "postgresql postgresql-18"
 )
 PACKAGE_NAMES_QUERY = "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n'"
+# Valkey's version read runs only when the package inventory lists it
+# (discovery/observations/components.py).
+VALKEY_VERSION_QUERY = version_query(("valkey-server", "valkey-tools"))
 UNIT_QUERY = "systemctl show {} -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState"
 DPKG_OUTPUT = """\
 certbot 4.0.0-4 ii
@@ -215,6 +220,9 @@ COLLECTED = CollectedSnapshot(
 
 
 _ROOT_LISTENER_READ = shlex.quote("ss -Hlnpt '( sport = :80 or sport = :443 )'")
+# The one bounded automation read a reviewed change uses to declare its fence (#395).
+_AUTOMATION_READ_COMMAND = automation_observation.read_command()
+_AUTOMATION_READ = shlex.quote(_AUTOMATION_READ_COMMAND)
 # The fixed command listing the sites a reviewed change reaches (sites/change.py).
 _MEMBERSHIP_READ = (
     "find /etc/caddy/sites -maxdepth 1 -type f -name '*.caddy' "
@@ -250,6 +258,8 @@ READ_ONLY = re.compile(
     # through the sudo authorization and execution pair.
     rf"|\A{re.escape(PROXY_INVENTORY_COMMAND)}\Z"
     rf"|\A{re.escape(_MEMBERSHIP_READ)}\Z"
+    rf"|\A{re.escape(_AUTOMATION_READ_COMMAND)}\Z"
+    rf"|\Asudo -n (-l )?/usr/bin/sh -c {_AUTOMATION_READ}\Z"
     rf"|\Asudo -n (-l )?/usr/bin/sh -c {re.escape(shlex.quote(PROXY_INVENTORY_COMMAND))}\Z"
     r"|\Aapt --version\Z"
     r"|\Adpkg --version\Z"
@@ -268,6 +278,7 @@ READ_ONLY = re.compile(
     r"|\Adf -B1 --output=size,avail,target /\Z"
     rf"|\A{re.escape(PACKAGE_QUERY)}\Z"
     rf"|\A{re.escape(PACKAGE_NAMES_QUERY)}\Z"
+    rf"|\A{re.escape(VALKEY_VERSION_QUERY)}\Z"
     r"|\Asystemctl show \S+\.(?:service|timer)(?: \S+\.(?:service|timer))*"
     r" -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState\Z"
     r"|\Als -1b /etc/postgresql\Z"
@@ -353,6 +364,12 @@ class FakeServer:
     def substituted(self) -> AbstractContextManager[object]:
         """Substitute this server for the SSH transport while the context is open."""
         return mock.patch.object(ssh, "connect", self.connect)
+
+    def answer_root(self, command: str, result: ssh.CommandResult) -> None:
+        """Answer one fixed root read as root and through the sudo authorization pair."""
+        argv = ["/usr/bin/sh", "-c", command]
+        for answer in (command, native.authorization(argv), native.privileged(argv, root=False)):
+            self.results[answer] = result
 
     @contextmanager
     def connect(self, target: ConnectionTarget) -> Iterator[ssh.RemoteShell]:
@@ -657,16 +674,25 @@ class CollectedSnapshotMixin(SimpleTestCase):
     def assert_statuses(
         self, collected: CollectedSnapshot, part: Literal["package", "service"], status: str
     ) -> None:
-        """Assert every component's ``part`` observation has ``status``, in display order."""
+        """Assert every component's ``part`` observation has ``status``, in display order.
+
+        A component whose packages are absent also skips its service read, so a service
+        assertion covers only the components that have a package observation.
+        """
+        compared = [
+            observation
+            for observation in collected.components
+            if part == "package" or observation.package.outcome != ObservationOutcome.ABSENT
+        ]
         self.assertEqual(
             [
                 (
                     observation.component,
                     (observation.package if part == "package" else observation.service).outcome,
                 )
-                for observation in collected.components
+                for observation in compared
             ],
-            [(component, status) for component in WebStackComponent.values],
+            [(observation.component, status) for observation in compared],
         )
 
     def assert_not_kept(self, *texts: str) -> None:
@@ -675,7 +701,13 @@ class CollectedSnapshotMixin(SimpleTestCase):
             self.assertNotIn(text, kept)
 
     def assert_nothing_absent(self) -> None:
-        outcomes = [item.outcome for item in present(self.collected).observations]
+        """No installed component's observation is absent (Valkey may simply be uninstalled)."""
+        outcomes = [
+            observation.outcome
+            for component in self.collected.components
+            if component.component != WebStackComponent.VALKEY
+            for observation in (component.package, component.service)
+        ]
         self.assertNotIn(ObservationOutcome.ABSENT, outcomes)
 
 

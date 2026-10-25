@@ -100,7 +100,7 @@ This section is the single source of truth for test time. Adding code must not a
 | Local full build: controller-fast, fast validators, browser tests and native lifecycle scenarios, as `docker/disposable-server/build.sh` runs them | 300 s | 900 s |
 | One hosted `Native` shard, every native stage included | 300 s | 900 s |
 
-The build limit counts from the runner's start, including any S1 preparation of L1. `build.sh` and `disposable/scenarios.py` report each measured time against its target and limit.
+The build limit counts from the runner's start, including any S1 preparation of L1. `build.sh` and `disposable/scenarios.py` report each measured time against its target and limit. The [scheduled breadth job](#the-scheduled-breadth-job) is outside this budget: it is never a required check, and it adds no time to a merge build.
 
 The baseline is the [Phase A qualification record](phase-a-qualification.md#build-budget): a cold local full build in 159 s, the fast gate in 22 s, the joint fast stage in 88 s while it prepares L1 (about 35 s with L1 present), browser tests in 42 s, the longest item at 40.7 s locally and the longest hosted shard at 412 s of scenario time. A newer measurement replaces it there.
 
@@ -123,6 +123,8 @@ The fast layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)
 
 Each transcript is one JSON file per server state in `discovery/transcripts/<state>.json`, with the pins its server was built from. `docker/disposable-server/pins.json` holds the current pin set, which is the digest of the Ubuntu base image today; the Nix release, nixpkgs revision and catalog lock join it as they arrive. A fast test fails when any transcript was recorded with other pins, so moving a pin means recording again in the same change. Another fast test reads every transcript and fails if one holds the secret every recording seeds on its server or a command naming a secret location.
 
+A staged body and a fixed read share their source: `sites/bodies/common.py` is part of the site read's program, and `laravel/bodies/common.py` part of the Laravel read's. Editing either changes the recorded command, so record every state whose read embeds it again in the same change rather than patching a transcript ([automation](automation.md#fencing-site-changes) did this for #395).
+
 A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
 
 ```bash
@@ -139,11 +141,30 @@ The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.m
 
 L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1 is the verified host foundation produced by the real S1 scenario. Its key hashes the engine-rendered payload and fixed native body, catalog lock and pinned base; missing L1 is loaded from the cache archive by that key, or else prepared through S1 before dependent scenarios, and an existing matching image is reused. A run that ends with the keyed L1 present writes it to the archive with `docker image save` when `BARECTL_NATIVE_L0_CACHE` names one, after its timed stages. Runtime and site scenarios extend the observed host through the same native change engine.
 
-The serving of [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) has its own scenarios: independent site admission and masters, both PHP switch directions with active and queued requests and delayed bodies, post-response worker drain, single-thread source-removability refusal, retained backend state across restarts, target failure, reverse rollback, controller loss and fresh-controller reconstruction, socket and process isolation, and unrelated-site continuity.
+Automation scenarios prove WordPress server cron and Laravel database queue workers on a real host, including work that runs with every controller closed and fresh-controller reconstruction. The serving of [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) has its own scenarios: independent site admission and masters, both PHP switch directions with active and queued requests and delayed bodies, post-response worker drain, single-thread source-removability refusal, retained backend state across restarts, target failure, reverse rollback, controller loss and fresh-controller reconstruction, socket and process isolation, and unrelated-site continuity.
+
+### The scheduled breadth job
+
+A test class tagged as breadth is excluded from ordinary discovery and runs only with
+`run-scenarios.sh -- --breadth`, in the weekly and dispatched `Native breadth` workflow. It
+is never a required check and never adds to the merge build. The job proves what a merge
+build must not pay for:
+
+| Scenario | What it proves |
+| --- | --- |
+| `RebootAutomation` | The container's init restarts with no Barectl controller: the queue workers return enabled, the timer is armed for the next calendar minute, a missed minute is not replayed as a burst, and the site serves |
+| `RebootGateFence` | A Deploy whose `/up` fails leaves the gate up with boot activation off for the timer and every worker; a boot cannot start them; Roll back closes the gate and restores exactly that work |
+| `LongSchedulerTick` | A tick that runs longer than a calendar minute is followed by the next calendar elapse, not an immediate second start (`DeferReactivation=yes`) |
+| `MemoryOneGiB`, `MemoryTwoGiB`, `MemoryFourGiB` | The cache instance and each queue worker are measured inside a 1, 2 and 4 GiB memory cgroup, and the site still serves |
+
+The container shares the Docker VM's kernel, so the reboot is a userspace reboot and each
+memory class is a cgroup limit, not a whole 1/2/4 GiB host. The
+[Phase C qualification record](phase-c-qualification.md#not-qualified) states both gaps; the
+job prints one `BREADTH_MEMORY` line per class and copies it into the run summary.
 
 ### Fast snapshot validators
 
-`run-scenarios.sh -- --validators` selects only the fast native validator class and runs it in one L1 container through the existing lane runner. It checks actual Caddy/PHP-FPM validators and before-effect scratch refusals, including a safe publication baseline before changed-preimage and unsafe-directory mutations. Ordinary lifecycle discovery, list, shard and recording selections exclude this class; validator mode refuses shard, recording and egress options. The class retains the `scenario` exclusion tag so ordinary controller tests never require Docker. A missing keyed L1 still goes through real S1 preparation, without reusing another key or raising the item/build limits.
+`run-scenarios.sh -- --validators` selects only the fast native validator class and runs it in one L1 container through the existing lane runner. It checks actual Caddy/PHP-FPM validators, the supported per-site log rotation file with the real `logrotate --debug`, and before-effect scratch refusals, including a safe publication baseline before changed-preimage and unsafe-directory mutations. Ordinary lifecycle discovery, list, shard and recording selections exclude this class; validator mode refuses shard, recording and egress options. The class retains the `scenario` exclusion tag so ordinary controller tests never require Docker. A missing keyed L1 still goes through real S1 preparation, without reusing another key or raising the item/build limits.
 
 The full build reports controller-fast and fast-validators separately and their joint elapsed time against the joint fast-stage target of the [test time budget](#test-time-budget). The required Native workflow runs the validator stage on shard 1 before lifecycle checks; a validator failure fails the shard and required aggregate. Its logs are retained separately from lifecycle logs.
 
@@ -152,6 +173,8 @@ The full build reports controller-fast and fast-validators separately and their 
 `docker/disposable-server/mirror-manifest.json` lists every upstream file a build needs with its SHA-256: the Nix installer tarball, the Nix binary-cache closure of the runtime catalog lock (byte copies of each `narinfo` and NAR, as cache.nixos.org serves them) and the Ubuntu archive's frozen release pocket, the only pocket whose bytes are stable. `docker/disposable-server/mirror.sh -- fetch` downloads and verifies them into `~/.cache/barectl/native/mirror`; it needs the internet and runs only when asked. Nothing at scenario time reaches the internet: each lane serves the mirror under the real host names over HTTPS with the fixture CA, which L0 trusts, so every signature stays the upstream's own. `mirror.sh -- drift` reports any file whose upstream bytes changed, and the [drift job](#drift-and-the-weekly-jobs) opens an issue. A scenario proves the mirror end to end: L0's Nix client installs from the mirrored tarball, realises a catalog path with `max-jobs = 0` and reads the official `cache.nixos.org-1` signature back, with only ADR 0028's `nix.conf` in place.
 
 ### Lanes and scenarios
+
+Snapshot layers are keyed by the code that builds them: L1 is the real S1 foundation, L2 adds one plain site the product created, L3 adds MariaDB and one WordPress site (created after the engine, because a package transaction's `daemon-reload` would otherwise leave an existing site proxy unverifiable), L4 adds the masked Valkey package and the site's phpredis client so the WordPress cache scenario stays a small item, and L5 adds the deployed Laravel queue-worker fixture with its database, cache route and phpredis client so the Laravel cache lifecycle stays one too. A missing layer is prepared through the real product flow and cached like the others.
 
 A scenario is a Django test class tagged `scenario` (excluded from the fast layer) declaring the snapshot layer it needs, whether it needs a server of its own, the name prefix for every resource it creates, and the checkpoint states it records. Non-exclusive scenarios share one server per lane in sequence, each prefixed and followed by a residue check; a failed scenario or residue check discards the server, so the next scenario gets a fresh one. A residue check waits for a removed pool's workers before deleting the account. A lane's server joins only an `--internal` network, so it has no egress and only Docker's aliased names resolve; the harness reaches its SSH through a dual-homed forwarder, and the runner refuses an item that asks for a name no mirror serves, naming the host. `run-scenarios.sh -- --check-egress` proves that refusal with a scenario that deliberately looks one up. The number of lanes is `min(floor(CPUs / 1.75), floor(Docker VM GiB / 0.5))`, or `--lanes` / `BARECTL_NATIVE_LANES`.
 

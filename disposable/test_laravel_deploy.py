@@ -13,10 +13,13 @@ import os
 import pathlib
 import shlex
 import time
-from typing import cast
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import cast, override
 
 from django.test import tag
 
+from discovery import ssh
 from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
 from operations import engine, native
@@ -309,6 +312,13 @@ class LaravelDeployCase(ScenarioTestCase):
             "git config user.email fixture@barectl.test",
             "git config user.name fixture",
         ]
+        if not getattr(self, "_pushed", False):
+            # The lane's Git container is shared by every scenario on that lane, so a later
+            # exclusive scenario would otherwise inherit an earlier one's fixture migrations.
+            # The first push of each test starts from the fixture app's root commit; the
+            # test's own later pushes build on it so its retained releases survive.
+            lines.append("git reset --hard $(git rev-list --max-parents=0 HEAD)")
+            self._pushed = True
         # The lane's fixture repository is shared by every scenario on its lane, so each
         # push carries a unique marker: a commit always has a change even when a previous
         # scenario already pushed the same application files.
@@ -321,7 +331,7 @@ class LaravelDeployCase(ScenarioTestCase):
             lines.append(f"printf %s {shlex.quote(payload)} | base64 -d > {target}")
         lines.append(
             f"git add -A && git commit -qm {shlex.quote(message)} "
-            "&& git push --quiet origin main && git rev-parse HEAD"
+            "&& git push --force --quiet origin main && git rev-parse HEAD"
         )
         with self.shell() as shell:
             commit = shell.run("sh -c " + shlex.quote("; ".join(lines)))
@@ -338,7 +348,13 @@ class LaravelDeployCase(ScenarioTestCase):
         self, kind: engine.ChangeKind, inputs: PreparationInputs, *, timeout: float = 150
     ) -> tuple[engine.ResultLine, str, engine.ReviewDraft]:
         with self.shell() as shell:
+            # The worker records the reviewed fence plan (automation/fence.py) before it
+            # stores the review, so a native scenario applies the same review it would. A
+            # recording shell refuses that read by design (ADR 0032), and a preparation
+            # run's transcript is recorded at its own checkpoint, so it plans no fence.
             draft = kind.review(kind.inspect(shell, inputs), inputs)
+            if not self.record_state:
+                draft = engine._planned(shell, draft)
             self.assertTrue(draft.eligible, draft.refusals)
             stored = ChangeReview(
                 document=draft.document,
@@ -557,6 +573,18 @@ class LaravelDeployMariaDB(LaravelDeployCase):
     prefix = "sld"
     identity = "sld"
     database_engine = "mariadb"
+
+    @override
+    @contextmanager
+    def shell(self) -> Iterator[RemoteShell]:
+        """A plain connection: setup applies changes that use the confidential channel.
+
+        A recording shell refuses those by design (ADR 0032); the scheduler scenario
+        (``disposable.test_scheduler``) owns the ``automation-laravel-26.04`` transcript.
+        """
+        os.environ["SSH_AUTH_SOCK"] = ""
+        with ssh.connect(self.target()) as connection:
+            yield connection
 
     def test_the_applied_lifecycle_on_mariadb(self) -> None:
         from laravel import change, rollback

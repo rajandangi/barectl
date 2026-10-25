@@ -80,7 +80,8 @@ class SiteNodeSelection(SiteNodeCase):
             observed = collect(shell).sites.value
             self.assertEqual([site.identifier for site in observed], ["s7node"])
             self.assertEqual(observed[0].node_runtime, "nodejs_22")
-            engine._sites_digest(shell, node_change.review(evidence, inputs))
+            draft = engine._planned(shell, node_change.review(evidence, inputs))
+            engine._sites_digest(shell, draft)
             self.checkpoint("site-node-26.04", shell)
 
 
@@ -138,6 +139,7 @@ class SiteNodeValidators(DefaultChangeCase):
     layer = "L1"
     validator = True
     prefix = "s7nodevalidate"
+    repair_masters = True
     prepared = False
 
     def prepare(self) -> None:

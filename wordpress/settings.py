@@ -15,6 +15,8 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation import fence as automation_fence
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
@@ -31,7 +33,9 @@ from . import convention, observation
 SLUG: Final = "edit_wordpress_settings"
 LABEL: Final = "Edit WordPress settings"
 BODY_SOURCE: Final = (
-    site_observation.COMMON_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + site_observation.COMMON_SOURCE
     + "\n"
     + importlib.resources.files("wordpress").joinpath("convention.py").read_text()
     + "\n"
@@ -46,6 +50,7 @@ BODY_SOURCE: Final = (
         "    private_configuration_path,\n"
         "    private_configuration_problem,\n"
         "    valid_constant_key,\n"
+        "    write_as_site,\n"
         ")\n",
         "",
     )
@@ -276,7 +281,11 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     value = _document(document)
     if value["secret_fields"] and not context.secret_path:
         raise ValueError("The WordPress settings review needs a staged confidential value.")
-    payload = {**value, "secret_path": context.secret_path}
+    payload = {
+        **value,
+        "secret_path": context.secret_path,
+        "automation_fence": automation_fence.checked(document),
+    }
     encoded = base64.b64encode(gzip.compress(json.dumps(payload).encode(), mtime=0)).decode()
     return NativeBody(BODY_BYTES.rstrip(b"\n"), (encoded,))
 
