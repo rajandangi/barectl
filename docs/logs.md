@@ -122,14 +122,15 @@ on the log directory) adds an unobserved permission and another package dependen
 
 The supported rotation shape is rendered and parsed by `sites/bodies/logrotate.py`: a file
 that matches the fixed header, directives and known paths for its own site is supported;
-anything else is outside the supported settings. The reviewed action and every log page
-report the state (supported, partial, outside, missing, or unavailable without logrotate) as
-typed evidence, and the Logs section says when the file was edited outside the shape.
+anything else is outside the supported settings. Discovery stores the state in the site
+observation's typed `log_rotation` column (ADR 0003): `supported`, `partial`, `outside`,
+`missing`, or `unavailable` when the server does not run logrotate. The Logs section states
+it once, next to **Set up log rotation** when the state is not supported; every log page and
+the reviewed action carry the same typed evidence.
 
-Log rotation is not yet a typed discovery snapshot field. Adding it to the site observation
-would change the recorded site-read command and therefore invalidate every stored
-transcript; it is deferred to the Phase C qualification run, which will re-record them. The
-observed state reaches the operator through the change review and the log page instead.
+The site read gained the column, so every stored transcript that contains a site read was
+re-recorded with the documented recorder. The later #394 merge may need one consolidated
+re-record on the integration tree; do not hand-edit transcript JSON.
 
 ## Tests
 

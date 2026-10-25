@@ -8,6 +8,7 @@ from .mirror import apt_sources
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 CANDIDATE = "/run/v389logs/logrotate.conf"
+SCRATCH = "/run/v389logs/logs"
 
 
 @tag(SCENARIO_TAG)
@@ -56,6 +57,43 @@ class LogRotationValidators(ScenarioTestCase):
         self.assertIn("5 rotations", output)
         self.assertIn("after 14 days", output)
         self.assertNotIn("access.json", output)
+
+    def test_the_supported_file_rotates_and_recreates_the_site_log(self) -> None:
+        """The exact rendered file, with its paths moved to a scratch tree, rotates for real."""
+        self.install_logrotate()
+        self.prepare_candidate()
+        self.addCleanup(self.native, f"rm -rf {SCRATCH}")
+        self.native(
+            f"install -d -o root -g sv389logs -m 0750 {SCRATCH} 2>&1; "
+            f"install -o sv389logs -g sv389logs -m 0640 /dev/null {SCRATCH}/php-error.log; "
+            f"install -o sv389logs -g sv389logs -m 0640 /dev/null {SCRATCH}/php-slow.log; "
+            f"install -o sv389logs -g sv389logs -m 0640 /dev/null {SCRATCH}/wp-debug.log; "
+            f"printf 'first line\n' > {SCRATCH}/php-error.log"
+        )
+        rendered = logrotate_render(
+            "v389logs", ("php-error.log", "php-slow.log", "wp-debug.log")
+        ).replace("/var/www/v389logs/logs", SCRATCH)
+        with self.shell() as shell:
+            written = shell.run(
+                f"install -D -m 0640 /dev/stdin {CANDIDATE}", stdin=rendered.encode()
+            )
+            self.assertEqual(written.exit_status, 0, written.stdout)
+        # delaycompress keeps the first rotation as .1; the second compresses it.
+        self.native(f"/usr/sbin/logrotate -f -v {CANDIDATE} 2>&1")
+        self.assertEqual(
+            self.native(f"test -e {SCRATCH}/php-error.log.1 && echo present").strip(),
+            "present",
+        )
+        self.native(f"printf 'second line\n' > {SCRATCH}/php-error.log")
+        self.native(f"/usr/sbin/logrotate -f -v {CANDIDATE} 2>&1")
+        rotated = self.native(f"ls -1 {SCRATCH}").split()
+        compressed = next((name for name in rotated if name.endswith(".gz")), "")
+        self.assertTrue(compressed, rotated)
+        self.assertEqual(self.native(f"zcat {SCRATCH}/{compressed}").strip(), "first line")
+        self.assertEqual(
+            self.native(f"stat -c '%U %G %a' {SCRATCH}/php-error.log").strip(),
+            "sv389logs sv389logs 640",
+        )
 
     def test_an_unsupported_directive_is_rejected_by_logrotate(self) -> None:
         self.install_logrotate()

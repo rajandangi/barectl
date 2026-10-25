@@ -154,6 +154,19 @@ class LogsPageTests(ControllerConfigTestCase):
         self.assertIsNotNone(cleared)
         self.assertEqual(cast(LogRead, cleared).page, {})
 
+    def test_discovery_reports_a_missing_rotation_without_any_log_read(self) -> None:
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "view_evidence",
+        )
+        record_log_site(self.server, log_rotation="missing")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertContains(response, "Log rotation is not set up for this site yet.")
+        self.assertContains(response, "Set up log rotation")
+
     def test_the_rotation_note_and_its_action_reach_the_logs_section(self) -> None:
         self.grant(
             "view_server",
@@ -164,6 +177,7 @@ class LogsPageTests(ControllerConfigTestCase):
         )
         record_log_site(
             self.server,
+            log_rotation="outside",
             page=LogPage(
                 "observed",
                 (LogLine(raw="PHP warning: harmless"),),
@@ -381,6 +395,22 @@ class LogReadShapeTests(SimpleTestCase):
         names = ("php-error.log", "php-slow.log", "wp-debug.log")
         self.assertEqual(
             rotation.logrotate_render("alpha", names), logrotate_render("alpha", names)
+        )
+
+    def test_a_recorded_discovery_read_maps_the_typed_rotation_state(self) -> None:
+        from discovery.recorded import ReplayShell, load
+        from sites import observation
+
+        native = observation.read(
+            ReplayShell(load("http-site-26.04")), "observed", "", protections=False
+        )
+        if native is None:
+            raise AssertionError("the recorded site read is unreadable")
+        sites = cast(list[object], native["sites"])
+        site = observation.observed_site(cast(dict[str, object], sites[0]))
+        self.assertIn(
+            site.log_rotation,
+            ("supported", "partial", "outside", "missing", "unavailable"),
         )
 
     def test_the_publish_body_is_valid_python(self) -> None:

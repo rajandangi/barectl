@@ -143,6 +143,8 @@ class ObservedSite:
     application_problem: str = ""
     # The PHP object-cache client enabled for this site's own master (Phase C #390).
     client: str = ""
+    # The supported state of the site's root-owned logrotate file (Phase C #389).
+    log_rotation: str = ""
 
 
 @dataclass(frozen=True)
@@ -385,6 +387,7 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             application=site.application,
             application_version=site.application_version,
             application_problem=site.application_problem,
+            log_rotation=site.log_rotation,
         )
         for site in sites
     )
@@ -620,6 +623,7 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         application=row.application,
         application_version=row.application_version,
         application_problem=row.application_problem,
+        log_rotation=row.log_rotation,
     )
 
 

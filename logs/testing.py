@@ -19,6 +19,7 @@ def record_log_site(
     *,
     identifier: str = "alpha",
     application: str = "plain",
+    log_rotation: str = "supported",
     page: LogPage | None = None,
     source: str = "php_errors",
     expires_in: timedelta | None = timedelta(hours=23),
@@ -29,7 +30,9 @@ def record_log_site(
     if snapshot is None:
         raise AssertionError("No snapshot.")
     sites = tuple(
-        replace(row, application=application) if row.identifier == identifier else row
+        replace(row, application=application, log_rotation=log_rotation)
+        if row.identifier == identifier
+        else row
         for row in snapshot.collected.sites.value
     )
     if not any(row.identifier == identifier for row in sites):
@@ -47,6 +50,7 @@ def record_log_site(
                 file=f"/etc/caddy/sites/{identifier}.caddy",
                 pool=SitePool(),
                 application=application,
+                log_rotation=log_rotation,
             ),
         )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)

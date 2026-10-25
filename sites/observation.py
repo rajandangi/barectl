@@ -92,6 +92,7 @@ COMMON_SOURCE: Final = with_bounded(
     LIVE_SOURCE,
     NAMES_SOURCE,
     POOL_SOURCE,
+    importlib.resources.files("sites.bodies").joinpath("logrotate.py").read_text(),
     SERVING_SOURCE,
     ADMISSION_SOURCE,
     FPM_SOURCE,
@@ -111,6 +112,7 @@ COMMON_SOURCE: Final = with_bounded(
         "",
     )
     .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
+    .replace("from sites.bodies.logrotate import logrotate_state\n", "")
     .replace(
         "from sites.names import readiness_directive, readiness_ok, readiness_path, request\n",
         "",
@@ -408,10 +410,13 @@ def valid_site(site: object) -> bool:
         "pool",
         "serving_form",
         "client",
+        "log_rotation",
     }
     if not isinstance(site, dict) or not required <= set(site) <= required | optional:
         return False
     if site.get("client", "") not in ("", "phpredis"):
+        return False
+    if site.get("log_rotation", "") not in ("", *LOG_ROTATION_STATES):
         return False
     if not _valid_application(site) or not _valid_site_scalars(site):
         return False
@@ -551,10 +556,12 @@ def observed_site(site: dict[str, object]) -> ObservedSite:
         application_problem=str(site.get("application_problem", "")),
         pool=SitePool.from_document(site.get("pool")),
         client=str(site.get("client", "")),
+        log_rotation=str(site.get("log_rotation", "")),
     )
 
 
 UNREADABLE_SITE: Final = "The site's live PHP protection evidence could not be read."
+LOG_ROTATION_STATES: Final = ("supported", "partial", "outside", "missing", "unavailable")
 
 
 def observed_sites(shell: RemoteShell) -> Observation[tuple[ObservedSite, ...]]:

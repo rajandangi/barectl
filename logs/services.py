@@ -78,7 +78,7 @@ def context_for_site(
     )
     chosen = next((view for view in views if view.source.slug == selected), None)
     active = any(view.active for view in views)
-    rotation, rotation_files = _rotation_evidence(server, identifier, chosen)
+    rotation, rotation_files = _rotation_evidence(server, identifier, chosen, site)
     from .forms import LogFilterForm
 
     return {
@@ -103,9 +103,22 @@ def context_for_site(
 
 
 def _rotation_evidence(
-    server: Server, identifier: str, chosen: SourceView | None
+    server: Server,
+    identifier: str,
+    chosen: SourceView | None,
+    site: ObservedSite | None,
 ) -> tuple[str, tuple[str, ...]]:
-    """The newest read's rotation evidence, or an empty state when no read has happened."""
+    """Discovery's rotation state, or the newest read's evidence when discovery has none.
+
+    A transcript recorded before the typed field has no state; the page then supplies it.
+    """
+    files: tuple[str, ...] = ()
+    for view in (chosen,):
+        page = view.page if view is not None else None
+        if page is not None:
+            files = page.rotation_files
+    if site is not None and site.log_rotation:
+        return site.log_rotation, files
     if chosen is not None:
         page = chosen.page
         if page is not None:
@@ -123,8 +136,10 @@ def _rotation_evidence(
 
 
 def _rotation_note(state: str) -> str:
-    if state in ("", "supported"):
-        return ""
+    if state == "":
+        return "Log rotation has not been checked yet."
+    if state == "supported":
+        return "Log rotation is set up."
     if state == "missing":
         return "Log rotation is not set up for this site yet."
     if state == "partial":
