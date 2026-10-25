@@ -1,0 +1,58 @@
+{% if scheduled_tasks %}
+  <section class="barectl-card" aria-labelledby="scheduled-tasks">
+    <h2 id="scheduled-tasks">Scheduled tasks</h2>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Status</dt>
+        <dd>
+          {{ scheduled_tasks.state }}
+          {% if scheduled_tasks.last_run %}, {{ scheduled_tasks.last_run }}{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Last checked</dt>
+        <dd>
+          {% if scheduled_tasks.checked_at %}
+            <time datetime="{{ scheduled_tasks.checked_at|date:'c' }}">{{ scheduled_tasks.checked_at|date:'M j, Y, H:i:s T' }}</time>
+          {% else %}
+            Not checked yet
+          {% endif %}
+        </dd>
+      </div>
+    </dl>
+    {% if scheduled_tasks.detail %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">{{ scheduled_tasks.detail }}</p>
+        </div>
+      </div>
+    {% endif %}
+    <p class="barectl-note">
+      Barectl runs this site's scheduled WordPress events every minute as
+      <code>s{{ identifier }}</code>, with a fifteen-minute limit on each run. Turning it
+      on keeps page loads running scheduled events until one server run has succeeded;
+      turning it off gives them back to page loads first.
+    </p>
+    {% if scheduled_tasks_can_prepare %}
+      <form method="post"
+            action="{% url 'site_scheduled_tasks_prepare' server.pk identifier %}">
+        {% csrf_token %}
+        {% if scheduled_tasks.on %}
+          <button class="usa-button usa-button--secondary"
+                  name="state"
+                  value="off"
+                  type="submit">Turn off</button>
+        {% else %}
+          <button class="usa-button" name="state" value="on" type="submit">Turn on</button>
+        {% endif %}
+      </form>
+    {% elif blocking %}
+      {% include "operations/_blocking_operation.html" with after="Change the scheduled tasks after it finishes." %}
+    {% else %}
+      <p class="barectl-note">
+        Changing scheduled tasks needs a current, complete WordPress site observation and
+        permission to change this site. Run discovery again or wait for the current change.
+      </p>
+    {% endif %}
+  </section>
+{% endif %}

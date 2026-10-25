@@ -521,6 +521,12 @@ def _site_overview_context(
     context["site_upload_path"] = f"/var/www/{site.identifier}/current/public"
     context["site_user"] = f"s{site.identifier}"
     context["site_checked_at"] = state.snapshot.collected_at if state.snapshot else None
+    if context.get("has_wordpress") and state.snapshot is not None:
+        from automation import presentation
+
+        context["site_schedule_lines"] = presentation.lines(
+            state.snapshot.collected, site.identifier, state.snapshot.collected_at
+        )
     if context.get("has_wordpress"):
         context["site_wordpress_admin"] = f"{scheme}://{primary}/wp-admin/"
     if not context.get("has_laravel"):
@@ -573,6 +579,7 @@ def site_page_response(
 
         context.update(php_overview_context(server, identifier, request.user))
     if target_site and section == "settings":
+        from automation.views import context_for_site as automation_context_for_site
         from sites.domains_views import context_for_site as domains_context_for_site
         from sites.node_views import context_for_site
         from sites.php_views import context_for_site as php_context_for_site
@@ -593,6 +600,7 @@ def site_page_response(
         )
         context.update(domains_context_for_site(server, identifier, request.user))
         context.update(remove_context_for_site(server, identifier, request.user))
+        context.update(automation_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
     if target_site and section == "database":
