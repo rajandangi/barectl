@@ -1,7 +1,9 @@
 <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
   <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
          for="{{ field.id_for_label }}">{{ field.label }}</label>
-  <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+  {% if field.help_text %}
+    <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+  {% endif %}
   {% if field.errors %}
     <span class="usa-error-message" id="{{ field.auto_id }}_error">
       {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}

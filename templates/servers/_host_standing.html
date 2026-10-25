@@ -54,25 +54,6 @@
       </ul>
     </section>
   {% endif %}
-  {% if state.attempt and state.attempt.host_key %}
-    <section class="barectl-card" aria-labelledby="advanced-connection-heading">
-      <h2 id="advanced-connection-heading">Connection evidence</h2>
-      <dl class="barectl-facts">
-        <div>
-          <dt>Host key</dt>
-          <dd>
-            <code>{{ state.attempt.host_key }}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>Connection</dt>
-          <dd>
-            <code>{{ state.attempt.ssh_alias }}</code>
-          </dd>
-        </div>
-      </dl>
-    </section>
-  {% endif %}
 {% else %}
   <p>No observations yet. Verify the connection to inspect the platform and hosting components.</p>
 {% endif %}
