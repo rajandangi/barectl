@@ -34,7 +34,13 @@ class AutomationValidators(ScenarioTestCase):
             self.native,
             f"pkill -u {ACCOUNT} 2>/dev/null || true; userdel {ACCOUNT} 2>/dev/null || true",
         )
-        self.native(f"install -d -m 0755 /var/www/{IDENTIFIER}/current /var/www/{IDENTIFIER}/bin")
+        # The lane runs with umask 0000. Create /var/www explicitly first, so the
+        # implicit parent cannot appear world-writable and break later validators.
+        self.native(
+            "umask 0022; test -d /var/www || install -d -m 0755 /var/www; "
+            f"install -d -m 0755 /var/www/{IDENTIFIER} "
+            f"/var/www/{IDENTIFIER}/current /var/www/{IDENTIFIER}/bin"
+        )
         self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/bin/wp")
         self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/bin/php")
         self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/current/artisan")
@@ -56,6 +62,10 @@ class AutomationValidators(ScenarioTestCase):
             ("service", convention.service_name(IDENTIFIER, convention.ROLE_WPCRON)),
             ("timer", convention.timer_name(IDENTIFIER, convention.ROLE_WPCRON)),
         ]
+
+    def test_the_shared_parent_is_not_made_world_writable(self) -> None:
+        self.prepare()
+        self.assertEqual(self.native("stat -c %a /var/www").strip(), "755")
 
     def test_the_rendered_slice_service_and_timer_load_in_systemd(self) -> None:
         self.prepare()
