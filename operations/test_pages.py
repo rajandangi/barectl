@@ -173,6 +173,7 @@ class PlainWordTests(SimpleTestCase):
             "add_runtime",
             "create_http_site",
             "set_site_php",
+            "set_site_node",
             "install_database_engine",
             "create_wordpress_site",
             "create_laravel_site",
@@ -359,9 +360,7 @@ class ConfirmScreenTests(ScreenTestCase):
     def test_another_active_change_is_named_and_offers_check_again(self) -> None:
         review = self.change("fixture_site")
         self.sign_in_with(*PREPARE_PERMISSIONS, "view_changes", "change_site", "change_shared")
-        self.client.post(
-            f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
-        )
+        self.client.post(f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"})
         content = self.client.get(f"/changes/{review.preparation_id}/").content.decode()
         self.assertIn("Another computer is changing this server.", content)
         self.assertIn("Check again", content)

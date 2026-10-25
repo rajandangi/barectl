@@ -83,6 +83,11 @@ site its current release and **Deploy**.
 | Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, PHP settings and the readiness path, domains and HTTPS, and **Remove site**. |
 | Logs | Native detail: the site account and paths, its file, missing paths, observed facts, the installed runtime diagnostics, masters, protections and a link to the server's pools. |
 
+A version this server does not have is marked **Installed first**. Choosing it prepares Add
+runtime as step one; the run page then offers to continue the switch with the same choice.
+The current version is never offered for a change, and a partly applied switch offers both
+the target and the current version to finish or reverse it.
+
 A site page shows a stale notice while a later check is queued, running or failed, and
 keeps the last successful snapshot. When the last complete observation confirms the site
 is gone, the page says **Site not found in the latest observation** and offers no change

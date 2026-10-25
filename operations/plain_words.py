@@ -136,6 +136,25 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to the site",
         after_home=Home.SITE,
     ),
+    "set_site_node": ChangeWords(
+        title="Switch {site} to {selection}",
+        summary=(
+            "{site} keeps serving while Barectl switches its Node.js version to {selection}.",
+            (
+                "If the new version lacks something the site uses, the change stops "
+                "before anything moves."
+            ),
+        ),
+        action="Switch version",
+        steps={
+            "preflight": "Checking the server",
+            "links": "Switching the Node.js commands",
+            "verify": "Checking the site answers",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
     "install_database_engine": ChangeWords(
         title="Install {selection} on {server}",
         summary=(

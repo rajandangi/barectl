@@ -9,6 +9,7 @@ create form keeps the operator's answers until the step finishes.
 from dataclasses import dataclass
 
 from databases import observation as database_observation
+from runtimes.defaults import NODE_CHOICES
 from runtimes.presentation import PHP_ENTRIES, shown_catalog
 from servers.discovery_state import DiscoveryState
 
@@ -18,7 +19,21 @@ POSTGRESQL = database_observation.POSTGRESQL
 
 def version_label(entry: str) -> str:
     """The version-only label the create form and its Step 1 name (PHP 8.5)."""
-    return f"PHP {entry[3]}.{entry[4]}"
+    return f"PHP {number_label(entry)}"
+
+
+def number_label(entry: str) -> str:
+    """The version number alone, as Settings states it (8.4, 22)."""
+    if entry.startswith("php"):
+        return f"{entry[3]}.{entry[4]}"
+    if entry.startswith("nodejs_"):
+        return entry.removeprefix("nodejs_")
+    return entry
+
+
+def node_version_label(entry: str) -> str:
+    """The Node.js version-only label the site's Settings names (Node.js 22)."""
+    return f"Node.js {number_label(entry)}"
 
 
 @dataclass(frozen=True)
@@ -82,6 +97,41 @@ def php_choices(state: DiscoveryState) -> tuple[PhpChoice, ...]:
     choices = [PhpChoice(entry, True, 0) for entry in PHP_ENTRIES if entry in installed]
     choices.extend(
         PhpChoice(entry, False, offered[entry].download_size)
+        for entry in sorted(offered)
+        if entry not in installed and entry not in present
+    )
+    return tuple(choices)
+
+
+@dataclass(frozen=True)
+class NodeChoice:
+    """One Node.js option a site's Settings offers: installed, or installed first."""
+
+    entry: str
+    installed: bool
+    download_size: int
+
+    @property
+    def version_label(self) -> str:
+        return node_version_label(self.entry)
+
+
+def node_choices(state: DiscoveryState) -> tuple[NodeChoice, ...]:
+    """Verified Node.js runtimes, then catalog builds this server does not have at all."""
+    snapshot = state.snapshot
+    if snapshot is None or state.snapshot_notice is not None:
+        return ()
+    installed = tuple(
+        row.entry
+        for row in snapshot.collected.runtimes
+        if row.entry in NODE_CHOICES and row.manageable and row.path
+    )
+    present = {row.entry for row in snapshot.collected.runtimes if row.path}
+    catalog = shown_catalog(checked=True, machine=snapshot.collected.architecture.value or None)
+    offered = {build.entry: build for build in catalog.runtimes if build.entry in NODE_CHOICES}
+    choices = [NodeChoice(entry, True, 0) for entry in NODE_CHOICES if entry in installed]
+    choices.extend(
+        NodeChoice(entry, False, offered[entry].download_size)
         for entry in sorted(offered)
         if entry not in installed and entry not in present
     )

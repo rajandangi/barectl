@@ -1,4 +1,4 @@
-"""Keyboard preparation uses the registered Node kind and its actual Site consent."""
+"""Keyboard changes a site's Node.js version from Settings with Site consent."""
 
 import contextlib
 import tempfile
@@ -30,7 +30,7 @@ class SiteNodeBrowserTests(BrowserTestCase):
         cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
         call_command("collectstatic", interactive=False, verbosity=0)
 
-    def test_keyboard_prepares_only_site_node_links_without_shared_permission(self) -> None:
+    def test_keyboard_changes_site_node_from_settings_without_shared_permission(self) -> None:
         server = Server.objects.get(name="Production")
         transcript = load("site-node-26.04")
         save_snapshot(
@@ -41,15 +41,20 @@ class SiteNodeBrowserTests(BrowserTestCase):
         for codename in ("view_siteobservation", "view_changes", "change_site"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
-        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/s7node/runtime/")
-        selection = self.page.get_by_role("combobox", name="Node runtime", exact=True)
-        expect(selection).to_have_value("nodejs_22")
-        selection.select_option("nodejs_24")
-        button = self.page.get_by_role("button", name="Select site Node runtime", exact=True)
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/s7node/settings/")
+        self.assert_no_native_terms()
+        expect(self.page.get_by_role("heading", name="Node.js version", level=2)).to_be_visible()
+        change = self.page.get_by_role("link", name="Change Node.js version", exact=True)
+        change.focus()
+        self.page.keyboard.press("Enter")
+        expect(self.page.locator("#change-node")).to_be_visible()
+        self.page.locator("label[for='site-node-nodejs_24']").click()
+        expect(self.page.locator("#site-node-nodejs_24")).to_be_checked()
+        button = self.page.get_by_role("button", name="Continue", exact=True)
         button.focus()
         self.page.keyboard.press("Enter")
         expect(
-            self.page.get_by_role("heading", name="Select site Node runtime", level=1)
+            self.page.get_by_role("heading", name="Switch s7node to Node.js 24", level=1)
         ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(
@@ -64,13 +69,11 @@ class SiteNodeBrowserTests(BrowserTestCase):
         review = ChangeReview.objects.get(preparation=preparation)
         self.assertTrue(review.eligible, review.document)
         self.assertEqual(review.consent, Consent.SITE)
-        expect(
-            self.page.get_by_role("button", name="Select site Node runtime", exact=True)
-        ).to_be_visible()
+        expect(self.page.get_by_role("button", name="Switch version", exact=True)).to_be_visible()
         self.page.set_viewport_size({"width": 375, "height": 812})
-        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/s7node/runtime/")
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/s7node/settings/")
         expect(
-            self.page.get_by_role("button", name="Select site Node runtime", exact=True)
+            self.page.get_by_role("link", name="Change Node.js version", exact=True)
         ).to_be_visible()
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0

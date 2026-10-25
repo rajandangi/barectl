@@ -332,9 +332,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             expect(https).not_to_be_checked()
             https.check()
             expect(https).to_be_checked()
-            button = self.page.get_by_role(
-                "button", name="Prepare domains and HTTPS review", exact=True
-            )
+            button = self.page.get_by_role("button", name="Change domains and HTTPS", exact=True)
             button.focus()
             self.page.keyboard.press("Enter")
             expect(
@@ -430,7 +428,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         link.focus()
         self.page.keyboard.press("Enter")
         expect(self.page).to_have_url(
-            f"{self.live_server_url}/servers/{server.pk}/sites/delta/runtime/"
+            f"{self.live_server_url}/servers/{server.pk}/sites/delta/settings/"
         )
         for tab, table in (("web", "Caddy site files"), ("php", "PHP-FPM site pools")):
             self.page.goto(f"{self.live_server_url}/servers/{server.pk}/stack/?tab={tab}")
@@ -671,7 +669,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/runtime/")
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/settings/")
             self.page.get_by_label("Process manager", exact=True).select_option("static")
             self.page.get_by_label("Maximum child processes", exact=True).fill("8")
             self.page.get_by_label("Slow request log threshold (seconds)", exact=True).fill("10")
@@ -679,7 +677,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.page.get_by_label("Memory limit (MB)", exact=True).fill("256")
             self.page.get_by_label("Maximum upload size (MB)", exact=True).fill("64")
             self.page.get_by_label("Maximum post size (MB)", exact=True).fill("64")
-            button = self.page.get_by_role("button", name="Review PHP settings", exact=True)
+            button = self.page.get_by_role("button", name="Change PHP settings", exact=True)
             button.focus()
             expect(button).to_be_focused()
             self.page.keyboard.press("Enter")
@@ -750,7 +748,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
             self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/settings/")
             expect(self.page.get_by_text("No backup exists", exact=True)).to_be_visible()
-            button = self.page.get_by_role("button", name="Prepare removal review", exact=True)
+            button = self.page.get_by_role("button", name="Remove site", exact=True)
             button.focus()
             expect(button).to_be_focused()
             self.page.keyboard.press("Enter")
