@@ -105,7 +105,6 @@ def state_rows(text: str) -> dict[str, list[str]]:
             8: "1",
             10: "1",
             11: "0",
-            12: "0",
             13: "8",
             14: "0",
             15: "0",
@@ -123,6 +122,7 @@ def state_rows(text: str) -> dict[str, list[str]]:
             any(row[index] != value for index, value in fixed.items())
             or (row[5], row[6]) not in (("2", "4"), ("0", "5"))
             or not row[9].isdecimal()
+            or not row[12].isdecimal()
         ):
             raise ValueError("Unsupported server state, address or maintenance flags.")
         rows[entry] = row

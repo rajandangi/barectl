@@ -461,7 +461,7 @@ class RefreshTests(DiscoveryTestCase):
 
     def test_refresh_replaces_service_observations(self) -> None:
         before = self.succeed_once()
-        self.assertEqual(len(current(self.server).collected.components), 5)
+        self.assertEqual(len(current(self.server).collected.components), 6)
         # Nginx was uninstalled and MariaDB stopped between the two discoveries.
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, DPKG_OUTPUT.replace("nginx ", ""))
         self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
@@ -484,6 +484,7 @@ class RefreshTests(DiscoveryTestCase):
                 ("mariadb", "observed", "observed"),
                 ("postgresql", "observed", "observed"),
                 ("certbot", "observed", "observed"),
+                ("valkey", "absent", "absent"),
             ],
         )
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")

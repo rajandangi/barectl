@@ -211,8 +211,11 @@ class FixtureTests(SimpleTestCase):
         self.assertEqual({host for host, _ in stored}, {"api.github.com"})
         self.assertTrue(all("/zipball/" in path for _, path in stored))
 
-    def test_the_fixture_packages_are_the_engines_and_git(self) -> None:
-        self.assertEqual(mirror.UBUNTU_FIXTURES, ("mariadb-server", "postgresql", "git"))
+    def test_the_fixture_packages_are_the_engines_git_and_valkey(self) -> None:
+        self.assertEqual(
+            mirror.UBUNTU_FIXTURES,
+            ("mariadb-server", "postgresql", "git", "valkey-server"),
+        )
 
     def test_pebble_files_are_required_from_the_mirror(self) -> None:
         with (

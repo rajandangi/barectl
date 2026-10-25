@@ -1,0 +1,47 @@
+{# Server Settings: the server-wide object cache (#391, docs/object-cache.md). #}
+<section class="margin-top-4" aria-labelledby="settings-object-cache-heading">
+  <h2 id="settings-object-cache-heading">Object cache (Valkey)</h2>
+  {% if object_cache_panel %}
+    {% if object_cache_panel.outside %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">Outside supported settings for object cache changes:</p>
+          <ul>
+            {% for reason in object_cache_panel.outside %}<li>{{ reason }}</li>{% endfor %}
+          </ul>
+        </div>
+      </div>
+    {% endif %}
+    {% if object_cache_panel.installed %}
+      <dl class="barectl-facts barectl-card">
+        <div>
+          <dt>Valkey</dt>
+          <dd>
+            {{ object_cache_panel.version }} — {{ object_cache_panel.state }}
+          </dd>
+        </div>
+      </dl>
+      <p class="barectl-note">{{ object_cache_panel.note }}</p>
+    {% else %}
+      <p>No object cache is installed.</p>
+      <p class="barectl-note">{{ object_cache_panel.note }}</p>
+      {% if object_cache_panel.installable %}
+        {% if object_cache_can_prepare %}
+          <form method="post"
+                action="{% url 'object_cache_prepare' server.pk %}"
+                class="usa-form">
+            {% csrf_token %}
+            <input type="hidden" name="kind" value="{{ object_cache_kind }}">
+            <button type="submit" class="usa-button usa-button--outline">Install Valkey</button>
+          </form>
+        {% else %}
+          <p class="barectl-note">
+            Installing Valkey needs a ready server and permission to change shared resources.
+          </p>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  {% else %}
+    <p>No observation yet. Check the connection to read the server's object cache.</p>
+  {% endif %}
+</section>
