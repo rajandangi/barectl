@@ -38,7 +38,8 @@ def unit(name: str, kind: str, text: str = "") -> dict[str, str]:
 
 
 def with_roles(
-    units: list[dict[str, str]], roles: dict[str, tuple[dict[str, str], dict[str, str]]]
+    units: list[dict[str, str]],
+    roles: dict[str, tuple[dict[str, str] | None, dict[str, str] | None]],
 ) -> dict[str, object]:
     """One site whose read answers each installed role's timer and service properties."""
     value = automation(units=units)
@@ -114,6 +115,20 @@ class FencePlanTests(SimpleTestCase):
                         resume=[SCHEDULE_TIMER, WPCRON_TIMER],
                     )
                 ],
+            },
+        )
+
+    def test_a_worker_role_whose_timer_is_absent_is_planned(self) -> None:
+        value = with_roles(
+            [unit(SLICE, "slice"), unit(QUEUE_SERVICE, "service")],
+            {"queue1": (None, show())},
+        )
+        document = fence.plan_from(value, (SHOP,))
+        self.assertEqual(
+            document,
+            {
+                "version": 1,
+                "sites": [site_plan(timers=[], services=[QUEUE_SERVICE], resume=[QUEUE_SERVICE])],
             },
         )
 

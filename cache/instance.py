@@ -21,6 +21,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final, cast
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from discovery.root_read import run_root
 from discovery.snapshot import CollectedSnapshot, ObservedCache, ObservedSite
 from discovery.ssh import RemoteShell
@@ -72,6 +73,7 @@ LARAVEL_COMMON_SOURCE: Final = (
         ")\n",
         "",
     )
+    .replace("from cache.laravel import laravel_managed\n", "")
 )
 BODY_SOURCE: Final = (
     site_observation.COMMON_SOURCE
@@ -85,7 +87,7 @@ BODY_SOURCE: Final = (
     + "\n"
     + importlib.resources.files("wordpress").joinpath("convention.py").read_text()
     + "\n"
-    + importlib.resources.files("automation").joinpath("convention.py").read_text()
+    + AUTOMATION_SOURCE
     + "\n"
     + importlib.resources.files("automation")
     .joinpath("workers.py")
@@ -121,13 +123,18 @@ BODY_SOURCE: Final = (
         "",
     )
     .replace(
+        "from automation.bodies.units import fence, restore\n",
+        "",
+    )
+    .replace(
+        "from cache.laravel import laravel_managed, laravel_values, laravel_wiring\n",
+        "",
+    )
+    .replace(
         "from cache.convention import (\n"
         "    MAXMEMORY_MIB,\n"
         "    config_shape,\n"
         "    instance_paths,\n"
-        "    laravel_managed,\n"
-        "    laravel_values,\n"
-        "    laravel_wiring,\n"
         "    render_config,\n"
         "    render_drop_in,\n"
         ")\n",
@@ -140,7 +147,6 @@ BODY_SOURCE: Final = (
         "    environment_entries_from_text,\n"
         "    environment_path,\n"
         "    read_environment,\n"
-        "    user_command,\n"
         ")\n",
         "",
     )

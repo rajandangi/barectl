@@ -28,6 +28,7 @@ import time
 from collections.abc import Mapping
 from typing import cast
 
+from automation.bodies.units import fence, restore
 from automation.bodies.worker_env import restart_workers
 from cache.convention import (
     MAXMEMORY_MIB,
@@ -513,6 +514,8 @@ def _apply_laravel(  # noqa: C901 - one reviewed sequence
     ):
         return "refused", "evidence"
     before_wiring = laravel_wiring(identifier, _environment_entries(text))
+    if not fence(document, identifier):
+        return "refused", "automation_fence"
     changed = False
     if enabled:
         stage("instance")
@@ -556,6 +559,8 @@ def _apply_laravel(  # noqa: C901 - one reviewed sequence
             != "complete"
         ):
             return "partial", "object_cache_verify"
+        if not restore(document, identifier):
+            return "partial", "automation_restore"
         return "succeeded", ""
     stage("disconnect")
     if document.get("write_environment") is True:
@@ -592,6 +597,8 @@ def _apply_laravel(  # noqa: C901 - one reviewed sequence
         or (before_wiring == "complete" and document.get("restore_store") is not True)
     ):
         return "partial", "object_cache_verify"
+    if not restore(document, identifier):
+        return "partial", "automation_restore"
     return "succeeded", ""
 
 
@@ -648,6 +655,9 @@ def apply(document: dict[str, object]) -> None:  # noqa: C901 - one reviewed seq
             "configuration_digest"
         ):
             result("refused", "evidence")
+            return
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
             return
         if enabled:
             stage("instance")
@@ -747,6 +757,9 @@ def apply(document: dict[str, object]) -> None:  # noqa: C901 - one reviewed seq
             ):
                 result("partial", "object_cache_verify")
                 return
+        if not restore(document, identifier):
+            result("partial", "automation_restore")
+            return
         result("succeeded")
     except (OSError, KeyError, ValueError, subprocess.TimeoutExpired) as error:
         sys.stderr.write("barectl-problem " + str(error)[-900:] + "\n")

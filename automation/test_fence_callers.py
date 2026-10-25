@@ -10,6 +10,7 @@ from django.test import SimpleTestCase
 
 from automation import fence, presentation
 from automation.status import STATUS_SENTENCE, ScheduleStatus
+from cache import instance as cache_instance
 from laravel import change as laravel_change
 from laravel import rollback as laravel_rollback
 from laravel import settings as laravel_settings
@@ -28,6 +29,7 @@ SOURCES = {
     "edit_wordpress_settings": wordpress_settings.BODY_SOURCE,
     "remove_site": remove.BODY_SOURCE,
     "update_catalog": catalog_update.BODY_SOURCE,
+    "set_site_object_cache": cache_instance.BODY_SOURCE,
 }
 
 

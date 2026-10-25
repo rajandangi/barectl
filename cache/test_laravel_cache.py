@@ -2,10 +2,12 @@
 
 The review and body are pure apart from their native seams, so these tests run without a
 database or SSH. The real instance, the fixture route through the private connection and the
-previous-store restoration are proved natively by ``disposable/test_laravel_cache.py``.
+previous-store restoration are proved natively by ``disposable.test_cache.LaravelObjectCache``.
 """
 
+import ast
 import hashlib
+import sys
 from dataclasses import replace
 
 from django.test import SimpleTestCase
@@ -317,6 +319,29 @@ class LaravelObjectCacheStateTests(SimpleTestCase):
 
 
 class LaravelObjectCacheDocumentTests(SimpleTestCase):
+    def test_the_staged_body_imports_only_the_standard_library(self) -> None:
+        """Every helper is inlined; a project import would fail on the server, not here."""
+        tree = ast.parse(instance.BODY_SOURCE)
+        modules = set(sys.stdlib_module_names)
+
+        def imported(node: ast.AST) -> set[str]:
+            found: set[str] = set()
+            for child in ast.iter_child_nodes(node):
+                if (
+                    isinstance(child, ast.If)
+                    and isinstance(child.test, ast.Name)
+                    and child.test.id == "TYPE_CHECKING"
+                ):
+                    continue
+                if isinstance(child, ast.Import):
+                    found.update(alias.name.split(".")[0] for alias in child.names)
+                elif isinstance(child, ast.ImportFrom) and child.level == 0 and child.module:
+                    found.add(child.module.split(".")[0])
+                found |= imported(child)
+            return found
+
+        self.assertEqual(imported(tree) - modules, set())
+
     def test_the_body_is_the_checked_in_source_and_names_the_environment(self) -> None:
         draft = instance.review(evidence(), inputs())
         body = instance.body(draft.document, BodyContext("unit", BOOT, 0))
@@ -418,6 +443,21 @@ class LaravelObjectCacheDocumentTests(SimpleTestCase):
             [(change["key"], change["action"]) for change in off_foreign],
             [("REDIS_HOST", "remove"), ("REDIS_PORT", "remove")],
         )
+
+    def test_the_laravel_sequence_fences_before_its_first_change_and_restores_after(self) -> None:
+        source = instance.BODY_SOURCE
+        sequence = source[source.index("def _apply_laravel") : source.index("def apply(")]
+        self.assertLess(
+            sequence.index("if not fence(document, identifier):"),
+            sequence.index('stage("environment")'),
+        )
+        self.assertEqual(sequence.count("if not restore(document, identifier):"), 2)
+        on_verify = sequence.index('stage("verify")')
+        on_restore = sequence.index("if not restore(document, identifier):")
+        off_verify = sequence.index('stage("verify")', on_verify + 1)
+        off_restore = sequence.index("if not restore(document, identifier):", on_restore + 1)
+        self.assertLess(on_verify, on_restore)
+        self.assertLess(off_verify, off_restore)
 
     def test_the_laravel_body_orders_the_environment_before_workers_and_stop(self) -> None:
         source = instance.BODY_SOURCE

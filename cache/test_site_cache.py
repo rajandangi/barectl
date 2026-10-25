@@ -422,6 +422,20 @@ class ObjectCacheDocumentTests(SimpleTestCase):
             )
 
 
+class ObjectCacheFenceTests(SimpleTestCase):
+    def test_the_wordpress_sequence_fences_before_its_first_change_and_restores_after(self) -> None:
+        source = instance.BODY_SOURCE
+        sequence = source[source.index("def apply(") : source.index('if __name__ == "__main__":')]
+        self.assertLess(
+            sequence.index("if not fence(document, identifier):"),
+            sequence.index('stage("instance")'),
+        )
+        verify = sequence.index('stage("verify")')
+        restore = sequence.index("if not restore(document, identifier):")
+        self.assertLess(verify, restore)
+        self.assertLess(restore, sequence.index('result("succeeded")'))
+
+
 class ObjectCacheConventionTests(SimpleTestCase):
     def test_the_wordpress_connection_is_the_instance_socket(self) -> None:
         from wordpress import convention as wordpress_convention
