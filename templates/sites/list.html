@@ -1,31 +1,48 @@
 {% extends "base.html" %}
 {% block title %}Sites · Barectl{% endblock %}
 {% block content %}
-  <h1>Sites</h1>
-  <p class="barectl-note">Recorded observations from this device. Collection times and any later failed or pending checks are shown per server. Opening this page does not contact servers.</p>
-  {% for row in rows %}
-    {% with state=row.state sites=row.sites %}
-      <section class="barectl-card"
-               aria-labelledby="sites-server-{{ state.server.pk }}">
-        <h2 id="sites-server-{{ state.server.pk }}"><a href="{% url 'server_sites' state.server.pk %}">{{ state.server.name }}</a></h2>
-        {% if state.snapshot %}
-          {% include "servers/_snapshot_freshness.html" with snapshot=state.snapshot source=None %}
-        {% endif %}
-        {% if sites.observation.observed %}
-          <ul class="usa-list">
-            {% for site in sites.sites %}
-              <li>
-                {% if site.identifier %}<a href="{% url 'site_detail' state.server.pk site.identifier %}">{{ site.domains|join:", "|default:site.identifier }}</a>{% else %}{{ site.file }}{% endif %}
-                {{ site.verdict }}
-              </li>
-        {% empty %}<li>No sites in this observation.</li>{% endfor %}
-          </ul>
-        {% else %}
-          <p>No complete site observation is available. This does not confirm that sites are absent.</p>
-          {% if sites.observation.warning %}<p class="barectl-note">{{ sites.observation.warning }}</p>{% endif %}
-        {% endif %}
-        {% if can_create_sites %}<p><a href="{% url 'server_sites' state.server.pk %}{% if state.snapshot.collected.standing %}#http-site-create{% else %}#site-plans{% endif %}">Create a site on {{ state.server.name }}</a></p>{% endif %}
-      </section>
-    {% endwith %}
-{% empty %}<p>No servers have been registered.</p>{% endfor %}
+  <div class="barectl-page-heading">
+    <div>
+      <h1>Sites</h1>
+    </div>
+  </div>
+  {% if not rows %}
+    <section class="barectl-card" aria-labelledby="sites-empty-heading">
+      <h2 id="sites-empty-heading">Add your first server</h2>
+      <p>
+        Barectl needs a fresh Ubuntu 26.04 server you can reach over SSH as root, or as a
+        user who can run commands without a password. Sites come after a server is ready.
+      </p>
+      {% if perms.servers.add_server %}
+        <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
+      {% else %}
+        <p class="barectl-note">An operator with the add-server permission can add one.</p>
+      {% endif %}
+    </section>
+  {% else %}
+    {% for row in rows %}
+      {% with state=row.state sites=row.sites %}
+        <section class="barectl-card"
+                 aria-labelledby="sites-server-{{ state.server.pk }}">
+          <h2 id="sites-server-{{ state.server.pk }}"><a href="{% url 'server_sites' state.server.pk %}">{{ state.server.name }}</a></h2>
+          {% if state.snapshot %}
+            {% include "servers/_snapshot_freshness.html" with snapshot=state.snapshot source=None %}
+          {% endif %}
+          {% if sites.observation.observed %}
+            <ul class="usa-list">
+              {% for site in sites.sites %}
+                <li>
+                  {% if site.identifier %}<a href="{% url 'site_detail' state.server.pk site.identifier %}">{{ site.domains|join:", "|default:site.identifier }}</a>{% else %}{{ site.file }}{% endif %}
+                  {{ site.verdict }}
+                </li>
+              {% empty %}<li>No sites in this observation.</li>{% endfor %}
+            </ul>
+          {% else %}
+            <p>No complete site observation is available. This does not confirm that sites are absent.</p>
+            {% if sites.observation.warning %}<p class="barectl-note">{{ sites.observation.warning }}</p>{% endif %}
+          {% endif %}
+        </section>
+      {% endwith %}
+    {% empty %}<p>No servers have been registered.</p>{% endfor %}
+  {% endif %}
 {% endblock %}

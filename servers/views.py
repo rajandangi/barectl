@@ -27,6 +27,7 @@ from sites.forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
 from sites.recognition import site_files, site_pools
 
 from .attention import needs_attention
+from .page import next_action, status_line
 from .discovery_state import (
     AttemptView,
     DiscoveryState,
@@ -129,11 +130,9 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     return render(request, "servers/form.html", context)
 
 
-Section = Literal["overview", "sites", "stack", "setup", "activity", "advanced", "settings"]
+Section = Literal["sites", "setup", "activity", "advanced", "settings"]
 _SECTIONS: dict[Section, str] = {
-    "overview": "Overview",
     "sites": "Sites",
-    "stack": "Stack",
     "setup": "Setup",
     "activity": "Activity",
     "advanced": "Advanced",
@@ -142,9 +141,8 @@ _SECTIONS: dict[Section, str] = {
 
 SiteSection = Literal[
     "overview",
-    "runtime",
     "activity",
-    "advanced",
+    "logs",
     "deployments",
     "database",
     "wordpress",
@@ -154,22 +152,35 @@ SiteSection = Literal[
 
 
 def _discovery_section(request: HttpRequest) -> Section:
-    return "advanced" if request.GET.get("section") == "advanced" else "overview"
+    return "advanced" if request.GET.get("section") == "advanced" else "sites"
 
 
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
-    context: dict[str, object] = {
-        "server": state.server,
-        "state": state,
-        "Status": Status,
-        "host_challenge": pending_challenge(state.server),
-        "attention": needs_attention(
+    attention = (
+        needs_attention(
             state.server.pk,
             state.snapshot.collected,
             can_set_up=state.can_prepare_changes and request.user.has_perms(PREPARE_PERMISSIONS),
         )
         if state.snapshot
-        else (),
+        else ()
+    )
+    challenge = pending_challenge(state.server)
+    can_set_up = state.can_prepare_changes and request.user.has_perms(PREPARE_PERMISSIONS)
+    context: dict[str, object] = {
+        "server": state.server,
+        "state": state,
+        "Status": Status,
+        "host_challenge": challenge,
+        "attention": attention,
+        "status_line": status_line(state),
+        "next_action": next_action(
+            state,
+            host_challenge=challenge is not None,
+            can_set_up=can_set_up,
+            can_view_sites=request.user.has_perm(VIEW_SITES),
+            attention=attention,
+        ),
     }
     if request.user.has_perm(VIEW_SITES):
         context["show_sites"] = True
@@ -248,24 +259,24 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 @require_GET
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
-def server_detail(request: HttpRequest, pk: int, section: Section = "overview") -> HttpResponse:
+def server_detail(request: HttpRequest, pk: int, section: Section = "sites") -> HttpResponse:
     return server_page(request, pk, section)
 
 
-def _overview_section(
+def _sites_section(
     request: HttpRequest, state: DiscoveryState, section: Section, context: dict[str, object]
 ) -> None:
-    if section == "overview":
+    if section == "sites":
         from sites.views import creation_url
 
         context["site_creation_url"] = creation_url(request.user, state.server.pk)
 
 
-def _stack_section(
+def _advanced_section(
     request: HttpRequest, state: DiscoveryState, section: Section, context: dict[str, object]
 ) -> None:
-    """The Stack section, read from the catalog lock and the last observation alone."""
-    if section == "stack":
+    """Advanced holds the Stack and the stored evidence, read from the last observation."""
+    if section == "advanced":
         snapshot = state.snapshot
         requested_tab = request.GET.get("tab", "web")
         stack_tab = (
@@ -337,9 +348,9 @@ def server_page(
     context = _discovery_context(request, state)
     context.update(history=state.history, section=section, section_title=_SECTIONS[section])
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
-        raise PermissionDenied
-    _overview_section(request, state, section, context)
-    _stack_section(request, state, section, context)
+        context["sites_forbidden"] = True
+    _sites_section(request, state, section, context)
+    _advanced_section(request, state, section, context)
     if section == "settings":
         from bootstrap.certificate_email_views import context_for_server
         from databases import engine as database_engine
@@ -361,6 +372,8 @@ def server_page(
             PREPARE_PERMISSIONS
         )
         context["foundation_journey"] = foundation_setup.project(state)
+    if section == "advanced":
+        context["presented"] = state.presentation
     standing = state.snapshot.collected.standing if state.snapshot else None
     target_host = (
         standing is not None and standing.standing != Standing.NOT_MANAGEABLE
@@ -394,13 +407,13 @@ def _target_site_context(
     site = page.site
     target = site is not None and site.file.startswith("/etc/caddy/sites/")
     if not target:
-        if section in ("runtime", "wordpress", "environment", "settings"):
+        if section in ("settings", "wordpress", "environment"):
             raise Http404
         return
     if section not in {
         "overview",
-        "runtime",
         "activity",
+        "logs",
         "deployments",
         "database",
         "wordpress",
@@ -491,6 +504,9 @@ def _site_overview_context(
     context["site_primary"] = primary
     context["site_https"] = site.https
     context["site_readiness_path"] = site.readiness
+    context["site_upload_path"] = f"/var/www/{site.identifier}/current/public"
+    context["site_user"] = f"s{site.identifier}"
+    context["site_checked_at"] = state.snapshot.collected_at if state.snapshot else None
     if context.get("has_wordpress"):
         context["site_wordpress_admin"] = f"{scheme}://{primary}/wp-admin/"
     if not context.get("has_laravel"):
@@ -538,11 +554,13 @@ def site_page_response(
     target_site = page.site is not None and page.site.file.startswith("/etc/caddy/sites/")
     context["target_site"] = target_site
     _target_site_context(page, state, section, context)
-    if target_site and section == "runtime":
+    if target_site and section == "settings":
+        from sites.domains_views import context_for_site as domains_context_for_site
         from sites.node_views import context_for_site
         from sites.php_views import context_for_site as php_context_for_site
         from sites.pool_views import context_for_site as pool_context_for_site
         from sites.readiness_views import context_for_site as readiness_context_for_site
+        from sites.remove_views import context_for_site as remove_context_for_site
 
         context.update(context_for_site(server, identifier, request.user))
         context.update(php_context_for_site(server, identifier, request.user))
@@ -555,19 +573,14 @@ def site_page_response(
                 has_releases=bool(context.get("has_releases")),
             )
         )
+        context.update(domains_context_for_site(server, identifier, request.user))
+        context.update(remove_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
     if target_site and section == "database":
         from databases.site_views import context_for_site as database_context_for_site
 
         context.update(database_context_for_site(server, identifier, request.user))
-    if target_site and section == "settings":
-        from sites.domains_views import context_for_site as domains_context_for_site
-        from sites.remove_views import context_for_site as remove_context_for_site
-
-        context.update(domains_context_for_site(server, identifier, request.user))
-        context.update(remove_context_for_site(server, identifier, request.user))
-        context["blocking"] = blocking_operation(state.other_operation)
     if target_site and section == "overview":
         _site_overview_context(request, server, state, page, identifier, context)
     if target_site and section == "deployments":
@@ -603,6 +616,23 @@ def site_page_response(
 def activity(request: HttpRequest) -> HttpResponse:
     rows: list[AttemptView] = list(activity_rows())
     return render(request, "servers/activity.html", {"attempts": rows})
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required("servers.view_server", raise_exception=True)
+def server_status(request: HttpRequest, pk: int) -> HttpResponse:
+    """The server page's status line, polled while a connection check runs."""
+    server = get_object_or_404(Server, pk=pk)
+    if not _is_fragment_request(request):
+        return redirect("server_detail", pk=pk)
+    state = server_state(server)
+    return render(
+        request,
+        "servers/_status_line.html",
+        {"server": server, "state": state, "status_line": status_line(state)},
+    )
 
 
 @never_cache
@@ -709,6 +739,6 @@ def server_confirm_host(request: HttpRequest, pk: int) -> HttpResponse:
         )
     except ConfirmationRefused as refusal:
         messages.error(request, str(refusal))
-        return server_page(request, pk, "overview", status=409)
+        return server_page(request, pk, "settings", status=409)
     messages.success(request, "Host fingerprint confirmed. Barectl queued a connection check.")
     return redirect("server_detail", pk=pk)

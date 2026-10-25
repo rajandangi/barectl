@@ -1,8 +1,10 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
+from django.views.generic import RedirectView
 
 from bootstrap.certificate_email_views import prepare_certificate_email
 from dashboard.forms import SignInForm
+from dashboard.settings_views import settings_page
 from databases.site_views import prepare_site_database
 from databases.views import database_prepare
 from laravel.settings_views import prepare_environment
@@ -26,6 +28,7 @@ from servers.views import (
     server_edit,
     server_list,
     server_remove,
+    server_status,
     server_verify,
     site_detail,
 )
@@ -74,6 +77,7 @@ urlpatterns = [
     path("sites/", site_list, name="sites"),
     path("", server_list, name="servers"),
     path("activity/", activity, name="activity"),
+    path("settings/", settings_page, name="settings"),
     path("servers/add/", server_add, name="server_add"),
     path("servers/<int:pk>/", server_detail, name="server_detail"),
     path("servers/<int:pk>/setup/", server_detail, {"section": "setup"}, name="server_setup"),
@@ -84,7 +88,11 @@ urlpatterns = [
         "servers/<int:pk>/advanced/", server_detail, {"section": "advanced"}, name="server_advanced"
     ),
     path("servers/<int:pk>/sites/", server_detail, {"section": "sites"}, name="server_sites"),
-    path("servers/<int:pk>/stack/", server_detail, {"section": "stack"}, name="server_stack"),
+    path(
+        "servers/<int:pk>/stack/",
+        RedirectView.as_view(pattern_name="server_advanced", permanent=False),
+        name="server_stack",
+    ),
     path(
         "servers/<int:pk>/settings/",
         server_detail,
@@ -103,6 +111,7 @@ urlpatterns = [
     ),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),
+    path("servers/<int:pk>/status/", server_status, name="server_status"),
     path("servers/<int:pk>/confirm-host/", server_confirm_host, name="server_confirm_host"),
     path("servers/<int:pk>/verify/", server_verify, name="server_verify"),
     path("servers/<int:pk>/remove/", server_remove, name="server_remove"),
@@ -122,16 +131,21 @@ urlpatterns = [
         name="server_wordpress_site_prepare",
     ),
     path(
-        "servers/<int:pk>/sites/<str:identifier>/overview/",
+        "servers/<int:pk>/sites/<str:identifier>/",
         site_detail,
         {"section": "overview"},
         name="site_detail",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/runtime/",
-        site_detail,
-        {"section": "runtime"},
+        RedirectView.as_view(pattern_name="site_settings", permanent=False),
         name="site_runtime",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/logs/",
+        site_detail,
+        {"section": "logs"},
+        name="site_logs",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/deployments/",
@@ -221,8 +235,7 @@ urlpatterns = [
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/advanced/",
-        site_detail,
-        {"section": "advanced"},
+        RedirectView.as_view(pattern_name="site_logs", permanent=False),
         name="site_advanced",
     ),
     path("servers/<int:pk>/changes/", server_changes, name="server_changes"),

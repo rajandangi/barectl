@@ -76,7 +76,7 @@ def _sites(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:
         subject_url = reverse("site_detail", args=(server, site.identifier))
         if finding in (PHP_TRANSITION_INCOMPLETE, NODE_INTERRUPTED):
             action = "Finish the runtime change"
-            action_url = reverse("site_runtime", args=(server, site.identifier))
+            action_url = reverse("site_settings", args=(server, site.identifier))
         else:
             action, action_url = ADMINISTRATION, ""
         items.append(Attention("Site", site.identifier, finding, action, action_url, subject_url))
@@ -84,7 +84,7 @@ def _sites(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:
 
 
 def _runtimes(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:
-    php = reverse("server_stack", args=(server,)) + "?tab=php"
+    php = reverse("server_advanced", args=(server,)) + "?tab=php"
     return tuple(
         Attention("PHP runtime", runtime.entry, runtime.problem, "Inspect PHP runtimes", php)
         for runtime in collected.runtimes

@@ -1,0 +1,29 @@
+{% include "sites/_site_advanced.html" %}
+{% include "sites/_site_runtime_diagnostics.html" %}
+<section class="barectl-card" aria-labelledby="site-native-heading">
+  <h2 id="site-native-heading">Native configuration</h2>
+  <dl class="barectl-facts">
+    <div>
+      <dt>Site file</dt>
+      <dd>
+        {% if site.file %}<code>{{ site.file }}</code>{% else %}Not observed{% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Site user</dt>
+      <dd>
+        <code>{{ site_user }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Public folder</dt>
+      <dd>
+        <code>{{ site_upload_path }}</code>
+      </dd>
+    </div>
+  </dl>
+  <p class="barectl-note">
+    Pools, private admission and master state for every site are on the server's
+    <a href="{% url 'server_advanced' server.pk %}?tab=php">Advanced</a> page.
+  </p>
+</section>

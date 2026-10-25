@@ -404,3 +404,30 @@ body {
 .barectl-section-navigation .usa-button-group {
   flex-flow: row wrap;
 }
+
+// A resource's sections sit in a USWDS side navigation beside the content on wide
+// screens and stack above it on narrow ones (docs/dashboard-workflows.md).
+.barectl-layout {
+  display: grid;
+  gap: units(3);
+
+  @include at-media("tablet") {
+    grid-template-columns: units("card") minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.barectl-layout__nav {
+  @include at-media("tablet") {
+    position: sticky;
+    top: units(2);
+  }
+}
+
+.barectl-layout__content {
+  min-width: 0;
+}
+
+.barectl-break-all {
+  overflow-wrap: anywhere;
+}

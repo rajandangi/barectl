@@ -1,0 +1,11 @@
+{% if next_action %}
+  <div class="usa-alert usa-alert--info" id="next-action">
+    <div class="usa-alert__body">
+      <h2 class="usa-alert__heading">{{ next_action.label }}</h2>
+      {% if next_action.note %}<p class="usa-alert__text">{{ next_action.note }}</p>{% endif %}
+      {% if next_action.url %}
+        <a class="usa-button" href="{{ next_action.url }}">{{ next_action.label }}</a>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

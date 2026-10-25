@@ -1,13 +1,60 @@
-<section class="barectl-card" aria-labelledby="site-overview-heading">
-  <h2 id="site-overview-heading">Observed site</h2>
-  {% if site_address %}
+{% if site %}
+  <section class="barectl-card" aria-labelledby="site-overview-heading">
+    <h2 id="site-overview-heading">Site</h2>
+    {% if site_address %}
+      <p>
+        <a href="{{ site_address }}">{{ site_address }}</a>
+        {% if site_https %}
+          over HTTPS
+        {% else %}
+          over HTTP
+        {% endif %}
+      </p>
+    {% endif %}
+    <dl class="barectl-facts">
+      <div>
+        <dt>Address</dt>
+        <dd>
+          {% if site_address %}<a href="{{ site_address }}">{{ site_primary }}</a>{% else %}Not observed{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Platform</dt>
+        <dd>
+          {% if has_wordpress %}
+            WordPress
+          {% elif has_laravel %}
+            Laravel
+          {% else %}
+            PHP
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>PHP version</dt>
+        <dd>
+          {{ site.php_version|default:"Not observed" }}
+        </dd>
+      </div>
+      <div>
+        <dt>Status</dt>
+        <dd>
+          {{ site.verdict }}
+        </dd>
+      </div>
+      <div>
+        <dt>Last checked</dt>
+        <dd>
+          {% if site_checked_at %}
+            <time datetime="{{ site_checked_at|date:'c' }}">{{ site_checked_at|date:'M j, Y, H:i:s T' }}</time>
+          {% else %}
+            Not checked yet
+          {% endif %}
+        </dd>
+      </div>
+    </dl>
     <p>
-      <a href="{{ site_address }}">{{ site_address }}</a>
-      {% if site_https %}
-        over HTTPS
-      {% else %}
-        over HTTP only
-      {% endif %}
+      Upload your code to <code>{{ site_upload_path }}</code> as <code>{{ site_user }}</code>.
     </p>
     {% if has_wordpress and site_wordpress_admin %}
       <p>
@@ -44,24 +91,9 @@
         Barectl checks <code>{{ site_readiness_path }}</code> after a change.
       </p>
     {% endif %}
-  {% endif %}
-  {% include "servers/_snapshot_freshness.html" with source=None %}
-  <p class="barectl-note">
-    {{ site.summary }} This describes the observed configuration, not live service or application health.
-  </p>
-  <dl class="barectl-facts">
-    {% for fact in site.facts %}
-      <div>
-        <dt>{{ fact.label }}</dt>
-        <dd>
-          {{ fact.text }}
-        </dd>
-      </div>
-    {% endfor %}
-  </dl>
-  {% if not target_site %}
+    {% include "servers/_snapshot_freshness.html" with source=None %}
     <p class="barectl-note">
-      Native resources, read commands and fingerprints are under <a href="{% url 'site_advanced' server.pk identifier %}">Advanced</a>.
+      {{ site.summary }} This describes the observed configuration, not live service or application health.
     </p>
-  {% endif %}
-</section>
+  </section>
+{% endif %}
