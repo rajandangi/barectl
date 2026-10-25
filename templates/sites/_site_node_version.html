@@ -1,0 +1,63 @@
+<section class="barectl-card" aria-labelledby="site-node-version-heading">
+  <h2 id="site-node-version-heading">Node.js version</h2>
+  <p>
+    Node.js version:
+    {% if site_node_current_label %}
+      <strong>{{ site_node_current_label }}</strong>
+    {% else %}
+      not selected
+    {% endif %}
+  </p>
+  {% if site_node_incomplete %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          Changing this site's Node.js version did not finish. Choose the version you want
+          to keep and confirm a fresh change to finish or reverse it.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+  {% if site_node_can_prepare %}
+    {% if request.GET.change == "node" or site_node_incomplete %}
+      <form class="usa-form"
+            id="change-node"
+            method="post"
+            action="{% url 'site_node_prepare' server.pk identifier %}">
+        {% csrf_token %}
+        <fieldset class="usa-fieldset">
+          <legend class="usa-legend">
+            {% if site_node_incomplete %}Finish or reverse the Node.js change{% else %}Change Node.js version{% endif %}
+          </legend>
+          {% for choice in site_node_choices %}
+            <div class="usa-radio">
+              <input class="usa-radio__input usa-radio__input--tile"
+                     type="radio"
+                     name="selection"
+                     id="site-node-{{ choice.entry }}"
+                     value="{{ choice.entry }}"
+                     {% if request.GET.selection == choice.entry %}checked{% endif %}>
+              <label class="usa-radio__label" for="site-node-{{ choice.entry }}">
+                {{ choice.label }}
+                {% if choice.download %}<span class="barectl-radio__description">{{ choice.download }}</span>{% endif %}
+              </label>
+            </div>
+          {% endfor %}
+        </fieldset>
+        <button class="usa-button" type="submit">Continue</button>
+      </form>
+    {% else %}
+      <p>
+        <a class="usa-button usa-button--secondary"
+           href="?change=node#change-node">Change Node.js version</a>
+      </p>
+    {% endif %}
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Change the Node.js version after it finishes." %}
+  {% else %}
+    <p class="barectl-note">
+      Changing the Node.js version is unavailable until a fresh check confirms this site is
+      managed.
+    </p>
+  {% endif %}
+</section>

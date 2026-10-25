@@ -84,7 +84,7 @@ class RecordedJudgeByShapePageTests(ControllerConfigTestCase):
         for identifier, offered in (("s9alpha", True), ("s9gamma", True), ("s9beta", False)):
             with self.subTest(site=identifier):
                 html = self.page(f"sites/{identifier}/settings/")
-                self.assertEqual("Select site PHP runtime</button>" in html, offered)
+                self.assertEqual("Change PHP version</a>" in html, offered)
 
 
 class RecordedLockBusyRunTests(ChangeTestCase):

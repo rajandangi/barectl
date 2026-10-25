@@ -72,7 +72,7 @@ def prepare_pool(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
         messages.error(
             request, "Choose PHP settings within the supported bounds from a current observation."
         )
-        return redirect("site_runtime", pk=pk, identifier=identifier)
+        return redirect("site_settings", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
             server,
@@ -86,10 +86,10 @@ def prepare_pool(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
         )
     except OperationRefused, ValueError:
         messages.error(request, "The saved connection changed. Refresh and prepare a new review.")
-        return redirect("site_runtime", pk=pk, identifier=identifier)
+        return redirect("site_settings", pk=pk, identifier=identifier)
     except Server.DoesNotExist:
         raise Http404 from None
     if queued is None:
         messages.error(request, "Wait for the current operation before preparing this review.")
-        return redirect("site_runtime", pk=pk, identifier=identifier)
+        return redirect("site_settings", pk=pk, identifier=identifier)
     return redirect("change_detail", operation_id=queued.pk)

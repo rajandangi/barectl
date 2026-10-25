@@ -1,5 +1,3 @@
-{% include "sites/_php_runtime.html" %}
-{% include "sites/_php_settings.html" %}
 <section class="barectl-card" aria-labelledby="site-readiness-heading">
   <h2 id="site-readiness-heading">Readiness check</h2>
   <p>
@@ -24,26 +22,10 @@
           {{ site_readiness_form.readiness.help_text }}
         </div>
         {{ site_readiness_form.readiness }}
-        <button class="usa-button" type="submit">Review readiness path</button>
+        <button class="usa-button" type="submit">Change readiness path</button>
       </form>
     {% elif blocking %}
-      {% include "operations/_blocking_operation.html" with after="Prepare the readiness path after it finishes." %}
+      {% include "operations/_blocking_operation.html" with after="Change the readiness path after it finishes." %}
     {% endif %}
-  {% endif %}
-</section>
-<section class="barectl-card" aria-labelledby="site-node-heading">
-  <h2 id="site-node-heading">Node runtime</h2>
-  <p>Recorded selection: {{ site_node_selection|default:"No site Node runtime selected" }}.</p>
-  {% if site_node_can_prepare %}
-    <form method="post"
-          action="{% url 'site_node_prepare' server.pk identifier %}">
-      {% csrf_token %}
-      <label class="usa-label"
-             for="{{ site_node_form.selection.id_for_label }}">Node runtime</label>
-      {{ site_node_form.selection }}
-      <button class="usa-button" type="submit">Select site Node runtime</button>
-    </form>
-  {% elif blocking %}
-    {% include "operations/_blocking_operation.html" with after="Prepare the Node selection after it finishes." %}
   {% endif %}
 </section>

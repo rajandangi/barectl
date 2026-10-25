@@ -4,8 +4,16 @@ from django import forms
 
 
 class SitePhpForm(forms.Form):
+    """The PHP version the site's Settings switches to, checked against the offered list."""
+
     selection = forms.ChoiceField(
-        label="PHP runtime", choices=(), widget=forms.Select(attrs={"class": "usa-select"})
+        label="PHP version",
+        choices=(),
+        widget=forms.HiddenInput,
+        error_messages={
+            "required": "Choose another PHP version.",
+            "invalid_choice": "Choose another PHP version from the current observation.",
+        },
     )
 
     def __init__(
@@ -18,7 +26,4 @@ class SitePhpForm(forms.Form):
         super().__init__(data, initial={"selection": selected}, auto_id="id_site_php_%s")
         field = self.fields["selection"]
         if isinstance(field, forms.ChoiceField):
-            field.choices = [
-                ("", "Choose an installed PHP runtime"),
-                *((entry, f"PHP {entry[3]}.{entry[4]} ({entry})") for entry in choices),
-            ]
+            field.choices = [(entry, entry) for entry in choices]
