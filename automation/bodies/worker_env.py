@@ -9,10 +9,9 @@ current job within its own stop budget.
 import subprocess
 from typing import Final
 
-from automation.convention import service_name
+from automation.convention import ENABLED_STATES, service_name
 from automation.workers import WORKER_ROLES
 
-ENABLED_STATES: Final = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
 RESTART_TIMEOUT: Final = 180
 
 

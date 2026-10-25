@@ -255,12 +255,7 @@ def start_and_wait(identifier: str, role: str, budget_seconds: int) -> str:
 
 def timer_ready(identifier: str, role: str) -> bool:
     timer = timer_name(identifier, role)
-    return active_state(timer) == "active" and unit_file_state(timer) in (
-        "enabled",
-        "enabled-runtime",
-        "static",
-        "indirect",
-    )
+    return active_state(timer) == "active" and unit_file_state(timer) in ENABLED_STATES
 
 
 def slice_events(name: str) -> pathlib.Path | None:
@@ -451,12 +446,7 @@ def restore(document: object, identifier: str) -> bool:
 
 def _active(name: str) -> bool:
     if name.endswith(".timer"):
-        return active_state(name) == "active" and unit_file_state(name) in (
-            "enabled",
-            "enabled-runtime",
-            "static",
-            "indirect",
-        )
+        return active_state(name) == "active" and unit_file_state(name) in ENABLED_STATES
     return active_state(name) in ("active", "activating")
 
 
