@@ -36,6 +36,8 @@ class AutomationValidators(ScenarioTestCase):
         )
         self.native(f"install -d -m 0755 /var/www/{IDENTIFIER}/current /var/www/{IDENTIFIER}/bin")
         self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/bin/wp")
+        self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/bin/php")
+        self.native(f"install -m 0755 /bin/true /var/www/{IDENTIFIER}/current/artisan")
         self.addCleanup(self.native, f"rm -rf /var/www/{IDENTIFIER}")
         self.native(f"rm -rf {SCRATCH} && install -d -m 0755 {SCRATCH}")
         self.addCleanup(self.native, f"rm -rf {SCRATCH}")
@@ -61,6 +63,25 @@ class AutomationValidators(ScenarioTestCase):
             paths = [
                 self.write(shell, name, convention.render(IDENTIFIER, convention.ROLE_WPCRON, kind))
                 for kind, name in self.rendered()
+            ]
+        self.native(
+            "systemd-analyze verify " + " ".join(shlex.quote(path) for path in paths) + " 2>&1"
+        )
+
+    def test_the_rendered_laravel_scheduler_loads_in_systemd(self) -> None:
+        self.prepare()
+        with self.shell() as shell:
+            paths = [
+                self.write(
+                    shell,
+                    name,
+                    convention.render(IDENTIFIER, convention.ROLE_SCHEDULE, kind),
+                )
+                for kind, name in (
+                    ("slice", convention.slice_name(IDENTIFIER)),
+                    ("service", convention.service_name(IDENTIFIER, convention.ROLE_SCHEDULE)),
+                    ("timer", convention.timer_name(IDENTIFIER, convention.ROLE_SCHEDULE)),
+                )
             ]
         self.native(
             "systemd-analyze verify " + " ".join(shlex.quote(path) for path in paths) + " 2>&1"
