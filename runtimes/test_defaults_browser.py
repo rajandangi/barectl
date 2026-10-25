@@ -43,9 +43,7 @@ class DefaultCommandBrowserTests(BrowserTestCase):
         button = self.page.get_by_role("button", name="Review PHP default", exact=True)
         button.focus()
         self.page.keyboard.press("Enter")
-        expect(
-            self.page.get_by_role("heading", name="Set default PHP: review", level=1)
-        ).to_be_visible()
+        expect(self.page.get_by_role("heading", name="Set default PHP", level=1)).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.inputs, {"version": 1, "selection": "php84"})
         with mock.patch(
@@ -57,10 +55,10 @@ class DefaultCommandBrowserTests(BrowserTestCase):
         review = ChangeReview.objects.get(preparation=preparation)
         self.assertTrue(review.eligible, review.document)
         self.assertEqual(review.consent, Consent.SHARED)
-        expect(self.page.get_by_role("button", name="Apply review", exact=False)).to_have_count(0)
+        expect(self.page.get_by_role("button", name="Set default PHP", exact=True)).to_have_count(0)
         self.user.user_permissions.add(Permission.objects.get(codename="change_shared"))
         self.page.reload()
-        expect(self.page.get_by_role("button", name="Apply review", exact=False)).to_be_visible()
+        expect(self.page.get_by_role("button", name="Set default PHP", exact=True)).to_be_visible()
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/stack/?tab=defaults")
         expect(

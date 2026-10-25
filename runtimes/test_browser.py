@@ -47,7 +47,7 @@ class RuntimeCatalogBrowserTests(BrowserTestCase):
         button.focus()
         self.page.keyboard.press("Enter")
         expect(
-            self.page.get_by_role("heading", name="Add runtime: review", level=1)
+            self.page.get_by_role("heading", name="Add PHP 8.4 to Production", level=1)
         ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.inputs, {"version": 1, "selection": "php84"})
@@ -59,8 +59,8 @@ class RuntimeCatalogBrowserTests(BrowserTestCase):
         self.page.reload()
         review = ChangeReview.objects.get(preparation=preparation)
         self.assertTrue(review.no_changes, review.document)
-        expect(self.page.get_by_text("php84", exact=True).first).to_be_visible()
-        expect(self.page.get_by_role("button", name="Apply review", exact=False)).to_have_count(0)
+        expect(self.page.get_by_text("Barectl found nothing to change.")).to_be_visible()
+        expect(self.page.get_by_role("button", name="Add PHP 8.4", exact=True)).to_have_count(0)
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.reload()
         self.assertEqual(
@@ -102,9 +102,7 @@ class RuntimeCatalogBrowserTests(BrowserTestCase):
         expect(button).to_be_visible()
         button.focus()
         self.page.keyboard.press("Enter")
-        expect(
-            self.page.get_by_role("heading", name="Remove runtime: review", level=1)
-        ).to_be_visible()
+        expect(self.page.get_by_role("heading", name="Remove runtime", level=1)).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.inputs, {"version": 1, "selection": "php84"})
         self.assertEqual(preparation.kind_slug, "remove_runtime")
