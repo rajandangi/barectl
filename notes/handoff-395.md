@@ -51,7 +51,7 @@
 | Command | Result |
 | --- | --- |
 | `uv run --env-file .env python manage.py test --exclude-tag browser --exclude-tag scenario --parallel 8` | see the final run in "Commands" below |
-| `uv run --env-file .env mypy` | Success, 443 source files |
+| `uv run --env-file .env mypy` | Success, 461 source files |
 | `uv run ruff check .` / `uv run ruff format --check .` | Pass |
 | `uv run vulture` | Pass |
 | `uv run djlint templates --lint --check` | Pass (79 files) |
@@ -68,19 +68,19 @@ New fast tests:
 
 | Command | Result |
 | --- | --- |
-| `uv run --env-file .env python manage.py test --exclude-tag browser --exclude-tag scenario --parallel 8` | **1298 tests, OK, 21.9 s** (90 s target) |
-| `uv run --env-file .env mypy` | Success, 443 source files |
-| `uv run ruff check .` / `uv run ruff format --check .` | All checks passed / 537 files formatted |
+| `uv run --env-file .env python manage.py test --exclude-tag browser --exclude-tag scenario --parallel 8` | **1402 tests, OK, 22.0 s** (90 s target), merged tree |
+| `uv run --env-file .env mypy` | Success, 461 source files |
+| `uv run ruff check .` / `uv run ruff format --check .` | All checks passed / 555 files formatted |
 | `uv run vulture` | Pass |
-| `uv run djlint templates --lint --check` | 79 files, 0 errors |
+| `uv run djlint templates --lint --check` | 81 files, 0 errors |
 | `uv run --env-file .env python manage.py check` / `makemigrations --check --dry-run` | Pass / no changes |
 | `docker/disposable-server/run-scenarios.sh --env-file .env -- --record fence-wordpress-26.04` | 5 tests, 92 s, OK; new transcript `fence-wordpress-26.04` |
-| `docker/disposable-server/run-scenarios.sh --env-file .env -- --record <state>` for every other state (24) | all 24 recorded OK on the frozen tree |
+| `docker/disposable-server/run-scenarios.sh --env-file .env -- --record <state>` for every other state (24) | all 28 recorded OK on the merged tree |
 | `docker/disposable-server/run-scenarios.sh --env-file .env -- --validators` | 3 of 5 classes: **pre-existing** failure on the integration tip too (`ddcc065` fails the same 4 tests); each failing class passes alone, and `AutomationValidators`, `LogRotationValidators` and `RuntimeDefaultValidators` pass in the combined stage |
 
 ## What is not run, and risks
 
-1. **arm64/amd64 split.** Everything here ran on this host (arm64, Ubuntu 26.04 containers). CI's `native` shard runs the same C3 class on x86_64; `disposable/shard_times.json` records 95.0 s for it (local 92 s).
+1. **arm64/amd64 split.** Everything here ran on this host (arm64, Ubuntu 26.04 containers). CI's `native` shard runs the same C3 class on x86_64; `disposable/shard_times.json` records 95.0 s for it (local 90–92 s).
 2. **Browser suite not run locally.** `automation.test_browser` and `dashboard.test_browser` still need CI on this machine; the confirm-screen block uses only existing markup patterns and no new activations.
 3. **The runtime-mask limitation is version-specific.** The drop-in exists because systemd 259 ignores a runtime mask for a loaded unit. If a later systemd applies the mask immediately, the drop-in is redundant but harmless; `docs/automation.md#fencing-site-changes` and the ADR say why it is there.
 4. **Fencing wider than the enumerated callers.** `FENCING` is the specification's list. Readiness, Domains, the site database binding and the cache client do not fence; they change no code, schema, runtime or file a scheduled run reads. If a later ticket decides otherwise, add its slug and wire its body — the plan and the helpers are generic.

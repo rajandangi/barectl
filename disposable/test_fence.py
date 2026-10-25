@@ -136,7 +136,14 @@ class PHPFence(WordPressCreateCase):
     def test_3_a_fence_that_cannot_drain_refuses_with_nothing_changed(self) -> None:
         timer = timer_name(IDENTIFIER, "wpcron")
         runtime = self.wrapper_runtime()
-        self.addCleanup(self.native, f"systemctl kill -s SIGKILL {BLOCKER} || true")
+        # The blocker survives SIGTERM by design; kill it and unload its transient unit so
+        # the site's slice can unload too.
+        self.addCleanup(
+            self.native,
+            f"systemctl kill -s SIGKILL {BLOCKER} || true; "
+            f"systemctl stop {BLOCKER} || true; "
+            f"systemctl reset-failed {BLOCKER} || true",
+        )
         # A process that survives SIGTERM keeps the slice populated past the stop budget.
         self.native(
             "systemd-run "
