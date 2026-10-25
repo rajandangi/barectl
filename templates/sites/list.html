@@ -11,7 +11,7 @@
       <h2 id="sites-empty-heading">Add your first server</h2>
       <p>
         Barectl needs a fresh Ubuntu 26.04 server you can reach over SSH as root, or as a
-        user who can run commands without a password. Sites come after a server is ready.
+        user with passwordless sudo. Sites come after a server is ready.
       </p>
       {% if perms.servers.add_server %}
         <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
@@ -35,7 +35,7 @@
                   {% if site.identifier %}<a href="{% url 'site_detail' state.server.pk site.identifier %}">{{ site.domains|join:", "|default:site.identifier }}</a>{% else %}{{ site.file }}{% endif %}
                   {{ site.verdict }}
                 </li>
-              {% empty %}<li>No sites in this observation.</li>{% endfor %}
+          {% empty %}<li>No sites in this observation.</li>{% endfor %}
             </ul>
           {% else %}
             <p>No complete site observation is available. This does not confirm that sites are absent.</p>
@@ -43,6 +43,6 @@
           {% endif %}
         </section>
       {% endwith %}
-    {% empty %}<p>No servers have been registered.</p>{% endfor %}
-  {% endif %}
+  {% empty %}<p>No servers have been registered.</p>{% endfor %}
+{% endif %}
 {% endblock %}

@@ -9,11 +9,6 @@
             <th scope="col" data-sortable>Address or SSH alias</th>
             <th scope="col">Status</th>
             <th scope="col" data-sortable>Added</th>
-            {% if perms.servers.change_server %}
-              <th scope="col">
-                <span class="usa-sr-only">Actions</span>
-              </th>
-            {% endif %}
           </tr>
         </thead>
         <tbody>
@@ -28,11 +23,6 @@
                 <td data-sort-value="{{ server.created_at|date:'U' }}">
                   <time datetime="{{ server.created_at|date:'c' }}">{{ server.created_at|date:'M j, Y' }}</time>
                 </td>
-                {% if perms.servers.change_server %}
-                  <td>
-                    <a href="{% url 'server_edit' server.pk %}">Edit<span class="usa-sr-only"> {{ server.name }}</span></a>
-                  </td>
-                {% endif %}
               </tr>
             {% endwith %}
           {% endfor %}
@@ -49,11 +39,15 @@
     </section>
   {% else %}
     <section class="barectl-empty" aria-labelledby="no-servers-heading">
-      <h2 id="no-servers-heading">No servers yet</h2>
+      <h2 id="no-servers-heading">Add your first server</h2>
+      <p>
+        Barectl needs a fresh Ubuntu 26.04 server you can reach over SSH as root, or as a
+        user with passwordless sudo.
+      </p>
       {% if perms.servers.add_server %}
-        <p>Use Add server to register your first server by its SSH alias.</p>
+        <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
       {% else %}
-        <p>An operator with inventory permissions can add the first server.</p>
+        <p class="barectl-note">An operator with the add-server permission can add one.</p>
       {% endif %}
     </section>
   {% endif %}

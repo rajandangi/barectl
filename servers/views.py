@@ -5,7 +5,6 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -27,7 +26,6 @@ from sites.forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
 from sites.recognition import site_files, site_pools
 
 from .attention import needs_attention
-from .page import next_action, status_line
 from .discovery_state import (
     AttemptView,
     DiscoveryState,
@@ -40,6 +38,7 @@ from .discovery_state import (
 )
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
+from .page import banner, status_line
 from .registration import (
     RemovalBlocked,
     SaveOutcome,
@@ -123,11 +122,21 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
         "server": saved,
         "title": f"Edit {saved.name}" if saved else "Add server",
         "submit_label": "Save and check",
+        "more_open": _more_options_open(form),
         "alias_unavailable": saved is not None
         and saved.connection_mode == "alias"
         and saved.ssh_alias not in catalog,
     }
     return render(request, "servers/form.html", context)
+
+
+def _more_options_open(form: ServerForm) -> bool:
+    """Open More options when its values differ from the common case or need fixing."""
+    if form.errors.get("port") or form.errors.get("ssh_alias"):
+        return True
+    port = form["port"].value()
+    alias = form["ssh_alias"].value()
+    return (port not in (None, "", 22, "22")) or bool(alias)
 
 
 Section = Literal["sites", "setup", "activity", "advanced", "settings"]
@@ -174,11 +183,16 @@ def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str,
         "host_challenge": challenge,
         "attention": attention,
         "status_line": status_line(state),
-        "next_action": next_action(
+        "banner": banner(
             state,
             host_challenge=challenge is not None,
             can_set_up=can_set_up,
-            can_view_sites=request.user.has_perm(VIEW_SITES),
+            can_request_check=(
+                state.can_request
+                and state.alias_usable
+                and request.user.has_perm("discovery.add_discoveryattempt")
+            ),
+            can_edit=request.user.has_perm("servers.change_server"),
             attention=attention,
         ),
     }
@@ -628,11 +642,10 @@ def server_status(request: HttpRequest, pk: int) -> HttpResponse:
     if not _is_fragment_request(request):
         return redirect("server_detail", pk=pk)
     state = server_state(server)
-    return render(
-        request,
-        "servers/_status_line.html",
-        {"server": server, "state": state, "status_line": status_line(state)},
-    )
+    context = _discovery_context(request, state)
+    if state.changed_since(request.GET.get("shown")):
+        context["announcement"] = state.announcement
+    return render(request, "servers/_status_update.html", context)
 
 
 @never_cache

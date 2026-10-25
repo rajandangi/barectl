@@ -1,4 +1,5 @@
 import type { Htmx } from "htmx.org";
+import accordion from "@uswds/uswds/js/usa-accordion";
 import navigation from "@uswds/uswds/js/usa-header";
 import skipnav from "@uswds/uswds/js/usa-skipnav";
 import table from "@uswds/uswds/js/usa-table";
@@ -6,7 +7,7 @@ import table from "@uswds/uswds/js/usa-table";
 /** docs/frontend-assets.md#components-and-htmx-lifecycle */
 const FRAGMENT_ROOT = "[data-uswds-fragment]";
 
-const pageBehaviors: readonly UswdsBehavior[] = [skipnav, navigation];
+const pageBehaviors: readonly UswdsBehavior[] = [skipnav, navigation, accordion];
 const fragmentBehaviors: readonly UswdsBehavior[] = [table];
 const activeRoots = new Set<HTMLElement>();
 
