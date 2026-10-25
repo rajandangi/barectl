@@ -8,91 +8,16 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from bootstrap.standing import Standing
-from databases import binding, provision
+from databases import binding
 from operations.consent import Scope
-from operations.fakes import APPLY_PERMISSIONS, BOOT_ID, ChangeTestCase
+from operations.fakes import APPLY_PERMISSIONS, ChangeTestCase
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from operations.models import ChangeReview, ChangeRun, Consent
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 from sites import remove
+from sites.removal_testing import evidence
 from sites.ui_testing import record_http_sites, record_shaped_sites
-
-PATHS = (
-    "/etc/caddy/sites/alpha.caddy",
-    "/etc/haproxy/sites/alpha.cfg",
-    "/var/lib/haproxy/sites/alpha.state",
-    "/run/haproxy/alpha",
-    "/etc/php-fpm/sites/alpha",
-    "/var/lib/php-fpm/sites/alpha",
-    "/run/php-fpm/sites/alpha",
-    "/var/www/alpha",
-)
-DIGEST = "a" * 64
-
-
-def evidence(
-    *,
-    names: tuple[str, ...] = ("alpha.example.com",),
-    present: bool = True,
-    binding_state: str = "satisfied",
-) -> remove.RemovalEvidence:
-    current = (
-        binding.Binding("mariadb", "alpha", binding_state, ("principal", "database", "privileges"))
-        if binding_state
-        else None
-    )
-    database = provision.DatabaseEvidence(
-        "mariadb" if binding_state else "",
-        "MariaDB" if binding_state else "the database engine",
-        bool(binding_state),
-        (),
-        current,
-        "",
-        "principal\t1\naccount\t1\ndatabase\t1\nprivileges\t1\n" if binding_state else "",
-        "",
-        "/nix/store/fcgi/bin/cgi-fcgi" if binding_state else "",
-    )
-    return remove.RemovalEvidence(
-        None,
-        Standing.TARGET_STACK,
-        {
-            "version": 1,
-            "identifier": "alpha",
-            "boot": BOOT_ID,
-            "uptime": 500025,
-            "paths": dict.fromkeys(PATHS, present),
-            "names": list(names),
-            "https": True,
-            "runtime": "php84",
-            "problem": "",
-            "site_file_digest": DIGEST if present else "",
-            "account": [1001, 1001, "/var/www/alpha", "/usr/sbin/nologin", [1001]]
-            if present
-            else None,
-            "proxy_account": [1002, 1002, "/nonexistent", "/usr/sbin/nologin", [1002]]
-            if present
-            else None,
-            "account_group": [1001, []] if present else None,
-            "proxy_group": [1002, []] if present else None,
-            "certificates": (
-                ["/var/lib/caddy/.local/share/caddy/certificates/acme/alpha.example.com"]
-                if present
-                else []
-            ),
-            "services": {
-                "haproxy-site@alpha.service": ["loaded", "active", "running"],
-                "php-fpm-site-php84@alpha.service": ["loaded", "active", "running"],
-                "php-fpm-site-php85@alpha.service": ["loaded", "inactive", "dead"],
-            },
-            "other_sites": ["beta"],
-            "caddy_matches": True,
-            "caddy_data_directory": "/var/lib/caddy/.local/share/caddy",
-            "digest": DIGEST,
-        },
-        "",
-        database,
-    )
 
 
 class RemovalReviewTests(SimpleTestCase):

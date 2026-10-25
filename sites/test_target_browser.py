@@ -8,7 +8,13 @@ from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
 from servers.models import Server
-from sites.ui_testing import record_http_sites, record_shaped_sites, record_wordpress_sites
+from sites.ui_testing import (
+    record_http_sites,
+    record_laravel_releases,
+    record_shaped_sites,
+    record_site_settings,
+    record_wordpress_sites,
+)
 
 
 @tag("browser")
@@ -19,6 +25,16 @@ class HttpSiteBrowserTests(BrowserTestCase):
         static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
         cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
         call_command("collectstatic", interactive=False, verbosity=0)
+
+    def assert_phone_layout(self) -> None:
+        """The journey's final page fits a 320-pixel screen with production assets."""
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        # Fonts change the measurement; wait for them before checking for overflow.
+        self.assert_theme_and_components_initialized()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+        self.assertEqual(self.console_errors, [])
 
     def test_keyboard_creation_keeps_the_edited_identifier_and_validation_focus(self) -> None:
         server = Server.objects.get(name="Production")
@@ -314,12 +330,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             rows[0].preparation.inputs,
             {"version": 1, "identifier": "shop", "admin_username": "shopadmin"},
         )
-        self.page.set_viewport_size({"width": 320, "height": 800})
-        self.assertEqual(
-            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
-        )
-        self.assert_theme_and_components_initialized()
-        self.assertEqual(self.console_errors, [])
+        self.assert_phone_layout()
 
     def test_attention_and_recognition_read_at_phone_width(self) -> None:
         server = Server.objects.get(name="Production")
@@ -407,3 +418,330 @@ class HttpSiteBrowserTests(BrowserTestCase):
         expect(
             self.page.get_by_role("heading", name="Preparation queued", exact=True)
         ).to_be_visible()
+
+    def test_operator_reviews_a_deploy_with_its_migration_acknowledgement(self) -> None:
+        from unittest import mock
+
+        from laravel.change import MIGRATION_ACKNOWLEDGEMENT
+        from operations.models import ChangePreparation
+        from sites.ui_testing import record_deploy_review
+
+        server = Server.objects.get(name="Production")
+        record_laravel_releases(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/deployments/")
+            expect(
+                self.page.get_by_role("table", name="Retained releases for alpha")
+            ).to_be_visible()
+            deploy = self.page.get_by_role("button", name="Deploy", exact=True)
+            deploy.focus()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Deploy Laravel site: review", level=1)
+            ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "deploy_laravel_site")
+        self.assertEqual(preparation.inputs, {"version": 1, "identifier": "alpha"})
+        record_deploy_review(preparation)
+        self.page.reload()
+        expect(
+            self.page.get_by_role("heading", name="Deploy Laravel site: review", level=1)
+        ).to_be_visible()
+        expect(self.page.get_by_text("Run pending migrations", exact=True)).to_be_visible()
+        acknowledgement = self.page.get_by_label(MIGRATION_ACKNOWLEDGEMENT)
+        acknowledgement.focus()
+        expect(acknowledgement).to_be_focused()
+        expect(acknowledgement).to_have_attribute("required", "")
+        self.page.keyboard.press("Space")
+        expect(acknowledgement).to_be_checked()
+        self.assert_phone_layout()
+
+    def test_operator_rolls_back_to_a_release_chosen_from_the_list(self) -> None:
+        from unittest import mock
+
+        from laravel.configuration import ROLLBACK_ACKNOWLEDGEMENT
+        from operations.models import ChangePreparation
+        from sites.ui_testing import record_rollback_review
+
+        server = Server.objects.get(name="Production")
+        record_laravel_releases(server)
+        target = f"{1:040x}-{'a' * 16}"
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/deployments/")
+            release = self.page.get_by_label("Release")
+            release.focus()
+            release.select_option(target)
+            rollback = self.page.get_by_role("button", name="Roll back", exact=True)
+            rollback.focus()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Roll back Laravel site: review", level=1)
+            ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "rollback_laravel_site")
+        self.assertEqual(
+            preparation.inputs,
+            {"version": 1, "identifier": "alpha", "release": target},
+        )
+        record_rollback_review(preparation)
+        self.page.reload()
+        expect(
+            self.page.get_by_role("heading", name="Roll back Laravel site: review", level=1)
+        ).to_be_visible()
+        expect(self.page.get_by_text(ROLLBACK_ACKNOWLEDGEMENT, exact=True)).to_be_visible()
+        acknowledgement = self.page.get_by_label(ROLLBACK_ACKNOWLEDGEMENT)
+        acknowledgement.focus()
+        expect(acknowledgement).to_be_focused()
+        expect(acknowledgement).to_have_attribute("required", "")
+        self.page.keyboard.press("Space")
+        expect(acknowledgement).to_be_checked()
+        self.assert_phone_layout()
+
+    def test_operator_adds_an_environment_key_with_a_keyboard(self) -> None:
+        from unittest import mock
+
+        from discovery.snapshot import ObservedSetting
+        from operations.models import ChangePreparation
+
+        server = Server.objects.get(name="Production")
+        record_site_settings(
+            server,
+            application="laravel",
+            settings=(
+                ObservedSetting("alpha", "laravel", "APP_ENV", "a" * 64, "production"),
+                ObservedSetting("alpha", "laravel", "MAIL_PASSWORD", "b" * 64),
+            ),
+        )
+        for codename in (
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "manage_secrets",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/environment/")
+            expect(self.page.get_by_text("Hidden, write-only")).to_be_visible()
+            key = self.page.get_by_label("Key", exact=True)
+            key.focus()
+            self.page.keyboard.type("MAIL_FROM_ADDRESS")
+            button = self.page.get_by_role("button", name="Review adding the key", exact=True)
+            button.focus()
+            expect(button).to_be_focused()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Edit Laravel environment: review", level=1)
+            ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "edit_laravel_environment")
+        self.assertEqual(
+            preparation.inputs,
+            {
+                "version": 1,
+                "identifier": "alpha",
+                "changes": [{"key": "MAIL_FROM_ADDRESS", "action": "set"}],
+            },
+        )
+        self.assert_phone_layout()
+
+    def test_operator_adds_a_wordpress_constant_with_a_keyboard(self) -> None:
+        from unittest import mock
+
+        from discovery.snapshot import ObservedSetting
+        from operations.models import ChangePreparation
+
+        server = Server.objects.get(name="Production")
+        record_site_settings(
+            server,
+            application="wordpress",
+            settings=(ObservedSetting("alpha", "wordpress", "MAIL_HOST", "b" * 64),),
+        )
+        for codename in (
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "manage_secrets",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/wordpress/")
+            expect(self.page.get_by_text("write-only")).to_be_visible()
+            constant = self.page.get_by_label("Constant", exact=True)
+            constant.focus()
+            self.page.keyboard.type("ACME_MODE")
+            button = self.page.get_by_role("button", name="Review adding the constant", exact=True)
+            button.focus()
+            expect(button).to_be_focused()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Edit WordPress settings: review", level=1)
+            ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "edit_wordpress_settings")
+        self.assertEqual(
+            preparation.inputs,
+            {
+                "version": 1,
+                "identifier": "alpha",
+                "changes": [{"key": "ACME_MODE", "action": "set"}],
+            },
+        )
+        self.assert_phone_layout()
+
+    def test_operator_changes_php_settings_with_a_keyboard(self) -> None:
+        from unittest import mock
+
+        from operations.models import ChangePreparation
+        from sites.bodies.pool import SitePool
+
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/runtime/")
+            self.page.get_by_label("Process manager", exact=True).select_option("static")
+            self.page.get_by_label("Maximum child processes", exact=True).fill("8")
+            self.page.get_by_label("Slow request log threshold (seconds)", exact=True).fill("10")
+            self.page.get_by_label("Request time limit (seconds)", exact=True).fill("120")
+            self.page.get_by_label("Memory limit (MB)", exact=True).fill("256")
+            self.page.get_by_label("Maximum upload size (MB)", exact=True).fill("64")
+            self.page.get_by_label("Maximum post size (MB)", exact=True).fill("64")
+            button = self.page.get_by_role("button", name="Review PHP settings", exact=True)
+            button.focus()
+            expect(button).to_be_focused()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Change site PHP settings: review", level=1)
+            ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "set_site_pool")
+        self.assertEqual(
+            preparation.inputs,
+            {
+                "version": 1,
+                "identifier": "alpha",
+                "pool": SitePool(
+                    process_manager="static",
+                    max_children=8,
+                    slowlog_timeout=10,
+                    terminate_timeout=120,
+                    memory_limit=256,
+                    upload_max_filesize=64,
+                    post_max_size=64,
+                ).document(),
+            },
+        )
+        self.assert_phone_layout()
+
+    def test_operator_installs_a_database_engine_from_server_settings(self) -> None:
+        from unittest import mock
+
+        from operations.models import ChangePreparation
+
+        server = Server.objects.get(name="Production")
+        record_http_sites(server, engine="")
+        for codename in ("view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/settings/")
+            expect(self.page.get_by_text("No database engine is installed.")).to_be_visible()
+            button = self.page.get_by_role("button", name="Install MariaDB", exact=True)
+            button.focus()
+            expect(button).to_be_focused()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Install database engine: review", level=1)
+            ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "install_database_engine")
+        self.assertEqual(preparation.inputs, {"version": 1, "selection": "mariadb"})
+        self.assert_phone_layout()
+
+    def test_operator_prepares_a_removal_and_types_the_domain_to_confirm(self) -> None:
+        from unittest import mock
+
+        from operations.models import ChangePreparation
+        from sites.ui_testing import record_removal_review
+
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in (
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "change_destructive",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/settings/")
+            expect(self.page.get_by_text("No backup exists", exact=True)).to_be_visible()
+            button = self.page.get_by_role("button", name="Prepare removal review", exact=True)
+            button.focus()
+            expect(button).to_be_focused()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Remove site: review", level=1)
+            ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "remove_site")
+        self.assertEqual(
+            preparation.inputs,
+            {"version": 1, "identifier": "alpha", "primary": "alpha.example.com"},
+        )
+        record_removal_review(preparation)
+        self.page.reload()
+        expect(
+            self.page.get_by_role("heading", name="Remove site: review", level=1)
+        ).to_be_visible()
+        label = "Type alpha.example.com to confirm this removal."
+        expect(self.page.get_by_text(label, exact=True)).to_be_visible()
+        confirmation = self.page.get_by_label(label, exact=True)
+        confirmation.focus()
+        expect(confirmation).to_be_focused()
+        expect(confirmation).to_have_attribute("required", "")
+        self.page.keyboard.type("alpha.example.com")
+        expect(confirmation).to_have_value("alpha.example.com")
+        expect(confirmation).to_be_focused()
+        self.assert_phone_layout()
+
+    def test_operator_reads_the_https_and_certificate_states_at_phone_width(self) -> None:
+        from unittest import mock
+
+        from discovery.snapshot import SiteCertificate
+
+        server = Server.objects.get(name="Production")
+        record_site_settings(
+            server,
+            certificate=SiteCertificate("issued", "CN=Pebble", 1_800_000_000),
+            https=True,
+        )
+        self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/overview/")
+            expect(self.page.get_by_role("heading", name="Observed site", level=2)).to_be_visible()
+            expect(self.page.get_by_text("Certificate", exact=True)).to_be_visible()
+            expect(self.page.get_by_text("over HTTPS")).to_be_visible()
+            expect(
+                self.page.get_by_text(
+                    "Issued by CN=Pebble, expires 2027-01-15 08:00 UTC", exact=True
+                )
+            ).to_be_visible()
+            self.assert_phone_layout()
+            record_site_settings(server, certificate=SiteCertificate("http"), https=False)
+            self.page.reload()
+            expect(self.page.get_by_text("over HTTP only")).to_be_visible()
+            expect(self.page.get_by_text("Not used (HTTP only)", exact=True)).to_be_visible()
+        self.assert_phone_layout()

@@ -20,9 +20,11 @@ step ([#446](https://github.com/rajandangi/barectl/issues/446)), and Create site
 install of a missing database engine or PHP runtime ([#443](https://github.com/rajandangi/barectl/issues/443)).
 It also adds browser journeys for the new Domains and HTTPS settings, Overview and the
 WordPress Step 1 round trip. [#444](https://github.com/rajandangi/barectl/issues/444) adds
-the optional certificate contact email after this record was gathered. Still not implemented:
-the remaining browser journeys ([#447](https://github.com/rajandangi/barectl/issues/447)) and
-hosted shard balance ([#449](https://github.com/rajandangi/barectl/issues/449)).
+the optional certificate contact email after this record was gathered. [#447](https://github.com/rajandangi/barectl/issues/447)
+added the remaining browser journeys: Deploy with its migration acknowledgement, Roll back
+from the release list, the environment and WordPress settings, PHP settings, the database
+engine install, site removal with its typed domain, and the HTTPS and certificate states.
+Still not implemented: hosted shard balance ([#449](https://github.com/rajandangi/barectl/issues/449)).
 
 ## Revisions
 
@@ -343,7 +345,7 @@ the ticket that tracks the gap. Test names without a path are in the app's `test
 | 83. A fresh controller reconstructs certificates, engines, databases and users, applications, releases and `current`, settings keys and deploy keys | Native `FreshControllerReconstruction`, `HttpsSite`, `DatabaseEngineMariaDB`/`PostgreSQL`, `SiteDatabaseMariaDB`/`PostgreSQL`, `WordPressCreateMariaDB`, `LaravelCreateMariaDB`, `LaravelReleaseReconstruction` |
 | 84. A hand-made resource that follows the convention is managed like Barectl's, and anything else is reported once | `sites/test_target_discovery.py::RecordedJudgeByShapeTests`, `sites/test_target_configuration.py`, native `JudgeByShape`, `HttpSiteReconstruction`, `LaravelReleaseReconstruction` |
 | 85. A viewer sees sites, certificates, deployments and settings keys without changing them | `sites/test_settings_pages.py::test_a_viewer_reads_the_certificate_releases_and_settings_keys` (certificate, releases and key names, with SSH patched out); `sites/test_target_pages.py` viewer case; the viewer refusals in `sites/test_deploy_pages.py`, `sites/test_pool_settings.py`, `sites/test_remove.py` and `databases/*` |
-| 86. Every new journey works with a keyboard, a screen reader and a 320-pixel screen | **Partly qualified.** Browser journeys cover the three create forms, the WordPress password reset, the new Domains and HTTPS change and the Overview address with keyboard, focus and 320-pixel checks; Deploy, the other settings forms, database install and removal still have request tests only ([#447](https://github.com/rajandangi/barectl/issues/447)) |
+| 86. Every new journey works with a keyboard, a screen reader and a 320-pixel screen | **Qualified.** Browser journeys cover the three create forms, the WordPress password reset, the Domains and HTTPS change, Deploy with its migration acknowledgement, Roll back from the release list, adding an environment key and a WordPress constant, PHP settings, the database engine install, removal with the typed domain, and the HTTPS and certificate states. The journeys that prepare a change drive the keyboard through focused controls; every journey checks its heading and asserts no horizontal scrolling at 320 pixels (`sites/test_target_browser.py`) |
 | 87. Opening any page makes no SSH connection | Page tests patch `discovery.ssh.connect` to fail (`sites/test_target_pages.py`, `sites/test_deploy_pages.py`, `sites/test_settings_pages.py`, `sites/test_remove.py`, `databases/test_site.py`, `wordpress/test_actions.py`), and the browser journeys do the same |
 
 ### Maintainers
@@ -421,9 +423,9 @@ measured for memory or disk.
 - **The Generate button's value.** The control and its script exist; no automated test checks the
   generated password (story 31).
 - **WordPress self-updates as the site user.** Not exercised (story 41).
-- **Browser journeys beyond creation.** Deploy, Roll back, settings, database install and removal
-  have request tests but no browser journey, so stories 82 and 86 are partly qualified
-  ([#447](https://github.com/rajandangi/barectl/issues/447), [#370](https://github.com/rajandangi/barectl/issues/370)).
+- **Browser recovery journeys.** Phase B changes still have no browser journey through #179
+  Journey 7, so story 82 stays partly qualified ([#370](https://github.com/rajandangi/barectl/issues/370)).
+  Creation, review and settings journeys are covered (story 86).
 - **Composer advisory blocking.** The offline lane reaches no host but the repository, so the
   build passes `--no-blocking`; a real host therefore also skips Composer's advisory blocking.
 - **Assertion depth.** `--prefer-dist` is asserted by the absence of dev packages and of `.git`
