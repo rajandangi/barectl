@@ -87,7 +87,11 @@ urlpatterns = [
     path("settings/", settings_page, name="settings"),
     path("servers/add/", server_add, name="server_add"),
     path("servers/<int:pk>/", server_detail, name="server_detail"),
-    path("servers/<int:pk>/setup/", server_detail, {"section": "setup"}, name="server_setup"),
+    path(
+        "servers/<int:pk>/setup/",
+        RedirectView.as_view(pattern_name="server_detail", permanent=False),
+        name="server_setup",
+    ),
     path(
         "servers/<int:pk>/activity/", server_detail, {"section": "activity"}, name="server_activity"
     ),

@@ -65,7 +65,7 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.assertNotContains(response, 'id="site-plans"')
         self.assertNotContains(response, 'id="tls-plans"')
         self.assertNotContains(response, 'id="database-plans"')
-        self.assertEqual(self.client.get("/servers/999/setup/").status_code, 404)
+        self.assertEqual(self.client.get("/servers/999/setup/").status_code, 302)
 
     def test_failed_refresh_preserves_truthful_status_and_advanced_evidence(self) -> None:
         self.grant("view_server", "add_discoveryattempt", "view_siteobservation")

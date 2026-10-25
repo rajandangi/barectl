@@ -12,7 +12,6 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from bootstrap import foundation_setup
 from bootstrap.standing import Standing
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
@@ -139,10 +138,9 @@ def _more_options_open(form: ServerForm) -> bool:
     return (port not in (None, "", 22, "22")) or bool(alias)
 
 
-Section = Literal["sites", "setup", "activity", "advanced", "settings"]
+Section = Literal["sites", "activity", "advanced", "settings"]
 _SECTIONS: dict[Section, str] = {
     "sites": "Sites",
-    "setup": "Setup",
     "activity": "Activity",
     "advanced": "Advanced",
     "settings": "Settings",
@@ -386,11 +384,6 @@ def server_page(
         context["database_remove_kind"] = database_engine.REMOVE_SLUG
     if section == "activity":
         context.update(attempts=list(state.history))
-    if section == "setup":
-        context["can_prepare_foundation"] = state.can_prepare_changes and request.user.has_perms(
-            PREPARE_PERMISSIONS
-        )
-        context["foundation_journey"] = foundation_setup.project(state)
     if section == "advanced":
         context["presented"] = state.presentation
     standing = state.snapshot.collected.standing if state.snapshot else None
