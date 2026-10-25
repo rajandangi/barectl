@@ -13,6 +13,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
 from bootstrap.standing import Standing
+from cache.laravel import laravel_managed_digests
 from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
@@ -50,14 +51,20 @@ def context_for_site(
     snapshot = state.snapshot
     standing = snapshot.collected.standing if snapshot is not None else None
     settings = snapshot.collected.settings if snapshot is not None else None
+    items = [
+        item
+        for item in (settings.value if settings is not None and settings.observed else ())
+        if item.identifier == identifier and item.application == "laravel"
+    ]
+    managed = laravel_managed_digests(identifier, {item.key: item.digest for item in items})
     rows = [
         {
             "key": item.key,
-            "value": item.value if item.key in NON_SECRET_KEYS else "",
-            "hidden": item.key not in NON_SECRET_KEYS,
+            "value": item.value if item.key in NON_SECRET_KEYS and item.key not in managed else "",
+            "hidden": item.key not in NON_SECRET_KEYS or item.key in managed,
+            "managed": item.key in managed,
         }
-        for item in (settings.value if settings is not None and settings.observed else ())
-        if item.identifier == identifier and item.application == "laravel"
+        for item in items
     ]
     rows.sort(key=lambda row: str(row["key"]))
     complete = (

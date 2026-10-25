@@ -1,8 +1,8 @@
 # Object cache
 
 Valkey is Ubuntu 26.04's Redis-compatible cache server. Barectl installs it once per
-server from Server **Settings > Object cache (Valkey)** and, in later work, gives every
-site that enables an object cache its own instance
+server from Server **Settings > Object cache (Valkey)**, and gives every WordPress or
+Laravel site that enables an object cache its own instance
 ([ADR 0030](adr/0030-give-each-site-its-own-valkey-instance.md)). A fresh controller
 reconstructs both from the package database and systemd; Barectl keeps no marker on the
 server.
@@ -65,12 +65,12 @@ so a server without Valkey issues exactly the fixed reads earlier recorded trans
 hold. A masked, inactive unit and the package version are all a fresh controller needs; no
 Barectl file or database participates.
 
-## A site's own cache (implemented, #392)
+## A site's own cache (implemented, #392 and #393)
 
-A WordPress site's **Settings > Object cache** turns on one cache that belongs to that
-site. The same primitive serves a Laravel site in #393; a plain PHP site is not offered it.
-Turning it on is one reviewed Site change: no other site, serving process or cache changes.
-Turning it off is one reviewed Site change too.
+A WordPress or Laravel site's **Settings > Object cache** turns on one cache that belongs
+to that site. A plain PHP site is not offered it. Turning it on is one reviewed Site change:
+no other site, serving process or cache changes. Turning it off is one reviewed Site change
+too.
 
 ### The instance
 
@@ -149,6 +149,49 @@ The plugin archive comes from `downloads.wordpress.org` in production and from t
 byte-exact mirror in the native lanes; `disposable/mirror.py` pins the same version and the
 daily **Native drift** job watches it, exactly as it does Phase B's WordPress archive.
 
+### Laravel wiring and ordering
+
+A Laravel site gets no plugin. Turning on, in this order:
+
+1. create and start the same per-site instance, and prove the site account can open its
+   private connection;
+2. write the three cache keys into `private/laravel.env` through the same atomic site-owned
+   writer the Edit settings change uses, keeping every other line byte-identical:
+
+   ```
+   CACHE_STORE=redis
+   REDIS_HOST=/run/valkey/<identifier>/valkey.sock
+   REDIS_PORT=0
+   ```
+
+   Laravel reads `REDIS_PORT=0` as "no TCP port" and the host as a Unix socket path;
+3. rebuild Laravel's cached configuration when `bootstrap/cache/config.php` is in use;
+4. gracefully restart the site's **running** queue workers (`systemctl restart`, so each
+   finishes its current job within its own stop budget); a deliberate Stop survives an
+   unrelated cache change.
+
+While those keys name the site's own private connection they are **Barectl-managed**:
+`CACHE_STORE`, `REDIS_HOST` and `REDIS_PORT` show as read-only in Environment, their values
+are withheld by the native read, and an Environment review that names one is refused. A
+supported hand edit of another key stays editable. If an operator changes the store by hand
+to something else, the two `REDIS_*` keys remain managed and can still be removed.
+
+Turning off **disconnects the application first**: restore `CACHE_STORE` to the store the
+site used before Barectl changed it (or remove the key when it was absent), remove the two
+managed connection keys, rebuild the cached configuration, restart the running workers, and
+only then stop and remove the instance. The previous store is recorded in the applied
+review's immutable document on the controller that turned the cache on. A controller with
+no such record refuses instead of guessing, and a hand-chosen store that no longer points at
+the managed connection is left untouched.
+
+The review refuses turning on when the host is not Target stack, Valkey is not installed or
+its shared unit is not stopped and masked, the site is not a verified Laravel installation,
+the site is not fully managed or its last deploy left the current release incomplete (a
+gate, a partly deployed release or an unknown outcome), the site does not load phpredis, the
+existing instance is outside supported settings, or the previous store is unknown while the
+current environment already names `redis`. Turning off stays available for a gated or partly
+deployed site whose cache artifacts or managed keys exist.
+
 ### Reading the cache on demand
 
 **Check the cache** queues one read through the worker and `RemoteShell` as the site's own
@@ -167,11 +210,11 @@ drop-in, the unit's own properties, the socket's owner and mode, and the applica
 constants, plugin version and drop-in. It reports one state per site:
 
 - **On** — a reviewed configuration, the drop-in and unit as written, a running instance,
-  the site-owned socket at `0600`, and (for WordPress) complete wiring, the plugin at the
-  pinned version and phpredis;
+  the site-owned socket at `0600`, phpredis, and (WordPress) complete `WP_REDIS_*` wiring
+  with the pinned plugin or (Laravel) the exact `.env` cache triple;
 - **Off** — no instance artifacts and no wiring;
 - **Partly on** — an instance or wiring that is incomplete (stopped, no socket, missing
-  drop-in, partial constants, another plugin version, no phpredis);
+  drop-in, partial constants or `.env` keys, another plugin version, no phpredis);
 - **Outside supported settings** — a hand edit the convention does not interpret, such as a
   changed `User`, `ExecStart` or socket path, or a configuration other than a reviewed one.
 

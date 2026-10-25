@@ -94,7 +94,13 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     release_observation, settings_observation = _hosting_inventories(
         shell, standing, sites=sites, releases=releases
     )
-    cache_observation = _hosting_cache(shell, standing, hosting, sites_requested=sites)
+    cache_observation = _hosting_cache(
+        shell,
+        standing,
+        hosting,
+        settings_observation,
+        sites_requested=sites,
+    )
     scheduled = _automation(
         shell,
         standing,
@@ -203,10 +209,26 @@ def _hosting_inventories(
     return laravel_observation.releases_from(inventory), settings
 
 
+def _laravel_wiring(settings: Observation[tuple[ObservedSetting, ...]]) -> dict[str, str]:
+    """Each Laravel site's `.env` cache wiring, from digests only."""
+    from cache.laravel import laravel_wiring_digests
+
+    digests: dict[str, dict[str, str]] = {}
+    for row in settings.value if settings.observed else ():
+        if row.application != "laravel":
+            continue
+        digests.setdefault(row.identifier, {})[row.key] = row.digest
+    return {
+        identifier: laravel_wiring_digests(identifier, values)
+        for identifier, values in digests.items()
+    }
+
+
 def _hosting_cache(
     shell: RemoteShell,
     standing: HostJudgment,
     sites: Observation[tuple[ObservedSite, ...]],
+    settings: Observation[tuple[ObservedSetting, ...]],
     *,
     sites_requested: bool,
 ) -> Observation[tuple[ObservedCache, ...]]:
@@ -226,7 +248,7 @@ def _hosting_cache(
         ObservationOutcome.OBSERVED,
         ("/etc/valkey", "/var/www"),
         "",
-        cache_instance.observed(value, sites.value),
+        cache_instance.observed(value, sites.value, _laravel_wiring(settings)),
     )
 
 

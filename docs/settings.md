@@ -21,8 +21,14 @@ never a new value. The confirm screen asks for the new value, which reaches the 
 through the confidential input channel and is sealed into the run until it is sent. The apply
 runs under the site lock, rewrites only the reviewed lines, leaves every untouched line
 byte-identical, and writes the file atomically as the site user at 0600. When Laravel has a
-cached configuration in use, the same apply rebuilds it; a failed rebuild reports partly
-applied and keeps the changed environment.
+cached configuration in use, the same apply rebuilds it and restarts the site's running
+queue workers; a failed rebuild or worker restart reports partly applied and keeps the
+changed environment.
+
+When a Laravel site's object cache is on, `CACHE_STORE`, `REDIS_HOST` and `REDIS_PORT` are
+managed by that setting: the table shows them read-only as **Managed by the object cache**,
+their values stay on the server, and a review that names one is refused ([object
+cache](object-cache.md#laravel-wiring-and-ordering)). Every other key stays editable.
 
 ## WordPress settings
 

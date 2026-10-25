@@ -25,6 +25,7 @@ from servers.models import Server
 from . import engine
 from .forms import ObjectCacheForm
 from .instance import SLUG as SET_SITE_OBJECT_CACHE_SLUG
+from .preimage import previous_store
 from .presentation import site_context
 from .reading import READ_PERMISSIONS, request_reading
 
@@ -89,7 +90,7 @@ def prepare_site_cache(request: HttpRequest, pk: int, identifier: str) -> HttpRe
     server = get_object_or_404(Server, pk=pk)
     context = site_context(server, identifier, request.user)
     if not context["object_cache_applicable"]:
-        messages.error(request, "This site is not a verified WordPress installation.")
+        messages.error(request, "This site is not a verified WordPress or Laravel site.")
         return redirect("site_settings", pk=pk, identifier=identifier)
     form = ObjectCacheForm(
         request.POST,
@@ -100,15 +101,21 @@ def prepare_site_cache(request: HttpRequest, pk: int, identifier: str) -> HttpRe
         messages.error(request, "Choose a supported object cache action.")
         return redirect("site_settings", pk=pk, identifier=identifier)
     action = str(form.cleaned_data["action"])
+    inputs: dict[str, object]
     if action == "client":
         slug = "set_site_php_client"
-        inputs: dict[str, object] = {
+        inputs = {
             "version": 1,
             "identifier": identifier,
             "php_client": True,
         }
     else:
-        if not context["object_cache_can_prepare"]:
+        allowed = (
+            context["object_cache_can_prepare"]
+            if action == "on"
+            else context["object_cache_can_turn_off"]
+        )
+        if not allowed:
             messages.error(
                 request,
                 "This site is not ready for an object cache change. Run discovery, resolve "
@@ -122,6 +129,7 @@ def prepare_site_cache(request: HttpRequest, pk: int, identifier: str) -> HttpRe
             "identifier": identifier,
             "object_cache": action == "on",
             "maxmemory_mib": memory,
+            **previous_store(server, identifier).document(),
         }
     try:
         queued = request_prepare(server, request.user, slug, inputs=inputs)

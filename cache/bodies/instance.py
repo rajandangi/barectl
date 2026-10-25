@@ -25,14 +25,24 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from typing import cast
 
+from automation.bodies.worker_env import restart_workers
 from cache.convention import (
     MAXMEMORY_MIB,
     config_shape,
     instance_paths,
     render_config,
     render_drop_in,
+)
+from cache.laravel import laravel_managed, laravel_values, laravel_wiring
+from laravel.bodies.common import (
+    _private_file_ok,
+    apply_environment,
+    environment_entries_from_text,
+    environment_path,
+    read_environment,
 )
 from sites.bodies.common import (
     native_state,
@@ -54,6 +64,7 @@ VALKEY_CLI = "/usr/bin/valkey-cli"
 WP_CLI = "bin/wp"
 PLUGIN_PATH = "wp-content/plugins/redis-cache/redis-cache.php"
 DROP_IN_PATH = "wp-content/object-cache.php"
+LARAVEL_CONFIG = "current/bootstrap/cache/config.php"
 
 
 def _read(path: pathlib.Path, limit: int = 65536) -> str | None:
@@ -132,7 +143,10 @@ def _run(argv: list[str], timeout: int = 120) -> subprocess.CompletedProcess[byt
 
 
 def _site(
-    settings: dict[str, object], argv: list[str], timeout: int = 900
+    settings: dict[str, object],
+    argv: list[str],
+    timeout: int = 900,
+    cwd: str = "",
 ) -> subprocess.CompletedProcess[bytes]:
     environment = {
         "HOME": f"/var/www/{settings['identifier']}",
@@ -141,7 +155,7 @@ def _site(
     }
     return subprocess.run(  # noqa: S603 - fixed argv as the site's own user
         ["/usr/sbin/runuser", "-u", str(settings["account"]), "--", *argv],
-        cwd=f"/var/www/{settings['identifier']}/current/public",
+        cwd=cwd or f"/var/www/{settings['identifier']}/current/public",
         env=environment,
         capture_output=True,
         timeout=timeout,
@@ -241,6 +255,80 @@ def _settings(document: dict[str, object]) -> dict[str, object] | None:
     except KeyError:
         return None
     return {"identifier": identifier, "account": account}
+
+
+def _laravel_settings(
+    settings: dict[str, object], site: Mapping[str, object]
+) -> dict[str, object] | None:
+    runtime = site.get("runtime")
+    if runtime not in ("php84", "php85"):
+        return None
+    return {**settings, "runtime": runtime}
+
+
+def _laravel_environment(identifier: str) -> str | None:
+    path = environment_path(identifier)
+    if not _private_file_ok(path, identifier):
+        return None
+    text = read_environment(identifier)
+    return text or None
+
+
+def _environment_entries(text: str) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for key, value in environment_entries_from_text(text):
+        entries.setdefault(key, value)
+    return entries
+
+
+def _write_environment(identifier: str, text: str) -> None:
+    write_as_site("s" + identifier, str(environment_path(identifier)), text)
+
+
+def _laravel_config(settings: dict[str, object]) -> bool:
+    """Rebuild Laravel's cached configuration only when one is in use."""
+    identifier = str(settings["identifier"])
+    current = f"/var/www/{identifier}/current"
+    if not pathlib.Path(f"/var/www/{identifier}/{LARAVEL_CONFIG}").exists():
+        return True
+    if not pathlib.Path(f"{current}/artisan").is_file():
+        return True
+    runtime = settings.get("runtime")
+    if runtime not in ("php84", "php85"):
+        return False
+    php = f"/nix/var/nix/profiles/barectl/{runtime}/bin/php"
+    try:
+        completed = _site(settings, [php, "artisan", "config:cache"], timeout=600, cwd=current)
+    except OSError, subprocess.TimeoutExpired:
+        return False
+    return completed.returncode == 0
+
+
+def _laravel_changes(
+    identifier: str, text: str, document: dict[str, object]
+) -> list[dict[str, object]]:
+    entries = _environment_entries(text)
+    managed = laravel_managed(identifier, entries)
+    changes: list[dict[str, object]] = []
+    if document.get("enabled") is True:
+        for key, value in laravel_values(identifier).items():
+            changes.append({"key": key, "action": "set", "value": value})
+        return changes
+    if document.get("restore_store") is True:
+        if document.get("previous_store_present") is True:
+            changes.append(
+                {
+                    "key": "CACHE_STORE",
+                    "action": "set",
+                    "value": str(document.get("previous_store", "")),
+                }
+            )
+        else:
+            changes.append({"key": "CACHE_STORE", "action": "remove"})
+    changes.extend(
+        {"key": key, "action": "remove"} for key in ("REDIS_HOST", "REDIS_PORT") if key in managed
+    )
+    return changes
 
 
 def _private_configuration(identifier: str) -> str | None:
@@ -404,12 +492,116 @@ def _connected(settings: dict[str, object], version: str) -> bool:
     return all(line in text for line in required) and f"Plugin Version: {version}" in text
 
 
+def _restart_site_workers(identifier: str) -> bool:
+    restarted, succeeded = restart_workers(identifier)
+    if restarted:
+        stage("workers")
+    return succeeded
+
+
+def _apply_laravel(  # noqa: C901 - one reviewed sequence
+    document: dict[str, object],
+    settings: dict[str, object],
+    identifier: str,
+) -> tuple[str, str]:
+    """Turn a Laravel site's cache on or off, returning ``(outcome, reason)``."""
+    enabled = document.get("enabled") is True
+    memory = int(str(document.get("maxmemory_mib")))
+    text = _laravel_environment(identifier)
+    if text is None or hashlib.sha256(text.encode("utf-8")).hexdigest() != document.get(
+        "environment_digest"
+    ):
+        return "refused", "evidence"
+    before_wiring = laravel_wiring(identifier, _environment_entries(text))
+    changed = False
+    if enabled:
+        stage("instance")
+        reason = _start_instance(settings, memory)
+        if reason:
+            return ("partial" if changed else "refused"), reason
+        changed = True
+        if _valkey(settings, "PING").stdout.strip() != b"PONG":
+            return "partial", "object_cache_instance"
+        if document.get("write_environment") is True:
+            stage("environment")
+            changes = _laravel_changes(identifier, text, document)
+            staged = apply_environment(text, changes)
+            if staged != text:
+                try:
+                    _write_environment(identifier, staged)
+                except OSError, ValueError, subprocess.TimeoutExpired:
+                    return "partial", "laravel_environment"
+                text = staged
+                changed = True
+            if laravel_wiring(identifier, _environment_entries(text)) != "complete":
+                return "partial", "object_cache_wiring"
+            if not _laravel_config(settings):
+                return "partial", "laravel_config"
+            if not _restart_site_workers(identifier):
+                return "partial", "laravel_worker"
+        stage("verify")
+        after = _instance_row(identifier)
+        unit = _mapping(after["unit"])
+        socket = _mapping(after["socket"])
+        if (
+            after["memory_mib"] != memory
+            or after["config"] != render_config(identifier, memory)
+            or not after["drop_in_supported"]
+            or unit.get("ActiveState") != "active"
+            or socket.get("present") is not True
+            or socket.get("mode") != 0o600
+            or laravel_wiring(
+                identifier, _environment_entries(_laravel_environment(identifier) or "")
+            )
+            != "complete"
+        ):
+            return "partial", "object_cache_verify"
+        return "succeeded", ""
+    stage("disconnect")
+    if document.get("write_environment") is True:
+        changes = _laravel_changes(identifier, text, document)
+        staged = apply_environment(text, changes)
+        if staged != text:
+            try:
+                _write_environment(identifier, staged)
+            except OSError, ValueError, subprocess.TimeoutExpired:
+                return "partial", "laravel_environment"
+            text = staged
+            changed = True
+        if not _laravel_config(settings):
+            return "partial", "laravel_config"
+        if not _restart_site_workers(identifier):
+            return "partial", "laravel_worker"
+    stage("stop")
+    _remove_instance(identifier)
+    stage("verify")
+    after = _instance_row(identifier)
+    unit = _mapping(after["unit"])
+    socket = _mapping(after["socket"])
+    remaining = laravel_managed(
+        identifier,
+        _environment_entries(_laravel_environment(identifier) or ""),
+    )
+    if (
+        after["config_present"]
+        or after["drop_in"]
+        or after["data"]
+        or socket.get("present") is True
+        or unit.get("ActiveState") == "active"
+        or remaining
+        or (before_wiring == "complete" and document.get("restore_store") is not True)
+    ):
+        return "partial", "object_cache_verify"
+    return "succeeded", ""
+
+
 def apply(document: dict[str, object]) -> None:  # noqa: C901 - one reviewed sequence
     settings = _settings(document)
     if settings is None:
         result("refused", "evidence")
         return
     identifier = str(settings["identifier"])
+    application = str(document.get("application", ""))
     enabled = document.get("enabled") is True
     memory = document.get("maxmemory_mib")
     if enabled and memory not in MAXMEMORY_MIB:
@@ -431,13 +623,25 @@ def apply(document: dict[str, object]) -> None:  # noqa: C901 - one reviewed seq
             result("refused", "evidence")
             return
         site = next((row for row in before["sites"] if row["identifier"] == identifier), None)
-        if (
-            site is None
-            or site["application"] != "wordpress"
-            or site["state"] != "complete"
-            or site.get("client") != "phpredis"
-        ):
+        if site is None or application not in ("wordpress", "laravel"):
             result("refused", "evidence")
+            return
+        if application == "wordpress" and site["application"] != "wordpress":
+            result("refused", "evidence")
+            return
+        if enabled and (site["state"] != "complete" or site.get("client") != "phpredis"):
+            result("refused", "evidence")
+            return
+        if application == "laravel":
+            if not pathlib.Path(f"/var/www/{identifier}/current/artisan").is_file():
+                result("refused", "evidence")
+                return
+            laravel_settings = _laravel_settings(settings, site)
+            if laravel_settings is None:
+                result("refused", "evidence")
+                return
+            outcome, reason = _apply_laravel(document, laravel_settings, identifier)
+            result(outcome, reason)
             return
         text = _private_configuration(identifier)
         if text is None or hashlib.sha256(text.encode("utf-8")).hexdigest() != document.get(

@@ -170,6 +170,19 @@ def _cache_row(state: DiscoveryState, identifier: str) -> ObservedCache | None:
     )
 
 
+def _laravel_site(state: DiscoveryState, identifier: str) -> bool:
+    """A Laravel site reads as plain in its passive site record; its settings name it."""
+    snapshot = state.snapshot
+    if snapshot is None:
+        return False
+    settings = snapshot.collected.settings
+    if not settings.observed:
+        return False
+    return any(
+        row.identifier == identifier and row.application == "laravel" for row in settings.value
+    )
+
+
 def _allowed(server: Server, state: DiscoveryState, site: ObservedSite | None) -> bool:
     snapshot = state.snapshot
     return (
@@ -190,26 +203,30 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
     snapshot = state.snapshot
     collected = snapshot.collected if snapshot is not None else None
     view = reading_view(reading.latest_reading(server, identifier))
-    applicable = site is not None and site.application == "wordpress"
+    laravel = _laravel_site(state, identifier)
+    application = "laravel" if laravel else (site.application if site is not None else "")
+    applicable = site is not None and (site.application == "wordpress" or laravel)
     current = row.state if row is not None else "off"
     problem = row.problem if row is not None else ""
     memory = (row.memory_mib if row is not None and row.memory_mib else None) or (
         convention.DEFAULT_MAXMEMORY_MIB
     )
     client = site.client if site is not None else ""
+    allowed = applicable and _allowed(server, state, site)
     can_prepare = (
-        applicable
+        allowed
         and site is not None
         and site.state == SiteState.MANAGED
-        and _allowed(server, state, site)
         and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
     )
+    can_turn_off = allowed and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
     can_read = (
         applicable and _allowed(server, state, site) and user.has_perms(reading.READ_PERMISSIONS)
     )
     checked = snapshot.collected_at if snapshot is not None else None
     return {
         "object_cache_applicable": applicable,
+        "object_cache_application": application,
         "object_cache_state": current,
         "object_cache_state_label": STATE_LABELS.get(current, current),
         "object_cache_problem": problem,
@@ -229,6 +246,7 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
             else None
         ),
         "object_cache_can_prepare": can_prepare,
+        "object_cache_can_turn_off": can_turn_off,
         "object_cache_can_read": can_read,
         "object_cache_reading": view,
         "object_cache_checked_at": checked,
@@ -281,7 +299,7 @@ def overview_context(
         return {}
     state = server_state(server)
     site = _site(state, identifier)
-    if site is None or site.application != "wordpress":
+    if site is None or not (site.application == "wordpress" or _laravel_site(state, identifier)):
         return {}
     row = _cache_row(state, identifier)
     current = row.state if row is not None else "off"

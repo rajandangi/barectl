@@ -7,7 +7,7 @@ from unittest import mock
 from django.test import Client
 from django.utils import timezone
 
-from discovery.snapshot import ObservedCache
+from discovery.snapshot import ObservedCache, ObservedSetting
 from operations.models import ChangePreparation
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
@@ -92,6 +92,37 @@ class ObjectCacheCardTests(ControllerConfigTestCase):
                 reading_at=timezone.now(),
                 status="succeeded",
             )
+
+    def record_laravel(self, *, state: str = "off", memory: int | None = None) -> None:
+        record_site_settings(
+            self.server,
+            identifier="alpha",
+            application="plain",
+            settings=(
+                ObservedSetting("alpha", "laravel", "APP_NAME", "a" * 64, "Laravel"),
+                ObservedSetting("alpha", "laravel", "APP_ENV", "b" * 64, "production"),
+            ),
+            cache=(ObservedCache("alpha", state, memory, "", "", "phpredis", "active"),),
+            installed_valkey=True,
+            client="phpredis",
+        )
+
+    def test_a_laravel_site_offers_the_cache_without_the_plugin_sentence(self) -> None:
+        self.record_laravel()
+        response = self.client.get(self.settings_url)
+        self.assertContains(response, "Turn on object cache")
+        self.assertNotContains(response, "WordPress uses the pinned")
+        self.assertNotContains(response, "Redis Object Cache")
+
+    def test_a_laravel_site_can_turn_a_partial_cache_off(self) -> None:
+        self.record_laravel(state="partial", memory=64)
+        response = self.client.get(self.settings_url)
+        self.assertContains(response, "Turn off object cache")
+        posted = self.client.post(self.prepare_url, {"action": "off"})
+        self.assertEqual(posted.status_code, 302)
+        preparation = ChangePreparation.objects.get()
+        self.assertEqual(preparation.inputs["object_cache"], False)
+        self.assertNotIn("cache_store_known", preparation.inputs)
 
     def test_an_off_site_offers_the_memory_limit_and_the_turn_on_action(self) -> None:
         self.record()

@@ -20,6 +20,7 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Final
 
+from cache.laravel import laravel_managed
 from sites.bodies.common import (
     canonical,
     current_bytes,
@@ -172,12 +173,16 @@ def environment_details(identifier: str) -> list[dict[str, str]]:
 
     The controller never reads a secret's value (Phase B #356, docs/wordpress.md pattern):
     a digest lets the review detect a changed value, and ``value`` is present only for a
-    key on the fixed non-secret list.
+    key on the fixed non-secret list. The object cache's `.env` keys are Barectl-managed
+    when they name the site's own private cache, so their values stay on the server even
+    though ``CACHE_STORE`` is otherwise public (Phase C #393).
     """
+    entries = environment_entries(identifier)
+    managed = laravel_managed(identifier, dict(entries))
     details: list[dict[str, str]] = []
-    for key, value in environment_entries(identifier):
+    for key, value in entries:
         row = {"key": key, "digest": hashlib.sha256(value.encode("utf-8")).hexdigest()}
-        if key in NON_SECRET_KEYS:
+        if key in NON_SECRET_KEYS and key not in managed:
             row["value"] = value
         details.append(row)
     return details

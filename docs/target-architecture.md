@@ -128,6 +128,8 @@ Source cleanup requires the supported `wait srv-removable` predicate in the auth
 
 Each site that enables an object cache gets its own Valkey instance. The PHP client is phpredis from the runtime catalog, loaded into that site's own master and CLI wrappers ([PHP extensions](runtimes.md#php-extensions)). Enabling it restarts only that site's master. On the disposable arm64 lane a measured enable took 3.59 s, served 210 requests with 2 refused (502) over a 0.17 s window, left the runtime master's MainPID and invocation untouched, and reported `redis` 6.3.0 with `Zend OPcache` through the site's diagnostic pool; `disposable/test_native_qualification.py::SitePHPMasterRestart` prints the measurement.
 
+A WordPress site is connected by the pinned Redis Object Cache plugin and its `WP_REDIS_*` constants. A Laravel site is connected through its own `.env`: `CACHE_STORE=redis`, `REDIS_HOST` set to the site's private socket path and `REDIS_PORT=0`, written through the same reviewed environment path as any other key, followed by a cached-configuration rebuild and a graceful restart of the site's running workers. Those three keys are Barectl-managed while they name the site's own cache: the Environment screen shows them read-only and discovery keeps their values on the server. Turning the cache off restores the store the site used before Barectl changed it, rebuilds the configuration and restarts workers before the instance stops; a controller with no record of that earlier store refuses to guess ([object cache](object-cache.md#laravel-wiring-and-ordering)).
+
 ## Valkey
 
 One Ubuntu `valkey-server` package is installed per server from Server **Settings > Object

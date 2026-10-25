@@ -121,6 +121,8 @@ A Laravel site's Caddy file is the front-controller form: every path that is not
 
 A review of a site that already exists in this form proposes no changes. A fresh controller reconstructs the site, its repository and branch, its `.env` key names and server-computed digests (never a secret value) and the deploy key's public half from the server alone. The Environment section edits only reviewed keys ([settings](settings.md)).
 
+**Object cache** on the same Settings page points a Laravel site's cache store at its own private Valkey instance. The review needs a verified, ungated current release; the `.env` keys are written through the Environment path, Laravel's cached configuration is rebuilt and any running workers restart. While the cache is on, `CACHE_STORE`, `REDIS_HOST` and `REDIS_PORT` are Barectl-managed and read-only in Environment. Turning it off restores the previous store before the instance stops; a controller without that record refuses to guess ([object cache](object-cache.md#laravel-wiring-and-ordering)).
+
 ## Deploying a Laravel site
 
 **Deployments** shows a site's current release and its retained releases, each with its commit, creation time, state and whether it is serving. The list comes from the server's own release layout: a release directory under `releases/`, the `current` link, and each release's Git metadata. A release created by CI in the same layout under the same site lock is listed like Barectl's own. Nothing is read from a Barectl marker, and reading releases never runs PHP, Composer, Git hooks or Artisan.
