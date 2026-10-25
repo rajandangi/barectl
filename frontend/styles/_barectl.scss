@@ -424,6 +424,21 @@ body {
   }
 }
 
+.barectl-main pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.barectl-main code {
+  overflow-wrap: anywhere;
+}
+
+.barectl-results,
+.usa-table-container--scrollable {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .barectl-layout__content {
   min-width: 0;
 

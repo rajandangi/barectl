@@ -45,6 +45,7 @@ from sites.views import (
     server_laravel_site_prepare,
     server_wordpress_site_prepare,
     site_create,
+    site_create_continue,
     site_create_platform,
     site_list,
 )
@@ -90,6 +91,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/create/",
         site_create,
         name="server_site_create",
+    ),
+    path(
+        "servers/<int:pk>/sites/create/continue/",
+        site_create_continue,
+        name="site_create_continue",
     ),
     path(
         "servers/<int:pk>/sites/create/<str:platform>/",

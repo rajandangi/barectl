@@ -540,10 +540,6 @@ def kind_of(slug: str) -> ChangeKind | None:
     return _KINDS.get(slug)
 
 
-def registered_kinds() -> tuple[ChangeKind, ...]:
-    return tuple(_KINDS.values())
-
-
 def current_units() -> frozenset[str]:
     """The units of this installation's runs that are not finished, on any server."""
     return frozenset(

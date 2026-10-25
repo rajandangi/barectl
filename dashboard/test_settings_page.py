@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+from typing import ClassVar, override
 from unittest import mock
 
 from django.test import override_settings
@@ -43,7 +44,11 @@ class HeaderTests(ControllerConfigTestCase):
 
 
 class InstallationSettingsTests(ControllerConfigTestCase):
+    key: ClassVar[ECDSAKey]
+    key_file: ClassVar[Path]
+
     @classmethod
+    @override
     def setUpClass(cls) -> None:
         super().setUpClass()
         directory = Path(cls.enterClassContext(tempfile.TemporaryDirectory()))

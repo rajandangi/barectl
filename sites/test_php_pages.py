@@ -21,7 +21,7 @@ from servers.testing import ControllerConfigTestCase
 
 from .observation import PHP_TRANSITION_INCOMPLETE
 from .php_change import SLUG
-from .ui_testing import record_http_sites, record_step_run
+from .ui_testing import record_http_sites, record_php85_installed, record_step_run
 
 BANNED = (
     "master",
@@ -49,23 +49,6 @@ BANNED = (
     "digest",
     "known_hosts",
 )
-
-
-def record_php85_installed(server: Server) -> None:
-    """A host where PHP 8.5 was installed and discovery verified its service."""
-    record_http_sites(server)
-    snapshot = current_snapshot(server)
-    if snapshot is None:
-        raise AssertionError("No snapshot.")
-    runtimes = tuple(
-        replace(row, path="/nix/store/observed-php85", master_state="active", problem="")
-        if row.entry == "php85"
-        else row
-        for row in snapshot.collected.runtimes
-    )
-    collected = replace(snapshot.collected, runtimes=runtimes)
-    attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
-    save_snapshot(attempt, collected, timezone.now())
 
 
 class SitePhpSettingsTests(ControllerConfigTestCase):

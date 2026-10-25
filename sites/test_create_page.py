@@ -151,7 +151,7 @@ class CreateSitePageTests(ControllerConfigTestCase):
         self.assertContains(run_page, "Continue to create the site")
         self.assertContains(
             run_page,
-            f'href="/servers/{self.server.pk}/sites/create/?create={preparation.pk}"',
+            f'action="/servers/{self.server.pk}/sites/create/continue/"',
         )
         page = self.client.get(f"/servers/{self.server.pk}/sites/create/?create={preparation.pk}")
         self.assertContains(page, "Your answers are kept.")
@@ -163,14 +163,7 @@ class CreateSitePageTests(ControllerConfigTestCase):
         )
         # The same answers prepare the site once the runtime is installed.
         record_php85_installed(self.server)
-        response = self.client.post(
-            f"/servers/{self.server.pk}/sites/http/prepare/",
-            {
-                "platform": "php",
-                "names": ["shop.example.com", "www.shop.example.com"],
-                "php_version": "php85",
-            },
-        )
+        response = self.client.post(f"/servers/{self.server.pk}/sites/create/continue/")
         rows = read_changes(self.server).rows
         self.assertEqual(rows[0].preparation.kind_slug, "create_http_site")
         self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")

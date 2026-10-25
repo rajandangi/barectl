@@ -44,8 +44,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.sign_in()
         self.page.goto(f"{self.live_server_url}/sites/")
         link = self.page.get_by_role("link", name="Create a site on Production", exact=True)
-        link.focus()
-        self.page.keyboard.press("Enter")
+        link.press("Enter")
         form = self.page.locator("form.barectl-create-site")
         domain = form.get_by_label("Domain", exact=True)
         domain.fill("shop.example.com")
@@ -56,8 +55,8 @@ class HttpSiteBrowserTests(BrowserTestCase):
         domain.fill("second.example.com")
         expect(identifier).to_have_value("myshop")
         identifier.fill("apply")
-        form.locator("#create-php-php85").check()
-        form.locator("#create-php-php84").check()
+        form.locator('label[for="create-php-php85"]').click()
+        form.locator('label[for="create-php-php84"]').click()
         form.get_by_role("button", name="Add another domain", exact=True).click()
         expect(form.locator('input[name="names"]')).to_have_count(2)
         button = form.get_by_role("button", name="Continue", exact=True)
@@ -119,7 +118,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
 
     def test_a_missing_php_version_is_added_before_the_site(self) -> None:
         from operations.services import read_changes
-        from sites.ui_testing import record_step_run
+        from sites.ui_testing import record_php85_installed, record_step_run
 
         server = Server.objects.get(name="Production")
         record_http_sites(server)
@@ -129,7 +128,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/create/")
         form = self.page.locator("form.barectl-create-site")
         form.get_by_label("Domain", exact=True).fill("shop.example.com")
-        form.locator("#create-php-php85").check()
+        form.locator('label[for="create-php-php85"]').click()
         form.get_by_role("button", name="Continue", exact=True).click()
         expect(
             self.page.get_by_text("Step 1 of 2: add PHP 8.5 to this server", exact=True)
@@ -137,14 +136,11 @@ class HttpSiteBrowserTests(BrowserTestCase):
         preparation = read_changes(server).rows[0].preparation
         self.assertEqual(preparation.kind_slug, "add_runtime")
         run = record_step_run(preparation)
+        record_php85_installed(server)
         self.page.goto(f"{self.live_server_url}/runs/{run.pk}/")
-        link = self.page.get_by_role("link", name="Continue to create the site", exact=True)
-        link.focus()
+        button = self.page.get_by_role("button", name="Continue to create the site", exact=True)
+        button.focus()
         self.page.keyboard.press("Enter")
-        form = self.page.locator("form.barectl-create-site")
-        expect(form.get_by_label("Domain", exact=True)).to_have_value("shop.example.com")
-        expect(form.locator("#create-php-php85")).to_be_checked()
-        form.get_by_role("button", name="Continue", exact=True).click()
         expect(
             self.page.get_by_role("heading", name="Create shop.example.com", exact=True)
         ).to_be_visible()
@@ -365,7 +361,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/overview/")
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/")
             address = self.page.get_by_role("link", name="http://alpha.example.com")
             expect(address).to_be_visible()
             expect(address).to_have_attribute("href", "http://alpha.example.com")
@@ -390,7 +386,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/overview/")
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/")
             self.page.get_by_role("link", name="WordPress", exact=True).click()
             expect(
                 self.page.get_by_role("heading", name="Reset administrator password", exact=True)
@@ -418,7 +414,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
         self.sign_in()
         self.page.set_viewport_size({"width": 375, "height": 812})
-        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/")
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/advanced/")
         attention = self.page.get_by_role("region", name="Needs attention")
         expect(attention.get_by_role("listitem")).to_have_count(5)
         self.assertEqual(
@@ -431,7 +427,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             f"{self.live_server_url}/servers/{server.pk}/sites/delta/settings/"
         )
         for tab, table in (("web", "Caddy site files"), ("php", "PHP-FPM site pools")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/stack/?tab={tab}")
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/advanced/?tab={tab}")
             expect(self.page.get_by_role("table", name=table)).to_be_visible()
             self.assertEqual(
                 self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
@@ -455,7 +451,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
             form.get_by_label("Domain", exact=True).fill("shop.example.com")
             form.get_by_role("button", name="Add another domain", exact=True).click()
             form.locator('input[name="names"]').nth(1).fill("www.shop.example.com")
-            form.locator("#create-php-php84").check()
+            form.locator('label[for="create-php-php84"]').click()
             button = form.get_by_role("button", name="Continue", exact=True)
             button.focus()
             self.page.keyboard.press("Enter")
@@ -787,18 +783,21 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/overview/")
-            expect(self.page.get_by_role("heading", name="Observed site", level=2)).to_be_visible()
-            expect(self.page.get_by_text("Certificate", exact=True)).to_be_visible()
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/")
+            expect(self.page.get_by_role("heading", name="Site", level=2)).to_be_visible()
             expect(self.page.get_by_text("over HTTPS")).to_be_visible()
+            self.page.get_by_role("link", name="Logs", exact=True).click()
+            expect(self.page.get_by_text("Certificate", exact=True)).to_be_visible()
             expect(
                 self.page.get_by_text(
                     "Issued by CN=Pebble, expires 2027-01-15 08:00 UTC", exact=True
                 )
             ).to_be_visible()
+            self.page.get_by_role("link", name="Overview", exact=True).click()
             self.assert_phone_layout()
             record_site_settings(server, certificate=SiteCertificate("http"), https=False)
-            self.page.reload()
-            expect(self.page.get_by_text("over HTTP only")).to_be_visible()
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/")
+            expect(self.page.get_by_text("over HTTP").first).to_be_visible()
+            self.page.get_by_role("link", name="Logs", exact=True).click()
             expect(self.page.get_by_text("Not used (HTTP only)", exact=True)).to_be_visible()
         self.assert_phone_layout()

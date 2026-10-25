@@ -30,8 +30,6 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from discovery.fakes import run_worker
-from discovery.recorded import ReplayShell, load
 from servers.discovery_state import DiscoveryState
 from servers.models import Server
 
@@ -143,45 +141,6 @@ class BrowserTestCase(LiveServerTestCase):
         self.page.on("request", self.record_request)
         self.page.on("console", self.record_console)
         self.page.on("pageerror", self.record_page_error)
-
-    def assert_saved_connection_journey(self) -> None:
-        for codename in ("add_server", "add_discoveryattempt", "change_shared"):
-            self.user.user_permissions.add(Permission.objects.get(codename=codename))
-        self.sign_in()
-        page = self.page
-        page.get_by_role("link", name="Add server").click()
-        expect(page.get_by_role("textbox", name="SSH user", exact=True)).to_have_value("root")
-        expect(page.get_by_role("spinbutton", name="Port", exact=True)).to_have_value("22")
-        page.get_by_role("textbox", name="Name", exact=True).fill("Cloud")
-        address = page.get_by_role("textbox", name="Address", exact=True)
-        address.fill("https://cloud.example")
-        page.get_by_role("button", name="Save and check").click()
-        summary = page.locator("#server-form-errors")
-        expect(summary).to_be_focused()
-        expect(page.get_by_role("textbox", name="Name", exact=True)).to_have_value("Cloud")
-        summary.get_by_role("link", name="Address:", exact=False).click()
-        expect(address).to_be_focused()
-        address.fill("cloud.example")
-        page.get_by_role("button", name="Save and check").click()
-        expect(page.get_by_role("heading", name="Cloud", level=1)).to_be_visible()
-        expect(page.locator("#discovery")).to_contain_text("Connection check queued")
-        with mock.patch(
-            "discovery.ssh.connect",
-            return_value=contextlib.nullcontext(ReplayShell(load("pristine-26.04"))),
-        ):
-            run_worker()
-        page.reload()
-        expect(page.locator("#discovery")).to_contain_text("Fresh host")
-        expect(page.get_by_role("link", name="Set up server", exact=True)).to_be_visible()
-        expect(page.locator(".barectl-facts").first).to_contain_text("cloud.example")
-        expect(page.locator(".barectl-facts").first).to_contain_text("root")
-        page.set_viewport_size({"width": 320, "height": 740})
-        self.assertEqual(
-            page.evaluate(
-                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
-            ),
-            0,
-        )
 
     def record_request(self, request: Request) -> None:
         self.requests.append(request)

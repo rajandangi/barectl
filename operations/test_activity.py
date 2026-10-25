@@ -182,7 +182,8 @@ class ActivityPageTests(ControllerConfigTestCase):
         record_attempt(self.web, DiscoveryAttempt.Status.QUEUED)
         page = self.client.get("/activity/").content.decode()
         shown = re.search(r"shown=([0-9a-f]+)", page)
-        self.assertIsNotNone(shown)
+        if shown is None:
+            self.fail("The Activity page does not carry its poll token.")
         unchanged = self.client.get(
             "/activity/rows/", {"shown": shown.group(1)}, headers=HTMX_FRAGMENT
         )

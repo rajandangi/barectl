@@ -81,8 +81,7 @@ class CreationStep:
             family = SWITCH_PLATFORMS[self.platform]
             return f"{base}?change={family}&selection={self.selection}#change-{family}"
         if self.platform == "http":
-            base = reverse("server_site_create", args=[self.server_id])
-            return f"{base}?create={self.preparation_id}"
+            return reverse("site_create_continue", args=[self.server_id])
         if self.platform in ("wordpress", "laravel"):
             base = reverse("site_create_platform", args=[self.server_id, self.platform])
             return f"{base}?create={self.preparation_id}"
@@ -152,6 +151,8 @@ class StepBanner:
     note: str
     continue_url: str = ""
     continue_label: str = ""
+    # A continuation that prepares the next review itself is a CSRF-protected POST.
+    continue_post: bool = False
 
 
 def remember(request: HttpRequest, step: CreationStep) -> None:
@@ -244,4 +245,5 @@ def run_banner(step: CreationStep, *, succeeded: bool, finished: bool) -> StepBa
         note=note,
         continue_url=step.continue_url(),
         continue_label=step.continue_label if succeeded else "Return to Create site",
+        continue_post=succeeded and step.platform == "http",
     )

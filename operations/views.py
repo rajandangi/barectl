@@ -27,7 +27,6 @@ from .forms import (
     ChangeConfirmationForm,
     SharedApplyForm,
 )
-from .inputs import InputShape
 from .models import (
     MANAGE_SECRETS,
     VIEW_CHANGES,
@@ -63,35 +62,6 @@ def _user(request: HttpRequest) -> User:
     if not isinstance(user, User):
         raise PermissionDenied
     return user
-
-
-@never_cache
-@require_GET
-@login_required
-def server_changes(request: HttpRequest, pk: int) -> HttpResponse:
-    """The server's changes page: what the one change engine prepares, reviews and runs."""
-    _may_view(request)
-    if not request.user.has_perm("servers.view_server"):
-        raise PermissionDenied
-    server = get_object_or_404(Server, pk=pk)
-    changes = services.read_changes(server)
-    discovery_state = server_state(server)
-    can_prepare = request.user.has_perms(PREPARE_PERMISSIONS) and (
-        discovery_state.can_prepare_changes
-    )
-    context = {
-        "server": server,
-        "rows": [change_view(row) for row in changes.rows],
-        "kinds": [
-            kind
-            for kind in engine.registered_kinds()
-            if can_prepare and kind.input_shape == InputShape.SELECTION and not kind.input_choices
-        ],
-        "can_prepare": can_prepare,
-        "standing_refusal": not discovery_state.can_prepare_changes,
-        "busy": changes.polling,
-    }
-    return render(request, "operations/changes.html", context)
 
 
 @require_POST

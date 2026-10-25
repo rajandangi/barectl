@@ -57,10 +57,10 @@ class DefaultCommandBrowserTests(BrowserTestCase):
         review = ChangeReview.objects.get(preparation=preparation)
         self.assertTrue(review.eligible, review.document)
         self.assertEqual(review.consent, Consent.SHARED)
-        expect(self.page.get_by_role("button", name="Apply review", exact=False)).to_have_count(0)
+        expect(self.page.get_by_role("button", name="Set default PHP", exact=True)).to_have_count(0)
         self.user.user_permissions.add(Permission.objects.get(codename="change_shared"))
         self.page.reload()
-        expect(self.page.get_by_role("button", name="Apply review", exact=False)).to_be_visible()
+        expect(self.page.get_by_role("button", name="Set default PHP", exact=True)).to_be_visible()
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/settings/")
         expect(

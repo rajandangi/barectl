@@ -23,6 +23,7 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
         call_command("collectstatic", interactive=False, verbosity=0)
 
+    @override
     def setUp(self) -> None:
         super().setUp()
         for codename in (
@@ -68,7 +69,7 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         expect(page.get_by_role("heading", name="alpha.example.com", level=1)).to_be_visible()
         expect(page.get_by_role("link", name="http://alpha.example.com")).to_be_visible()
         expect(page.get_by_text("PHP version")).to_be_visible()
-        expect(page.get_by_text("php84")).to_be_visible()
+        expect(page.get_by_text("8.4")).to_be_visible()
         expect(page.get_by_text("Last checked")).to_be_visible()
         expect(page.get_by_text("/var/www/alpha/current/public")).to_be_visible()
         self.assert_no_native_terms(allowed=("caddy",))

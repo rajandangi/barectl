@@ -52,6 +52,8 @@ class AddServerBrowserTests(BrowserTestCase):
             "add_discoveryattempt",
             "change_server",
             "change_shared",
+            "view_changes",
+            "change_site",
         )
         self.empty_inventory()
         self.sign_in()

@@ -157,6 +157,7 @@ def create_site_context(
         "create_site_observed_at": snapshot.collected_at if snapshot is not None else None,
         "create_site_domains": domains or [""],
         "create_site_identifier": str(form["identifier"].value() or ""),
+        "create_site_more_open": bool(form["identifier"].errors),
         "create_site_continuation": (
             step if step is not None and step.platform == "http" else None
         ),
@@ -618,12 +619,16 @@ def site_create_platform_form(
     }
     can_prepare = request.user.has_perms(PREPARE_PERMISSIONS)
     if platform == "wordpress":
+        if not isinstance(form, WordPressSiteForm):
+            raise Http404
         context.update(wordpress_site_context(server, form))
         context["wordpress_site_can_prepare"] = (
             can_prepare and context["wordpress_site_can_prepare"]
         )
         context["wordpress_site_focus"] = True
     else:
+        if not isinstance(form, LaravelSiteForm):
+            raise Http404
         context.update(laravel_site_context(server, form))
         context["laravel_site_can_prepare"] = can_prepare and context["laravel_site_can_prepare"]
         context["laravel_site_focus"] = True
@@ -657,6 +662,59 @@ def site_create_platform(request: HttpRequest, pk: int, platform: str) -> HttpRe
         context.update(laravel_site_context(server, step=step))
         context["laravel_site_can_prepare"] = can_prepare and context["laravel_site_can_prepare"]
     return render(request, "sites/create_platform.html", context)
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def site_create_continue(request: HttpRequest, pk: int) -> HttpResponse:
+    """Continue a Create site from Step 1's kept answers, preparing its review directly."""
+    server = get_object_or_404(Server, pk=pk)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    step = continuation.stored(request)
+    if step is None or step.server_id != server.pk or step.platform != "http":
+        messages.error(
+            request, "Your answers are no longer kept. Start Create site again."
+        )
+        return redirect("server_site_create", pk=pk)
+    state = server_state(server)
+    choices = prerequisites.php_choices(state)
+    form = CreateSiteForm(
+        {
+            "platform": "php",
+            "names": str(step.answers.get("names", "")),
+            "identifier": str(step.answers.get("identifier", "")),
+            "php_version": str(step.answers.get("php_version", "")),
+            "http_only": "on" if step.answers.get("http_only") else "",
+        },
+        php_versions=tuple(choice.entry for choice in choices if choice.installed),
+        installable=prerequisites.installable(choices),
+    )
+    if not form.is_valid():
+        return _create_page(request, server, form, status=409)
+    if not _can_prepare(state, has_choices=bool(choices), reason=""):
+        messages.warning(
+            request, "Run discovery and resolve the server's findings before creating a site."
+        )
+        return redirect("server_sites", pk=pk)
+    return _finish_creation(
+        request,
+        server,
+        user,
+        "http",
+        state,
+        form,
+        kind_slug="create_http_site",
+        inputs={
+            "version": 1,
+            "identifier": form.cleaned_data["identifier"],
+            "names": list(form.cleaned_data["names"]),
+            "selection": form.cleaned_data["php_version"],
+            "https": not form.cleaned_data["http_only"],
+        },
+    )
 
 
 @never_cache

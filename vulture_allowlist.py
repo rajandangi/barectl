@@ -112,7 +112,6 @@ if TYPE_CHECKING:
     from laravel.apps import LaravelConfig
     from laravel.bodies import settings as laravel_settings_body
     from laravel.bodies.common import laravel_read
-    from operations import views as operations_views
     from operations.activity import ActivityRow
     from operations.apps import OperationsConfig
     from operations.forms import (
@@ -151,7 +150,7 @@ if TYPE_CHECKING:
     from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
-    from sites.continuation import CreationStep
+    from sites.continuation import CreationStep, StepBanner
     from sites.forms import (
         HttpSiteForm,
         LaravelSiteForm,
@@ -303,6 +302,8 @@ if TYPE_CHECKING:
     _http_site_field = HttpSiteForm.http_only
     # The create form renders the Step 1 continuation note from the session step.
     _creation_step = CreationStep.resume_note
+    # The run banner's template renders the continuation as a form POST.
+    _step_banner = StepBanner("", "", "", "", True).continue_post
     # The Stack page's runtime catalog template reads these fields.
     _shown_build = ShownBuild("", "", "", 0, 0)
     _runtime_catalog = (
@@ -503,9 +504,6 @@ if TYPE_CHECKING:
         Banner.queued_at,
         Banner.worker_unavailable,
     )
-    # The retired server changes page: its URL redirects to the server's Activity and its
-    # view stays until #371 removes the old screens.
-    _retired_changes_view = (operations_views.server_changes,)
     # templates/servers/_activity_table.html presents a change's preparation time beside
     # the run that applied it.
     _activity_template_fields = (ActivityRow.prepared_at,)
