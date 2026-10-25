@@ -259,7 +259,8 @@ def _records() -> dict[str, object]:
             role
             for role in ROLES
             if any(
-                unit["name"].startswith(f"{service_name(identifier, role)[:-8]}-") for unit in units
+                unit["name"] in (service_name(identifier, role), timer_name(identifier, role))
+                for unit in units
             )
         }
         for role in ROLES:

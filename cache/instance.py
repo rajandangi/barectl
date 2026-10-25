@@ -21,6 +21,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final, cast
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from discovery.root_read import run_root
 from discovery.snapshot import CollectedSnapshot, ObservedCache, ObservedSite
 from discovery.ssh import RemoteShell
@@ -32,22 +33,103 @@ from operations.models import ChangeReview
 from sites import observation as site_observation
 
 from . import convention, observation
+from .laravel import laravel_managed_digests, laravel_wiring_digests
 
 SLUG: Final = "set_site_object_cache"
 LABEL: Final = "Object cache"
 STAGES: Final = ("preflight", "instance", "wiring", "plugin", "verify")
 STAGES_OFF: Final = ("preflight", "disconnect", "stop", "verify")
+STAGES_LARAVEL: Final = ("preflight", "instance", "environment", "config", "workers", "verify")
+STAGES_LARAVEL_OFF: Final = (
+    "preflight",
+    "disconnect",
+    "config",
+    "workers",
+    "stop",
+    "verify",
+)
 SOCKET_MODE: Final = 0o600
 DIGEST: Final = re.compile(r"[0-9a-f]{64}")
 _BODY_RESOURCE: Final = importlib.resources.files("cache.bodies").joinpath("instance.py")
+LARAVEL_COMMON_SOURCE: Final = (
+    importlib.resources.files("laravel.bodies")
+    .joinpath("common.py")
+    .read_text()
+    .replace(
+        "from sites.bodies.common import (\n"
+        "    canonical,\n"
+        "    current_bytes,\n"
+        "    open_site_lock,\n"
+        "    reload_caddy,\n"
+        "    reload_site_fpm,\n"
+        "    replace_caddy,\n"
+        "    result,\n"
+        "    safe,\n"
+        "    same_site_lock,\n"
+        "    setting,\n"
+        "    site_account,\n"
+        "    site_address,\n"
+        "    stage,\n"
+        ")\n",
+        "",
+    )
+    .replace("from cache.laravel import laravel_managed\n", "")
+)
 BODY_SOURCE: Final = (
     site_observation.COMMON_SOURCE
     + "\n"
     + importlib.resources.files("cache").joinpath("convention.py").read_text()
     + "\n"
+    + importlib.resources.files("cache")
+    .joinpath("laravel.py")
+    .read_text()
+    .replace("from .convention import instance_paths\n", "")
+    + "\n"
     + importlib.resources.files("wordpress").joinpath("convention.py").read_text()
     + "\n"
+    + AUTOMATION_SOURCE
+    + "\n"
+    + importlib.resources.files("automation")
+    .joinpath("workers.py")
+    .read_text()
+    .replace(
+        "from automation.convention import (\n"
+        "    KILL_MODE,\n"
+        "    WORKER_ROLES,\n"
+        "    account,\n"
+        "    digest,\n"
+        "    directives_map,\n"
+        "    parse_unit,\n"
+        "    render_slice,\n"
+        "    role_of,\n"
+        "    service_name,\n"
+        "    site_directory,\n"
+        "    slice_name,\n"
+        ")\n",
+        "",
+    )
+    + "\n"
+    + importlib.resources.files("automation.bodies")
+    .joinpath("worker_env.py")
+    .read_text()
+    .replace("from automation.convention import service_name\n", "")
+    .replace("from automation.workers import WORKER_ROLES\n", "")
+    + "\n"
+    + LARAVEL_COMMON_SOURCE
+    + "\n"
     + _BODY_RESOURCE.read_text()
+    .replace(
+        "from automation.bodies.worker_env import restart_workers\n",
+        "",
+    )
+    .replace(
+        "from automation.bodies.units import fence, restore\n",
+        "",
+    )
+    .replace(
+        "from cache.laravel import laravel_managed, laravel_values, laravel_wiring\n",
+        "",
+    )
     .replace(
         "from cache.convention import (\n"
         "    MAXMEMORY_MIB,\n"
@@ -55,6 +137,16 @@ BODY_SOURCE: Final = (
         "    instance_paths,\n"
         "    render_config,\n"
         "    render_drop_in,\n"
+        ")\n",
+        "",
+    )
+    .replace(
+        "from laravel.bodies.common import (\n"
+        "    _private_file_ok,\n"
+        "    apply_environment,\n"
+        "    environment_entries_from_text,\n"
+        "    environment_path,\n"
+        "    read_environment,\n"
         ")\n",
         "",
     )
@@ -499,20 +591,37 @@ def state_of(  # noqa: C901 - one recognized state table
     application: str = "",
     client: str = "",
     account: object = None,
+    wiring: str = "",
 ) -> tuple[str, str]:
-    """One site's object cache state and the reason it is not simply on or off."""
+    """One site's object cache state and the reason it is not simply on or off.
+
+    ``wiring`` is the application's own cache wiring, recognized by the caller from native
+    evidence: the WordPress constants, or Laravel's `.env` keys. An application's wiring
+    participates in the off state, so a leftover environment never reads as "off".
+    """
     if row is None:
+        if wiring:
+            return "partial", "The cache instance is not installed."
         return "off", ""
     wordpress = wordpress_of(row)
-    wiring = str(wordpress.get("wiring", ""))
+    wordpress_wiring = str(wordpress.get("wiring", ""))
     dropin = bool(wordpress.get("dropin"))
+    if application != "laravel" and not wiring:
+        wiring = wordpress_wiring
     if not row["config_present"] and not row["drop_in_present"] and not wiring and not dropin:
         return "off", ""
     if row["outside"]:
         return "unsupported", str(row["outside"])
     if row["config_problem"]:
         return "unsupported", str(row["config_problem"])
-    if not row["drop_in_present"] or not row["drop_in_supported"]:
+    if not row["drop_in_supported"]:
+        return "unsupported", (
+            "The cache instance's unit settings are outside the supported convention."
+        )
+    if application == "laravel":
+        if not row["config_present"] or not row["drop_in_present"]:
+            return "partial", "The cache instance is not installed."
+    elif not row["drop_in_present"]:
         return "unsupported", (
             "The cache instance's unit settings are outside the supported convention."
         )
@@ -543,23 +652,36 @@ def state_of(  # noqa: C901 - one recognized state table
             return "partial", "The site does not load the object cache's PHP client."
         if wordpress.get("plugin") != plugin_version():
             return "partial", "The WordPress object cache plugin is not the pinned version."
+    if application == "laravel":
+        if wiring != "complete":
+            return "partial", "The site does not use its own cache."
+        if client != "phpredis":
+            return "partial", "The site does not load the object cache's PHP client."
     return "on", ""
 
 
 def observed(
-    value: dict[str, object] | None, sites: tuple[ObservedSite, ...]
+    value: dict[str, object] | None,
+    sites: tuple[ObservedSite, ...],
+    laravel: dict[str, str] | None = None,
 ) -> tuple[ObservedCache, ...]:
-    """One observation row per site, plus any instance whose site is not configured."""
+    """One observation row per site, plus any instance whose site is not configured.
+
+    ``laravel`` maps a Laravel site's identifier to its recognized `.env` wiring, which the
+    caller derives from the server-computed setting digests, never from the values.
+    """
     rows = instances(value)
     known = {site.identifier for site in sites}
     records: list[ObservedCache] = []
     for site in sites:
         row = rows.get(site.identifier)
+        is_laravel = laravel is not None and site.identifier in laravel
         state, problem = state_of(
             row,
-            application=site.application,
+            application="laravel" if is_laravel else site.application,
             client=site.client,
             account=site.account,
+            wiring=(laravel or {}).get(site.identifier, "") if is_laravel else "",
         )
         records.append(
             ObservedCache(
@@ -610,6 +732,9 @@ class InstanceEvidence:
     value: dict[str, object] | None
     site: ObservedSite | None
     site_digest: str = ""
+    # A Laravel site's own release and environment inventory (#393). ``None`` for another
+    # application or when the inventory is unreadable.
+    laravel: dict[str, object] | None = None
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> InstanceEvidence:
@@ -617,7 +742,21 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> InstanceEvidence:
 
     snapshot = collect(shell, sites=False)
     site, digest = _site_snapshot(shell, snapshot, inputs.identifier)
-    return InstanceEvidence(snapshot, read(shell, inputs.identifier), site, digest)
+    laravel: dict[str, object] | None = None
+    if site is not None and site.application != "wordpress":
+        from laravel import observation as laravel_observation
+
+        # A Laravel site's passive site record reads as plain (its application is known
+        # from its release layout), so the release inventory is the native proof.
+        inventory = laravel_observation.read(shell)
+        row = (
+            laravel_observation.site(inventory, inputs.identifier)
+            if inventory is not None
+            else None
+        )
+        if row is not None and row["application"] == "laravel":
+            laravel = inventory
+    return InstanceEvidence(snapshot, read(shell, inputs.identifier), site, digest, laravel)
 
 
 def _site_snapshot(
@@ -638,13 +777,96 @@ def _site_snapshot(
 
 
 ACCOUNT_LABEL: Final = "The site's Linux account is not observed."
+LARAVEL_PREIMAGE_ON = (
+    "Barectl does not know which cache store this site used before its object cache was "
+    "turned on, so it will not overwrite the current store. Turn the object cache off and "
+    "prepare again only after the site's cache store is known."
+)
+LARAVEL_PREIMAGE_OFF = (
+    "Barectl does not know which cache store this site used before its object cache was "
+    "turned on, so it will not guess. This device has no record of turning it on; restore "
+    "the site's cache store through ordinary administration, then prepare this review again."
+)
+LARAVEL_UNREADABLE = "The site's release and environment could not be read."
+
+
+@dataclass(frozen=True)
+class LaravelCacheState:
+    """One Laravel site's environment wiring, recognized from digests and the release."""
+
+    row: dict[str, object] | None
+    wiring: str
+    managed: frozenset[str]
+    store: str
+    store_present: bool
+    release_complete: bool
+
+
+def laravel_site(evidence: InstanceEvidence, identifier: str) -> dict[str, object] | None:
+    if evidence.laravel is None:
+        return None
+    from laravel import observation as laravel_observation
+
+    return laravel_observation.site(evidence.laravel, identifier)
+
+
+def _environment_details(row: dict[str, object] | None) -> list[dict[str, object]]:
+    details = row.get("environment_details") if row is not None else None
+    return (
+        [detail for detail in details if isinstance(detail, dict)]
+        if isinstance(details, list)
+        else []
+    )
+
+
+def laravel_wiring(identifier: str, row: dict[str, object] | None) -> str:
+    digests = {
+        str(detail["key"]): str(detail["digest"])
+        for detail in _environment_details(row)
+        if isinstance(detail.get("key"), str) and isinstance(detail.get("digest"), str)
+    }
+    return laravel_wiring_digests(identifier, digests)
+
+
+def laravel_managed(identifier: str, row: dict[str, object] | None) -> frozenset[str]:
+    digests = {
+        str(detail["key"]): str(detail["digest"])
+        for detail in _environment_details(row)
+        if isinstance(detail.get("key"), str) and isinstance(detail.get("digest"), str)
+    }
+    return laravel_managed_digests(identifier, digests)
+
+
+def _laravel_state(identifier: str, row: dict[str, object] | None) -> LaravelCacheState:
+    entries = {
+        str(detail["key"]): str(detail["value"])
+        for detail in _environment_details(row)
+        if isinstance(detail.get("key"), str) and isinstance(detail.get("value"), str)
+    }
+    current = str(row.get("current", "")) if row is not None else ""
+    releases = row.get("releases") if row is not None else None
+    complete = bool(current) and any(
+        isinstance(entry, dict)
+        and entry.get("name") == current
+        and entry.get("state") == "complete"
+        for entry in (releases if isinstance(releases, list) else [])
+    )
+    return LaravelCacheState(
+        row,
+        laravel_wiring(identifier, row),
+        laravel_managed(identifier, row),
+        entries.get("CACHE_STORE", ""),
+        "CACHE_STORE" in entries,
+        complete,
+    )
 
 
 def _refusals(  # noqa: C901 - every refusal reason
-    evidence: InstanceEvidence, *, enabled: bool, identifier: str
+    evidence: InstanceEvidence, inputs: PreparationInputs, identifier: str
 ) -> tuple[list[str], dict[str, object] | None]:
     from bootstrap.standing import Standing
 
+    enabled = inputs.object_cache is True
     refusals: list[str] = []
     snapshot = evidence.collected
     if snapshot.standing is None or snapshot.standing.standing != Standing.TARGET_STACK:
@@ -665,14 +887,45 @@ def _refusals(  # noqa: C901 - every refusal reason
     if site is None:
         refusals.append("The site was not observed in the current server configuration.")
         return refusals, None
-    if site.application != "wordpress":
-        refusals.append("This site is not a verified WordPress installation.")
+    row = instance(evidence.value, identifier)
+    laravel_row = laravel_site(evidence, identifier)
+    if laravel_row is None:
+        if site.application != "wordpress":
+            refusals.append("This site is not a verified WordPress or Laravel installation.")
+        else:
+            value = wordpress_of(row)
+            if value and value.get("present") is False:
+                refusals.append(
+                    "The private WordPress configuration is outside the supported settings."
+                )
+        if not enabled:
+            return refusals, row
+    if laravel_row is not None:
+        laravel = _laravel_state(identifier, laravel_row)
+        if not enabled:
+            return refusals, row
+        if laravel.row is None:
+            refusals.append(LARAVEL_UNREADABLE)
+        elif not laravel.release_complete:
+            refusals.append(
+                "The site's last deploy is not complete, so its object cache cannot be turned "
+                "on. Deploy the site again first."
+            )
+        if (
+            laravel.wiring != "complete"
+            and laravel.store == "redis"
+            and not inputs.cache_store_known
+        ):
+            refusals.append(LARAVEL_PREIMAGE_ON)
     if not enabled:
-        return refusals, instance(evidence.value, identifier)
+        return refusals, row
     from discovery.models import SiteState
 
     if site.state != SiteState.MANAGED:
-        refusals.append("The site is not fully managed, so its object cache cannot be turned on.")
+        refusals.append(
+            "The site is not fully managed, so its object cache cannot be turned on. Finish "
+            "its last deploy or take it out of maintenance first."
+        )
     if site.account is None:
         refusals.append(ACCOUNT_LABEL)
     if site.client != "phpredis":
@@ -680,7 +933,6 @@ def _refusals(  # noqa: C901 - every refusal reason
             "This site does not load the object cache's PHP client. Load it for this site "
             "first, then prepare the object cache again."
         )
-    row = instance(evidence.value, identifier)
     artifacts = row is not None and (row["config_present"] or row["drop_in_present"])
     if (
         artifacts
@@ -691,91 +943,172 @@ def _refusals(  # noqa: C901 - every refusal reason
             "The site's cache instance is outside supported settings. Correct it through "
             "ordinary administration, then prepare again."
         )
-    value = wordpress_of(row)
-    if value and value.get("present") is False:
-        refusals.append("The private WordPress configuration is outside the supported settings.")
-    return refusals, instance(evidence.value, identifier)
+    return refusals, row
 
 
-def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
+def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa: C901
     if not isinstance(evidence, InstanceEvidence):
         raise ValueError("An object cache change needs native evidence.")
     identifier = inputs.identifier
     enabled = inputs.object_cache is True
-    refusals, row = _refusals(evidence, enabled=enabled, identifier=identifier)
+    refusals, row = _refusals(evidence, inputs, identifier)
     site = evidence.site
+    laravel_row = laravel_site(evidence, identifier)
+    application = (
+        "laravel" if laravel_row is not None else (site.application if site is not None else "")
+    )
+    laravel = _laravel_state(identifier, laravel_row) if laravel_row is not None else None
     account = site.account if site is not None else None
     state, problem = state_of(
         row,
-        application=site.application if site is not None else "",
+        application=application,
         client=site.client if site is not None else "",
         account=account,
+        wiring=laravel.wiring if laravel is not None else "",
     )
     memory = inputs.cache_mib if enabled else 0
+    previous_present, previous_store = False, ""
+    write_environment = False
+    restore_store = False
+    if laravel is not None:
+        if enabled:
+            write_environment = laravel.wiring != "complete"
+            if write_environment:
+                if laravel.store_present and laravel.store != "redis":
+                    previous_present, previous_store = True, laravel.store
+                elif not laravel.store_present:
+                    previous_present, previous_store = False, ""
+                elif inputs.cache_store_known:
+                    previous_present = inputs.cache_store_present
+                    previous_store = inputs.cache_store
+                elif LARAVEL_PREIMAGE_ON not in refusals:
+                    refusals.append(LARAVEL_PREIMAGE_ON)
+        else:
+            restore_store = "CACHE_STORE" in laravel.managed
+            write_environment = bool(laravel.managed)
+            if restore_store:
+                if inputs.cache_store_known:
+                    previous_present = inputs.cache_store_present
+                    previous_store = inputs.cache_store
+                else:
+                    refusals.append(LARAVEL_PREIMAGE_OFF)
     unchanged = enabled and state == "on" and row is not None and row["memory_mib"] == memory
-    if not enabled and state == "off":
+    artifacts = row is not None and (row["config_present"] or row["drop_in_present"])
+    if not enabled and not artifacts and not write_environment:
         unchanged = True
     document: dict[str, object] = {
         "version": 1,
         "body_sha256": BODY_SHA256,
         "identifier": identifier,
+        "application": application,
         "enabled": enabled,
         "maxmemory_mib": memory,
         "socket": convention.instance_paths(identifier).socket,
-        "prefix": _prefix(identifier),
     }
     current: dict[str, object] = {
         "state": state,
         "memory_mib": row["memory_mib"] if row is not None else None,
         "problem": problem,
-        "wiring": wordpress_of(row).get("wiring", ""),
-        "plugin": wordpress_of(row).get("plugin", ""),
+        "wiring": (
+            laravel.wiring if laravel is not None else str(wordpress_of(row).get("wiring", ""))
+        ),
+        "plugin": str(wordpress_of(row).get("plugin", "")),
     }
     effects: tuple[DeclaredEffect, ...] = ()
     if site is not None and evidence.value is not None:
-        from .plugin import (
-            PLUGIN_ARCHIVE_SHA256,
-            PLUGIN_ARCHIVE_SIZE,
-            PLUGIN_ARCHIVE_URL,
-            PLUGIN_VERSION,
-        )
+        if application == "wordpress":
+            from .plugin import (
+                PLUGIN_ARCHIVE_SHA256,
+                PLUGIN_ARCHIVE_SIZE,
+                PLUGIN_ARCHIVE_URL,
+                PLUGIN_VERSION,
+            )
 
+            document.update(
+                prefix=_prefix(identifier),
+                plugin_version=PLUGIN_VERSION,
+                plugin_url=PLUGIN_ARCHIVE_URL,
+                plugin_size=PLUGIN_ARCHIVE_SIZE,
+                plugin_sha256=PLUGIN_ARCHIVE_SHA256,
+                configuration_digest=wordpress_of(row).get("configuration_digest", ""),
+            )
+            effect_on = (
+                "Turn on this site's own object cache: its private Valkey instance, the "
+                "pinned Redis Object Cache plugin and the WordPress connection, limited to "
+                f"{_size_label(memory)}."
+            )
+            effect_off = (
+                "Turn off this site's object cache: disable the WordPress cache first, then "
+                "stop and remove the site's private instance."
+            )
+        else:
+            if laravel is not None and laravel.row is not None:
+                document.update(
+                    environment_digest=laravel.row.get("environment_digest", ""),
+                    write_environment=write_environment,
+                    restore_store=restore_store,
+                    previous_store_present=previous_present,
+                    previous_store=previous_store,
+                )
+            effect_on = (
+                "Turn on this site's own object cache: its private cache, the site's cache "
+                f"settings, limited to {_size_label(memory)}, and restart its workers. Its "
+                "cached configuration is rebuilt."
+            )
+            effect_off = (
+                "Turn off this site's object cache: restore the site's previous cache store "
+                "and rebuild its configuration first, restart its workers, then stop and "
+                "remove the site's private instance."
+            )
         document.update(
-            plugin_version=PLUGIN_VERSION,
-            plugin_url=PLUGIN_ARCHIVE_URL,
-            plugin_size=PLUGIN_ARCHIVE_SIZE,
-            plugin_sha256=PLUGIN_ARCHIVE_SHA256,
             precondition_digest=evidence.site_digest,
             cache_digest=evidence.value["digest"],
-            configuration_digest=wordpress_of(row).get("configuration_digest", ""),
             current=current,
-            details=_details(identifier, enabled, memory, state, problem, row),
+            details=_details(identifier, application, enabled, memory, state, problem, row),
         )
         if not refusals and not unchanged:
             effects = (
-                DeclaredEffect(
-                    Scope.SITE,
-                    (
-                        (
-                            "Turn on this site's own object cache: its private Valkey "
-                            "instance, the pinned Redis Object Cache plugin and the "
-                            f"WordPress connection, limited to {_size_label(memory)}."
-                        )
-                        if enabled
-                        else (
-                            "Turn off this site's object cache: disable the WordPress "
-                            "cache first, then stop and remove the site's private instance."
-                        )
-                    ),
-                    (identifier,),
-                ),
+                DeclaredEffect(Scope.SITE, effect_on if enabled else effect_off, (identifier,)),
             )
     note = ""
     if unchanged and not refusals:
-        note = (
-            "This site's object cache is already on with the chosen limit."
+        if enabled:
+            note = "This site's object cache is already on with the chosen limit."
+        elif laravel is not None and laravel.wiring:
+            note = (
+                "Barectl has no cache to turn off for this site; its environment points at "
+                "another cache."
+            )
+        else:
+            note = "This site has no object cache."
+    stages: tuple[str, ...]
+    postconditions: tuple[str, ...]
+    if laravel is not None:
+        stages = STAGES_LARAVEL if enabled else STAGES_LARAVEL_OFF
+        postconditions = (
+            (
+                "The site's cache settings use its own private cache, its cached configuration "
+                "was rebuilt, and any running workers restarted."
+            )
             if enabled
-            else "This site has no object cache."
+            else (
+                "The site is back on its previous cache store with its configuration rebuilt, "
+                "and no cache instance runs."
+            ),
+            "No other site's cache or serving changes.",
+            "Discovery reconstructs the cache state from the server alone.",
+        )
+    else:
+        stages = STAGES if enabled else STAGES_OFF
+        postconditions = (
+            (
+                "The site has its own running cache instance on a private connection, with "
+                "the pinned plugin enabled."
+            )
+            if enabled
+            else ("The site keeps no cache instance, no plugin drop-in and no cache settings."),
+            "No other site's cache or serving changes.",
+            "Discovery reconstructs the cache state from the server alone.",
         )
     return ReviewDraft(
         SLUG,
@@ -785,17 +1118,8 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             else f"Turn off the object cache for {identifier}."
         ),
         effects=effects,
-        stages=STAGES if enabled else STAGES_OFF,
-        postconditions=(
-            (
-                "The site has its own running cache instance on a private connection, with "
-                "the pinned plugin enabled."
-            )
-            if enabled
-            else ("The site keeps no cache instance, no plugin drop-in and no cache settings."),
-            "No other site's cache or serving changes.",
-            "Discovery reconstructs the cache state from the server alone.",
-        ),
+        stages=stages,
+        postconditions=postconditions,
         refusals=tuple(dict.fromkeys(refusals)),
         boot_id=str(evidence.value["boot"]) if evidence.value is not None else "",
         uptime_centiseconds=(
@@ -827,6 +1151,7 @@ def _size_label(memory_mib: int) -> str:
 
 def _details(
     identifier: str,
+    application: str,
     enabled: bool,
     memory: int,
     state: str,
@@ -839,18 +1164,51 @@ def _details(
         {"label": "PHP client", "value": "phpredis (loaded for this site)"},
     ]
     if enabled:
-        details.extend(
-            [
-                {"label": "Memory limit", "value": _size_label(memory)},
-                {
-                    "label": "WordPress plugin",
-                    "value": f"{plugin_name()} {plugin_version()} (pinned)",
-                },
-                {
-                    "label": "Private connection",
-                    "value": "This site's own cache connection; no network port, no password.",
-                },
-            ]
+        details.append({"label": "Memory limit", "value": _size_label(memory)})
+        if application == "laravel":
+            details.extend(
+                [
+                    {
+                        "label": "Cache store",
+                        "value": "Redis through this site's own private connection.",
+                    },
+                    {
+                        "label": "Cached configuration",
+                        "value": "Rebuilt after the cache setting changes.",
+                    },
+                    {
+                        "label": "Workers",
+                        "value": "Any running workers restart gracefully and finish current jobs.",
+                    },
+                    {
+                        "label": "Private connection",
+                        "value": "This site's own cache connection; no network port, no password.",
+                    },
+                ]
+            )
+        else:
+            details.extend(
+                [
+                    {
+                        "label": "WordPress plugin",
+                        "value": f"{plugin_name()} {plugin_version()} (pinned)",
+                    },
+                    {
+                        "label": "Private connection",
+                        "value": "This site's own cache connection; no network port, no password.",
+                    },
+                ]
+            )
+    elif application == "laravel":
+        details.append(
+            {
+                "label": "Disconnected first",
+                "value": (
+                    "The site's previous cache store is restored, its configuration rebuilt "
+                    "and its workers restarted; then its private instance and connection are "
+                    "removed."
+                ),
+            }
         )
     else:
         details.append(
@@ -887,37 +1245,61 @@ def _document(document: dict[str, object]) -> dict[str, object]:
     )
 
     identifier = document.get("identifier")
+    application = document.get("application")
     if (
         document.get("version") != 1
         or document.get("body_sha256") != BODY_SHA256
         or not isinstance(identifier, str)
+        or application not in ("wordpress", "laravel")
         or type(document.get("enabled")) is not bool
         or type(document.get("maxmemory_mib")) is not int
     ):
         raise ValueError("The object cache review is not a valid immutable selection.")
-    convention.instance_paths(identifier)
+    paths = convention.instance_paths(identifier)
     enabled = document["enabled"] is True
     memory = int(str(document["maxmemory_mib"]))
     if enabled and memory not in convention.MAXMEMORY_MIB:
         raise ValueError("The object cache review names an unreviewed memory size.")
     if not enabled and memory:
         raise ValueError("A disabled object cache must not name a memory size.")
-    if (
-        document.get("plugin_version") != PLUGIN_VERSION
-        or document.get("plugin_url") != PLUGIN_ARCHIVE_URL
-        or document.get("plugin_size") != PLUGIN_ARCHIVE_SIZE
-        or document.get("plugin_sha256") != PLUGIN_ARCHIVE_SHA256
-    ):
-        raise ValueError("The object cache review does not name the pinned plugin.")
     digest = document.get("precondition_digest")
-    configuration = document.get("configuration_digest")
+    cache = document.get("cache_digest")
     if (
         not isinstance(digest, str)
         or DIGEST.fullmatch(digest) is None
-        or not isinstance(configuration, str)
-        or DIGEST.fullmatch(configuration) is None
+        or not isinstance(cache, str)
+        or DIGEST.fullmatch(cache) is None
+        or document.get("socket") != paths.socket
     ):
         raise ValueError("The object cache review's evidence is invalid.")
+    if application == "wordpress":
+        configuration = document.get("configuration_digest")
+        if (
+            document.get("plugin_version") != PLUGIN_VERSION
+            or document.get("plugin_url") != PLUGIN_ARCHIVE_URL
+            or document.get("plugin_size") != PLUGIN_ARCHIVE_SIZE
+            or document.get("plugin_sha256") != PLUGIN_ARCHIVE_SHA256
+            or not isinstance(configuration, str)
+            or DIGEST.fullmatch(configuration) is None
+            or not isinstance(document.get("prefix"), str)
+        ):
+            raise ValueError("The object cache review does not name the pinned plugin.")
+        return document
+    environment = document.get("environment_digest")
+    previous = document.get("previous_store")
+    if (
+        not isinstance(environment, str)
+        or not environment
+        or DIGEST.fullmatch(environment) is None
+        or type(document.get("write_environment")) is not bool
+        or type(document.get("restore_store")) is not bool
+        or type(document.get("previous_store_present")) is not bool
+        or not isinstance(previous, str)
+        or len(previous) > 2048
+        or any(character in "\x00\r\n" for character in previous)
+        or (document.get("previous_store_present") is False and previous)
+    ):
+        raise ValueError("The object cache review's Laravel environment is invalid.")
     return document
 
 
@@ -928,6 +1310,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
         for key in (
             "version",
             "identifier",
+            "application",
             "enabled",
             "maxmemory_mib",
             "socket",
@@ -938,6 +1321,12 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
             "plugin_sha256",
             "precondition_digest",
             "configuration_digest",
+            "cache_digest",
+            "environment_digest",
+            "write_environment",
+            "restore_store",
+            "previous_store_present",
+            "previous_store",
         )
     }
     from base64 import b64encode
@@ -956,11 +1345,24 @@ def verify(shell: RemoteShell, review_value: ChangeReview) -> bool | None:
     row = instance(value, identifier)
     enabled = review_value.document.get("enabled") is True
     site, _digest = _site_snapshot(shell, _collect(shell), identifier)
+    wiring = ""
+    laravel_row: dict[str, object] | None = None
+    if site is not None and site.application != "wordpress":
+        from laravel import observation as laravel_observation
+
+        inventory = laravel_observation.read(shell)
+        laravel_row = (
+            laravel_observation.site(inventory, identifier) if inventory is not None else None
+        )
+        if laravel_row is not None and laravel_row["application"] != "laravel":
+            laravel_row = None
+        wiring = laravel_wiring(identifier, laravel_row)
     state, _problem = state_of(
         row,
         application=site.application if site is not None else "",
         client=site.client if site is not None else "",
         account=site.account if site is not None else None,
+        wiring=wiring,
     )
     if enabled:
         return (
@@ -968,6 +1370,9 @@ def verify(shell: RemoteShell, review_value: ChangeReview) -> bool | None:
             and row is not None
             and row["memory_mib"] == review_value.document.get("maxmemory_mib")
         )
+    if laravel_row is not None:
+        artifacts = row is not None and (row["config_present"] or row["drop_in_present"])
+        return not artifacts and not laravel_managed(identifier, laravel_row)
     return state == "off"
 
 

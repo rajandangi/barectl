@@ -110,3 +110,27 @@ class RecordedObjectCacheTests(SimpleTestCase):
         self.assertFalse(draft.eligible)
         off = PreparationInputs(identifier=SITE, object_cache=False)
         self.assertTrue(instance.review(instance.inspect(shell, off), off).eligible)
+
+
+LARAVEL_OBJECT_CACHE_STATE = "object-cache-laravel-26.04"
+LARAVEL_SITE = "sqwalpha"
+
+
+class RecordedLaravelObjectCacheTests(SimpleTestCase):
+    def test_a_fresh_controller_reconstructs_the_laravel_site_cache(self) -> None:
+        shell = ReplayShell(load(LARAVEL_OBJECT_CACHE_STATE))
+        collected = collect(shell)
+        row = next(row for row in collected.cache.value if row.identifier == LARAVEL_SITE)
+        self.assertEqual(row.state, "on", row.problem)
+        self.assertEqual(row.memory_mib, 64)
+        self.assertEqual(row.client, "phpredis")
+        self.assertEqual(row.plugin_version, "")
+
+    def test_a_repeated_laravel_review_proposes_nothing(self) -> None:
+        from . import instance
+
+        inputs = PreparationInputs(identifier=LARAVEL_SITE, object_cache=True, cache_mib=64)
+        shell = ReplayShell(load(LARAVEL_OBJECT_CACHE_STATE))
+        draft = instance.review(instance.inspect(shell, inputs), inputs)
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertTrue(draft.no_changes)

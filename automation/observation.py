@@ -431,8 +431,15 @@ def role_show(row: dict[str, object], role: str) -> tuple[dict[str, str], dict[s
 
 
 def _both(timer: object, service: object) -> tuple[dict[str, str], dict[str, str]] | None:
-    timer_values, service_values = _values(timer), _values(service)
-    if timer_values is None or service_values is None:
+    # A queue worker has no timer: its role carries only service properties, and the fence
+    # still needs to pause and resume it (Phase C #266/#395).
+    service_values = _values(service)
+    if service_values is None:
+        return None
+    if timer is None:
+        return {}, service_values
+    timer_values = _values(timer)
+    if timer_values is None:
         return None
     return timer_values, service_values
 

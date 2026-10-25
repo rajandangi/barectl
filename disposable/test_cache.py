@@ -1,9 +1,10 @@
-"""Valkey installed and masked by the product's own reviewed change (#391).
+"""A site's own object cache, WordPress and Laravel (#391, #393).
 
 docs/quality.md#native-layer. The lane server reaches only its lane's pinned snapshot. The
-class starts from L1, creates one site through the product so a PHP master and a site proxy
-are running, then proves the transaction's ``daemon-reload`` recovery on those real units
-(issue #428).
+WordPress classes start from L1, create one site through the product so a PHP master and a
+site proxy are running, then prove the transaction's ``daemon-reload`` recovery on those real
+units (issue #428) and the cache lifecycle. The Laravel class starts from the prepared L5
+snapshot so the cache lifecycle alone stays one small item.
 """
 
 import os
@@ -23,6 +24,7 @@ from operations.inputs import PreparationInputs
 from . import mirror
 from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
+from .test_laravel_deploy import LaravelDeployCase
 
 STATE = "valkey-installed-26.04"
 PACKAGE = "valkey-server"
@@ -408,3 +410,133 @@ class SiteObjectCache(ValkeyCase):
         with self.shell() as shell:
             collected = collect(shell)
         self.assertEqual(self.cache_row(collected).state, "off")
+
+
+LARAVEL_CACHE_STATE = "object-cache-laravel-26.04"
+LARAVEL_CACHE_SITE = "sqwalpha"
+LARAVEL_CACHE_DOMAIN = "site.fixture.test"
+
+
+@tag(SCENARIO_TAG)
+class LaravelObjectCache(LaravelDeployCase):
+    """#393 on the prepared L5 layer: the cache lifecycle only, no setup."""
+
+    layer = "L5"
+    exclusive = True
+    prefix = "sqw"
+    identity = LARAVEL_CACHE_SITE
+    domain = LARAVEL_CACHE_DOMAIN
+    records: tuple[str, ...] = (LARAVEL_CACHE_STATE,)
+
+    @override
+    @contextmanager
+    def shell(self) -> Iterator[RemoteShell]:
+        os.environ["SSH_AUTH_SOCK"] = ""
+        from discovery import ssh
+
+        with ssh.connect(self.target()) as connection:
+            yield connection
+
+    def environment(self) -> str:
+        return self.native(f"cat {self.base()}/private/laravel.env")
+
+    def valkey(self, *arguments: str) -> str:
+        command = " ".join(shlex.quote(argument) for argument in arguments)
+        return self.native(
+            f"runuser -u s{LARAVEL_CACHE_SITE} -- /usr/bin/valkey-cli -s "
+            f"/run/valkey/{LARAVEL_CACHE_SITE}/valkey.sock " + command
+        ).strip()
+
+    def cached_values(self) -> list[str]:
+        """What the instance holds, read out of band from whichever database Laravel used."""
+        databases = {0}
+        for line in self.valkey("INFO", "keyspace").splitlines():
+            if line.startswith("db") and ":" in line:
+                databases.add(int(line[2:].split(":", 1)[0]))
+        values: list[str] = []
+        for database in sorted(databases):
+            keys = self.valkey(
+                "-n", str(database), "--scan", "--pattern", "*barectl-cache-check*"
+            ).splitlines()
+            values.extend(self.valkey("-n", str(database), "GET", key) for key in keys)
+        return values
+
+    def test_the_application_reads_through_the_socket_and_returns(self) -> None:
+        from cache import instance
+        from discovery import recorded, ssh
+        from discovery.observations import collect
+
+        self.assertIn("CACHE_STORE=database", self.environment())
+        before = {
+            process: self.native(
+                "systemctl show --value -p InvocationID "
+                f"barectl-site-{LARAVEL_CACHE_SITE}-queue{process}.service"
+            ).strip()
+            for process in (1, 2)
+        }
+        apply_change(
+            self,
+            instance.SET_SITE_OBJECT_CACHE,
+            PreparationInputs(identifier=LARAVEL_CACHE_SITE, object_cache=True, cache_mib=64),
+            timeout=180,
+        )
+        environment = self.environment()
+        self.assertIn("CACHE_STORE=redis", environment)
+        self.assertIn(f"REDIS_HOST=/run/valkey/{LARAVEL_CACHE_SITE}/valkey.sock", environment)
+        self.assertIn("REDIS_PORT=0", environment)
+        self.assertEqual(self.https_status("/"), 200)
+        self.assertEqual(self.https_body("/"), "through-the-private-cache")
+        # The instance keeps Laravel's serialized value; the store name is not the proof.
+        self.assertTrue(any("through-the-private-cache" in value for value in self.cached_values()))
+        for process in (1, 2):
+            self.assertNotEqual(
+                self.native(
+                    "systemctl show --value -p InvocationID "
+                    f"barectl-site-{LARAVEL_CACHE_SITE}-queue{process}.service"
+                ).strip(),
+                before[process],
+            )
+        with ssh.connect(self.target()) as connection:
+            recording = recorded.RecordingShell(
+                connection, LARAVEL_CACHE_STATE, secrets=(recorded.SEEDED_SECRET,)
+            )
+            observed = collect(recording)
+            inputs = PreparationInputs(
+                identifier=LARAVEL_CACHE_SITE, object_cache=True, cache_mib=64
+            )
+            instance.review(instance.inspect(recording, inputs), inputs)
+            self.checkpoint(LARAVEL_CACHE_STATE, recording)
+        row = next(item for item in observed.cache.value if item.identifier == LARAVEL_CACHE_SITE)
+        self.assertEqual(row.state, "on", row.problem)
+        apply_change(
+            self,
+            instance.SET_SITE_OBJECT_CACHE,
+            PreparationInputs(
+                identifier=LARAVEL_CACHE_SITE,
+                object_cache=False,
+                cache_store_known=True,
+                cache_store_present=True,
+                cache_store="database",
+            ),
+            timeout=180,
+        )
+        environment = self.environment()
+        self.assertIn("CACHE_STORE=database", environment)
+        self.assertNotIn("REDIS_HOST", environment)
+        self.assertNotIn("REDIS_PORT", environment)
+        self.assertNotEqual(
+            self.native(
+                f"systemctl show -p ActiveState --value valkey-server@{LARAVEL_CACHE_SITE}.service"
+            ).strip(),
+            "active",
+        )
+        self.assertEqual(
+            self.native(f"test -e /run/valkey/{LARAVEL_CACHE_SITE}/valkey.sock; echo $?").strip(),
+            "1",
+        )
+        self.assertEqual(self.https_status("/"), 200)
+        self.assertEqual(self.https_body("/"), "through-the-private-cache")
+        with self.shell() as shell:
+            after = collect(shell)
+        row = next(item for item in after.cache.value if item.identifier == LARAVEL_CACHE_SITE)
+        self.assertEqual(row.state, "off")

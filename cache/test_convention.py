@@ -1,10 +1,13 @@
 """The per-site Valkey convention #392 and #393 build on (docs/adr/0030)."""
 
+import hashlib
+
 from django.test import SimpleTestCase
 
 from wordpress import convention as wordpress_convention
 
 from . import convention
+from . import laravel as laravel_convention
 
 
 class ValkeyInstanceConventionTests(SimpleTestCase):
@@ -91,6 +94,48 @@ class ValkeyInstanceConventionTests(SimpleTestCase):
         shape = convention.config_shape("shop", changed)
         self.assertNotEqual(shape.problem, "")
         self.assertEqual(shape.outside, "")
+
+    def test_the_laravel_wiring_is_the_same_private_connection(self) -> None:
+        values = laravel_convention.laravel_values("shop")
+        self.assertEqual(
+            values,
+            {
+                "CACHE_STORE": "redis",
+                "REDIS_HOST": "/run/valkey/shop/valkey.sock",
+                "REDIS_PORT": "0",
+            },
+        )
+        self.assertEqual(laravel_convention.laravel_wiring("shop", values), "complete")
+        self.assertEqual(
+            laravel_convention.laravel_managed("shop", values),
+            frozenset(laravel_convention.LARAVEL_KEYS),
+        )
+        self.assertEqual(laravel_convention.laravel_wiring("shop", {}), "")
+        other = {**values, "REDIS_HOST": "/run/valkey/other/valkey.sock"}
+        self.assertEqual(laravel_convention.laravel_wiring("shop", other), "partial")
+        self.assertEqual(laravel_convention.laravel_managed("shop", other), frozenset())
+
+    def test_a_hand_chosen_store_keeps_its_value_but_not_the_cache_keys(self) -> None:
+        values = {**laravel_convention.laravel_values("shop"), "CACHE_STORE": "file"}
+        self.assertEqual(
+            laravel_convention.laravel_managed("shop", values),
+            frozenset({"REDIS_HOST", "REDIS_PORT"}),
+        )
+        digests = {key: hashlib.sha256(value.encode()).hexdigest() for key, value in values.items()}
+        self.assertEqual(
+            laravel_convention.laravel_managed_digests("shop", digests),
+            frozenset({"REDIS_HOST", "REDIS_PORT"}),
+        )
+        self.assertEqual(
+            laravel_convention.laravel_managed_digests(
+                "shop",
+                {
+                    key: hashlib.sha256(value.encode()).hexdigest()
+                    for key, value in laravel_convention.laravel_values("shop").items()
+                },
+            ),
+            frozenset(laravel_convention.LARAVEL_KEYS),
+        )
 
     def test_only_the_reviewed_memory_sizes_are_offered(self) -> None:
         self.assertEqual(convention.MAXMEMORY_MIB, (32, 64, 128, 256))

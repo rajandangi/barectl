@@ -355,6 +355,14 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "so the site may still serve the previous configuration. Check the run's journal, "
         "then prepare a new review."
     ),
+    "laravel_environment_managed": (
+        "The selected environment key is managed by the site's object cache, so nothing "
+        "changed. Change the object cache setting instead."
+    ),
+    "laravel_worker": (
+        "The environment changed, but a running worker did not restart cleanly. The new "
+        "configuration is written; check the worker and restart it from Settings."
+    ),
     "wordpress_settings": (
         "The private WordPress configuration changed, is outside the supported grammar or "
         "could not be rewritten safely, so nothing changed. Run discovery and prepare a new "
@@ -489,11 +497,6 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
     "queue_workers_stop": (
         "Barectl could not confirm that every queue worker stopped. Check the run's journal, "
         "then prepare a new review."
-    ),
-    "laravel_worker": (
-        "The environment changed, but Barectl could not restart the site's queue workers in "
-        "time. They may still be running the previous environment; check the run's journal "
-        "and restart them."
     ),
     "automation_scheduler": (
         "The site's Laravel files, account or scheduler units were not the reviewed ones, so "
@@ -757,7 +760,9 @@ RESULT_REASONS: Final = frozenset(
         "laravel_release",
         "laravel_shared",
         "laravel_environment",
+        "laravel_environment_managed",
         "laravel_config",
+        "laravel_worker",
         "wordpress_settings",
         "settings_secret",
         "release_absent",
@@ -789,7 +794,6 @@ RESULT_REASONS: Final = frozenset(
         "queue_workers_environment",
         "queue_workers_start",
         "queue_workers_stop",
-        "laravel_worker",
         "automation_scheduler",
         "automation_run",
         "automation_running",

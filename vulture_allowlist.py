@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
-    from disposable.test_cache import SiteObjectCache, ValkeyInstall
+    from disposable.test_cache import LaravelObjectCache, SiteObjectCache, ValkeyInstall
     from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
     from disposable.test_confidential_channel import ConfidentialChannelLifecycle
     from disposable.test_database_engine import (
@@ -100,6 +100,7 @@ if TYPE_CHECKING:
         SitePHPIsolation,
         SitePHPServing,
     )
+    from disposable.test_prepared_laravel import PrepareLaravel
     from disposable.test_prepared_sites import PreparedSitesReuse, PrepareSites
     from disposable.test_prepared_wordpress import PrepareWordPress, PrepareWordPressCache
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
@@ -569,7 +570,14 @@ if TYPE_CHECKING:
         LaravelDeployBootFailure.test_a_release_whose_readiness_fails_is_never_reached,
         LaravelDeployPostgreSQL.test_a_deploy_on_postgresql,
     )
-    # The Phase C Valkey scenario is found by Django's test discovery.
-    _cache_scenarios = (ValkeyInstall, SiteObjectCache, PrepareWordPress, PrepareWordPressCache)
+    # The Phase C cache scenarios are found by Django's test discovery.
+    _cache_scenarios = (
+        ValkeyInstall,
+        SiteObjectCache,
+        LaravelObjectCache,
+        PrepareWordPress,
+        PrepareWordPressCache,
+        PrepareLaravel,
+    )
     # The cache state choices are Django field choices, read through the field.
     _cache_states = (CacheState.OFF, CacheState.ON, CacheState.PARTIAL, CacheState.UNSUPPORTED)

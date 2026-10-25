@@ -197,6 +197,7 @@ class FenceSetTests(SimpleTestCase):
                 "edit_wordpress_settings",
                 "remove_site",
                 "update_catalog",
+                "set_site_object_cache",
             },
         )
 

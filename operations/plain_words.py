@@ -160,8 +160,9 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         title="Turn on the object cache for {site}",
         summary=(
             (
-                "{site} gets its own private cache, with the pinned WordPress cache plugin "
-                "installed and connected."
+                "{site} gets its own private cache. A WordPress site gets the pinned cache "
+                "plugin; a Laravel site's cache store points at it, its cached configuration "
+                "is rebuilt and any running workers restart."
             ),
             "No other site can read, clear or fill this cache.",
             (
@@ -175,6 +176,11 @@ _WORDS: Final[dict[str, ChangeWords]] = {
             "instance": "Starting the site's cache",
             "wiring": "Connecting WordPress",
             "plugin": "Installing the cache plugin",
+            "environment": "Pointing the site at its cache",
+            "config": "Rebuilding the site's configuration",
+            "workers": "Restarting the site's workers",
+            "disconnect": "Disconnecting the site",
+            "stop": "Stopping the site's cache",
             "verify": "Checking the cache connects",
         },
         home=Home.SITE,

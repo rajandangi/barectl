@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from automation.bodies.worker_env import restart_workers
+from cache.laravel import laravel_managed
 from laravel.bodies.common import (
     ENVIRONMENT_KEY,
     _private_file_ok,
@@ -191,9 +192,14 @@ def edit_environment(document: dict[str, object]) -> None:  # noqa: C901 - revie
         if hashlib.sha256(before.encode("utf-8")).hexdigest() != document.get("environment_digest"):
             result("refused", "evidence")
             return
-        existing = {key for key, _value in environment_entries_from_text(before)}
+        entries = environment_entries_from_text(before)
+        existing = {key for key, _value in entries}
+        managed = laravel_managed(settings.identifier, dict(entries))
         for change in changes:
             key, action = str(change["key"]), str(change["action"])
+            if key in managed:
+                result("refused", "laravel_environment_managed")
+                return
             if action == "remove" and key not in existing:
                 result("refused", "evidence")
                 return

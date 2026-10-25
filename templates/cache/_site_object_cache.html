@@ -1,4 +1,4 @@
-{# Site Settings: the site's own object cache (#392, docs/object-cache.md). #}
+{# Site Settings: the site's own object cache (#392/#393, docs/object-cache.md). #}
 {% if object_cache_applicable %}
   <section class="barectl-card" aria-labelledby="site-object-cache-heading">
     <h2 id="site-object-cache-heading">Object cache</h2>
@@ -33,40 +33,16 @@
           <button type="submit" class="usa-button">Load the cache client</button>
         </form>
       {% endif %}
-    {% elif object_cache_enabled %}
-      <p>
-        WordPress uses the pinned {{ object_cache_plugin_name }} plugin
-        {{ object_cache_plugin_version }}.
-      </p>
-      {% if object_cache_reading %}
-        <p>
-          {{ object_cache_reading.line }}
-          {% if object_cache_checked_at %}
-            Checked {{ object_cache_checked_at|date:"M j, Y, H:i:s T" }}.
-          {% endif %}
-        </p>
-      {% else %}
-        <p class="barectl-note">Check the cache to see its memory use and evictions.</p>
+      {% if object_cache_state != "off" and object_cache_can_turn_off %}
+        <form method="post"
+              action="{% url 'site_object_cache_prepare' server.pk identifier %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="off">
+          <button type="submit"
+                  class="usa-button usa-button--outline">Turn off object cache</button>
+        </form>
       {% endif %}
-      <div class="barectl-actions">
-        {% if object_cache_can_read %}
-          <form method="post"
-                action="{% url 'site_object_cache_read' server.pk identifier %}">
-            {% csrf_token %}
-            <button type="submit" class="usa-button usa-button--outline">Check the cache</button>
-          </form>
-        {% endif %}
-        {% if object_cache_can_prepare %}
-          <form method="post"
-                action="{% url 'site_object_cache_prepare' server.pk identifier %}">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="off">
-            <button type="submit"
-                    class="usa-button usa-button--outline">Turn off object cache</button>
-          </form>
-        {% endif %}
-      </div>
-    {% else %}
+    {% elif object_cache_state == "off" %}
       <p class="barectl-note">
         Turning the cache on gives this site its own private cache. No other site can read,
         clear or fill it.
@@ -92,10 +68,68 @@
         {% include "operations/_blocking_operation.html" with after="Turn the cache on after it finishes." %}
       {% else %}
         <p class="barectl-note">
-          Turning the cache on needs a current, complete WordPress site and permission to
-          change this site.
+          Turning the cache on needs a current, complete site and permission to change this
+          site.
         </p>
       {% endif %}
+    {% else %}
+      {% if object_cache_application == "wordpress" %}
+        <p>
+          WordPress uses the pinned {{ object_cache_plugin_name }} plugin
+          {{ object_cache_plugin_version }}.
+        </p>
+      {% else %}
+        <p class="barectl-note">
+          This site's cache store points at its own private cache. Its configuration is
+          rebuilt and running workers restart when the cache changes.
+        </p>
+      {% endif %}
+      {% if object_cache_reading %}
+        <p>
+          {{ object_cache_reading.line }}
+          {% if object_cache_checked_at %}
+            Checked {{ object_cache_checked_at|date:"M j, Y, H:i:s T" }}.
+          {% endif %}
+        </p>
+      {% else %}
+        <p class="barectl-note">Check the cache to see its memory use and evictions.</p>
+      {% endif %}
+      {% if object_cache_state != "on" and object_cache_can_prepare %}
+        <form method="post"
+              action="{% url 'site_object_cache_prepare' server.pk identifier %}"
+              class="usa-form">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="on">
+          <div class="usa-form-group">
+            <label class="usa-label" for="object-cache-memory-repair">Memory limit</label>
+            <select class="usa-select" id="object-cache-memory-repair" name="memory">
+              {% for size, label in object_cache_memory_choices %}
+                <option value="{{ size }}"
+                        {% if size == object_cache_memory_mib %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="usa-button">Turn on object cache</button>
+        </form>
+      {% endif %}
+      <div class="barectl-actions">
+        {% if object_cache_can_read %}
+          <form method="post"
+                action="{% url 'site_object_cache_read' server.pk identifier %}">
+            {% csrf_token %}
+            <button type="submit" class="usa-button usa-button--outline">Check the cache</button>
+          </form>
+        {% endif %}
+        {% if object_cache_can_turn_off %}
+          <form method="post"
+                action="{% url 'site_object_cache_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="off">
+            <button type="submit"
+                    class="usa-button usa-button--outline">Turn off object cache</button>
+          </form>
+        {% endif %}
+      </div>
     {% endif %}
   </section>
 {% endif %}

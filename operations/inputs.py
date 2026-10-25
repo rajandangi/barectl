@@ -61,6 +61,12 @@ class PreparationInputs:
     # limit in MiB when it is.
     object_cache: bool | None = None
     cache_mib: int = 0
+    # The cache store a Laravel site used before Barectl turned its object cache on, from
+    # the last applied review this controller recorded. ``cache_store_known`` is false on
+    # a controller that has no such record, so turning the cache off refuses to guess.
+    cache_store: str = ""
+    cache_store_known: bool = False
+    cache_store_present: bool = True
     # The primary domain a site-removal preparation uses when the server no longer names it.
     primary: str = ""
     # A database engine request that installs Git in the same reviewed transaction.
@@ -151,12 +157,19 @@ class PreparationInputs:
                 "php_client": self.php_client,
             }
         if self.object_cache is not None:
-            return {
+            document: dict[str, object] = {
                 "version": 1,
                 "identifier": self.identifier,
                 "object_cache": self.object_cache,
                 "maxmemory_mib": self.cache_mib if self.object_cache else 0,
             }
+            if self.cache_store_known:
+                document.update(
+                    cache_store_known=True,
+                    cache_store_present=self.cache_store_present,
+                    cache_store=self.cache_store,
+                )
+            return document
         if self.pool is not None:
             return {
                 "version": 1,
@@ -498,7 +511,9 @@ def _site_object_cache_inputs(
     from cache.convention import MAXMEMORY_MIB
     from sites.names import request
 
-    if set(value) != {"version", "identifier", "object_cache", "maxmemory_mib"}:
+    base = {"version", "identifier", "object_cache", "maxmemory_mib"}
+    optional = {"cache_store_known", "cache_store_present", "cache_store"}
+    if not base <= set(value) <= base | optional:
         raise ValueError(INVALID_INPUTS)
     identifier, enabled, memory = value["identifier"], value["object_cache"], value["maxmemory_mib"]
     if not isinstance(identifier, str) or type(enabled) is not bool or type(memory) is not int:
@@ -507,13 +522,34 @@ def _site_object_cache_inputs(
         raise ValueError(INVALID_INPUTS)
     if not enabled and memory != 0:
         raise ValueError(INVALID_INPUTS)
+    known = value.get("cache_store_known", False)
+    present = value.get("cache_store_present", True)
+    store = value.get("cache_store", "")
+    if (
+        type(known) is not bool
+        or type(present) is not bool
+        or not isinstance(store, str)
+        or len(store) > 2048
+        or any(character in "\x00\r\n" for character in store)
+        or (not known and (present is not True or store))
+        or (not present and store)
+    ):
+        raise ValueError(INVALID_INPUTS)
     try:
         canonical, _ = request(identifier, "example.com")
     except ValueError:
         raise ValueError(INVALID_INPUTS) from None
     if canonical != identifier:
         raise ValueError(INVALID_INPUTS)
-    return PreparationInputs("", identifier, object_cache=enabled, cache_mib=memory)
+    return PreparationInputs(
+        "",
+        identifier,
+        object_cache=enabled,
+        cache_mib=memory,
+        cache_store=store,
+        cache_store_known=known,
+        cache_store_present=present,
+    )
 
 
 def _database_engine_inputs(

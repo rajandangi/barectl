@@ -84,6 +84,7 @@ BODY_SOURCE: Final = (
         "from sites.bodies.common import open_site_lock, result, setting, site_account, stage\n",
         "",
     )
+    .replace("from cache.laravel import laravel_managed\n", "")
 )
 BODY_BYTES: Final = (
     (
@@ -139,6 +140,20 @@ def _entries(row: dict[str, object]) -> dict[str, dict[str, object]]:
             if isinstance(detail, dict) and isinstance(detail.get("key"), str):
                 entries[str(detail["key"])] = detail
     return entries
+
+
+def _managed_keys(identifier: str, laravel: dict[str, object] | None) -> frozenset[str]:
+    from cache.laravel import laravel_managed_digests
+
+    details = laravel.get("environment_details") if laravel is not None else None
+    digests = {
+        str(detail["key"]): str(detail["digest"])
+        for detail in (details if isinstance(details, list) else [])
+        if isinstance(detail, dict)
+        and isinstance(detail.get("key"), str)
+        and isinstance(detail.get("digest"), str)
+    }
+    return laravel_managed_digests(identifier, digests)
 
 
 def _refusals(
@@ -219,9 +234,12 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     refusals, site, laravel = _refusals(evidence, inputs.identifier)
     entries = _entries(laravel) if laravel is not None else {}
     changes = _change_list(inputs)
+    managed = _managed_keys(inputs.identifier, laravel)
     if inputs.settings_changes:
         for key, action in inputs.settings_changes:
-            if action == "remove" and key not in entries:
+            if key in managed:
+                refusals.append(f"{key} is managed by the object cache and cannot be edited here.")
+            elif action == "remove" and key not in entries:
                 refusals.append(f"{key} is not in this site's environment.")
     document: dict[str, object] = {
         "version": 1,

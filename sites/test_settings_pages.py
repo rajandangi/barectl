@@ -1,9 +1,10 @@
 """The Environment and WordPress settings pages and their permission gate (Phase B #383)."""
 
+import hashlib
 from typing import override
 from unittest import mock
 
-from discovery.snapshot import ObservedSetting
+from discovery.snapshot import ObservedCache, ObservedSetting
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 from sites.ui_testing import record_site_settings
@@ -46,6 +47,44 @@ class SettingsPageTests(ControllerConfigTestCase):
         self.assertContains(response, "MAIL_PASSWORD")
         self.assertContains(response, "Hidden, write-only")
         self.assertContains(response, "manage-secrets permission")
+
+    def test_the_object_cache_keys_are_managed_and_never_show_their_values(self) -> None:
+        from cache.laravel import laravel_values
+
+        values = laravel_values("alpha")
+        self.grant("manage_secrets")
+        record_site_settings(
+            self.server,
+            application="laravel",
+            settings=(
+                *(
+                    ObservedSetting(
+                        "alpha",
+                        "laravel",
+                        key,
+                        hashlib.sha256(value.encode()).hexdigest(),
+                    )
+                    for key, value in values.items()
+                ),
+                ObservedSetting(
+                    "alpha",
+                    "laravel",
+                    "APP_URL",
+                    DIGEST,
+                    "https://alpha.example.com",
+                ),
+            ),
+            cache=(ObservedCache("alpha", "on", 64, "", "", "phpredis", "active"),),
+            installed_valkey=True,
+            client="phpredis",
+        )
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/environment/")
+        self.assertContains(response, "Managed by the object cache", count=3)
+        self.assertNotContains(response, ">redis<")
+        self.assertNotContains(response, "/run/valkey/alpha/valkey.sock")
+        self.assertContains(response, "APP_URL")
+        self.assertContains(response, "https://alpha.example.com")
 
     def test_the_wordpress_page_lists_extra_constants_without_values(self) -> None:
         self.wordpress()

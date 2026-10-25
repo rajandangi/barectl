@@ -246,10 +246,10 @@ class ObjectCacheReviewTests(SimpleTestCase):
         self.assertIn("Install Valkey in Server Settings first", " ".join(draft.refusals))
         self.assertEqual(draft.effects, ())
 
-    def test_a_site_that_is_not_wordpress_is_refused(self) -> None:
-        draft = instance.review(evidence(value(row()), application="laravel"), inputs())
+    def test_a_site_that_is_neither_wordpress_nor_laravel_is_refused(self) -> None:
+        draft = instance.review(evidence(value(row()), application="plain"), inputs())
         self.assertFalse(draft.eligible)
-        self.assertIn("not a verified WordPress installation", " ".join(draft.refusals))
+        self.assertIn("not a verified WordPress or Laravel installation", " ".join(draft.refusals))
 
     def test_a_site_that_is_not_managed_is_refused(self) -> None:
         draft = instance.review(evidence(value(row()), state=SiteState.PARTLY_APPLIED), inputs())
@@ -420,6 +420,20 @@ class ObjectCacheDocumentTests(SimpleTestCase):
                 (),
                 InputShape.SITE_OBJECT_CACHE,
             )
+
+
+class ObjectCacheFenceTests(SimpleTestCase):
+    def test_the_wordpress_sequence_fences_before_its_first_change_and_restores_after(self) -> None:
+        source = instance.BODY_SOURCE
+        sequence = source[source.index("def apply(") : source.index('if __name__ == "__main__":')]
+        self.assertLess(
+            sequence.index("if not fence(document, identifier):"),
+            sequence.index('stage("instance")'),
+        )
+        verify = sequence.index('stage("verify")')
+        restore = sequence.index("if not restore(document, identifier):")
+        self.assertLess(verify, restore)
+        self.assertLess(restore, sequence.index('result("succeeded")'))
 
 
 class ObjectCacheConventionTests(SimpleTestCase):

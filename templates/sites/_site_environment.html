@@ -30,14 +30,16 @@
           <tr>
             <th scope="row"><code>{{ row.key }}</code></th>
             <td>
-              {% if row.hidden %}
+              {% if row.managed %}
+                <span class="barectl-note">Managed by the object cache</span>
+              {% elif row.hidden %}
                 <span class="barectl-note">Hidden, write-only</span>
               {% else %}
                 <code>{{ row.value|default:"Empty" }}</code>
               {% endif %}
             </td>
             <td>
-              {% if environment_can_prepare %}
+              {% if environment_can_prepare and not row.managed %}
                 <form method="post"
                       action="{% url 'site_environment_prepare' server.pk identifier %}"
                       class="usa-form">
