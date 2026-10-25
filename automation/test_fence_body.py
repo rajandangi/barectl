@@ -25,7 +25,7 @@ def document(**values: object) -> dict[str, object]:
         "timers": [TIMER],
         "services": [SERVICE],
         "resume": [TIMER],
-        "budget_seconds": 5,
+        "budget_seconds": 30,
         **values,
     }
     return {"automation_fence": {"version": 1, "sites": [site]}}
@@ -44,6 +44,8 @@ class FakeSystemd:
         self.broken: set[str] = set()
         # Units whose runtime fence drop-in is present.
         self.fenced: set[str] = set()
+        # The site's installed unit files, independent of the loaded unit state.
+        self.installed = {TIMER, SERVICE}
         self.slice_empty = True
 
     def systemctl(self, *arguments: str) -> str:
@@ -88,6 +90,15 @@ class FakeSystemd:
     def unit_file_state(self, name: str) -> str:
         return self.file_state.get(name, "")
 
+    def refuse_manual_start(self, name: str) -> str:
+        return "yes" if name in self.fenced else "no"
+
+    def installed_units(self, identifier: str) -> tuple[list[str], list[str]]:
+        return (
+            sorted(name for name in self.installed if name.endswith(".timer")),
+            sorted(name for name in self.installed if name.endswith(".service")),
+        )
+
     def timer_ready(self, name: str) -> bool:
         return self.active.get(name) == "active" and self.file_state.get(name) == "enabled"
 
@@ -106,6 +117,8 @@ class FenceBodyTests(SimpleTestCase):
             "active_state",
             "timer_ready",
             "unit_file_state",
+            "refuse_manual_start",
+            "installed_units",
             "write_dropin",
             "clear_dropin",
         ):
@@ -137,6 +150,7 @@ class FenceBodyTests(SimpleTestCase):
         self.assertLess(self.verbs().index(["disable", TIMER]), self.verbs().index(["stop", TIMER]))
 
     def test_a_gate_disables_boot_activation_for_every_reviewed_unit(self) -> None:
+        self.fake.installed.add(WORKER)
         plan = document(services=[SERVICE, WORKER], resume=[TIMER, WORKER])
         self.assertTrue(units.fence(plan, SHOP, gate=True))
         self.assertEqual(
@@ -149,6 +163,7 @@ class FenceBodyTests(SimpleTestCase):
         )
 
     def test_a_gated_fence_restores_the_workers_boot_activation(self) -> None:
+        self.fake.installed.add(WORKER)
         plan = document(services=[SERVICE, WORKER], resume=[WORKER, TIMER])
         self.assertTrue(units.fence(plan, SHOP, gate=True))
         self.assertTrue(units.restore(plan, SHOP))
@@ -173,6 +188,18 @@ class FenceBodyTests(SimpleTestCase):
     def test_a_fence_that_cannot_drain_reports_failure(self) -> None:
         self.fake.slice_empty = False
         self.assertFalse(units.fence(document(), SHOP))
+
+    def test_a_worker_enabled_after_the_review_refuses_with_nothing_changed(self) -> None:
+        self.fake.installed.add(WORKER)
+        self.fake.file_state[WORKER] = "enabled"
+        plan = document(services=[SERVICE, WORKER], resume=[TIMER])
+        self.assertFalse(units.fence(plan, SHOP))
+        self.assertEqual(self.verbs(), [], "A stale resume set must not mask or stop anything.")
+
+    def test_a_unit_removed_after_the_review_refuses_with_nothing_changed(self) -> None:
+        self.fake.installed.remove(SERVICE)
+        self.assertFalse(units.fence(document(), SHOP))
+        self.assertEqual(self.verbs(), [])
 
     def test_a_site_without_a_plan_needs_no_fence(self) -> None:
         self.assertTrue(units.fence({}, SHOP))
@@ -216,10 +243,14 @@ class FenceBodyTests(SimpleTestCase):
             document(timers=["barectl-site-other-wpcron.timer"]),
             document(resume=["barectl-site-shop-wpcron-extra.timer"]),
             document(budget_seconds=0),
+            document(budget_seconds=916),
             {"automation_fence": {"version": 1, "sites": [{"identifier": SHOP}]}},
         ):
             with self.subTest(plan=plan), self.assertRaises(ValueError):
                 units.fence(plan, SHOP)
+
+    def test_a_worker_reviewed_stop_budget_is_accepted(self) -> None:
+        self.assertTrue(units.fence(document(budget_seconds=915), SHOP))
 
     def test_a_forgotten_site_clears_its_masks_and_failed_state(self) -> None:
         units.forget(document(), SHOP)

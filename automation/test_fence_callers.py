@@ -1,29 +1,43 @@
-"""Every change that fences calls the one fence/restore step in its own body (#395).
+"""Every change that fences reaches the one fence/restore step in its own body (#395).
 
-A body is a standalone program on the server, so the assertion is about the staged source:
-the reviewed plan reaches the body and its helpers are there to act on it.
+The body functions are driven with a fake reviewed document and a fence that raises; a
+body that never reaches its fence fails instead of passing on a staged-source substring.
+The staged program is still compiled, because a body that does not compile cannot run.
 """
 
 import base64
+import contextlib
 import gzip
+import hashlib
 import importlib.resources
 import json
+import os
+from collections.abc import Callable
+from types import ModuleType, SimpleNamespace
 from typing import ClassVar, cast
 from unittest import mock
 
 from django.test import SimpleTestCase
 
-from automation import fence, presentation
+from automation import presentation
 from automation.status import STATUS_SENTENCE, ScheduleStatus
 from cache import instance as cache_instance
+from cache.bodies import instance as cache_body
 from laravel import change as laravel_change
 from laravel import configuration as laravel_configuration
 from laravel import rollback as laravel_rollback
 from laravel import settings as laravel_settings
+from laravel.bodies import common as laravel_common
+from laravel.bodies import settings as laravel_settings_body
 from operations.engine import NativeBody
 from runtimes import update as catalog_update
+from runtimes.bodies import update as catalog_update_body
 from sites import node_change, php_change, pool_change, remove
+from sites.bodies import common as site_common
+from sites.bodies import php_runtime
+from sites.bodies import remove as remove_body
 from wordpress import settings as wordpress_settings
+from wordpress.bodies import settings as wordpress_settings_body
 
 # Each fenced kind's staged body source, by the slug the engine plans for.
 SOURCES = {
@@ -38,6 +52,10 @@ SOURCES = {
     "update_catalog": catalog_update.BODY_SOURCE,
     "set_site_object_cache": cache_instance.BODY_SOURCE,
 }
+
+
+class FenceReached(Exception):
+    """The body executed its reviewed fence call."""
 
 
 class CallerTests(SimpleTestCase):
@@ -58,19 +76,22 @@ class CallerTests(SimpleTestCase):
                     self.assertLess(source.find("def fence("), marker)
                     self.assertLess(source.find("def restore("), marker)
 
-    def test_every_fenced_change_stages_the_fence_helpers(self) -> None:
-        self.assertEqual(set(SOURCES), set(fence.FENCING))
-        for slug, source in SOURCES.items():
-            with self.subTest(slug=slug):
-                self.assertIn("def fence(", source)
-                self.assertIn("def restore(", source)
-                self.assertIn("if not fence(document, ", source)
+    def test_each_kind_own_change_function_reaches_its_fence(self) -> None:
+        for slug, module, function, args, patches in CALLERS:
+            with self.subTest(slug=slug), contextlib.ExitStack() as stack:
+                for name, value in patches().items():
+                    stack.enter_context(mock.patch.object(module, name, value))
+                stack.enter_context(
+                    mock.patch.object(module, "fence", side_effect=FenceReached, create=True)
+                )
+                with self.assertRaises(FenceReached):
+                    getattr(module, function)(*args())
 
     def test_every_fenced_change_restores_except_removal(self) -> None:
         for slug, source in SOURCES.items():
+            if slug == "remove_site":
+                continue
             with self.subTest(slug=slug):
-                if slug == "remove_site":
-                    continue
                 self.assertIn("if not restore(document, ", source)
 
     def test_removal_never_starts_the_sites_work_again(self) -> None:
@@ -78,10 +99,262 @@ class CallerTests(SimpleTestCase):
         self.assertIn("remove_automation(document, identifier)", steps)
         self.assertNotIn("automation_restore", steps)
 
-    def test_a_failed_fence_refuses_and_a_failed_restore_is_partial(self) -> None:
-        for slug, source in SOURCES.items():
-            with self.subTest(slug=slug):
-                self.assertIn('"automation_fence"', source)
+    def test_removal_reaches_the_fence_before_it_mutates(self) -> None:
+        current = {"digest": "digest", "site_file_digest": "file"}
+        with (
+            mock.patch.object(remove_body, "inventory", return_value=current),
+            mock.patch.object(remove_body, "fence", side_effect=FenceReached, create=True),
+            self.assertRaises(FenceReached),
+        ):
+            remove_body.remove(
+                {
+                    "identifier": "shop",
+                    "site_digest": "digest",
+                    "site_file_digest": "file",
+                }
+            )
+
+
+def _switch_args() -> tuple[object, ...]:
+    return ({"identifier": "shop", "selection": "php85", "precondition_digest": "d", "path": "p"},)
+
+
+def _switch_patches() -> dict[str, object]:
+    return {
+        "php_state": lambda identifier: {"digest": "d", "profiles": {"php85": "p"}},
+        "php_settings": lambda identifier, state, selected: SimpleNamespace(
+            directory="/var/www/shop"
+        ),
+        "missing_php_modules": lambda state, selected: False,
+        "common": SimpleNamespace(
+            open_site_lock=lambda identifier: os.open(os.devnull, os.O_RDONLY),
+            stage=lambda label: None,
+            result=lambda *args: None,
+        ),
+    }
+
+
+def _node_args() -> tuple[object, ...]:
+    return (
+        {
+            "identifier": "shop",
+            "selection": "nodejs_24",
+            "precondition_digest": "d",
+            "path": "p",
+        },
+        os.open(os.devnull, os.O_RDONLY),
+    )
+
+
+def _node_patches() -> dict[str, object]:
+    return {
+        "site_node_state": lambda identifier: {
+            "digest": "d",
+            "native": {"sites": [{"identifier": "shop", "state": "complete", "problem": ""}]},
+        },
+        "known_node_profile": lambda selection: "p",
+        "safe": lambda path, directory=False: True,
+        "same_site_lock": lambda descriptor, identifier: True,
+    }
+
+
+def _pool_args() -> tuple[object, ...]:
+    return (
+        {"identifier": "shop", "pool": {}, "precondition_digest": "d"},
+        os.open(os.devnull, os.O_RDONLY),
+    )
+
+
+def _pool_patches() -> dict[str, object]:
+    state = {
+        "digest": "d",
+        "sites": [
+            {
+                "identifier": "shop",
+                "state": "complete",
+                "pool": object(),
+                "names": ["shop.example.com"],
+                "runtime": "php84",
+                "https": True,
+                "readiness": "/",
+            }
+        ],
+    }
+    return {
+        "SitePool": SimpleNamespace(from_document=lambda value: object()),
+        "native_state": lambda *args, **kwargs: state,
+        "setting": lambda *args, **kwargs: SimpleNamespace(
+            identifier="shop", runtime="php84", account="sshop"
+        ),
+        "site_pool_path": lambda identifier, runtime: "/run/barectl/test/pool.conf",
+        "current_bytes": lambda path: "preimage",
+        "render_pool_settings": lambda text, pool: "candidate",
+        "pwd": SimpleNamespace(getpwnam=lambda account: SimpleNamespace(pw_uid=1001)),
+        "validate_pool_candidate": lambda settings, uid, candidate: None,
+        "same_site_lock": lambda descriptor, identifier: True,
+        "stage": lambda label: None,
+    }
+
+
+def _deploy_args() -> tuple[object, ...]:
+    document = {"commit": "c", "token": "t", "repository": "r", "branch": "main", "gate": "g"}
+    return (document, SimpleNamespace(), "shop", os.open(os.devnull, os.O_RDONLY))
+
+
+def _deploy_patches() -> dict[str, object]:
+    return {
+        "_preflight": lambda *args: "",
+        "release_path": lambda settings, name: f"releases/{name}",
+        "stage": lambda label: None,
+        "fetch": lambda *args: None,
+        "build": lambda *args: None,
+        "link_shared": lambda *args: None,
+        "discover": lambda *args: None,
+        "classify": lambda *args: None,
+        "_attempt": lambda *args: "",
+    }
+
+
+def _rollback_args() -> tuple[object, ...]:
+    document = {"release": "r", "gate": "g"}
+    return (document, SimpleNamespace(), "shop", os.open(os.devnull, os.O_RDONLY))
+
+
+def _rollback_patches() -> dict[str, object]:
+    return {
+        "_rollback_preflight": lambda *args: "",
+        "stage": lambda label: None,
+    }
+
+
+def _environment_args() -> tuple[object, ...]:
+    text = "APP_ENV=production\n"
+    return (
+        {
+            "identifier": "shop",
+            "names": ["shop.example.com"],
+            "selection": "php84",
+            "environment_digest": hashlib.sha256(text.encode()).hexdigest(),
+            "changes": [],
+            "secret_fields": [],
+        },
+    )
+
+
+def _environment_patches() -> dict[str, object]:
+    return {
+        "setting": lambda *args, **kwargs: SimpleNamespace(identifier="shop"),
+        "site_account": lambda identifier: object(),
+        "environment_path": lambda identifier: "/run/barectl/test/laravel.env",
+        "open_site_lock": lambda identifier: os.open(os.devnull, os.O_RDONLY),
+        "_private_file_ok": lambda path, identifier: True,
+        "read_environment": lambda identifier: "APP_ENV=production\n",
+        "environment_entries_from_text": lambda text: [],
+        "laravel_managed": lambda identifier, entries: {},
+        "_changes": lambda document: [],
+        "stage": lambda label: None,
+    }
+
+
+def _settings_args() -> tuple[object, ...]:
+    text = "<?php\n"
+    return (
+        {
+            "identifier": "shop",
+            "configuration_digest": hashlib.sha256(text.encode()).hexdigest(),
+            "changes": [],
+            "secret_fields": [],
+        },
+    )
+
+
+def _settings_patches() -> dict[str, object]:
+    return {
+        "private_configuration_path": lambda identifier: "/run/barectl/test/wp-config.php",
+        "open_site_lock": lambda identifier: os.open(os.devnull, os.O_RDONLY),
+        "site_account": lambda identifier: object(),
+        "_private": lambda path, account: True,
+        "read_configuration": lambda identifier: "<?php\n",
+        "private_configuration_problem": lambda text, identifier: False,
+        "extra_constants": lambda text, identifier: [],
+        "_changes": lambda document: [],
+        "stage": lambda label: None,
+    }
+
+
+def _update_args() -> tuple[object, ...]:
+    return ("shop", "php85", {"identifier": "shop"})
+
+
+def _update_patches() -> dict[str, object]:
+    return {
+        "open_site_lock": lambda identifier: os.open(os.devnull, os.O_RDONLY),
+        "php_state": lambda identifier: {"profiles": {"php85": "p"}},
+        "profile_path": lambda target: "p",
+        "missing_php_modules": lambda state, target: False,
+    }
+
+
+def _cache_args() -> tuple[object, ...]:
+    text = "CACHE_STORE=database\n"
+    return (
+        {
+            "enabled": False,
+            "maxmemory_mib": 64,
+            "environment_digest": hashlib.sha256(text.encode()).hexdigest(),
+        },
+        {},
+        "shop",
+    )
+
+
+def _cache_patches() -> dict[str, object]:
+    return {
+        "_laravel_environment": lambda identifier: "CACHE_STORE=database\n",
+        "laravel_wiring": lambda identifier, entries: "",
+        "_environment_entries": lambda text: [],
+        "stage": lambda label: None,
+    }
+
+
+CALLERS: tuple[
+    tuple[
+        str,
+        ModuleType,
+        str,
+        Callable[[], tuple[object, ...]],
+        Callable[[], dict[str, object]],
+    ],
+    ...,
+] = (
+    ("set_site_php", php_runtime, "switch_php", _switch_args, _switch_patches),
+    ("set_site_node", site_common, "node_locked_change", _node_args, _node_patches),
+    ("set_site_pool", site_common, "pool_locked_change", _pool_args, _pool_patches),
+    ("deploy_laravel_site", laravel_common, "_deploy_release", _deploy_args, _deploy_patches),
+    (
+        "rollback_laravel_site",
+        laravel_common,
+        "_rollback_release",
+        _rollback_args,
+        _rollback_patches,
+    ),
+    (
+        "edit_laravel_environment",
+        laravel_settings_body,
+        "edit_environment",
+        _environment_args,
+        _environment_patches,
+    ),
+    (
+        "edit_wordpress_settings",
+        wordpress_settings_body,
+        "edit_constants",
+        _settings_args,
+        _settings_patches,
+    ),
+    ("update_catalog", catalog_update_body, "move_site", _update_args, _update_patches),
+    ("set_site_object_cache", cache_body, "_apply_laravel", _cache_args, _cache_patches),
+)
 
 
 def passthrough(value: dict[str, object]) -> dict[str, object]:
@@ -228,6 +501,14 @@ class FenceSummaryTests(SimpleTestCase):
         )
         self.assertEqual(summary.pauses, ("shop's queue workers",))
         self.assertEqual(summary.resumes, ("shop's queue workers",))
+
+    def test_a_plan_that_leaves_installed_work_off_names_the_site(self) -> None:
+        summary = self.summary(self.document(resume=[]))
+        self.assertTrue(summary.work_off)
+        self.assertEqual(summary.stopped_sites, ("shop",))
+
+    def test_a_plan_that_starts_work_again_asks_nothing(self) -> None:
+        self.assertFalse(self.summary(self.document()).work_off)
 
     def test_the_plain_words_name_the_paused_and_maintenance_states(self) -> None:
         self.assertEqual(STATUS_SENTENCE[ScheduleStatus.PAUSED], "Paused by an unfinished change")

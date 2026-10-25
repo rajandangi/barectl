@@ -19,7 +19,7 @@ from sites import observation as site_observation
 from sites.bodies.common import SITE_GATED
 
 from . import workers
-from .convention import SITE_IDENTIFIER
+from .convention import ENABLED_STATES, SITE_IDENTIFIER
 from .worker_status import WorkerEvidence, WorkerStatus, project
 
 if TYPE_CHECKING:
@@ -80,7 +80,6 @@ SHOW_PROPERTIES: Final = frozenset(
         "ControlGroup",
     }
 )
-ENABLED_STATES: Final = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
 MAX_TEXT: Final = 16384
 MAX_SITES: Final = 16
 

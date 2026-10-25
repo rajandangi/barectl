@@ -11,9 +11,12 @@ import re
 import sys
 import time
 from types import SimpleNamespace
+from typing import cast
 
 from automation.convention import (
+    ENABLED_STATES,
     SYSTEMD_DIRECTORY,
+    checked_fence_plan,
     digest,
     render,
     role_of,
@@ -93,12 +96,7 @@ def unit_digests(identifier: str, role: str) -> dict[str, str]:
     """Each rendered file's digest, or ``absent``; the reviewed preimage the body rechecks."""
     values: dict[str, str] = {}
     for kind in ("slice", "service", "timer"):
-        path = pathlib.Path(
-            f"{SYSTEMD_DIRECTORY}/{slice_name(identifier)}"
-            if kind == "slice"
-            else unit_file(identifier, role, kind)
-        )
-        text = current_text(path)
+        text = current_text(pathlib.Path(_path(identifier, role, kind)))
         values[kind] = "absent" if text is None else digest(text)
     return values
 
@@ -186,6 +184,12 @@ def properties(name: str) -> dict[str, str]:
         "LastTriggerUSec",
         "-p",
         "NextElapseUSecRealtime",
+        "-p",
+        "UnitFileState",
+        "-p",
+        "LoadState",
+        "-p",
+        "RefuseManualStart",
         name,
     )
     values: dict[str, str] = {}
@@ -251,12 +255,7 @@ def start_and_wait(identifier: str, role: str, budget_seconds: int) -> str:
 
 def timer_ready(identifier: str, role: str) -> bool:
     timer = timer_name(identifier, role)
-    return active_state(timer) == "active" and unit_file_state(timer) in (
-        "enabled",
-        "enabled-runtime",
-        "static",
-        "indirect",
-    )
+    return active_state(timer) == "active" and unit_file_state(timer) in ENABLED_STATES
 
 
 def slice_events(name: str) -> pathlib.Path | None:
@@ -301,60 +300,74 @@ def _checked_plan(document: object, identifier: str) -> SimpleNamespace | None:
     """One site's reviewed fence from the change's document, or ``None`` for nothing to pause."""
     if not isinstance(document, dict):
         raise ValueError("The reviewed change is not valid.")
-    fence = document.get("automation_fence")
-    if fence is None:
+    sites = checked_fence_plan(document.get("automation_fence"))
+    if sites is None:
         return None
-    if not isinstance(fence, dict) or set(fence) != {"version", "sites"} or fence["version"] != 1:
-        raise ValueError("The reviewed automation plan is not valid.")
-    entries = fence["sites"]
-    if not isinstance(entries, list):
-        raise ValueError("The reviewed automation plan is not valid.")
+    entry = next((site for site in sites if site["identifier"] == identifier), None)
+    if entry is None:
+        return None
+    return SimpleNamespace(
+        slice=_checked_unit(str(entry["slice"])),
+        timers=[_checked_unit(str(name)) for name in cast("list[object]", entry["timers"])],
+        services=[_checked_unit(str(name)) for name in cast("list[object]", entry["services"])],
+        resume=[_checked_unit(str(name)) for name in cast("list[object]", entry["resume"])],
+        budget_seconds=int(str(entry["budget_seconds"])),
+    )
+
+
+def installed_units(identifier: str) -> tuple[list[str], list[str]]:
+    """The site's installed timers and services, read from the unit directory."""
+    try:
+        entries = sorted(pathlib.Path(SYSTEMD_DIRECTORY).iterdir())
+    except OSError as error:
+        raise ValueError("The site's background work could not be read.") from error
+    timers: list[str] = []
+    services: list[str] = []
     for entry in entries:
-        if not isinstance(entry, dict):
-            raise ValueError("The reviewed automation plan is not valid.")
-        if entry.get("identifier") != identifier:
+        if not entry.is_file() or role_of(entry.name, identifier) is None:
             continue
-        return _checked_site(entry, identifier)
-    return None
+        if entry.name.endswith(".timer"):
+            timers.append(entry.name)
+        elif entry.name.endswith(".service"):
+            services.append(entry.name)
+    return timers, services
 
 
-def _checked_site(document: dict[str, object], identifier: str) -> SimpleNamespace:
-    expected = {"identifier", "slice", "timers", "services", "resume", "budget_seconds"}
-    slice_value = document.get("slice")
-    timers, services, resume = (
-        document.get("timers"),
-        document.get("services"),
-        document.get("resume"),
+def refuse_manual_start(name: str) -> str:
+    return systemctl("show", "--value", "-p", "RefuseManualStart", name).strip()
+
+
+def unit_was_on(name: str) -> bool:
+    """Whether the installed unit is on now, as the review's resume set means it."""
+    state = unit_file_state(name)
+    return (
+        state in ENABLED_STATES
+        and load_state(name) != "masked"
+        and state not in ("masked", "masked-runtime")
+        and refuse_manual_start(name) != "yes"
     )
-    budget = document.get("budget_seconds")
-    if (
-        set(document) != expected
-        or document.get("identifier") != identifier
-        or not isinstance(slice_value, str)
-        or not isinstance(timers, list)
-        or not isinstance(services, list)
-        or not isinstance(resume, list)
-        or type(budget) is not int
-        or not 1 <= budget <= 300
-        or not all(isinstance(name, str) for name in (*timers, *services, *resume))
-    ):
-        raise ValueError("The reviewed automation plan is not valid.")
-    plan = SimpleNamespace(
-        slice=_checked_unit(slice_value),
-        timers=[_checked_unit(name) for name in timers if isinstance(name, str)],
-        services=[_checked_unit(name) for name in services if isinstance(name, str)],
-        resume=[_checked_unit(name) for name in resume if isinstance(name, str)],
-        budget_seconds=budget,
-    )
-    units_of_site = [*plan.timers, *plan.services]
-    if (
-        plan.slice != slice_name(identifier)
-        or len(set(units_of_site)) != len(units_of_site)
-        or any(role_of(name, identifier) is None for name in units_of_site)
-        or not set(plan.resume) <= set(units_of_site)
-    ):
-        raise ValueError("The reviewed automation plan is not valid.")
-    return plan
+
+
+def resume_matches(plan: SimpleNamespace, identifier: str) -> bool:
+    """Whether the site's installed roles and enablement still match the reviewed plan."""
+    timers, services = installed_units(identifier)
+    if set(timers) != set(plan.timers) or set(services) != set(plan.services):
+        return False
+    roles = {role_of(name, identifier) for name in [*timers, *services]}
+    current: set[str] = set()
+    for role in roles:
+        if role is None:
+            continue
+        timer = timer_name(identifier, role)
+        service = service_name(identifier, role)
+        if timer in timers:
+            # A timer owns boot activation for its oneshot service; the service's own
+            # unit-file state is not a second "on".
+            if unit_was_on(timer):
+                current.add(timer)
+        elif service in services and unit_was_on(service):
+            current.add(service)
+    return current == set(plan.resume)
 
 
 def fence(  # noqa: C901 - one reviewed stop sequence
@@ -371,6 +384,10 @@ def fence(  # noqa: C901 - one reviewed stop sequence
     plan = _checked_plan(document, identifier)
     if plan is None:
         return True
+    # A unit enabled, disabled, added or removed since the review would escape the
+    # declared resume set. Refuse before any mask, and leave the site exactly as it was.
+    if not resume_matches(plan, identifier):
+        return False
     try:
         for name in [*plan.timers, *plan.services]:
             if load_state(name) != "not-found":
@@ -429,12 +446,7 @@ def restore(document: object, identifier: str) -> bool:
 
 def _active(name: str) -> bool:
     if name.endswith(".timer"):
-        return active_state(name) == "active" and unit_file_state(name) in (
-            "enabled",
-            "enabled-runtime",
-            "static",
-            "indirect",
-        )
+        return active_state(name) == "active" and unit_file_state(name) in ENABLED_STATES
     return active_state(name) in ("active", "activating")
 
 
