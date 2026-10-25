@@ -14,7 +14,7 @@ The local numbers in [Build budget](#build-budget) and [Scenarios](#scenarios) b
 `439e1c1`, the `feat/357-398` head that merged the integration tip and the review fixes and ran
 the full build. Later commits on the branch change tests, measurements and documentation only;
 [Handoff](#handoff) names the final head. The hosted figures belong to the revisions named under
-[Hosted runs](#hosted-runs); this branch has no hosted run of its own.
+[Hosted runs](#hosted-runs); the final head is the run named there.
 
 | Evidence | Where |
 | --- | --- |
@@ -28,7 +28,7 @@ the full build. Later commits on the branch change tests, measurements and docum
 | --- | --- | --- | --- |
 | Local full build | arm64 | Apple M4 Pro, 14 CPUs, 16 GiB Docker VM; 8 lanes by the lane formula | Ubuntu 26.04.1 LTS by the digest in `docker/disposable-server/pins.json`; systemd 259.5; the kernel shared with the Docker VM |
 | Scheduled breadth job | arm64 local, amd64 in the workflow | The same host; one container per breadth item | The same image; the memory classes cap the container's cgroup at 1, 2 or 4 GiB |
-| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 8 shards of 2 lanes | The same image |
+| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 9 shards of 2 lanes after the rebalance | The same image |
 
 The controller runs Python 3.14 and Django 6.1.1. Every server is offline: the lane serves the
 pinned Ubuntu snapshot, the Nix binary cache, the WordPress core and plugin archives, the
@@ -254,9 +254,10 @@ before an interrupted change.
   reboot). The kernel, and therefore the kernel boot ID, is shared with the Docker VM. Unit
   enablement, timers and slice parenting are re-exercised; a kernel panic or power-loss path is
   not.
-- **Hosted runs of this branch.** The final branch has no pull request and no hosted checks.
-  The named hosted runs are the integration tip's; the two failures they found are fixed here
-  and are proven locally.
+- **Hosted runs of this branch.** `98aee59` has a green `Checks`/`Native` run whose three
+  heaviest shards exceeded the 300 s target. `shard_times.json` was refreshed from that run's
+  artifacts and the matrix moved to nine shards; the 9-shard hosted run is the next revision
+  and its result belongs in the pull request, not this record.
 - **The local browser suite on this host.** It fails at sign-in with a 500 (a missing or
   unusable Vite manifest in this worktree) before any journey runs, so its local 425 s is not
   a suite measurement. The two focused journeys the integration fixes target pass in CI and
@@ -264,10 +265,11 @@ before an interrupted change.
 - **The scheduled breadth workflow in CI.** It is defined and runs locally by
   `run-scenarios.sh -- --breadth`; no hosted dispatch of it exists yet, so the amd64 breadth
   numbers, and the workflow's artifact/summary path, are unproven in CI.
-- **The hosted shard target.** The last green hosted run (`bfe2339`) reported 220 s to 451 s
-  per shard, and the next one (`bcaf565`) timed out `LaravelDeployMariaDB` on shard 2 at 180 s.
-  Splitting the scheduler out and recording the new item times addresses the cause; a hosted
-  run at this head must confirm the 300 s target. This record does not claim it.
+- **The hosted shard target.** The 8-shard run at `98aee59` passed every shard but shards 3,
+  7 and 8 took 354 s, 384 s and 326 s against the 300 s target; the earlier `bcaf565` run timed
+  out `LaravelDeployMariaDB` at 180 s. Splitting the scheduler out fixed the item limit, and
+  the refreshed hosted times partition under 300 s at nine shards (`shard_times.py` predicts
+  295.3 s). The hosted 9-shard run is not claimed here; the pull request carries it.
 - **WordPress self-updates, the Generate password button, the database engine's site count and
   the WordPress interrupted install** remain as the Phase B record lists them; Phase C does
   not change those claims.
@@ -275,6 +277,13 @@ before an interrupted change.
   public authority; the lane's ACME server and fixture names stand in.
 
 ## Hosted runs
+
+`Native` run [40211383746](https://github.com/rajandangi/barectl/actions/runs/40211383746) at
+`98aee59`, amd64, eight shards of two lanes, passed every shard. Its heaviest shards missed
+the 300 s target: shard 3 354 s, shard 7 384 s and shard 8 326 s; shard 1 ran the 6-class
+validator stage in 132 s and its lifecycle in 103 s. The per-item times from this run are the
+new `disposable/shard_times.json`, and the matrix moved to nine shards (predicted worst stop
+295.3 s).
 
 `Native` run [40191609433](https://github.com/rajandangi/barectl/actions/runs/40191609433) at
 integration `bfe2339`, amd64, eight shards of two lanes, all passed:
