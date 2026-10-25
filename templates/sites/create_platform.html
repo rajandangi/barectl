@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Create {{ platform|capfirst }} site · {{ server.name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a>
+      </p>
+      <h1>Create {{ platform|capfirst }} site</h1>
+      <p class="barectl-note">Nothing changes on the server until you approve the next step.</p>
+    </div>
+  </div>
+  {% if platform == "wordpress" %}
+    {% include "sites/_wordpress_create.html" %}
+  {% else %}
+    {% include "sites/_laravel_create.html" %}
+  {% endif %}
+  <p class="barectl-note">
+    <a href="{% url 'server_site_create' server.pk %}">Back to Create site</a>
+  </p>
+{% endblock %}

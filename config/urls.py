@@ -44,6 +44,7 @@ from sites.views import (
     server_laravel_site_prepare,
     server_wordpress_site_prepare,
     site_create,
+    site_create_platform,
     site_list,
 )
 from wordpress.settings_views import prepare_settings as prepare_wordpress_settings
@@ -81,6 +82,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/create/",
         site_create,
         name="server_site_create",
+    ),
+    path(
+        "servers/<int:pk>/sites/create/<str:platform>/",
+        site_create_platform,
+        name="site_create_platform",
     ),
     path("", server_list, name="servers"),
     path("activity/", activity, name="activity"),

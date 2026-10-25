@@ -30,10 +30,6 @@
             </p>
           {% endif %}
           {% include "servers/_sites.html" %}
-          {% if target_host and http_site_permission %}
-            {% include "sites/_wordpress_create.html" %}
-            {% include "sites/_laravel_create.html" %}
-          {% endif %}
         {% endif %}
       {% elif section == "settings" %}
         {% include "servers/_settings.html" %}
