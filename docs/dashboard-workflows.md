@@ -75,7 +75,7 @@ site its current release and **Deploy**.
 | Section | What it holds |
 | --- | --- |
 | Overview (default) | Address, platform, PHP version, status, last checked time and upload path. |
-| Activity | The site's checks and changes. |
+| Activity | The site's changes, newest first. |
 | Database | The site's database binding, or the review that adds one ([databases](databases.md)). |
 | Deployments | A Laravel site's releases, **Deploy** and **Roll back** ([deploying](sites.md#deploying-a-laravel-site)). |
 | Environment | A Laravel site's environment keys ([settings](settings.md)). |

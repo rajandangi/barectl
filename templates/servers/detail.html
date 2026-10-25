@@ -83,15 +83,12 @@
       {% elif section == "advanced" %}
         {% include "servers/_advanced.html" %}
       {% elif section == "activity" %}
+        <p id="activity-announcement" class="usa-sr-only" role="status"></p>
         <p class="barectl-note">
-          This installation's record of checks and changes for this server. It never
-          establishes the server's current state.
+          This controller's record of checks and changes for this server, newest first. It
+          never establishes the server's current state.
         </p>
-        {% if attempts %}
-          {% include "servers/_attempts_table.html" with attempts=attempts show_servers=False show_warnings=True %}
-        {% else %}
-          <p>No activity yet.</p>
-        {% endif %}
+        {% include "servers/_activity_rows.html" %}
       {% endif %}
     </div>
   </div>

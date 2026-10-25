@@ -922,12 +922,12 @@ class ActivityHistoryTests(DiscoveryTestCase):
         self.run_worker()
 
         page = self.client.get("/activity/")
-        self.assertContains(page, "Discovery attempts across all servers")
+        self.assertContains(page, "Checks and changes, newest first")
         # Newest recorded first: Web's failed refresh, DB's check, then Web's first.
         content = page.content.decode()
         failure = content.index("could not reach the SSH service")
-        db_row = content.index("stage.example.net")
-        web_retry = content.index("web.example.com", db_row)
+        db_row = content.index(f'href="/servers/{other.pk}/activity/"')
+        web_retry = content.index(f'href="/servers/{self.server.pk}/activity/"', db_row)
         self.assertLess(failure, db_row)
         self.assertLess(db_row, web_retry)
 

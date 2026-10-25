@@ -1,0 +1,8 @@
+<div id="activity-rows" {% if activity.polling %}hx-get="{{ rows_url }}{% if '?' in rows_url %}&{% else %}?{% endif %}shown={{ activity.token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if announcement %}
+    <hx-partial hx-target="#activity-announcement" hx-swap="innerHTML">
+    {{ announcement }}
+    </hx-partial>
+  {% endif %}
+  {% include "servers/_activity_table.html" %}
+</div>

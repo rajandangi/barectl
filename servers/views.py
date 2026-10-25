@@ -1,5 +1,7 @@
+from collections.abc import Iterable
 from copy import copy
 from typing import Literal
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
@@ -8,6 +10,7 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
@@ -16,8 +19,10 @@ from bootstrap.standing import Standing
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
+from operations import activity as activity_read
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
+from operations.models import VIEW_CHANGES
 from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog, shown_runtimes, shown_updates
 from sites import names as site_names
@@ -30,10 +35,12 @@ from .discovery_state import (
     DiscoveryState,
     SitePage,
     Status,
-    activity_rows,
     inventory,
     server_state,
     site_page,
+)
+from .discovery_state import (
+    activity_rows as recorded_activity,
 )
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
@@ -324,6 +331,9 @@ def _advanced_section(
             and standing is not None
             and standing.standing == Standing.TARGET_STACK
         )
+        context["can_clean_up"] = (
+            request.user.has_perms(PREPARE_PERMISSIONS) and state.can_prepare_changes
+        )
         runtime_rows = shown_runtimes(snapshot.collected) if snapshot else ()
         runtime_updates = shown_updates(snapshot.collected, runtime_rows) if snapshot else ()
         context["runtime_profiles"] = runtime_rows
@@ -380,7 +390,15 @@ def server_page(
         context["database_install_kind"] = database_engine.SLUG
         context["database_remove_kind"] = database_engine.REMOVE_SLUG
     if section == "activity":
-        context.update(attempts=list(state.history))
+        context.update(
+            _activity_context(
+                request,
+                server,
+                "",
+                attempts=state.history,
+                show_servers=False,
+            )
+        )
     if section == "advanced":
         context["presented"] = state.presentation
     standing = state.snapshot.collected.standing if state.snapshot else None
@@ -478,21 +496,8 @@ def _site_activity_context(
 ) -> None:
     if section != "activity" or not target_site:
         return
-    from operations.models import VIEW_CHANGES
-    from operations.presentation import change_view
-    from operations.services import read_changes
-
-    permitted = request.user.has_perm(VIEW_CHANGES)
-    context["target_activity_allowed"] = permitted
-    context["target_activity"] = (
-        [
-            change_view(row)
-            for row in read_changes(server).rows
-            if row.preparation.inputs.get("identifier") == identifier
-        ]
-        if permitted
-        else []
-    )
+    context["target_activity_allowed"] = request.user.has_perm(VIEW_CHANGES)
+    context.update(_activity_context(request, server, identifier, show_servers=False))
 
 
 def _site_overview_context(
@@ -622,13 +627,93 @@ def site_page_response(
     return render(request, "sites/detail.html", context, status=status)
 
 
+def _activity_rows_url(server: Server | None, site: str) -> str:
+    query = {}
+    if server is not None:
+        query["server"] = str(server.pk)
+    if site:
+        query["site"] = site
+    url = reverse("activity_rows")
+    return f"{url}?{urlencode(query)}" if query else url
+
+
+def _activity_context(
+    request: HttpRequest,
+    server: Server | None,
+    site: str,
+    *,
+    attempts: Iterable[AttemptView] | None = None,
+    show_servers: bool,
+    shown: str | None = None,
+) -> dict[str, object]:
+    """The Activity list for one scope, read from stored rows only."""
+    if site:
+        # A check belongs to its whole server, never to a site.
+        attempts = ()
+    elif attempts is None:
+        attempts = recorded_activity() if server is None else server_state(server).history
+    rows = activity_read.check_rows(attempts)
+    if request.user.has_perm(VIEW_CHANGES):
+        rows += activity_read.change_rows(server)
+    listed = activity_read.Activity(activity_read.newest_first(rows, site=site))
+    context: dict[str, object] = {
+        "activity": listed,
+        "rows_url": _activity_rows_url(server, site),
+        "show_servers": show_servers,
+        "sites": sorted({row.site for row in rows if row.site}),
+        "site_filter": site,
+    }
+    if shown is not None and shown != listed.token:
+        context["announcement"] = "Activity updated."
+    return context
+
+
+def _activity_scope(request: HttpRequest) -> tuple[Server | None, str]:
+    """The server and site an Activity list is narrowed to, from its query string."""
+    site = request.GET.get("site", "").strip()
+    if not site_names.valid_identifier(site):
+        site = ""
+    raw_server = request.GET.get("server", "")
+    server = Server.objects.filter(pk=int(raw_server)).first() if raw_server.isdigit() else None
+    return server, site
+
+
 @never_cache
 @require_GET
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
 def activity(request: HttpRequest) -> HttpResponse:
-    rows: list[AttemptView] = list(activity_rows())
-    return render(request, "servers/activity.html", {"attempts": rows})
+    server, site = _activity_scope(request)
+    context = _activity_context(request, server, site, show_servers=server is None)
+    context.update(
+        servers=list(Server.objects.order_by("name")),
+        selected_server=server,
+    )
+    return render(request, "servers/activity.html", context)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required("servers.view_server", raise_exception=True)
+def activity_rows(request: HttpRequest) -> HttpResponse:
+    """The Activity list, polled while a check or change is active."""
+    if not _is_fragment_request(request):
+        query = request.GET.copy()
+        query.pop("shown", None)
+        url = reverse("activity")
+        return redirect(f"{url}?{query.urlencode()}" if query else url)
+    server, site = _activity_scope(request)
+    context = _activity_context(
+        request,
+        server,
+        site,
+        show_servers=server is None,
+        shown=request.GET.get("shown", ""),
+    )
+    response = render(request, "servers/_activity_rows.html", context)
+    patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+    return response
 
 
 @never_cache

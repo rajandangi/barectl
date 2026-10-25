@@ -5,4 +5,26 @@
   <h2 id="advanced-stack-heading">Web stack and services</h2>
   {% include "bootstrap/_foundation_stack.html" %}
 </section>
+<section class="margin-top-4" aria-labelledby="advanced-cleanup-heading">
+  <h2 id="advanced-cleanup-heading">Finished runs</h2>
+  <p class="barectl-note">
+    Barectl leaves a record of each change on the server. Cleaning up finished runs clears
+    the finished ones the server still keeps, a batch at a time; their logs stay as long as
+    the server keeps them.
+  </p>
+  {% if can_clean_up %}
+    <form class="usa-form"
+          method="post"
+          action="{% url 'server_change_prepare' server.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="kind" value="cleanup_runs">
+      <button class="usa-button usa-button--outline" type="submit">Clean up finished runs</button>
+    </form>
+  {% else %}
+    <p class="barectl-note">
+      An operator who can prepare changes can clean up finished runs. Check the connection
+      and resolve any findings first.
+    </p>
+  {% endif %}
+</section>
 {% include "servers/_history.html" %}

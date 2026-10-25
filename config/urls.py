@@ -17,11 +17,11 @@ from operations.views import (
     run_detail,
     run_status,
     server_change_prepare,
-    server_changes,
 )
 from runtimes.defaults_views import prepare_default
 from servers.views import (
     activity,
+    activity_rows,
     server_add,
     server_confirm_host,
     server_detail,
@@ -98,6 +98,7 @@ urlpatterns = [
     ),
     path("", server_list, name="servers"),
     path("activity/", activity, name="activity"),
+    path("activity/rows/", activity_rows, name="activity_rows"),
     path("settings/", settings_page, name="settings"),
     path("servers/add/", server_add, name="server_add"),
     path("servers/<int:pk>/", server_detail, name="server_detail"),
@@ -263,7 +264,11 @@ urlpatterns = [
         RedirectView.as_view(pattern_name="site_logs", permanent=False),
         name="site_advanced",
     ),
-    path("servers/<int:pk>/changes/", server_changes, name="server_changes"),
+    path(
+        "servers/<int:pk>/changes/",
+        RedirectView.as_view(pattern_name="server_activity", permanent=False),
+        name="server_changes",
+    ),
     path(
         "servers/<int:pk>/changes/prepare/",
         server_change_prepare,
