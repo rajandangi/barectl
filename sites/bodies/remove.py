@@ -635,9 +635,12 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
         changed = True
         stage("configuration")
         remove_automation(document, identifier)
-        paths = site_paths(identifier)
-        for path in [*paths[1:7], *paths[8:]]:
-            remove_path(path)
+        # The Caddy file is gone already and the site directory is removed after the
+        # database; every other reviewed path is removed by name, never by position.
+        keep = {f"/etc/caddy/sites/{identifier}.caddy", f"/var/www/{identifier}"}
+        for path in site_paths(identifier):
+            if path not in keep:
+                remove_path(path)
         stage("database")
         reason = drop_database(document)
         if reason:

@@ -31,22 +31,26 @@ def _setting(name: str) -> str:
     return os.environ[f"BARECTL_SSH_TEST_{name}"]
 
 
+_RUNTIME_REPAIRED: set[str] = set()
+
+
 def repair_runtime_masters(test: ScenarioTestCase) -> None:
     """Restart the shared PHP runtime masters once per validator process.
 
     A package transaction, a unit write or systemd-analyze's manager interaction can clear
     the running masters' ExecStart metadata (issue #428). The next validator class then
     cannot verify the master or its diagnostic socket. Restarting them once at the start of
-    each validator class restores the evidence without changing the product.
+    the validator process restores the evidence without changing the product; a failed
+    restart or a missing socket fails the class instead of hiding the defect.
     """
-    if getattr(type(test), "_runtime_repaired", False):
+    if "php-masters" in _RUNTIME_REPAIRED:
         return
-    type(test)._runtime_repaired = True
-    test.native("systemctl restart php-fpm@php84.service php-fpm@php85.service 2>&1 || true")
+    test.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
     test.native(
         "timeout 20 sh -c 'until [ -S /run/php-fpm/php84/diagnostic.sock ] "
-        "&& [ -S /run/php-fpm/php85/diagnostic.sock ]; do sleep 0.2; done' || true"
+        "&& [ -S /run/php-fpm/php85/diagnostic.sock ]; do sleep 0.2; done'"
     )
+    _RUNTIME_REPAIRED.add("php-masters")
 
 
 class ScenarioTestCase(TestCase):
@@ -61,7 +65,6 @@ class ScenarioTestCase(TestCase):
     preparation = False
     validator = False
     repair_masters = False
-    _runtime_repaired = False
 
     @override
     def setUp(self) -> None:
