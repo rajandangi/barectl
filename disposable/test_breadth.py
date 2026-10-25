@@ -258,12 +258,7 @@ class GateFence(BreadthCase):
             line, unit, _ = running.result()
         self.assert_succeeded(line, unit)
         self.assertNotEqual(self.current_release(), previous)
-        status = self.https_status("/")
-        self.assertEqual(
-            status,
-            200,
-            self.native(f"tail -n 30 {self.base()}/private/storage/logs/*.log 2>/dev/null || true"),
-        )
+        self.assertTrue(self.served(), "the site did not serve on the new release")
         self._assert_resumed(timer, service)
         # The restored scheduler runs the new release: Run now starts its installed service.
         line, unit, _ = self.apply(
