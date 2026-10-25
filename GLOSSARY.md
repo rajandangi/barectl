@@ -409,9 +409,17 @@ _Avoid_: Pause, maintenance mode, lockdown
 The site's own evidence that a change fenced its background work and did not finish: its automation units carry a runtime mask, or a maintenance page is up with boot activation off. It is read from the server, never from a Barectl marker or a remembered resume set, and the Overview offers one safe next action ([automation](docs/automation.md#status)).
 _Avoid_: Fenced flag, disabled flag, stale change
 
+**Object cache instance**:
+One site's own `valkey-server@<identifier>` process, running as that site's account on a private Unix socket with its own memory limit, eviction policy and no persistence or TCP. Other sites cannot reach or flush it, and pausing the site's automation never stops it ([object cache](docs/object-cache.md#a-sites-own-cache-implemented-392)).
+_Avoid_: Shared cache, Redis server, cache cluster
+
+**Log page**:
+One bounded, scrubbed read of one of a site's logs, requested explicitly and kept only on that request for 24 hours or until the next read of the same log. A page names its cursor for older lines and its live continuation for newer ones, and a missing, empty, unreadable or rotated log is described as exactly that ([logs](docs/logs.md)).
+_Avoid_: Log download, log export, log tail
+
 ### Later phases
 
-Terms for planned WordPress and Laravel sites, site automation and backups are defined in the Phase B ([#356](https://github.com/rajandangi/barectl/issues/356)), Phase C ([#357](https://github.com/rajandangi/barectl/issues/357)) and Phase D ([#358](https://github.com/rajandangi/barectl/issues/358)) specifications.
+Terms for planned backups and Phase E operations are defined in the Phase D ([#358](https://github.com/rajandangi/barectl/issues/358)) specification and the [ROADMAP](../ROADMAP.md). Delivered Phase B and Phase C terms are defined in the [Phase B qualification record](docs/phase-b-qualification.md) and the [Phase C qualification record](docs/phase-c-qualification.md).
 
 **Security review** (planned):
 A server's plain-language findings about its firewall, SSH sign-in, automatic security updates, pending updates and restart requirement, reconstructed from native evidence with its collection time. It reports what Barectl could read; it is not a score or a statement that the server is secure.

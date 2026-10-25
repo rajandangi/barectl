@@ -100,7 +100,7 @@ This section is the single source of truth for test time. Adding code must not a
 | Local full build: controller-fast, fast validators, browser tests and native lifecycle scenarios, as `docker/disposable-server/build.sh` runs them | 300 s | 900 s |
 | One hosted `Native` shard, every native stage included | 300 s | 900 s |
 
-The build limit counts from the runner's start, including any S1 preparation of L1. `build.sh` and `disposable/scenarios.py` report each measured time against its target and limit.
+The build limit counts from the runner's start, including any S1 preparation of L1. `build.sh` and `disposable/scenarios.py` report each measured time against its target and limit. The [scheduled breadth job](#the-scheduled-breadth-job) is outside this budget: it is never a required check, and it adds no time to a merge build.
 
 The baseline is the [Phase A qualification record](phase-a-qualification.md#build-budget): a cold local full build in 159 s, the fast gate in 22 s, the joint fast stage in 88 s while it prepares L1 (about 35 s with L1 present), browser tests in 42 s, the longest item at 40.7 s locally and the longest hosted shard at 412 s of scenario time. A newer measurement replaces it there.
 
@@ -142,6 +142,25 @@ The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.m
 L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1 is the verified host foundation produced by the real S1 scenario. Its key hashes the engine-rendered payload and fixed native body, catalog lock and pinned base; missing L1 is loaded from the cache archive by that key, or else prepared through S1 before dependent scenarios, and an existing matching image is reused. A run that ends with the keyed L1 present writes it to the archive with `docker image save` when `BARECTL_NATIVE_L0_CACHE` names one, after its timed stages. Runtime and site scenarios extend the observed host through the same native change engine.
 
 Automation scenarios prove WordPress server cron and Laravel database queue workers on a real host, including work that runs with every controller closed and fresh-controller reconstruction. The serving of [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) has its own scenarios: independent site admission and masters, both PHP switch directions with active and queued requests and delayed bodies, post-response worker drain, single-thread source-removability refusal, retained backend state across restarts, target failure, reverse rollback, controller loss and fresh-controller reconstruction, socket and process isolation, and unrelated-site continuity.
+
+### The scheduled breadth job
+
+A test class tagged as breadth is excluded from ordinary discovery and runs only with
+`run-scenarios.sh -- --breadth`, in the weekly and dispatched `Native breadth` workflow. It
+is never a required check and never adds to the merge build. The job proves what a merge
+build must not pay for:
+
+| Scenario | What it proves |
+| --- | --- |
+| `RebootAutomation` | The container's init restarts with no Barectl controller: the queue workers return enabled, the timer is armed for the next calendar minute, a missed minute is not replayed as a burst, and the site serves |
+| `RebootGateFence` | A Deploy whose `/up` fails leaves the gate up with boot activation off for the timer and every worker; a boot cannot start them; Roll back closes the gate and restores exactly that work |
+| `LongSchedulerTick` | A tick that runs longer than a calendar minute is followed by the next calendar elapse, not an immediate second start (`DeferReactivation=yes`) |
+| `MemoryOneGiB`, `MemoryTwoGiB`, `MemoryFourGiB` | The cache instance and each queue worker are measured inside a 1, 2 and 4 GiB memory cgroup, and the site still serves |
+
+The container shares the Docker VM's kernel, so the reboot is a userspace reboot and each
+memory class is a cgroup limit, not a whole 1/2/4 GiB host. The
+[Phase C qualification record](phase-c-qualification.md#not-qualified) states both gaps; the
+job prints one `BREADTH_MEMORY` line per class and copies it into the run summary.
 
 ### Fast snapshot validators
 

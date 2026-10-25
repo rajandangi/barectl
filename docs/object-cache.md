@@ -105,6 +105,11 @@ refused; `PING`, `INFO`, `GET`, `SET` and the flushes work.
 Valkey stays outside the site's automation slice, so pausing a site's background work never
 stops its cache or its serving.
 
+On the disposable arm64 lane, enabling the client on a site took 3.59 s, served 210 requests
+with 2 refused (502) over a 0.17 s window, left the runtime master's `MainPID` and invocation
+untouched, and reported `redis` 6.3.0 with `Zend OPcache` through the site's diagnostic pool
+(`disposable/test_native_qualification.py::SitePHPMasterRestart`).
+
 ### WordPress wiring and ordering
 
 Turning on, in this order:

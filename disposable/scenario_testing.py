@@ -9,8 +9,10 @@ checkpoint states it records a transcript for.
 The harness sets the environment below; a scenario reads nothing else from its host.
 """
 
+import contextlib
 import os
 import shlex
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -60,6 +62,8 @@ class ScenarioTestCase(TestCase):
     # name only to build a missing snapshot layer (scenarios.prepare_layers).
     preparation = False
     validator = False
+    breadth = False
+    memory_gib = 0
     repair_masters = False
     _runtime_repaired = False
 
@@ -97,6 +101,33 @@ class ScenarioTestCase(TestCase):
     def native(self, command: str, *, timeout: float = 300) -> str:
         """Run a harness command in the server container (teardown, probes)."""
         return docker("exec", _setting("CONTAINER"), "sh", "-c", command, timeout=timeout)
+
+    def reboot(self, *, timeout: float = 90) -> None:
+        """Restart the container's init and wait for systemd (a userspace reboot).
+
+        The container shares the Docker VM's kernel, so this is not a kernel reboot; it is
+        the closest boot path the lane can prove (docs/phase-c-qualification.md).
+        """
+        docker("restart", "--time", "5", _setting("CONTAINER"), timeout=timeout + 30)
+        self._wait_for_systemd(timeout)
+
+    def stop_for(self, seconds: float) -> None:
+        """Stop the container, leave it down for ``seconds``, then start it again."""
+        docker("stop", "--time", "5", _setting("CONTAINER"), timeout=60)
+        time.sleep(seconds)
+        docker("start", _setting("CONTAINER"), timeout=60)
+        self._wait_for_systemd(90)
+
+    def _wait_for_systemd(self, timeout: float) -> None:
+        end = time.monotonic() + timeout
+        state = ""
+        while time.monotonic() < end:
+            with contextlib.suppress(Exception):
+                state = self.native("systemctl is-system-running || true").strip()
+            if state in {"running", "degraded"}:
+                return
+            time.sleep(0.3)
+        raise AssertionError(f"systemd did not return in {timeout:.0f} s ({state!r})")
 
     def checkpoint(self, state: str, shell: ssh.RemoteShell) -> None:
         """Write the transcript of ``state`` while recording it; otherwise do nothing."""

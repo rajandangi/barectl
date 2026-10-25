@@ -15,6 +15,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation import fence as automation_fence
 from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
@@ -360,7 +361,11 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     value = _document(document)
     if value["secret_fields"] and not context.secret_path:
         raise ValueError("The environment review needs a staged confidential value.")
-    payload = {**value, "secret_path": context.secret_path}
+    payload = {
+        **value,
+        "secret_path": context.secret_path,
+        "automation_fence": automation_fence.checked(document),
+    }
     encoded = base64.b64encode(gzip.compress(json.dumps(payload).encode(), mtime=0)).decode()
     return NativeBody(BODY_BYTES.rstrip(b"\n"), (encoded,))
 

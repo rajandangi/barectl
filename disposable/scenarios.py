@@ -6,7 +6,9 @@ nothing but the lane's local mirror; the harness reaches its SSH through the lan
 forwarder. Non-exclusive scenarios share one server in sequence, each with its own name
 prefix and a residue check; a failed scenario or residue check discards the server. Items
 are killed at 180 s, the build stops at 900 s naming what did not finish, and the summary
-reports the total against the 10-minute target.
+reports the total against the 10-minute target. The scheduled breadth scenarios
+(``--breadth``) are separate: a reboot, a long scheduler run and the 1/2/4 GiB memory classes
+never add to the merge build (docs/quality.md#the-scheduled-breadth-job).
 """
 
 import argparse
@@ -79,6 +81,8 @@ class Scenario:
     prefix: str
     records: tuple[str, ...]
     egress_control: bool = False
+    breadth: bool = False
+    memory_gib: int = 0
 
 
 def setup_django() -> None:
@@ -104,6 +108,7 @@ def discover(
     egress_control: bool = False,
     validators: bool = False,
     preparations: bool = False,
+    breadth: bool = False,
 ) -> list[Scenario]:
     from django.test.runner import DiscoverRunner
 
@@ -123,6 +128,7 @@ def discover(
             egress_control=egress_control,
             validators=validators,
             preparations=preparations,
+            breadth=breadth,
         )
     ]
     return sorted(scenarios, key=lambda scenario: scenario.label)
@@ -136,12 +142,17 @@ def _wanted(
     egress_control: bool,
     validators: bool = False,
     preparations: bool = False,
+    breadth: bool = False,
 ) -> bool:
     if bool(getattr(cls, "preparation", False)) != preparations:
         return False
     if bool(getattr(cls, "validator", False)) != validators:
         return False
     if bool(getattr(cls, "egress_control", False)) != egress_control:
+        return False
+    # The scheduled breadth job is selected only by ``--breadth``; the merge build never
+    # pays for a reboot, a long scheduler run or a memory-class boot (docs/quality.md).
+    if bool(getattr(cls, "breadth", False)) != breadth:
         return False
     marked = quarantine.marker_of(cls) is not None
     if only_quarantined:
@@ -161,6 +172,8 @@ def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
         prefix=str(getattr(cls, "prefix", "")),
         records=tuple(getattr(cls, "records", ())),
         egress_control=bool(getattr(cls, "egress_control", False)),
+        breadth=bool(getattr(cls, "breadth", False)),
+        memory_gib=int(getattr(cls, "memory_gib", 0) or 0),
     )
 
 
@@ -350,6 +363,7 @@ class Lane:
     containers: list[str] = field(default_factory=list)
     server: Machine | None = None
     server_layer: str = ""
+    server_memory_gib: int = 0
     port: int = 0
     dns: str = ""
     git_key: Path | None = None
@@ -463,13 +477,15 @@ class Lane:
         pattern = '{{(index .NetworkSettings.Networks "' + self.network + '").IPAddress}}'
         return docker("inspect", "-f", pattern, self.dns).strip()
 
-    def boot_server(self, layer: str) -> Machine:
-        self.server = Machine.boot(
-            images.ensure(layer),
-            network=self.network,
-            extra=["--dns", self._dns_address(), "--network-alias", FIXTURE_ACME_DOMAIN],
-        )
+    def boot_server(self, layer: str, memory_gib: int = 0) -> Machine:
+        extra = ["--dns", self._dns_address(), "--network-alias", FIXTURE_ACME_DOMAIN]
+        if memory_gib:
+            # A memory-cgroup-limited container, not a 1/2/4 GiB host: the kernel and the
+            # page cache are shared with the Docker VM (docs/phase-c-qualification.md).
+            extra += [f"--memory={memory_gib}g", f"--memory-swap={memory_gib}g"]
+        self.server = Machine.boot(images.ensure(layer), network=self.network, extra=extra)
         self.server_layer = layer
+        self.server_memory_gib = memory_gib
         public = Path(f"{self.key}.pub").read_text(encoding="utf-8")
         self.server.exec(
             "install -d -m 700 /root/.ssh && "
@@ -645,9 +661,13 @@ class Runner:
             lane.remove()
 
     def _run_scenario(self, lane: Lane, scenario: Scenario) -> None:
-        if lane.server is None or lane.server_layer != scenario.layer:
+        if (
+            lane.server is None
+            or lane.server_layer != scenario.layer
+            or lane.server_memory_gib != scenario.memory_gib
+        ):
             lane.discard_server()
-            lane.boot_server(scenario.layer)
+            lane.boot_server(scenario.layer, scenario.memory_gib)
         server = lane.server
         if server is None:
             raise ScenarioError("the lane has no server to run a scenario on.")
@@ -823,6 +843,11 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--validators", action="store_true", help="run the fast snapshot validators"
     )
+    parser.add_argument(
+        "--breadth",
+        action="store_true",
+        help="run the scheduled breadth scenarios (reboot, long ticks, memory classes)",
+    )
     parser.add_argument("--include-quarantined", action="store_true", help="also run quarantined")
     parser.add_argument("--quarantined", action="store_true", help="run only quarantined")
     parser.add_argument(
@@ -903,6 +928,13 @@ def _prepare(
     runner.outcomes.clear()
 
 
+def _breadth_lanes(lanes: int, options: argparse.Namespace) -> int:
+    """Two lanes for the breadth job: a memory class boots its own limited container."""
+    if options.breadth and not options.lanes:
+        return min(lanes, 2)
+    return lanes
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     options = arguments(sys.argv[1:] if argv is None else argv)
     output = Output(sys.stdout)
@@ -911,6 +943,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         only_quarantined=options.quarantined,
         egress_control=options.check_egress,
         validators=options.validators,
+        breadth=options.breadth,
     )
     if options.record:
         scenarios = [scenario for scenario in scenarios if options.record in scenario.records]
@@ -935,6 +968,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if (options.record or options.check_egress or options.validators)
         else (options.lanes or default_lanes())
     )
+    lanes = _breadth_lanes(lanes, options)
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
         image = images.ensure()

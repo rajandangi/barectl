@@ -147,6 +147,10 @@ class QueueWorkerPageTests(ControllerConfigTestCase):
         self.assertIn("Queue workers: On, running", html)
         self.assertIn("Checked", html)
         self.assertIn("Oct 25, 2026", html)
+        # The default path keeps the operator's words: no "Review" or "evidence" link.
+        self.assertIn('#queue-workers">Open settings</a>', html)
+        self.assertNotIn(">Review<", html)
+        self.assertNotIn("release evidence", html)
 
     def test_a_crash_loop_marks_the_overview_and_the_server_attention(self) -> None:
         record_worker(

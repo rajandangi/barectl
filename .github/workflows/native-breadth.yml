@@ -1,0 +1,71 @@
+name: Native breadth
+# docs/quality.md#the-scheduled-breadth-job: the measurements the merge build must not pay
+# for. A real boot with the controller closed, a scheduler tick longer than a minute, and
+# the memory of a site's cache instance and its queue workers inside 1, 2 and 4 GiB memory
+# cgroups. Weekly and by dispatch; never a required check, so it never blocks a merge.
+on:
+  schedule:
+    - cron: "41 5 * * 6"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  breadth:
+    runs-on: ubuntu-26.04
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      BARECTL_NATIVE_LANES: "2"
+    steps:
+      - run: echo "BARECTL_NATIVE_L0_CACHE=$RUNNER_TEMP/native-images" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - name: Restore the mirror
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+      - run: docker/disposable-server/mirror.sh -- fetch
+      - id: keys
+        run: |
+          echo "l0=$(uv run python -m disposable.images cache-key)" >> "$GITHUB_OUTPUT"
+          echo "l1=$(uv run python -m disposable.images cache-key --layer L1)" >> "$GITHUB_OUTPUT"
+          echo "l5=$(uv run python -m disposable.images cache-key --layer L5)" >> "$GITHUB_OUTPUT"
+      - name: Restore the L0 snapshot
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ${{ env.BARECTL_NATIVE_L0_CACHE }}
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+          key: native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
+      - name: Restore the L1 snapshot
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+          key: native-l1-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l1 }}
+      # Every breadth class starts from L5: the deployed Laravel fixture with its workers.
+      - name: Restore the L5 snapshot
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+          key: native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
+      # The 900 s stop covers a cache miss, which prepares L1 and L5 through the real flows.
+      - run: |
+          mkdir -p "$RUNNER_TEMP/native/logs"
+          export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
+          docker/disposable-server/run-scenarios.sh -- --breadth --time-limit 900
+      - name: Record the memory samples
+        if: always()
+        run: |
+          grep -h 'BREADTH_MEMORY' "$RUNNER_TEMP"/native/logs/*.log \
+            >> "$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-breadth
+          path: ${{ runner.temp }}/native
+          if-no-files-found: ignore

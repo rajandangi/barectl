@@ -17,7 +17,7 @@ from .status import ScheduleStatus
 STATE = "automation-wordpress-26.04"
 LARAVEL_STATE = "automation-laravel-26.04"
 IDENTIFIER = "swpalpha"
-LARAVEL_IDENTIFIER = "sld"
+LARAVEL_IDENTIFIER = "sqwalpha"
 
 
 class RecordedServerCronTests(TestCase):
