@@ -517,9 +517,7 @@ def private_configuration_problem(text: str, identifier: str) -> str:
             if problem := (
                 owned_value_problem(parsed[0], parsed[1])
                 or (
-                    _cache_value_problem(parsed, identifier)
-                    if parsed[0] in CACHE_CONSTANTS
-                    else ""
+                    _cache_value_problem(parsed, identifier) if parsed[0] in CACHE_CONSTANTS else ""
                 )
             ):
                 return f"The private WordPress configuration line {number} is not supported."

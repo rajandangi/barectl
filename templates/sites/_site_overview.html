@@ -89,7 +89,7 @@
         {% if line.checked_at %}
           Checked <time datetime="{{ line.checked_at|date:'c' }}">{{ line.checked_at|date:'M j, Y, H:i:s T' }}</time>.
         {% endif %}
-        <a href="{% url 'site_settings' server.pk identifier %}#scheduled-tasks">Review</a>
+        <a href="{% url 'site_settings' server.pk identifier %}#scheduled-tasks">Open settings</a>
       </p>
     {% endfor %}
     <p>
