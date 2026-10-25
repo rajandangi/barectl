@@ -72,14 +72,14 @@ class SnapshotPageTests(ControllerConfigTestCase):
             web_stack,
         )
 
-    def test_not_manageable_overview_keeps_evidence_and_hides_change_links(self) -> None:
+    def test_not_manageable_advanced_keeps_evidence_and_hides_change_links(self) -> None:
         standing = HostJudgment(
             Standing.NOT_MANAGEABLE,
             ("Another web stack is installed: Apache.",),
             (),
             (("Nix", "absent"), ("Catalog realisation", "absent")),
         )
-        page = self.show(replace(COLLECTED, standing=standing), "overview")
+        page = self.show(replace(COLLECTED, standing=standing))
         self.assertIn("Not manageable", page)
         self.assertIn("Another web stack is installed: Apache.", page)
         self.assertIn("Nix: absent", page)

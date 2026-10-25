@@ -5,7 +5,6 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -27,7 +26,6 @@ from sites.forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
 from sites.recognition import site_files, site_pools
 
 from .attention import needs_attention
-from .page import next_action, status_line
 from .discovery_state import (
     AttemptView,
     DiscoveryState,
@@ -40,6 +38,7 @@ from .discovery_state import (
 )
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
+from .page import next_action, status_line
 from .registration import (
     RemovalBlocked,
     SaveOutcome,
@@ -178,7 +177,6 @@ def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str,
             state,
             host_challenge=challenge is not None,
             can_set_up=can_set_up,
-            can_view_sites=request.user.has_perm(VIEW_SITES),
             attention=attention,
         ),
     }
@@ -346,7 +344,12 @@ def server_page(
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
     context = _discovery_context(request, state)
-    context.update(history=state.history, section=section, section_title=_SECTIONS[section])
+    context.update(
+        history=state.history,
+        snapshot=state.snapshot,
+        section=section,
+        section_title=_SECTIONS[section],
+    )
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
         context["sites_forbidden"] = True
     _sites_section(request, state, section, context)

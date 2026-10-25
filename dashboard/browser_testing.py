@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -46,6 +47,34 @@ Host web.example.com stage.example.net db-1
 Host *.internal
   User ops
 """
+
+# #179 criterion 3: implementation detail the default path must not name.
+NATIVE_TERMS: tuple[str, ...] = (
+    "master",
+    "pool",
+    "fpm",
+    "haproxy",
+    "admission",
+    "caddy",
+    "nix",
+    "store path",
+    "catalog",
+    "socket",
+    "opcache",
+    "systemd",
+    "unit",
+    "invocation",
+    "journal",
+    "stage",
+    "standing",
+    "foundation",
+    "evidence",
+    "consent level",
+    "review",
+    "plan",
+    "digest",
+    "known_hosts",
+)
 
 
 class BrowserTestCase(LiveServerTestCase):
@@ -201,6 +230,22 @@ class BrowserTestCase(LiveServerTestCase):
         with self.page.expect_response(lambda r: urlsplit(r.url).path == "/") as info:
             field.press("Enter")
         self.assertEqual(info.value.request.headers["hx-request-type"], "partial")
+
+    def assert_no_native_terms(self, *, allowed: tuple[str, ...] = ()) -> None:
+        """#179 criterion 3: the default path names no native implementation detail.
+
+        Playwright's inner_text reads rendered text only, so a closed Show details
+        accordion or Logs section does not count. ``allowed`` names the terms this
+        screen may legitimately show (the fingerprint step and Journey 7 sentences).
+        """
+        visible = self.page.locator("body").inner_text().lower()
+        found = [
+            term
+            for term in NATIVE_TERMS
+            if term not in allowed
+            and re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", visible)
+        ]
+        self.assertEqual(found, [], f"native terms on the default path: {found}")
 
     def assert_theme_and_components_initialized(self) -> None:
         page = self.page

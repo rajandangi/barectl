@@ -107,10 +107,12 @@ class TransportWorkflowCase(ControllerConfigTestCase):
     def assert_previous_snapshot_kept(self, server: Server, snapshot: DiscoverySnapshot) -> None:
         """The failed attempt published nothing, and the page labels the old snapshot."""
         self.assertEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
-        page = self.client.get(f"/servers/{server.pk}/")
+        page = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(page, "may be out of date")
         self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
-        self.assertContains(page, "Retry connection check")
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/settings/"), "Retry connection check"
+        )
 
     def assert_disconnected(self, *servers: SshServer) -> None:
         """Wait for the servers, by default the test's own, to see every session closed."""
@@ -236,7 +238,7 @@ class TransportFailureTests(TransportWorkflowCase):
             self.server.stalled = False
             self.known_hosts.write_text("", encoding="utf-8")
             self.refresh(server)
-        page = self.client.get(f"/servers/{server.pk}/").content.decode()
+        page = self.client.get(f"/servers/{server.pk}/settings/").content.decode()
         activity = self.client.get("/activity/").content.decode()
         failures = "\n".join(
             attempt.failure
