@@ -91,7 +91,7 @@ urlpatterns = [
     path("servers/<int:pk>/sites/", server_detail, {"section": "sites"}, name="server_sites"),
     path(
         "servers/<int:pk>/stack/",
-        RedirectView.as_view(pattern_name="server_advanced", permanent=False),
+        RedirectView.as_view(pattern_name="server_advanced", permanent=False, query_string=True),
         name="server_stack",
     ),
     path(
