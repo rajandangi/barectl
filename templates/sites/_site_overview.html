@@ -105,7 +105,7 @@
         {% if line.checked_at %}
           Checked <time datetime="{{ line.checked_at|date:'c' }}">{{ line.checked_at|date:'M j, Y, H:i:s T' }}</time>.
         {% endif %}
-        <a href="{% url 'site_settings' server.pk identifier %}#queue-workers">Review</a>
+        <a href="{% url 'site_settings' server.pk identifier %}#queue-workers">Open settings</a>
       </p>
     {% endfor %}
     <p>
@@ -124,7 +124,7 @@
           <code>{{ site_current_release.commit }}</code>.
         </p>
       {% else %}
-        <p>Barectl has no current release evidence for this site yet.</p>
+        <p>Barectl has no current release information for this site yet.</p>
       {% endif %}
       {% if blocking %}
         <p class="barectl-note">Wait for the active operation before preparing a Deploy.</p>
