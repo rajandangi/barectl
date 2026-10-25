@@ -767,7 +767,9 @@ class RecoveryTests(DiscoveryTestCase):
         self.interrupt_running()
         self.sign_in_with("view_server")
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
-        self.assertContains(page, "<strong>Checking the connection…</strong> Started at", html=False)
+        self.assertContains(
+            page, "<strong>Checking the connection…</strong> Started at", html=False
+        )
         self.assertContains(
             self.client.get(f"/servers/{self.server.pk}/advanced/"),
             "A new connection check is running",

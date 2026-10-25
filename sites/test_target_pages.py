@@ -30,7 +30,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
 
     def test_runtime_page_uses_the_observed_master_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
         self.assertContains(response, "Diagnostic master state")
         self.assertContains(response, "Verified in this observation")
         # Each site has its own master, so another runtime's master failure is not this
@@ -47,14 +47,14 @@ class HttpSitePageTests(ControllerConfigTestCase):
 
     def test_overview_links_the_https_address_and_the_readiness_path(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, 'href="http://alpha.example.com"')
         self.assertContains(response, "Barectl checks <code>/</code>")
 
     def test_a_wordpress_overview_links_the_sign_in_page(self) -> None:
         record_site_settings(self.server, identifier="alpha", application="wordpress", https=True)
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, 'href="https://alpha.example.com"')
         self.assertContains(response, 'href="https://alpha.example.com/wp-admin/"')
         self.assertContains(response, "Sign in to WordPress")
@@ -81,13 +81,13 @@ class HttpSitePageTests(ControllerConfigTestCase):
             settings=(ObservedSetting("alpha", "laravel", "APP_ENV", "a" * 64, "production"),),
         )
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+            response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, "Current release")
         self.assertContains(response, "abc123def456")
         self.assertContains(response, "Deploy")
 
     def test_overview_summary_ends_with_one_period(self) -> None:
-        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, "Matches the supported site convention. This describes")
         self.assertNotContains(response, "..")
 
@@ -186,7 +186,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
 
     def test_current_master_failure_is_shown_without_claiming_verification(self) -> None:
         record_http_sites(self.server, problem="Loaded master evidence is unavailable")
-        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
         self.assertContains(response, "Not manageable: Loaded master evidence is unavailable")
         self.assertNotContains(response, "Verified in this observation")
 
@@ -197,12 +197,11 @@ class HttpSitePageTests(ControllerConfigTestCase):
         record_attempt(self.server, DiscoveryAttempt.Status.FAILED)
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
         self.assertContains(response, "observations may be out of date")
-        self.assertNotContains(response, 'value="php84"')
-        for section in ("overview", "runtime", "activity"):
+        for section in ("", "settings/", "logs/", "activity/"):
             with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
                 self.assertEqual(
                     self.client.get(
-                        f"/servers/{self.server.pk}/sites/alpha/{section}/"
+                        f"/servers/{self.server.pk}/sites/alpha/{section}"
                     ).status_code,
                     200,
                 )
