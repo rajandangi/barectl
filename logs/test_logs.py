@@ -13,7 +13,7 @@ from django.utils import timezone
 from logs import services
 from logs.change import RotationEvidence, body, review
 from logs.models import LogOutcome, LogRead
-from logs.read import LogLine, LogPage, scrubbed
+from logs.read import LogLine, LogPage
 from logs.read import command as log_command
 from logs.testing import php_error_page, record_log_site
 from operations.engine import BodyContext, ReviewDraft
@@ -381,12 +381,6 @@ class LogReadShapeTests(SimpleTestCase):
         self.assertIn("flock -s -n 9", command)
         self.assertIn("python3 -c", command)
         self.assertIn("alpha php_errors", command)
-
-    def test_the_controller_side_scrubber_replaces_a_known_value(self) -> None:
-        page = LogPage("observed", (LogLine(raw=f"PHP warning: {CANARY}"),))
-        cleaned = scrubbed(page, (CANARY,))
-        self.assertNotIn(CANARY, cleaned.lines[0].raw)
-        self.assertIn("<secret>", cleaned.lines[0].raw)
 
     def test_the_publish_body_and_the_reader_share_the_supported_file(self) -> None:
         from logs.bodies import rotation

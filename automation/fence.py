@@ -15,10 +15,9 @@ from discovery.ssh import RemoteShell
 
 from . import convention, observation
 
-# The longest a change waits for a fence to drain, in seconds (docs/adr/0036). It is at least
-# the longest ``TimeoutStopSec`` any automation role declares; a role that raises its own
-# raises this with it.
-FENCE_BUDGET_SECONDS: Final = 30
+# The shortest a change waits for a fence to drain, in seconds (docs/adr/0036). A plan uses
+# the longest ``TimeoutStopSec`` among the units it reviewed, never less than this.
+FENCE_BUDGET_SECONDS: Final = convention.FENCE_BUDGET_SECONDS
 # The changes that pause a site's background work while they run. The specification names
 # this set (docs/automation.md#fencing): every change to a site's code, schema, runtime,
 # settings or files. A change that is not listed here never reads or touches automation.
@@ -55,14 +54,12 @@ UNREADABLE_REFUSAL: Final = (
     "The site's background work could not be read, so this change would not know what to "
     "pause. Check the server again, then prepare a new review."
 )
-# The systemd unit-file states that mean an installed role was on.
-ENABLED: Final = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
 
 
 def _was_on(properties: dict[str, str]) -> bool:
     """Whether one unit was on: enabled, and not left fenced by an unfinished change."""
     return (
-        properties.get("UnitFileState") in ENABLED
+        properties.get("UnitFileState") in convention.ENABLED_STATES
         and properties.get("LoadState") != "masked"
         and properties.get("UnitFileState") not in ("masked", "masked-runtime")
         and properties.get("RefuseManualStart") != "yes"
@@ -114,55 +111,12 @@ def checked(document: dict[str, object]) -> dict[str, object] | None:
     """The stored fence, validated exactly, for a kind that stages a closed payload.
 
     ``None`` means the review declared nothing to pause (a change outside the fence set).
-    The body re-validates the same plan from scratch with :mod:`automation.bodies.units`.
+    The body re-validates the same plan from the same shared shape.
     """
-    value = document.get("automation_fence")
-    if value is None:
+    sites = convention.checked_fence_plan(document.get("automation_fence"))
+    if sites is None:
         return None
-    if (
-        not isinstance(value, dict)
-        or set(value) != {"version", "sites"}
-        or value.get("version") != 1
-        or not isinstance(value.get("sites"), list)
-    ):
-        raise ValueError("The change's automation plan is not valid.")
-    for entry in value["sites"]:
-        if not isinstance(entry, dict):
-            raise ValueError("The change's automation plan is not valid.")
-        identifier = entry.get("identifier")
-        budget = entry.get("budget_seconds")
-        if (
-            not isinstance(identifier, str)
-            or convention.SITE_IDENTIFIER.fullmatch(identifier) is None
-            or type(budget) is not int
-            or not 1 <= budget <= 300
-        ):
-            raise ValueError("The change's automation plan is not valid.")
-        plan = FencePlan(
-            identifier,
-            _names(entry.get("timers"), identifier, "timer"),
-            _names(entry.get("services"), identifier, "service"),
-            _names(entry.get("resume"), identifier, ""),
-            budget,
-        )
-        units = {*plan.timers, *plan.services}
-        if not set(plan.resume) <= units or plan.document() != entry:
-            raise ValueError("The change's automation plan is not valid.")
-    return value
-
-
-def _names(value: object, identifier: str, suffix: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
-        raise ValueError("The change's automation plan is not valid.")
-    names = [str(name) for name in value]
-    if len(set(names)) != len(names):
-        raise ValueError("The change's automation plan is not valid.")
-    for name in names:
-        if (suffix and not name.endswith("." + suffix)) or (
-            convention.role_of(name, identifier) is None
-        ):
-            raise ValueError("The change's automation plan is not valid.")
-    return tuple(names)
+    return {"version": 1, "sites": sites}
 
 
 def plan_from(value: dict[str, object], sites: tuple[str, ...]) -> dict[str, object] | None:
@@ -200,6 +154,7 @@ def _site_plan(  # noqa: C901 - one read into one plan
     if not isinstance(units, list):
         return None
     present: dict[str, set[str]] = {}
+    texts: dict[str, str] = {}
     for unit in units:
         if not isinstance(unit, dict):
             continue
@@ -210,6 +165,9 @@ def _site_plan(  # noqa: C901 - one read into one plan
         if role is None:
             continue
         present.setdefault(role, set()).add(kind)
+        text = unit.get("text")
+        if isinstance(text, str):
+            texts[name] = text
     timers: list[str] = []
     services: list[str] = []
     starting: list[str] = []
@@ -232,10 +190,34 @@ def _site_plan(  # noqa: C901 - one read into one plan
             starting.append(timer)
         elif not has_timer and has_service and _was_on(service_properties):
             starting.append(service)
+    budget = _stop_budget(timers, services, texts)
+    if budget is None:
+        return None
     return FencePlan(
         identifier,
         tuple(sorted(timers)),
         tuple(sorted(services)),
         # Services start before timers, so a worker is running when its timer fires.
         tuple(sorted(starting, key=lambda name: (name.endswith(".timer"), name))),
+        budget,
     )
+
+
+def _stop_budget(timers: list[str], services: list[str], texts: dict[str, str]) -> int | None:
+    """The longest declared stop budget of the reviewed units, at least the fence minimum."""
+    budget = convention.FENCE_BUDGET_SECONDS
+    for name in (*timers, *services):
+        text = texts.get(name)
+        if text is None:
+            return None
+        values = convention.directives_map(text)
+        if values is None:
+            return None
+        value = values.get(("Service", "TimeoutStopSec")) or values.get(("Timer", "TimeoutStopSec"))
+        if value is None:
+            continue
+        seconds = convention.time_span_seconds(value)
+        if seconds is None or seconds > convention.MAX_FENCE_BUDGET_SECONDS:
+            return None
+        budget = max(budget, seconds)
+    return budget

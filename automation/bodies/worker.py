@@ -17,6 +17,7 @@ import sys
 from types import SimpleNamespace
 
 from automation.bodies.units import (
+    _reviewed_preimage,
     active_state,
     current_text,
     daemon_reload,
@@ -59,14 +60,6 @@ RELEASE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 MAX_NAMES = 64
 MAX_WAIT = 15
 UNIT_KEYS = ("slice", *WORKER_ROLES)
-
-
-def _reviewed_preimage(path: str, reviewed: str) -> str | None:
-    text = current_text(pathlib.Path(path))
-    now = "absent" if text is None else digest(text)
-    if now != reviewed:
-        raise ValueError("The reviewed automation evidence changed before publication.")
-    return text
 
 
 def publish_worker_units(identifier: str, definition: object, expected: dict[str, str]) -> None:

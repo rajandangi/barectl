@@ -41,7 +41,29 @@ KILL_MODE: Final = "control-group"
 # The longest a turn-on waits for one successful run before leaving the timer installed and
 # the constant unset (it stays inside the change engine's watch limit).
 TICK_BUDGET_SECONDS: Final = 150
+# A fence waits at least this long and never longer than a worker's longest declared stop
+# budget (the job timeout plus its fifteen-second margin).
+FENCE_BUDGET_SECONDS: Final = 30
+MAX_FENCE_BUDGET_SECONDS: Final = 915
+# The systemd unit-file states that mean an installed role was on.
+ENABLED_STATES: Final = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
 MAX_UNIT_BYTES: Final = 16384
+FENCE_SITE_KEYS: Final = frozenset(
+    {"identifier", "slice", "timers", "services", "resume", "budget_seconds"}
+)
+_TIME_UNITS: Final = {
+    "us": 0.000001,
+    "ms": 0.001,
+    "s": 1.0,
+    "min": 60.0,
+    "m": 60.0,
+    "h": 3600.0,
+    "d": 86400.0,
+    "w": 604800.0,
+    "M": 2629800.0,
+    "y": 31557600.0,
+}
+_TIME_PART: Final = re.compile(r"(\d+)(us|ms|s|min|m|h|d|w|M|y)?")
 
 
 @dataclass(frozen=True)
@@ -334,3 +356,84 @@ def _directives(text: str) -> list[tuple[str, str, str]] | None:
 def directives_map(text: str) -> dict[tuple[str, str], str] | None:
     found = _directives(text)
     return None if found is None else {(section, key): value for section, key, value in found}
+
+
+def time_span_seconds(value: str) -> int | None:
+    """A systemd time span in whole seconds, or ``None`` when it is not one."""
+    text = value.strip()
+    if not text or text == "infinity":
+        return None
+    total = 0.0
+    position = 0
+    while position < len(text):
+        match = _TIME_PART.match(text, position)
+        if match is None:
+            return None
+        total += int(match.group(1)) * _TIME_UNITS[match.group(2) or "s"]
+        position = match.end()
+        while position < len(text) and text[position].isspace():
+            position += 1
+    seconds = int(total)
+    return seconds if total == seconds else None
+
+
+def checked_fence_plan(value: object) -> list[dict[str, object]] | None:
+    """The sites of one reviewed automation plan, or ``None`` when it declared nothing.
+
+    The engine and every staged body validate the same closed document here, so they
+    cannot disagree about what a plan may contain (docs/automation.md#fencing).
+    """
+    if value is None:
+        return None
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"version", "sites"}
+        or value.get("version") != 1
+        or not isinstance(value.get("sites"), list)
+    ):
+        raise ValueError("The reviewed automation plan is not valid.")
+    sites: list[dict[str, object]] = []
+    for entry in value["sites"]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("identifier"), str):
+            raise ValueError("The reviewed automation plan is not valid.")
+        sites.append(checked_fence_site(entry, str(entry["identifier"])))
+    return sites
+
+
+def checked_fence_site(value: object, identifier: str) -> dict[str, object]:
+    """One site's reviewed fence, validated exactly against the closed shape."""
+    if not isinstance(value, dict) or set(value) != FENCE_SITE_KEYS:
+        raise ValueError("The reviewed automation plan is not valid.")
+    slice_value = value.get("slice")
+    timers = _fence_names(value.get("timers"), identifier, "timer")
+    services = _fence_names(value.get("services"), identifier, "service")
+    resume = _fence_names(value.get("resume"), identifier, "")
+    budget = value.get("budget_seconds")
+    if (
+        value.get("identifier") != identifier
+        or slice_value != slice_name(identifier)
+        or type(budget) is not int
+        or not FENCE_BUDGET_SECONDS <= budget <= MAX_FENCE_BUDGET_SECONDS
+        or not set(resume) <= {*timers, *services}
+    ):
+        raise ValueError("The reviewed automation plan is not valid.")
+    return {
+        "identifier": identifier,
+        "slice": slice_name(identifier),
+        "timers": list(timers),
+        "services": list(services),
+        "resume": list(resume),
+        "budget_seconds": budget,
+    }
+
+
+def _fence_names(value: object, identifier: str, suffix: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        raise ValueError("The reviewed automation plan is not valid.")
+    names = tuple(str(name) for name in value)
+    if len(set(names)) != len(names):
+        raise ValueError("The reviewed automation plan is not valid.")
+    for name in names:
+        if (suffix and not name.endswith("." + suffix)) or role_of(name, identifier) is None:
+            raise ValueError("The reviewed automation plan is not valid.")
+    return names

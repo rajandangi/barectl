@@ -9,7 +9,7 @@ from typing import cast
 
 from django.test import SimpleTestCase
 
-from automation import fence
+from automation import fence, workers
 from automation.testing import automation, show
 
 SHOP = "shop"
@@ -117,6 +117,45 @@ class FencePlanTests(SimpleTestCase):
                 ],
             },
         )
+
+    def test_the_stop_budget_is_the_longest_declared_stop_of_a_reviewed_worker(self) -> None:
+        definition = workers.WorkerDefinition(("default",), 1, 900)
+        value = with_roles(
+            [
+                unit(SLICE, "slice"),
+                {
+                    "name": QUEUE_SERVICE,
+                    "kind": "service",
+                    "text": workers.render_worker_service(SHOP, 1, definition),
+                },
+            ],
+            {"queue1": (None, show())},
+        )
+        document = fence.plan_from(value, (SHOP,))
+        if document is None:
+            self.fail("The worker fence plan was not built.")
+        sites = cast("list[dict[str, object]]", document["sites"])
+        self.assertEqual(sites[0]["budget_seconds"], 915)
+
+    def test_a_site_without_declared_stops_keeps_the_thirty_second_minimum(self) -> None:
+        value = with_roles(
+            [
+                unit(SLICE, "slice"),
+                {
+                    "name": QUEUE_SERVICE,
+                    "kind": "service",
+                    "text": workers.render_worker_service(
+                        SHOP, 1, workers.WorkerDefinition(("default",), 1, 30)
+                    ),
+                },
+            ],
+            {"queue1": (None, show())},
+        )
+        document = fence.plan_from(value, (SHOP,))
+        if document is None:
+            self.fail("The worker fence plan was not built.")
+        sites = cast("list[dict[str, object]]", document["sites"])
+        self.assertEqual(sites[0]["budget_seconds"], 45)
 
     def test_a_worker_role_whose_timer_is_absent_is_planned(self) -> None:
         value = with_roles(

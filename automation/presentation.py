@@ -153,6 +153,8 @@ class FenceSummary:
 
     pauses: tuple[str, ...]
     resumes: tuple[str, ...]
+    # Sites whose installed work the review leaves off, including a paused gated change.
+    stopped_sites: tuple[str, ...] = ()
 
     @property
     def pauses_nothing(self) -> bool:
@@ -161,6 +163,11 @@ class FenceSummary:
     @property
     def starts_nothing(self) -> bool:
         return not self.resumes
+
+    @property
+    def work_off(self) -> bool:
+        """Whether the operator must choose what to turn back on after this change."""
+        return bool(self.stopped_sites)
 
 
 def fence_summary(document: dict[str, object]) -> FenceSummary | None:
@@ -177,19 +184,24 @@ def fence_summary(document: dict[str, object]) -> FenceSummary | None:
         return FenceSummary((), ())
     pauses: list[str] = []
     resumes: list[str] = []
+    stopped: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("identifier"), str):
             continue
         identifier = str(entry["identifier"])
-        for name in _strings(entry.get("timers")) + _strings(entry.get("services")):
+        units = _strings(entry.get("timers")) + _strings(entry.get("services"))
+        for name in units:
             label = f"{identifier}'s {_work(name, identifier)}"
             if label not in pauses:
                 pauses.append(label)
-        for name in _strings(entry.get("resume")):
+        resumed = _strings(entry.get("resume"))
+        for name in resumed:
             label = f"{identifier}'s {_work(name, identifier)}"
             if label not in resumes:
                 resumes.append(label)
-    return FenceSummary(tuple(pauses), tuple(resumes))
+        if units and not resumed and identifier not in stopped:
+            stopped.append(identifier)
+    return FenceSummary(tuple(pauses), tuple(resumes), tuple(stopped))
 
 
 def _strings(value: object) -> list[str]:

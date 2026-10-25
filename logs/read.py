@@ -11,13 +11,12 @@ import gzip
 import importlib.resources
 import json
 import shlex
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Final
 
 from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
 from operations import native
-from operations.confidential import scrub
 
 from .models import LogOutcome
 
@@ -250,18 +249,3 @@ def decode(answer: str) -> LogPage:
     if page is None:
         raise ValueError("Not a log page.")
     return page
-
-
-def scrubbed(page: LogPage, values: tuple[str, ...] = ()) -> LogPage:
-    """The controller-side second pass over every stored line.
-
-    A read carries no submitted secret, so ``values`` is empty for a worker's own read; the
-    server-side pass is the guarantee. The same chokepoint keeps a future caller from
-    storing a known value, and the fast tests exercise it with canaries.
-    """
-    if not values:
-        return page
-    return replace(
-        page,
-        lines=tuple(replace(line, raw=scrub(line.raw, values)) for line in page.lines),
-    )

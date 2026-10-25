@@ -381,9 +381,6 @@ def _read(read: LogRead) -> None:
             cursor=read.cursor,
         )
         host_key = shell.host_key
-    # The controller-side second pass: a read carries no submitted secret, so the values are
-    # empty today; every stored line still passes the one scrubber chokepoint.
-    page = log_read.scrubbed(page, ())
     now = timezone.now()
     operation_id = read.pk or 0
     with transaction.atomic():

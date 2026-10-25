@@ -71,7 +71,7 @@ SHOW_PROPERTIES: Final = frozenset(
 )
 MAX_TEXT: Final = 16384
 MAX_SITES: Final = 64
-ENABLED_STATES: Final = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
+ENABLED_STATES: Final = convention.ENABLED_STATES
 TIMESTAMP: Final = "@"
 # The one scheduled role each supported application has (Phase C #357).
 ROLE_BY_APPLICATION: Final = {

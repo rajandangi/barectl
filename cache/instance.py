@@ -112,7 +112,7 @@ BODY_SOURCE: Final = (
     + importlib.resources.files("automation.bodies")
     .joinpath("worker_env.py")
     .read_text()
-    .replace("from automation.convention import service_name\n", "")
+    .replace("from automation.convention import ENABLED_STATES, service_name\n", "")
     .replace("from automation.workers import WORKER_ROLES\n", "")
     + "\n"
     + LARAVEL_COMMON_SOURCE

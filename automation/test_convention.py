@@ -57,6 +57,22 @@ class NameTests(SimpleTestCase):
         self.assertEqual(convention.queue_roles(names, "shop"), ("queue1", "queue3"))
 
 
+class TimeSpanTests(SimpleTestCase):
+    def test_systemd_time_spans_are_read_in_whole_seconds(self) -> None:
+        for text, expected in (
+            ("915", 915),
+            ("915s", 915),
+            ("1min 15s", 75),
+            ("1h", 3600),
+            ("0", 0),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(convention.time_span_seconds(text), expected)
+        for text in ("", "infinity", "soon", "1.5s", "-30s"):
+            with self.subTest(text=text):
+                self.assertIsNone(convention.time_span_seconds(text))
+
+
 class RenderingTests(SimpleTestCase):
     def test_the_service_is_a_oneshot_in_the_site_identity_with_its_own_limit(self) -> None:
         text = convention.render_service("shop", "wpcron")

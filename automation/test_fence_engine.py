@@ -180,6 +180,17 @@ class FencePageTests(FencedReviewCase):
         html = page.content.decode()
         self.assertIn("This change touches no site's background work.", html)
 
+    def test_paused_work_asks_what_to_turn_back_on_with_links(self) -> None:
+        masked = show(load="masked", enabled="masked", active="inactive")
+        self.answer(automation(identifier=SHOP, timer=masked, service=masked))
+        review = self.change("set_site_php")
+        page = self.client.get(f"/changes/{review.preparation_id}/")
+        html = page.content.decode()
+        self.assertIn("Background work is off.", html)
+        self.assertIn("Choose what to turn back on", html)
+        self.assertIn(f"/servers/{self.server.pk}/sites/{SHOP}/settings/#scheduled-tasks", html)
+        self.assertIn(f"/servers/{self.server.pk}/sites/{SHOP}/settings/#queue-workers", html)
+
 
 class FenceSetTests(SimpleTestCase):
     """The specification names the changes that fence and the ones that never do."""
