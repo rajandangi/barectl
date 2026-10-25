@@ -151,7 +151,7 @@ def _wanted(
 
 def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
     layer = getattr(cls, "layer", None)
-    if layer not in {"L0", "L1", "L2", "L0-standing", "L0-24.04"}:
+    if layer not in {"L0", "L1", "L2", "L3", "L4", "L0-standing", "L0-24.04"}:
         raise ScenarioError(f"{cls.__name__} declares no known layer ({layer!r}).")
     return Scenario(
         label=f"{cls.__module__}.{cls.__qualname__}",
@@ -184,6 +184,16 @@ for config in /etc/haproxy/sites/"$prefix"*.cfg; do
     rm -rf "/etc/php-fpm/sites/$site" "/var/lib/php-fpm/sites/$site"
     rm -f "$config" "/var/lib/haproxy/sites/$site.state"
 done
+for config in /etc/valkey/"$prefix"*.conf; do
+    [ -e "$config" ] || continue
+    site=$(basename "$config" .conf)
+    systemctl stop "valkey-server@$site.service" || exit 1
+    systemctl --no-reload disable "valkey-server@$site.service" || exit 1
+    rm -rf "/etc/systemd/system/valkey-server@$site.service.d" \
+        "/var/lib/valkey/$site" "/run/valkey/$site"
+    rm -f "$config"
+done
+systemctl daemon-reload || exit 1
 for pool in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$pool" ] || continue
     version=$(basename "$(dirname "$(dirname "$pool")")")
@@ -225,6 +235,16 @@ for path in /etc/caddy/sites/"$prefix"*.caddy; do
 done
 for path in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$path" ] && problems="$problems pool:$path"
+done
+for path in /etc/valkey/"$prefix"*.conf /var/lib/valkey/"$prefix"* \
+    /run/valkey/"$prefix"* /etc/systemd/system/valkey-server@"$prefix"*.service.d; do
+    [ -e "$path" ] && problems="$problems cache:$path"
+done
+for unit in $(systemctl list-units --type=service --no-legend --plain 'valkey-server@*' \
+    | cut -d' ' -f1); do
+    case "$unit" in
+        "valkey-server@$prefix"*) problems="$problems cache-unit:$unit" ;;
+    esac
 done
 if command -v caddy >/dev/null 2>&1 && [ -f /etc/caddy/Caddyfile ]; then
     caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 \
@@ -806,10 +826,14 @@ def prepare_layers(
     """
     layers = {scenario.layer for scenario in scenarios}
     requirements = []
-    if layers & {"L1", "L2"}:
+    if layers & {"L1", "L2", "L3", "L4"}:
         requirements.append(("L1", "disposable.test_foundation.HostFoundation"))
-    if "L2" in layers:
+    if layers & {"L2", "L3", "L4"}:
         requirements.append(("L2", "disposable.test_prepared_sites.PrepareSites"))
+    if layers & {"L3", "L4"}:
+        requirements.append(("L3", "disposable.test_prepared_wordpress.PrepareWordPress"))
+    if "L4" in layers:
+        requirements.append(("L4", "disposable.test_prepared_wordpress.PrepareWordPressCache"))
     for layer, label in requirements:
         if images.load(layer):
             continue
@@ -891,6 +915,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         keep_logs(work, output)
         images.store("L1")
         images.store("L2")
+        images.store("L3")
+        images.store("L4")
         if options.check_egress:
             return _egress_control(runner.outcomes, output)
     finished = {outcome.scenario.label for outcome in runner.outcomes}

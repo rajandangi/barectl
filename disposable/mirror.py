@@ -77,6 +77,10 @@ _PEBBLE_CERTS = (
 WORDPRESS_VERSION = "7.1.3"
 WORDPRESS_HOST = "downloads.wordpress.org"
 WORDPRESS_ARCHIVE = f"release/wordpress-{WORDPRESS_VERSION}.zip"
+# The one plugin Barectl manages (#392): pinned in cache/plugin.py and refreshed by the
+# same drift watch as the core archive.
+WORDPRESS_PLUGIN_VERSION = "3.0.0"
+WORDPRESS_PLUGIN_ARCHIVE = f"plugin/redis-cache.{WORDPRESS_PLUGIN_VERSION}.zip"
 # WP-CLI's ``core verify-checksums`` reads this endpoint; the mirror serves the response as
 # the directory's index so the query string WP-CLI adds still reaches it (Phase B #381).
 WORDPRESS_API_HOST = "api.wordpress.org"
@@ -486,6 +490,7 @@ def _pebble_entries(architecture: str, store: _StoreFn) -> None:
 
 def _wordpress_entries(architecture: str, store: _StoreFn) -> None:
     store(WORDPRESS_HOST, WORDPRESS_ARCHIVE, architecture)
+    store(WORDPRESS_HOST, WORDPRESS_PLUGIN_ARCHIVE, architecture)
     store(
         WORDPRESS_API_HOST,
         WORDPRESS_CHECKSUMS,
