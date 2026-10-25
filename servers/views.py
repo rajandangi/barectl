@@ -638,6 +638,14 @@ def site_page_response(
 
         context.update(environment_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
+    if section == "logs":
+        from logs.services import context_for_site as logs_context_for_site
+
+        context.update(
+            logs_context_for_site(
+                server, identifier, request.user, selected=request.GET.get("log", "")
+            )
+        )
     return render(request, "sites/detail.html", context, status=status)
 
 

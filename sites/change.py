@@ -47,10 +47,13 @@ BODY_SOURCE: Final = (
         'RUNTIME_READ_SOURCE = ""', "RUNTIME_READ_SOURCE = " + repr(runtime_observation.READ_SOURCE)
     )
     + "\n"
+    + importlib.resources.files("sites.bodies").joinpath("logrotate.py").read_text()
+    + "\n"
     + importlib.resources.files("sites.bodies")
     .joinpath("create.py")
     .read_text()
     .replace("from sites.bodies.common import create\n", "")
+    .replace("from sites.bodies.logrotate import logrotate_install, logrotate_present\n", "")
 )
 BODY_BYTES: Final = (
     (

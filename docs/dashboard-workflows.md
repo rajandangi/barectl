@@ -81,7 +81,7 @@ site its current release and **Deploy**.
 | Environment | A Laravel site's environment keys ([settings](settings.md)). |
 | WordPress | A WordPress site's constants, password reset and core verification ([WordPress](wordpress.md#actions)). |
 | Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, **Object cache** for a WordPress site with its state, **Turn on object cache**, **Turn off object cache** and **Check the cache**, PHP settings and the readiness path, domains and HTTPS, and **Remove site** ([object cache](object-cache.md#a-sites-own-cache-implemented-392)). |
-| Logs | Native detail: the site account and paths, its file, missing paths, observed facts, the installed runtime diagnostics, masters, protections and a link to the server's pools. |
+| Logs | The log catalogue named in plain words, a bounded viewer on request with older pages, a search term and a time range, and the site's log rotation state with **Set up log rotation** when it is missing or outside the supported shape ([logs](logs.md)). The object cache's journal is one of the sources. Native detail stays under **Advanced**. |
 
 A version this server does not have is marked **Installed first**. Choosing it prepares Add
 runtime as step one; the run page then offers to continue the switch with the same choice.
@@ -186,6 +186,8 @@ active. It is this controller's record and never establishes current state.
 Section visibility follows viewing permissions; a hidden control never replaces
 authorization on the request. Every mutation is a CSRF-protected POST checked against the
 account's permissions. Site pages need `servers.view_server` and
-`discovery.view_siteobservation`; editing secrets also needs `operations.manage_secrets`.
+`discovery.view_siteobservation`; reading a site's logs also needs
+`operations.view_evidence`, which the Site operator and Administrator presets hold and the
+Viewer preset does not; editing secrets also needs `operations.manage_secrets`.
 Changes need `operations.view_changes`, and applying needs the permissions the review's
 consent level declares.

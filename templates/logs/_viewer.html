@@ -1,0 +1,112 @@
+<div id="log-viewer"
+     {% if logs_selected.active %}hx-get="{% url 'site_log_page' server.pk identifier %}?log={{ logs_selected.source.slug }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h3 id="log-viewer-heading">{{ logs_selected.source.label }}</h3>
+  <p class="barectl-note">{{ logs_selected.source.summary }}</p>
+  {% if logs_selected.active %}
+    <p role="status">Reading this log…</p>
+  {% else %}
+    {% with page=logs_selected.page %}
+      {% if page and page.state == "observed" %}
+        {% if logs_selected.source.slug == "visits" %}
+          <table class="usa-table usa-table--borderless">
+            <caption class="usa-sr-only">The newest visits, oldest first</caption>
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Method</th>
+                <th scope="col">Path</th>
+                <th scope="col">Status</th>
+                <th scope="col">Took</th>
+                <th scope="col">Line</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line in page.lines %}
+                <tr>
+                  <td>{{ line.time|default:"—" }}</td>
+                  <td>{{ line.method|default:"—" }}</td>
+                  <td>
+                    <code>{{ line.path|default:"—" }}</code>
+                  </td>
+                  <td>{{ line.status|default_if_none:"—" }}</td>
+                  <td>{{ line.duration|default:"—" }}</td>
+                  <td>
+                    <details>
+                      <summary>Raw line</summary>
+                      <pre><code>{{ line.raw }}</code></pre>
+                      {% if line.truncated %}<p class="barectl-note">This line was shortened for the page.</p>{% endif %}
+                    </details>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <ol class="usa-list" aria-labelledby="log-viewer-heading">
+            {% for line in page.lines %}
+              <li>
+                <pre><code>{{ line.raw }}</code></pre>
+                {% if line.truncated %}<p class="barectl-note">This line was shortened for the page.</p>{% endif %}
+              </li>
+            {% endfor %}
+          </ol>
+        {% endif %}
+        <p class="barectl-note">Oldest first. A page holds at most 500 lines.</p>
+      {% elif page %}
+        <p>{{ page.wording }}</p>
+      {% else %}
+        <p class="barectl-note">This log has not been read yet. Ask for its newest lines.</p>
+      {% endif %}
+      <div class="margin-top-2">
+        <form method="post"
+              action="{% url 'site_log_read' server.pk identifier %}"
+              class="margin-bottom-2">
+          {% csrf_token %}
+          <input type="hidden" name="source" value="{{ logs_selected.source.slug }}">
+          <fieldset class="usa-fieldset">
+            <legend class="usa-legend">Filter this log</legend>
+            <label class="usa-label" for="id_logs_term">Search term</label>
+            <input class="usa-input"
+                   id="id_logs_term"
+                   name="term"
+                   type="search"
+                   maxlength="100"
+                   value="{{ logs_filter.term.value|default_if_none:'' }}">
+            <label class="usa-label" for="id_logs_since">From</label>
+            <input class="usa-input"
+                   id="id_logs_since"
+                   name="since"
+                   type="datetime-local"
+                   value="{{ logs_filter.since.value|default_if_none:'' }}">
+            <label class="usa-label" for="id_logs_until">To</label>
+            <input class="usa-input"
+                   id="id_logs_until"
+                   name="until"
+                   type="datetime-local"
+                   value="{{ logs_filter.until.value|default_if_none:'' }}">
+          </fieldset>
+          <button class="usa-button" type="submit">
+            {% if page %}Read with these filters{% else %}Read the newest lines{% endif %}
+          </button>
+        </form>
+        {% if page and page.cursor %}
+          <form method="post" action="{% url 'site_log_read' server.pk identifier %}">
+            {% csrf_token %}
+            <input type="hidden" name="source" value="{{ logs_selected.source.slug }}">
+            <input type="hidden" name="cursor" value="{{ page.cursor }}">
+            <input type="hidden"
+                   name="term"
+                   value="{{ logs_filter.term.value|default_if_none:'' }}">
+            <input type="hidden"
+                   name="since"
+                   value="{{ logs_filter.since.value|default_if_none:'' }}">
+            <input type="hidden"
+                   name="until"
+                   value="{{ logs_filter.until.value|default_if_none:'' }}">
+            <button class="usa-button usa-button--outline" type="submit">Load older lines</button>
+          </form>
+        {% endif %}
+      </div>
+    {% endwith %}
+  {% endif %}
+</div>

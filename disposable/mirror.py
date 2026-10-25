@@ -53,9 +53,9 @@ SNAPSHOT_TIMESTAMP = "20261017T000000Z"
 SNAPSHOT_ROOT = f"ubuntu/{SNAPSHOT_TIMESTAMP}"
 SNAPSHOT_SUITES = ("resolute", "resolute-updates", "resolute-security")
 SNAPSHOT_COMPONENT = "main"
-# The database engines and Git #356 names, and the object cache #391 names, installed from
-# the Ubuntu 26.04 archive.
-UBUNTU_FIXTURES = ("mariadb-server", "postgresql", "git", "valkey-server")
+# The database engines and Git #356 names, the object cache #391 names and logrotate #389,
+# installed from the Ubuntu 26.04 archive.
+UBUNTU_FIXTURES = ("mariadb-server", "postgresql", "git", "valkey-server", "logrotate")
 _DEB_ARCH = {"x86_64-linux": "amd64", "aarch64-linux": "arm64"}
 _DOCKER_PLATFORM = {"x86_64-linux": "linux/amd64", "aarch64-linux": "linux/arm64"}
 _IMAGETOOLS_FORMAT = (

@@ -209,6 +209,7 @@ for account in $(getent passwd | cut -d: -f1 | grep -E "^[sp]$prefix"); do
 done
 rm -rf /var/www/"$prefix"* 2>/dev/null
 rm -f /etc/caddy/sites/"$prefix"*.caddy 2>/dev/null
+rm -f /etc/logrotate.d/barectl-site-"$prefix"* 2>/dev/null
 systemctl reload caddy 2>/dev/null || true
 true
 """.strip()
@@ -232,6 +233,9 @@ for path in /var/www/"$prefix"*; do
 done
 for path in /etc/caddy/sites/"$prefix"*.caddy; do
     [ -e "$path" ] && problems="$problems site:$path"
+done
+for path in /etc/logrotate.d/barectl-site-"$prefix"*; do
+    [ -e "$path" ] && problems="$problems rotation:$path"
 done
 for path in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$path" ] && problems="$problems pool:$path"

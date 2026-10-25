@@ -26,6 +26,7 @@ from sites.bodies.admission import (
     haproxy_state,
     persist_proxy_state,
 )
+from sites.bodies.logrotate import logrotate_state
 from sites.bodies.pool import (
     SitePool,
     extension_line,
@@ -81,6 +82,8 @@ class SiteRecord(TypedDict):
     application_problem: str
     serving_form: str
     client: NotRequired[str]
+    # The supported state of the site's root-owned logrotate file (Phase C #389).
+    log_rotation: NotRequired[str]
 
 
 class NativeState(TypedDict):
@@ -1142,6 +1145,7 @@ def partial_sites(
                 "application_problem": application_problem,
                 "serving_form": "maintenance" if runtime else "partial",
                 "client": "",
+                "log_rotation": logrotate_state(identifier)[0],
             }
         )
     return rows
@@ -1342,6 +1346,7 @@ def native_site_record(  # noqa: C901 - one record per recognized serving form
         "application_problem": application_problem,
         "serving_form": form,
         "client": site_client(settings) if state == "complete" else "",
+        "log_rotation": logrotate_state(settings.identifier)[0],
     }
 
 

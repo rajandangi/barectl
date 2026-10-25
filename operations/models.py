@@ -27,6 +27,9 @@ CHANGE_SITE: str = "operations.change_site"
 CHANGE_SHARED: str = "operations.change_shared"
 CHANGE_DESTRUCTIVE: str = "operations.change_destructive"
 MANAGE_SECRETS: str = "operations.manage_secrets"
+# Reading a site's own logs is evidence access, separate from applying changes:
+# a Viewer may read changes but not a site's log content (Phase C #389).
+VIEW_EVIDENCE: str = "operations.view_evidence"
 
 ADMISSION_CENTISECONDS = 15 * 60 * 100
 # docs/adr/0032-keep-secrets-in-private-native-files.md#the-confidential-input-channel: a
@@ -41,6 +44,7 @@ class RemoteOperation(models.Model):
         DISCOVERY = "discovery", "Discovery"
         CHANGE_PREPARATION = "change_preparation", "Change preparation"
         CHANGE_APPLY = "change_apply", "Change apply"
+        LOG_READ = "log_read", "Log read"
         CACHE_READING = "cache_reading", "Object cache reading"
 
     class Status(models.TextChoices):
@@ -95,6 +99,7 @@ class RemoteOperation(models.Model):
                         "discovery",
                         "change_preparation",
                         "change_apply",
+                        "log_read",
                         "cache_reading",
                     ]
                 ),
@@ -293,6 +298,7 @@ class ChangeReview(ChangeRecord):
             ("change_shared", "Can change shared resources"),
             ("change_destructive", "Can make destructive changes"),
             ("manage_secrets", "Can manage secrets"),
+            ("view_evidence", "Can view evidence"),
         ]
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
             models.CheckConstraint(

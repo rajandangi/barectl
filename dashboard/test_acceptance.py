@@ -60,6 +60,10 @@ class AcceptanceSweepTests(BrowserTestCase):
             "link", name="Settings"
         ).click()
         self.assert_no_native_terms()
+        page.get_by_role("navigation", name="Site sections").get_by_role(
+            "link", name="Logs"
+        ).click()
+        self.assert_no_native_terms()
 
     def test_one_filled_primary_button_per_default_page(self) -> None:
         page = self.page
@@ -84,7 +88,7 @@ class AcceptanceSweepTests(BrowserTestCase):
         page.get_by_role("navigation", name="Site sections").get_by_role(
             "link", name="Logs"
         ).click()
-        expect(page.get_by_role("heading", name="Installed runtime diagnostics")).to_be_visible()
+        expect(page.get_by_role("heading", name="Logs", level=2)).to_be_visible()
 
     def test_keyboard_and_phone_width_reach_every_place(self) -> None:
         page = self.page

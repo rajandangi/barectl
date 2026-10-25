@@ -253,6 +253,8 @@ class SiteObservation(models.Model):
     application_problem = models.TextField(blank=True)
     # The site's own cache PHP client (Phase C #390), read from its own pool and commands.
     client = models.CharField(max_length=16, blank=True)
+    # The supported state of the site's root-owned logrotate file (Phase C #389).
+    log_rotation = models.CharField(max_length=12, blank=True)
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [

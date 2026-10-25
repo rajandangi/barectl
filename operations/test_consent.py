@@ -89,13 +89,15 @@ class ScopeGroupPresetsTests(TestCase):
     def test_the_three_presets_exist_with_their_permissions(self) -> None:
         expected = {
             "Viewer": self.codenames("view_changes") | {"view_server"},
-            "Site operator": self.codenames("view_changes", "change_site") | {"view_server"},
+            "Site operator": self.codenames("view_changes", "change_site", "view_evidence")
+            | {"view_server"},
             "Administrator": self.codenames(
                 "view_changes",
                 "change_site",
                 "change_shared",
                 "change_destructive",
                 "manage_secrets",
+                "view_evidence",
             )
             | {"view_server"},
         }
@@ -120,5 +122,6 @@ class ScopeGroupPresetsTests(TestCase):
                 "change_shared",
                 "change_destructive",
                 MANAGE_SECRETS.rsplit(".", 1)[1],
+                "view_evidence",
             },
         )

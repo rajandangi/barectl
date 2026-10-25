@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("discovery", "0010_alter_componentobservation_component"),
+        ("discovery", "0011_siteobservation_log_rotation"),
     ]
 
     operations = [

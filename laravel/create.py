@@ -57,6 +57,7 @@ BODY_SOURCE: Final = (
     + importlib.resources.files("laravel.bodies")
     .joinpath("create.py")
     .read_text()
+    .replace("from sites.bodies.logrotate import logrotate_install, logrotate_present\n", "")
     .replace(
         "from laravel.bodies.common import (\n"
         "    classify,\n"
