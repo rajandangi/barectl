@@ -119,7 +119,7 @@ class CleanupApplyTests(ChangeTestCase):
         self.assertContains(page, "Finished barectl runs to clear")
         self.assertContains(page, EXITED)
         self.assertContains(page, "Shared")
-        self.assertContains(page, "Consent needed to apply")
+        self.assertContains(page, "Consent level")
         self.assertContains(page, "Stages")
         run = self.apply(review)
         self.assertEqual(run.status, "succeeded", run.failure)
@@ -135,11 +135,13 @@ class CleanupApplyTests(ChangeTestCase):
         self.assertFalse(self.systemd.staged_bodies)
         self.assertIn(engine.body_path(run.unit_name), submission)
         self.assertNotIn(cleanup.BODY_BYTES.decode(), submission)
-        # The page shows the review, consent, stages and outcome.
+        # Progress shows the plain result and the kind's stage names; Logs the consent.
         run_page = self.client.get(f"/runs/{run.pk}/")
-        self.assertContains(run_page, "Applied and verified")
-        self.assertContains(run_page, "Shared")
+        self.assertContains(run_page, "Done")
         self.assertContains(run_page, "Take the mutation lock")
+        logs = self.client.get(f"/runs/{run.pk}/?tab=logs")
+        self.assertContains(logs, "Applied and verified")
+        self.assertContains(logs, "Shared")
 
     def test_a_refused_cleanup_stops_before_clearing_anything(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)

@@ -2,6 +2,7 @@
 whether a review is eligible or expired, what a run's result established, or what consent
 applying needs."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum, nonmember
@@ -11,9 +12,17 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.urls import reverse
 from django.utils import timezone
 
-from . import engine
+from . import engine, plain_words
 from .consent import Scope, permissions_for
-from .models import ChangeReview, ChangeRun, Consent, RemoteOperation, Result, Verification
+from .models import (
+    ChangePreparation,
+    ChangeReview,
+    ChangeRun,
+    Consent,
+    RemoteOperation,
+    Result,
+    Verification,
+)
 
 if TYPE_CHECKING:
     from .services import ChangeRow
@@ -48,6 +57,193 @@ _SCOPE_LABELS = {
     Scope.SHARED: "Shared",
     Scope.SERVER: "Whole server",
 }
+
+
+@dataclass(frozen=True)
+class PlainChange:
+    """A change in the words the confirm screen and Progress show by default (#179)."""
+
+    title: str
+    summary: tuple[str, ...]
+    action: str
+    home_url: str
+    after_label: str = ""
+    after_url: str = ""
+    after_permission: str = ""
+
+
+@dataclass(frozen=True)
+class PlainStep:
+    label: str
+    state_label: str
+    current: bool = False
+
+
+@dataclass(frozen=True)
+class NextAction:
+    """The one action a run's Progress offers: a form POST or a plain link."""
+
+    label: str
+    kind: str
+    url: str
+    permission: str = ""
+
+
+@dataclass(frozen=True)
+class PlainRun:
+    title: str
+    result: str
+    sentence: str
+    steps: tuple[PlainStep, ...]
+    next: NextAction | None = None
+
+
+def _subject(inputs: Mapping[str, object], server_name: str) -> tuple[str, str]:
+    """The site an operator named, or the server, and the site identifier when known."""
+    names = inputs.get("names")
+    if isinstance(names, list) and names and isinstance(names[0], str):
+        identifier = inputs.get("identifier")
+        return names[0], identifier if isinstance(identifier, str) else ""
+    identifier = inputs.get("identifier")
+    if isinstance(identifier, str) and identifier:
+        return identifier, identifier
+    return server_name, ""
+
+
+def _home_url(home: plain_words.Home, server_id: int | None, identifier: str) -> str:
+    if server_id is None:
+        return reverse("servers")
+    if home is plain_words.Home.SERVER_SITES:
+        return reverse("server_sites", args=[server_id])
+    if home is plain_words.Home.SERVER_SITE_CREATE:
+        return reverse("server_site_create", args=[server_id])
+    if home is plain_words.Home.SERVER_SETTINGS:
+        return reverse("server_settings", args=[server_id])
+    if home is plain_words.Home.SITE:
+        return (
+            reverse("site_detail", args=[server_id, identifier])
+            if identifier
+            else reverse("server_sites", args=[server_id])
+        )
+    return reverse("server_detail", args=[server_id])
+
+
+def plain_change(
+    kind_slug: str, kind_label: str, preparation: ChangePreparation | None, server_name: str
+) -> PlainChange:
+    inputs = preparation.inputs if preparation is not None else {}
+    server_id = preparation.server_id if preparation is not None else None
+    site, identifier = _subject(inputs, server_name)
+    raw_selection = inputs.get("selection")
+    selection = plain_words.selection_label(raw_selection) if isinstance(raw_selection, str) else ""
+    words = plain_words.words_for(kind_slug)
+    if words is None:
+        return PlainChange(
+            title=kind_label,
+            summary=(),
+            action=kind_label,
+            home_url=_home_url(plain_words.Home.SERVER, server_id, identifier),
+        )
+    values = {"server": server_name, "site": site, "selection": selection}
+    return PlainChange(
+        title=words.title.format(**values),
+        summary=tuple(sentence.format(**values) for sentence in words.summary),
+        action=words.action.format(**values),
+        home_url=_home_url(words.home, server_id, identifier),
+        after_label=words.after,
+        after_url=_home_url(words.after_home, server_id, identifier) if words.after else "",
+        after_permission=words.after_permission,
+    )
+
+
+def _steps(
+    kind_slug: str,
+    stages: list[str],
+    selection: str,
+    *,
+    reached: str,
+    finished: bool,
+    stopped: bool,
+) -> tuple[PlainStep, ...]:
+    words = plain_words.words_for(kind_slug)
+    index = stages.index(reached) if reached in stages else -1
+    steps: list[PlainStep] = []
+    for position, stage in enumerate(stages):
+        label = plain_words.step_label(words, stage, selection)
+        if finished or (index >= 0 and position < index):
+            steps.append(PlainStep(label, "Done"))
+        elif index >= 0 and position == index:
+            steps.append(PlainStep(label, "Stopped here" if stopped else "In progress", True))
+        else:
+            steps.append(PlainStep(label, "Not started"))
+    return tuple(steps)
+
+
+def _raw_selection(review: ChangeReview) -> str:
+    preparation = review.preparation
+    selection = preparation.inputs.get("selection") if preparation is not None else ""
+    return selection if isinstance(selection, str) else ""
+
+
+def _run_next(run: ChangeRun, outcome: RunOutcome, after: PlainChange) -> NextAction | None:
+    preparation_id = run.review.preparation_id
+    if outcome == RunOutcome.RECONCILING:
+        return NextAction("Check what happened", "check", reverse("run_check", args=[run.pk]))
+    if outcome == RunOutcome.SUCCEEDED and after.after_url:
+        return NextAction(
+            after.after_label, "link", after.after_url, permission=after.after_permission
+        )
+    if outcome == RunOutcome.FAILED and preparation_id is not None:
+        return NextAction(
+            "Try again", "again", reverse("change_prepare_again", args=[preparation_id])
+        )
+    if outcome == RunOutcome.UNKNOWN:
+        return NextAction("Open the server", "link", after.home_url)
+    return None
+
+
+def plain_run(run: ChangeRun, outcome: RunOutcome, kind_label: str) -> PlainRun:
+    review = run.review
+    server_name = run.server_name or run.ssh_alias
+    after = plain_change(review.kind_slug, kind_label, review.preparation, server_name)
+    document = review.document
+    stages = [str(stage) for stage in document.get("stages", [])]
+    selection = _raw_selection(review)
+    stopped = outcome in {RunOutcome.FAILED, RunOutcome.UNKNOWN}
+    steps = _steps(
+        review.kind_slug,
+        stages,
+        selection,
+        reached=run.progress_stage,
+        finished=outcome == RunOutcome.SUCCEEDED,
+        stopped=stopped,
+    )
+    result, sentence = _run_words(outcome, server_name, run)
+    return PlainRun(
+        title=after.title,
+        result=result,
+        sentence=sentence,
+        steps=steps,
+        next=_run_next(run, outcome, after),
+    )
+
+
+def _run_words(outcome: RunOutcome, server_name: str, run: ChangeRun) -> tuple[str, str]:
+    if outcome == RunOutcome.QUEUED:
+        return "Queued", f"Barectl will start this change on {server_name} in a moment."
+    if outcome == RunOutcome.RUNNING:
+        return (
+            "Working",
+            (
+                f"Barectl is changing {server_name} now. The change continues on the "
+                "server if you close this page."
+            ),
+        )
+    if outcome == RunOutcome.SUCCEEDED:
+        return "Done", "Barectl finished this change and checked it on the server."
+    if outcome == RunOutcome.RECONCILING:
+        return "Checking what happened", run.failure
+    return ("Outcome unknown" if outcome == RunOutcome.UNKNOWN else "Stopped"), run.failure
 
 
 @dataclass(frozen=True)
@@ -114,6 +310,7 @@ class ChangeView:
     failure: str
     review: ReviewView | None = None
     kind_slug: str = ""
+    plain: PlainChange = field(default_factory=lambda: PlainChange("", (), "", ""))
 
     @property
     def active(self) -> bool:
@@ -223,6 +420,12 @@ def change_view(row: ChangeRow) -> ChangeView:
         failure=preparation.failure,
         review=review,
         kind_slug=preparation.kind_slug,
+        plain=plain_change(
+            preparation.kind_slug,
+            row.kind_label,
+            preparation,
+            preparation.server.name if preparation.server is not None else "",
+        ),
     )
 
 
@@ -242,6 +445,7 @@ class RunView:
     kind_label: str
     consent_label: str
     requested_by: str
+    plain: PlainRun = field(default_factory=lambda: PlainRun("", "", "", ()))
 
     @property
     def succeeded(self) -> bool:
@@ -312,6 +516,7 @@ class RunView:
 
 def run_view(run: ChangeRun) -> RunView:
     kind = engine.kind_of(run.review.kind_slug)
+    kind_label = kind.label if kind is not None else run.review.kind_slug
     outcome = (
         RunOutcome.UNKNOWN
         if run.status == Status.FAILED and run.execution == Result.OUTCOME_UNKNOWN
@@ -320,9 +525,10 @@ def run_view(run: ChangeRun) -> RunView:
     return RunView(
         run=run,
         outcome=outcome,
-        kind_label=kind.label if kind is not None else run.review.kind_slug,
+        kind_label=kind_label,
         consent_label=Consent(run.review.consent).label,
         requested_by=run.requested_by_name,
+        plain=plain_run(run, outcome, kind_label),
     )
 
 

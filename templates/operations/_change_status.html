@@ -1,0 +1,210 @@
+{% with review=change.review %}
+  <section id="change-status"
+           class="barectl-card"
+           aria-labelledby="change-status-heading"
+           {% if change.active %}hx-get="{% url 'change_detail' change.operation_id %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+    {% if creation_banner %}
+      <div class="usa-alert usa-alert--info usa-alert--slim" id="creation-step">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            <strong>{{ creation_banner.title }}</strong> {{ creation_banner.note }}
+          </p>
+        </div>
+      </div>
+    {% endif %}
+    {% if change.active %}
+      <h2 id="change-status-heading">Checking the server…</h2>
+      <p>
+        Barectl is reading the server before it asks you to confirm. This page updates by
+        itself.
+      </p>
+    {% elif review %}
+      <h2 id="change-status-heading"
+          class="usa-sr-only"
+          {% if focus_heading %}autofocus tabindex="-1"{% endif %}>What will happen</h2>
+      {% if out_of_date %}
+        <div class="usa-alert usa-alert--warning" id="confirmation-out-of-date">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">
+              <strong>This confirmation is out of date.</strong> Barectl checks the server
+              again before anything changes, so it needs a fresh look first.
+            </p>
+          </div>
+        </div>
+        <div class="barectl-page-actions">
+          {% if can_prepare_again %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'change_prepare_again' change.operation_id %}">
+              {% csrf_token %}
+              <button type="submit" class="usa-button">Check again</button>
+            </form>
+          {% endif %}
+          <a class="usa-button usa-button--outline"
+             href="{{ change.plain.home_url }}">Cancel</a>
+        </div>
+      {% else %}
+        {% for sentence in change.plain.summary %}<p>{{ sentence }}</p>{% endfor %}
+        {% if review.shared %}
+          <p>
+            <strong>This change also touches these sites:</strong>
+            {% if review.affected_sites %}
+              {{ review.affected_sites|join:", " }}.
+            {% else %}
+              none. It changes only what the server shares between sites.
+            {% endif %}
+          </p>
+        {% endif %}
+        {% if can_apply %}
+          <form class="usa-form barectl-apply"
+                method="post"
+                action="{% url 'change_apply' change.operation_id %}">
+            {% csrf_token %}
+            {% if review.writes_secrets %}
+              {% if review.secret_fields %}
+                {% for field in review.secret_fields %}
+                  <div class="usa-form-group">
+                    <label class="usa-label"
+                           for="apply-value-{{ field.key }}">{{ field.label }}</label>
+                    <input class="usa-input"
+                           id="apply-value-{{ field.key }}"
+                           type="{% if field.secret %}password{% else %}text{% endif %}"
+                           name="value_{{ field.key }}"
+                           autocomplete="off"
+                           required>
+                  </div>
+                {% endfor %}
+                <p class="usa-hint">
+                  Sent only over the confidential channel. The values are never stored in
+                  plaintext, never appear in commands, logs or output, and are cleared once
+                  sent.
+                </p>
+              {% else %}
+                <div class="usa-form-group">
+                  <label class="usa-label" for="apply-secret">{{ review.secret_label }}</label>
+                  <input class="usa-input"
+                         id="apply-secret"
+                         type="password"
+                         name="secret"
+                         autocomplete="off"
+                         required>
+                  {% if review.secret_generate %}
+                    <button class="usa-button usa-button--outline"
+                            type="button"
+                            id="generate-secret"
+                            data-secret-generate="apply-secret"
+                            data-secret-value="generated-secret-value">Generate a strong password</button>
+                    <p class="usa-hint" id="generated-secret-value" aria-live="polite"></p>
+                  {% endif %}
+                  <p class="usa-hint">
+                    Sent only over the confidential channel. It is never stored in plaintext,
+                    never appears in commands, logs or output, and is cleared once sent.
+                  </p>
+                </div>
+              {% endif %}
+            {% endif %}
+            {% if review.confirmation %}
+              <div class="usa-form-group">
+                <label class="usa-label"
+                       for="apply-confirmation-value">{{ review.confirmation_label }}</label>
+                <input class="usa-input"
+                       id="apply-confirmation-value"
+                       type="text"
+                       name="{{ confirmation_form.confirmation.name }}"
+                       autocomplete="off"
+                       spellcheck="false"
+                       required>
+              </div>
+            {% endif %}
+            {% if review.shared %}
+              <div class="usa-checkbox">
+                <input class="usa-checkbox__input"
+                       id="apply-affected-sites"
+                       type="checkbox"
+                       name="{{ shared_form.affected_sites.name }}"
+                       value="on"
+                       required>
+                <label class="usa-checkbox__label"
+                       for="apply-affected-sites">{{ shared_form.affected_sites.label }}</label>
+              </div>
+            {% elif review.requires_acknowledgement %}
+              <div class="usa-checkbox">
+                <input class="usa-checkbox__input"
+                       id="apply-acknowledgement"
+                       type="checkbox"
+                       name="{{ kind_form.acknowledged.name }}"
+                       value="on"
+                       required>
+                <label class="usa-checkbox__label"
+                       for="apply-acknowledgement">{{ review.acknowledgement }}</label>
+              </div>
+            {% endif %}
+            <div class="barectl-page-actions">
+              <button type="submit" class="usa-button">{{ change.plain.action }}</button>
+              <a class="usa-button usa-button--outline"
+                 href="{{ change.plain.home_url }}">Cancel</a>
+            </div>
+            <p class="usa-hint">
+              Barectl starts the change on the server and never submits it twice. It
+              continues there if this computer disconnects.
+            </p>
+          </form>
+        {% else %}
+          <p class="barectl-note" id="apply-unavailable">{{ apply_reason }}</p>
+          {% if review.run_id %}
+            <p>
+              <a href="{% url 'run_detail' review.run_id %}">Open its run</a>
+            </p>
+          {% elif not review.eligible and can_prepare_again %}
+            <div class="barectl-page-actions">
+              <form class="usa-form"
+                    method="post"
+                    action="{% url 'change_prepare_again' change.operation_id %}">
+                {% csrf_token %}
+                <button type="submit" class="usa-button">Try again</button>
+              </form>
+              <a class="usa-button usa-button--outline"
+                 href="{{ change.plain.home_url }}">Cancel</a>
+            </div>
+          {% else %}
+            <p>
+              <a class="usa-button usa-button--outline"
+                 href="{{ change.plain.home_url }}">Cancel</a>
+            </p>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+      <div class="usa-accordion">
+        <h2 class="usa-accordion__heading">
+          <button type="button"
+                  class="usa-accordion__button"
+                  aria-expanded="false"
+                  aria-controls="show-details">Show details</button>
+        </h2>
+        <div id="show-details" class="usa-accordion__content" hidden>
+          {% include "operations/_change_details.html" %}
+        </div>
+      </div>
+    {% else %}
+      <h2 id="change-status-heading">Barectl could not prepare this change</h2>
+      <p>{{ change.failure }}</p>
+      <div class="barectl-page-actions">
+        {% if can_prepare_again %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'change_prepare_again' change.operation_id %}">
+            {% csrf_token %}
+            <button type="submit" class="usa-button">Try again</button>
+          </form>
+        {% endif %}
+        <a class="usa-button usa-button--outline"
+           href="{{ change.plain.home_url }}">Cancel</a>
+      </div>
+    {% endif %}
+  </section>
+  {% if announcement %}
+    <hx-partial hx-target="#change-announcement" hx-swap="innerHTML">
+    {{ announcement }}
+    </hx-partial>
+  {% endif %}
+{% endwith %}
