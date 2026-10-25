@@ -1,9 +1,25 @@
+{% if scheduled_tasks %}
+  <nav aria-label="Settings sections">
+    <ul class="usa-sidenav">
+      <li class="usa-sidenav__item">
+        <a href="#site-php-version-heading">Runtime and serving</a>
+      </li>
+      <li class="usa-sidenav__item">
+        <a href="#scheduled-tasks">Scheduled tasks</a>
+      </li>
+      <li class="usa-sidenav__item">
+        <a href="#site-remove-heading">Remove site</a>
+      </li>
+    </ul>
+  </nav>
+{% endif %}
 {% include "sites/_site_php_version.html" %}
 {% include "sites/_site_node_version.html" %}
 {% include "sites/_php_settings.html" %}
 {% include "cache/_site_object_cache.html" %}
 {% include "sites/_site_readiness.html" %}
 {% include "sites/_site_domains.html" %}
+{% include "sites/_site_scheduled_tasks.html" %}
 <section class="barectl-card" aria-labelledby="site-remove-heading">
   <h2 id="site-remove-heading">Remove site</h2>
   <p>

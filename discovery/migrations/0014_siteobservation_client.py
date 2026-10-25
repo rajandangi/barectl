@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("discovery", "0012_discoverysnapshot_cache_source_and_more"),
+        ("discovery", "0013_discoverysnapshot_cache_source_and_more"),
     ]
 
     operations = [

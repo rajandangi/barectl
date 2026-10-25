@@ -7,6 +7,9 @@ if TYPE_CHECKING:
 
     from django.db.migrations import Migration
 
+    from automation.apps import AutomationConfig
+    from automation.fence import review_fence_plan
+    from automation.presentation import ScheduleView
     from bootstrap.apps import BootstrapConfig
     from bootstrap.certificate_email_views import CertificateEmailForm
     from cache.apps import CacheConfig
@@ -545,6 +548,14 @@ if TYPE_CHECKING:
         laravel_configuration.DEPLOY_KEY_PUBLIC_FILE,
         laravel_configuration.KNOWN_HOSTS_FILE,
         laravel_configuration.INITIAL_RELEASE,
+    )
+    # The Scheduled tasks section is rendered by Django templates, which read these fields
+    # by name; the app config is Django's, and the fence plan is the exported extension
+    # point later Phase C kinds call (#395).
+    _automation_templates_and_extension_points = (
+        AutomationConfig,
+        ScheduleView("", "", "", "", None, "", False, False).last_run,
+        review_fence_plan,
     )
     # Django's form validation calls the settings form's clean_<field> by name, and the
     # settings bodies are read as resources by their change kinds.

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet
 
+from automation.observation import ObservedSchedule
 from bootstrap.standing import HostJudgment, Standing
 from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
@@ -220,6 +221,11 @@ class CollectedSnapshot:
     cache: Observation[tuple[ObservedCache, ...]] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
     )
+    # Each WordPress site's scheduled work, as native evidence and the pure projection
+    # record it (docs/automation.md, Phase C #357).
+    automation: Observation[tuple[ObservedSchedule, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
     certificate_email: str = ""
     certificate_email_state: str = ""
@@ -287,6 +293,9 @@ def save_snapshot(
         cache_status=collected.cache.outcome,
         cache_source=_joined(collected.cache.source),
         cache_warning=collected.cache.warning,
+        automation_status=collected.automation.outcome,
+        automation_source=_joined(collected.automation.source),
+        automation_warning=collected.automation.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -372,6 +381,7 @@ def save_snapshot(
     _save_cache(snapshot, collected.cache.value)
     _save_releases(snapshot, collected.releases.value)
     _save_settings(snapshot, collected.settings.value)
+    _save_automation(snapshot, collected.automation.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -469,6 +479,35 @@ def _save_settings(snapshot: DiscoverySnapshot, settings: tuple[ObservedSetting,
     )
 
 
+def _save_automation(snapshot: DiscoverySnapshot, schedules: tuple[ObservedSchedule, ...]) -> None:
+    from automation.models import AutomationObservation
+
+    AutomationObservation.objects.bulk_create(
+        AutomationObservation(
+            snapshot=snapshot,
+            identifier=schedule.identifier,
+            role=schedule.role,
+            status=schedule.status,
+            problem=schedule.problem,
+            duplicate=schedule.duplicate,
+            disable_wp_cron=schedule.disable_wp_cron,
+            installed=schedule.installed,
+            timer_active=schedule.timer_active,
+            timer_enabled=schedule.timer_enabled,
+            service_active=schedule.service_active,
+            masked=schedule.masked,
+            result=schedule.result,
+            exec_status=schedule.exec_status,
+            last_start_us=schedule.last_start_us,
+            last_exit_us=schedule.last_exit_us,
+            last_trigger_us=schedule.last_trigger_us,
+            next_elapse_us=schedule.next_elapse_us,
+            slice_populated=schedule.slice_populated,
+        )
+        for schedule in schedules
+    )
+
+
 class AttemptSnapshot(NamedTuple):
     attempt: DiscoveryAttempt
     snapshot: Snapshot | None
@@ -482,6 +521,7 @@ _OBSERVATION_ROWS = (
     "cache",
     "releases",
     "settings",
+    "automation",
 )
 
 
@@ -600,6 +640,12 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             _reads(row.settings_source),
             row.settings_warning,
             tuple(_read_setting(setting) for setting in row.settings.all()),
+        ),
+        automation=Observation(
+            ObservationOutcome(row.automation_status),
+            _reads(row.automation_source),
+            row.automation_warning,
+            tuple(_read_automation(automation) for automation in row.automation.all()),
         ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
@@ -726,6 +772,34 @@ def _read_certificate(row: SiteObservation) -> SiteCertificate | None:
 
 def _read_setting(row: SettingObservation) -> ObservedSetting:
     return ObservedSetting(row.identifier, row.application, row.name, row.digest, row.value)
+
+
+def _read_automation(row: object) -> ObservedSchedule:
+    from automation.models import AutomationObservation
+    from automation.status import ScheduleStatus
+
+    if not isinstance(row, AutomationObservation):
+        raise TypeError("Not an automation observation.")
+    return ObservedSchedule(
+        identifier=row.identifier,
+        role=row.role,
+        status=ScheduleStatus(row.status),
+        problem=row.problem,
+        duplicate=row.duplicate,
+        disable_wp_cron=row.disable_wp_cron,
+        installed=row.installed,
+        timer_active=row.timer_active,
+        timer_enabled=row.timer_enabled,
+        service_active=row.service_active,
+        masked=row.masked,
+        result=row.result,
+        exec_status=row.exec_status,
+        last_start_us=row.last_start_us,
+        last_exit_us=row.last_exit_us,
+        last_trigger_us=row.last_trigger_us,
+        next_elapse_us=row.next_elapse_us,
+        slice_populated=row.slice_populated,
+    )
 
 
 def _read_release(row: ReleaseObservation) -> ObservedRelease:

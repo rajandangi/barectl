@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("discovery", "0012_discoverysnapshot_cache_source_and_more"),
+        ("discovery", "0013_discoverysnapshot_cache_source_and_more"),
         ("operations", "0005_remove_remoteoperation_remote_operation_kind_known_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]

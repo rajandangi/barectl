@@ -2,6 +2,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 from django.views.generic import RedirectView
 
+from automation.views import prepare_schedule
 from bootstrap.certificate_email_views import prepare_certificate_email
 from cache.views import object_cache_prepare, prepare_site_cache, read_site_cache
 from dashboard.forms import SignInForm
@@ -253,6 +254,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/settings/remove/prepare/",
         prepare_remove,
         name="site_remove_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/settings/scheduled-tasks/prepare/",
+        prepare_schedule,
+        name="site_scheduled_tasks_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/environment/",

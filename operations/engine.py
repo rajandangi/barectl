@@ -437,6 +437,32 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "email. The previous main configuration was restored where it had been replaced. "
         "Check the run's journal on the server, then prepare a new review."
     ),
+    "automation": (
+        "Barectl could not change the site's scheduled tasks, so nothing more was changed. "
+        "Check the run's journal on the server, then prepare a new review."
+    ),
+    "automation_site": (
+        "The site's account, files or private configuration were not the reviewed ones, so "
+        "the run stopped before changing anything. Run discovery again and prepare a new "
+        "review."
+    ),
+    "automation_start": (
+        "Barectl could not start the site's scheduled task. Nothing was handed over: page "
+        "loads still run cron. Check the run's journal, then prepare a new review."
+    ),
+    "automation_tick": (
+        "The first scheduled run did not finish successfully within the reviewed wait, so "
+        "Barectl did not hand cron over and page loads still run it. The server task stays "
+        "installed and reports its next result; prepare a new review to finish."
+    ),
+    "automation_configuration": (
+        "Barectl could not set or clear the site's cron setting in the private WordPress "
+        "configuration. Check the run's journal, then prepare a new review."
+    ),
+    "automation_units": (
+        "Barectl could not remove the site's scheduled task, so it may still be installed. "
+        "Check the run's journal, then prepare a new review."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -695,6 +721,12 @@ RESULT_REASONS: Final = frozenset(
         "wordpress_checksums",
         "wordpress_checksums_unavailable",
         "certificate_email",
+        "automation",
+        "automation_site",
+        "automation_start",
+        "automation_tick",
+        "automation_configuration",
+        "automation_units",
         "logrotate_missing",
         "rotation_invalid",
     }
