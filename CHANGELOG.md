@@ -33,6 +33,7 @@
 ### Automation and cache (Phase C)
 
 - Settle the object cache's PHP client as phpredis from the runtime catalog. The lock gains the packaged `redis` extension for PHP 8.4 and 8.5 (`php84_redis`, `php85_redis`) as supply, never as a runtime an operator adds; a site loads it from its locked store path through its own pool and `bin/php`/`composer`/`wp` wrappers, and enabling or disabling it is a Site review that restarts only that site's master ([PHP extensions](docs/runtimes.md#php-extensions), [#390](https://github.com/rajandangi/barectl/issues/390)).
+- Install Valkey from Server **Settings > Object cache (Valkey)** as one reviewed APT transaction that names the package, its exact version and APT's download size. The run installs exactly those packages under the inline `DPkg::Pre-Install-Pkgs` guard, stops and masks the distribution's shared `valkey-server.service` so nothing listens on TCP 6379, and restarts the running PHP masters and site proxies so a package transaction's `daemon-reload` leaves them verifiable (#428). It is Shared consent, so a Site operator is refused in the page and on a direct POST; an installed and masked Valkey proposes no changes, and discovery reconstructs the package, version and masked unit from the server alone ([object cache](docs/object-cache.md)).
 
 ### Removed
 

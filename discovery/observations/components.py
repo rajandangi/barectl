@@ -2,7 +2,7 @@
 
 import re
 import shlex
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 
 from ..models import ObservationOutcome, WebStackComponent
@@ -71,6 +71,7 @@ _COMPONENT_PROFILES: dict[WebStackComponent, tuple[str, ...]] = {
     WebStackComponent.MARIADB: ("mariadb-server", "mariadb-server-core"),
     WebStackComponent.POSTGRESQL: ("postgresql",),
     WebStackComponent.CERTBOT: ("certbot",),
+    WebStackComponent.VALKEY: ("valkey-server", "valkey-tools"),
 }
 _COMPONENT_PROFILE_LABELS = {
     WebStackComponent.NGINX: "Nginx profile",
@@ -78,7 +79,16 @@ _COMPONENT_PROFILE_LABELS = {
     WebStackComponent.MARIADB: "MariaDB profile",
     WebStackComponent.POSTGRESQL: "PostgreSQL profile",
     WebStackComponent.CERTBOT: "Certbot renewal setup",
+    WebStackComponent.VALKEY: "Valkey profile",
 }
+# A component whose version query runs only when the package inventory already lists it.
+# Valkey joins discovery after every earlier transcript was recorded, so a server without
+# Valkey must issue exactly the fixed reads those transcripts hold. The inventory read
+# already reports every installed package, so its names gate the extra version read.
+_DEFERRED_PROFILES: dict[WebStackComponent, tuple[str, ...]] = {
+    WebStackComponent.VALKEY: _COMPONENT_PROFILES[WebStackComponent.VALKEY],
+}
+_DEFERRED_PACKAGES = frozenset(name for names in _DEFERRED_PROFILES.values() for name in names)
 
 
 def _profile_packages(release: SupportedRelease | None, spec: _ComponentSpec) -> frozenset[str]:
@@ -181,7 +191,19 @@ class _Packages:
 
 
 def _package_query(release: SupportedRelease | None) -> str:
-    names = sorted({name for spec in COMPONENT_SPECS for name in _profile_packages(release, spec)})
+    names = sorted(
+        {
+            name
+            for spec in COMPONENT_SPECS
+            for name in _profile_packages(release, spec)
+            if name not in _DEFERRED_PACKAGES
+        }
+    )
+    return version_query(names)
+
+
+def version_query(names: Iterable[str]) -> str:
+    """The fixed dpkg-query read of the named packages' installed versions."""
     return "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' " + " ".join(
         shlex.quote(name) for name in names
     )
@@ -205,21 +227,9 @@ def _installed_packages(
     )
     if isinstance(output, _Failed):
         return output
-    installed: dict[str, str | None] = {}
-    for line in output.splitlines():
-        match line.split():
-            case [name, *version, status] if len(version) <= 1 and PACKAGE_STATUS.fullmatch(status):
-                state = status[1]
-                if state in INSTALLED_STATES and version:
-                    installed[name] = version[0]
-                elif state not in NOT_INSTALLED_STATES:
-                    installed[name] = None
-            case _:
-                return _Failed(
-                    ObservationOutcome.UNSUPPORTED,
-                    f"{query} did not report package states in a supported format.",
-                    query,
-                )
+    installed = _versions(output, query)
+    if isinstance(installed, _Failed):
+        return installed
     names_output = _run(shell, PACKAGE_NAMES_QUERY, missing=NO_DPKG_QUERY)
     if isinstance(names_output, _Failed):
         return names_output
@@ -237,7 +247,40 @@ def _installed_packages(
                     f"{PACKAGE_NAMES_QUERY} did not report package states in a supported format.",
                     PACKAGE_NAMES_QUERY,
                 )
-    return _Packages(installed, frozenset(names), query)
+    deferred = frozenset(
+        name for name in _DEFERRED_PACKAGES if name in names and name not in installed
+    )
+    if not deferred:
+        return _Packages(installed, frozenset(names), query)
+    deferred_query = version_query(sorted(deferred))
+    deferred_output = _run(shell, deferred_query, accepted=frozenset((0, 1)), missing=NO_DPKG_QUERY)
+    if isinstance(deferred_output, _Failed):
+        return deferred_output
+    versions = _versions(deferred_output, deferred_query)
+    if isinstance(versions, _Failed):
+        return versions
+    installed.update(versions)
+    return _Packages(installed, frozenset(names), f"{query}; {deferred_query}")
+
+
+def _versions(output: str, query: str) -> dict[str, str | None] | _Failed:
+    """The package states and versions one dpkg-query answer reported."""
+    installed: dict[str, str | None] = {}
+    for line in output.splitlines():
+        match line.split():
+            case [name, *version, status] if len(version) <= 1 and PACKAGE_STATUS.fullmatch(status):
+                state = status[1]
+                if state in INSTALLED_STATES and version:
+                    installed[name] = version[0]
+                elif state not in NOT_INSTALLED_STATES:
+                    installed[name] = None
+            case _:
+                return _Failed(
+                    ObservationOutcome.UNSUPPORTED,
+                    f"{query} did not report package states in a supported format.",
+                    query,
+                )
+    return installed
 
 
 # systemd reports these fixed tokens; anything else is not a supported format.
@@ -510,6 +553,13 @@ COMPONENT_SPECS = (
         WebStackComponent.CERTBOT,
         re.compile(r"certbot"),
         _fixed_unit("certbot.timer"),
+    ),
+    # Valkey ships one shared unit, which Barectl stops and masks; a site's own instance is a
+    # later change (docs/adr/0030-give-each-site-its-own-valkey-instance.md).
+    _ComponentSpec(
+        WebStackComponent.VALKEY,
+        re.compile(r"valkey(-server|-tools)?(-[0-9.]+)?"),
+        _fixed_unit("valkey-server.service"),
     ),
 )
 # Names and statuses only identify conflicts; versions and units come from the exact query.

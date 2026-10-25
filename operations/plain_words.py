@@ -194,6 +194,22 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after_home=Home.SERVER_SITE_CREATE,
         after_permission="operations.change_site",
     ),
+    "install_valkey": ChangeWords(
+        title="Install Valkey on {server}",
+        summary=(
+            "Barectl will install Valkey on {server} and keep one shared cache from running.",
+            "Each site that uses the object cache later gets its own private cache.",
+        ),
+        action="Install Valkey",
+        steps={
+            "preflight": "Checking the server",
+            "install": "Installing",
+            "mask": "Stopping the shared cache",
+            "recover": "Restarting the site services",
+            "verify": "Verifying",
+        },
+        home=Home.SERVER_SETTINGS,
+    ),
     "create_wordpress_site": ChangeWords(
         title="Create {site}",
         summary=(

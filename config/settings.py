@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "wordpress",
     "laravel",
     "databases",
+    "cache",
     "logs",
 ]
 MIDDLEWARE = [

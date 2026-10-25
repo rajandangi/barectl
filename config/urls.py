@@ -3,6 +3,7 @@ from django.urls import path
 from django.views.generic import RedirectView
 
 from bootstrap.certificate_email_views import prepare_certificate_email
+from cache.views import object_cache_prepare
 from dashboard.forms import SignInForm
 from dashboard.settings_views import settings_page
 from databases.site_views import prepare_site_database
@@ -136,6 +137,11 @@ urlpatterns = [
         "servers/<int:pk>/settings/database/prepare/",
         database_prepare,
         name="database_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/object-cache/prepare/",
+        object_cache_prepare,
+        name="object_cache_prepare",
     ),
     path(
         "servers/<int:pk>/settings/certificate-email/prepare/",
