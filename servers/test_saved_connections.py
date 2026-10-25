@@ -4,6 +4,7 @@ from django.test import TestCase
 from discovery.models import DiscoveryAttempt
 
 from .forms import ServerForm
+from .models import Server
 from .ssh_config import AliasCatalog
 from .testing import ControllerConfigTestCase
 
@@ -141,6 +142,32 @@ class SavedConnectionJourneyTests(ControllerConfigTestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
         self.assertIn("Permission", attempt.failure)
 
+    def test_status_poll_updates_the_banner_and_announces_a_change(self) -> None:
+        from servers.testing import HTMX_FRAGMENT
+
+        self.grant("view_server", "add_server", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        self.client.post("/servers/add/", {"name": "Cloud", "address": "cloud.example"})
+        server = Server.objects.get()
+        page = self.client.get(
+            f"/servers/{server.pk}/status/", {"shown": "RUNNING"}, headers=HTMX_FRAGMENT
+        )
+        self.assertContains(page, 'id="connection-status"')
+        self.assertContains(page, "Checking…")
+        self.assertContains(page, "Checking the connection…")
+        self.assertContains(page, 'hx-target="#next-action-region"')
+        self.assertContains(page, "Connection check queued.")
+        # A poll that shows the same state does not repeat the announcement.
+        page = self.client.get(
+            f"/servers/{server.pk}/status/", {"shown": "QUEUED"}, headers=HTMX_FRAGMENT
+        )
+        self.assertNotContains(page, "Connection check queued.")
+        # Opening the poll URL as a page queues nothing and redirects to the server page.
+        self.assertRedirects(
+            self.client.get(f"/servers/{server.pk}/status/"), f"/servers/{server.pk}/"
+        )
+        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+
     def test_viewing_the_registered_pages_does_not_request_remote_work(self) -> None:
         self.grant("view_server", "add_server", "add_discoveryattempt")
         self.client.force_login(self.user)
@@ -224,5 +251,25 @@ class SavedConnectionJourneyTests(ControllerConfigTestCase):
         response = self.client.post("/servers/add/", {"name": "Cloud", "address": "cloud.example"})
         DiscoveryAttempt.objects.update(queued_at=timezone.now() - timedelta(minutes=11))
         page = self.client.get(response.headers["Location"])
+        self.assertContains(page, "Checking the connection…")
         self.assertContains(page, "Worker unavailable for this check")
-        self.assertContains(page, "Connection check queued")
+        self.assertContains(page, "Queued at")
+
+    def test_queue_time_and_worker_command_wait_one_minute(self) -> None:
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        self.grant("view_server", "add_server", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        response = self.client.post("/servers/add/", {"name": "Cloud", "address": "cloud.example"})
+        DiscoveryAttempt.objects.update(queued_at=timezone.now() - timedelta(seconds=30))
+        page = self.client.get(response.headers["Location"])
+        self.assertContains(page, "Checking the connection…")
+        self.assertNotContains(page, "Queued at")
+        self.assertNotContains(page, "db_worker")
+        DiscoveryAttempt.objects.update(queued_at=timezone.now() - timedelta(minutes=2))
+        page = self.client.get(response.headers["Location"])
+        self.assertContains(page, "Queued at")
+        self.assertContains(page, "python manage.py db_worker")
+        self.assertNotContains(page, "Worker unavailable for this check")

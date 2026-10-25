@@ -42,7 +42,7 @@ class InventoryTests(ControllerConfigTestCase):
         self.assertNotContains(response, "web.example.com", status_code=403)
         # The page offers sign-out, but no navigation the account cannot use.
         self.assertContains(response, "Sign out", status_code=403)
-        self.assertNotContains(response, "usa-nav__primary", status_code=403)
+        self.assertNotContains(response, "<span>Servers</span>", status_code=403)
 
     def test_unauthorized_htmx_request_reloads_the_page(self) -> None:
         self.client.force_login(self.user)
@@ -61,9 +61,6 @@ class InventoryTests(ControllerConfigTestCase):
         self.assertContains(response, "<td>Not verified</td>", count=2, html=True)
         self.assertNotContains(response, "Connected")
         self.assertContains(response, "2 servers.")
-        # The banner states what discovery covers and that Barectl does not change servers.
-        self.assertContains(response, "runs read-only discovery of the operating system")
-        self.assertContains(response, "Registration and discovery do not change the server.")
         self.assertContains(response, 'aria-current="page"')
         self.assertContains(response, "data-uswds-fragment")
         # View-only accounts get no registration or edit actions.
@@ -76,8 +73,8 @@ class InventoryTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         response = self.client.get("/")
         self.assertContains(response, '<a class="usa-button" href="/servers/add/">Add server</a>')
-        self.assertContains(response, f'href="/servers/{self.server.pk}/edit/"')
-        self.assertContains(response, '<span class="usa-sr-only"> Production</span>')
+        # Editing a connection starts from the server's Settings > Connection.
+        self.assertNotContains(response, "/edit/")
         self.assertNotContains(response, "/admin/")
 
     def test_aliases_removed_from_the_controller_are_flagged(self) -> None:
@@ -90,25 +87,47 @@ class InventoryTests(ControllerConfigTestCase):
 
     def test_empty_inventory_explains_the_next_step(self) -> None:
         Server.objects.all().delete()
-        self.grant_view()
+        self.grant("view_server", "add_server")
         self.client.force_login(self.user)
         response = self.client.get("/")
-        self.assertContains(response, "No servers yet")
-        self.assertContains(response, "An operator with inventory permissions")
+        self.assertContains(response, "Add your first server")
+        self.assertContains(response, "fresh Ubuntu 26.04 server")
+        self.assertContains(response, "passwordless sudo")
+        self.assertContains(
+            response, '<a class="usa-button" href="/servers/add/">Add server</a>', html=True
+        )
+        self.assertNotContains(response, "No servers yet")
+        self.assertNotContains(response, "SSH alias")
         self.assertNotContains(response, 'role="search"')
+
+    def add_extra_servers(self) -> None:
+        for index in range(9):
+            Server.objects.create(name=f"Extra {index}", ssh_alias=f"extra-{index}.example.net")
+
+    def test_search_appears_only_with_more_than_ten_servers(self) -> None:
+        self.grant_view()
+        self.client.force_login(self.user)
+        self.assertNotContains(self.client.get("/"), 'role="search"')
+        self.add_extra_servers()
+        self.assertEqual(Server.objects.count(), 11)
+        response = self.client.get("/")
+        self.assertContains(response, 'role="search"')
+        self.assertContains(response, 'type="search"')
 
     def test_search_filters_the_full_page(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
+        self.add_extra_servers()
         response = self.client.get("/", {"q": "stage"})
         self.assertContains(response, "stage.example.net")
         self.assertNotContains(response, "web.example.com")
-        self.assertContains(response, "1 of 2 servers match “stage”.")
+        self.assertContains(response, "1 of 11 servers match “stage”.")
         self.assertContains(response, 'value="stage"')
 
     def test_search_without_matches_offers_all_servers(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
+        self.add_extra_servers()
         response = self.client.get("/", {"q": "missing"})
         self.assertContains(response, "No matching servers")
         self.assertContains(response, 'href="/">Show all servers</a>', html=False)
@@ -116,6 +135,7 @@ class InventoryTests(ControllerConfigTestCase):
     def test_invalid_search_is_reported_on_the_field(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
+        self.add_extra_servers()
         response = self.client.get("/", {"q": "x" * 101})
         self.assertContains(response, 'id="id_q_error"')
         self.assertContains(response, 'aria-invalid="true"')
@@ -124,6 +144,7 @@ class InventoryTests(ControllerConfigTestCase):
     def test_htmx_search_returns_the_results_fragment(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
+        self.add_extra_servers()
         response = self.client.get("/", {"q": "web"}, headers=HTMX_FRAGMENT)
         content = response.content.decode()
         self.assertNotIn("<html", content)
@@ -131,7 +152,7 @@ class InventoryTests(ControllerConfigTestCase):
         self.assertIn("web.example.com", content)
         self.assertNotIn("stage.example.net", content)
         self.assertIn('<hx-partial hx-target="#server-results-status"', content)
-        self.assertIn("1 of 2 servers match “web”.", content)
+        self.assertIn("1 of 11 servers match “web”.", content)
         vary = response.headers["Vary"]
         self.assertIn("HX-Request", vary)
         self.assertIn("HX-Request-Type", vary)
@@ -263,10 +284,34 @@ class RegistrationTests(ControllerConfigTestCase):
             },
         )
         self.assertNotContains(response, 'type="file"')
+        self.assertContains(response, "Save and check queues a read-only connection check.")
+        # Port and the SSH alias stay collapsed under More options for the common case.
+        self.assertContains(response, ">More options</button>")
+        self.assertContains(response, 'aria-expanded="false"')
+        self.assertContains(response, 'aria-controls="more-options"')
+        self.assertRegex(response.content.decode(), r'id="more-options"[^>]*hidden')
+
+    def test_more_options_opens_for_a_non_default_port_or_alias(self) -> None:
+        self.sign_in_with("view_server", "add_server")
+        response = self.client.post(
+            "/servers/add/",
+            {"name": "Web", "address": "https://web.example", "port": "2222"},
+        )
+        self.assertContains(response, 'aria-expanded="true"')
+        self.assertContains(response, 'value="2222"')
+
+    def test_key_choice_names_the_controller_credential_hint(self) -> None:
+        self.sign_in_with("view_server", "add_server")
+        response = self.client.get("/servers/add/")
         self.assertContains(
             response,
-            "Save and check uses the selected controller credential "
-            "and queues read-only discovery.",
+            '<label class="usa-label" for="id_credential_reference">Key</label>',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            "The controller host supplies SSH credentials, even when your browser runs "
+            "on another computer.",
         )
 
     def test_valid_registration_persists_only_the_name_and_alias(self) -> None:
@@ -295,7 +340,8 @@ class RegistrationTests(ControllerConfigTestCase):
             "Registered Web with SSH alias web.example.com. Barectl queued a connection check.",
         )
         # Registration queues a check; it does not claim the server is reachable.
-        self.assertContains(page, "Connection check queued")
+        self.assertContains(page, "Checking…")
+        self.assertContains(page, "Checking the connection…")
         self.assertNotContains(page, "Verified")
 
     def test_invalid_selections_are_rejected_with_field_errors(self) -> None:
@@ -505,7 +551,7 @@ class ActivityTests(ControllerConfigTestCase):
         self.assertContains(response, "Access denied", status_code=403)
         self.assertNotContains(response, "web.example.com", status_code=403)
         # The page offers sign-out, but no navigation the account cannot use.
-        self.assertNotContains(response, "usa-nav__primary", status_code=403)
+        self.assertNotContains(response, "<span>Activity</span>", status_code=403)
 
     def test_htmx_activity_requests_follow_the_authorized_flow(self) -> None:
         response = self.client.get("/activity/", headers=HTMX_FRAGMENT)
@@ -623,7 +669,7 @@ class ActivityTests(ControllerConfigTestCase):
             age=timedelta(minutes=1),
             failure="The controller host does not trust the host key presented.",
         )
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         history = self.history_of(page)
         self.assertIn("Discovery history", history)
         self.assertIn("The controller host does not trust the host key presented.", history)
@@ -637,7 +683,7 @@ class ActivityTests(ControllerConfigTestCase):
         )
         self.grant_view()
         self.client.force_login(self.user)
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         # The connection status and the history both show the recovered attempt.
         self.assertContains(page, "Connection failed")
         self.assertIn("stopped before finishing", self.history_of(page))
@@ -647,6 +693,6 @@ class ActivityTests(ControllerConfigTestCase):
     def test_server_history_without_attempts_says_so(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
-        history = self.history_of(self.client.get(f"/servers/{self.server.pk}/"))
+        history = self.history_of(self.client.get(f"/servers/{self.server.pk}/advanced/"))
         self.assertIn("No discovery attempts yet.", history)
         self.assertNotIn("<table", history)

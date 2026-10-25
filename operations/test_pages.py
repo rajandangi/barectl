@@ -223,10 +223,11 @@ class PlainWordTests(SimpleTestCase):
         self.assertEqual(plain.home_url, "/servers/7/sites/shop/")
         foundation = ChangePreparation(kind_slug="host_foundation", inputs={"version": 1})
         foundation.server_id = 7
-        self.assertEqual(
-            plain_change("host_foundation", "Set up server", foundation, "Web").home_url,
-            "/servers/7/",
-        )
+        success = plain_change("host_foundation", "Set up server", foundation, "Web")
+        self.assertEqual(success.home_url, "/servers/7/")
+        self.assertEqual(success.after_label, "Create site")
+        self.assertEqual(success.after_url, "/servers/7/sites/create/")
+        self.assertEqual(success.after_permission, "operations.change_site")
 
 
 class ScreenTestCase(ChangeTestCase):

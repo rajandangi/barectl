@@ -7,7 +7,7 @@ import table from "@uswds/uswds/js/usa-table";
 /** docs/frontend-assets.md#components-and-htmx-lifecycle */
 const FRAGMENT_ROOT = "[data-uswds-fragment]";
 
-const pageBehaviors: readonly UswdsBehavior[] = [accordion, skipnav, navigation];
+const pageBehaviors: readonly UswdsBehavior[] = [skipnav, navigation, accordion];
 const fragmentBehaviors: readonly UswdsBehavior[] = [table];
 const activeRoots = new Set<HTMLElement>();
 

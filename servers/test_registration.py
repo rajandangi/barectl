@@ -83,10 +83,13 @@ class AliasChangeTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "Connection failed")
         self.assertContains(page, "could not reach the SSH service configured for db-1.")
-        # The observations collected through the earlier alias remain, labeled as such.
-        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
-        self.assertContains(page, "over connection <code>web.example.com</code>")
-        self.assertContains(page, "These observations do not verify the current connection.")
+        self.assertContains(page, "Check again")
+        self.assertContains(page, "Edit connection")
+        # The observations collected through the earlier alias remain, labelled as such.
+        advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(advanced, "over connection <code>web.example.com</code>")
+        self.assertContains(advanced, "These observations do not verify the current connection.")
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
 
 
@@ -175,10 +178,8 @@ class RemovalTests(DiscoveryTestCase):
         request_discovery(self.server)
         self.run_worker()
         self.sign_in_with("view_server", "delete_server")
-        page = self.client.get(f"/servers/{self.server.pk}/")
-        self.assertContains(
-            page, f'href="{self.remove_url()}">Remove<span class="usa-sr-only"> Web</span></a>'
-        )
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertContains(page, f'href="{self.remove_url()}">Remove Web</a>')
         # Opening the confirmation, or posting without confirming, deletes nothing.
         page = self.client.get(self.remove_url())
         self.assertContains(page, "<h1>Remove Web</h1>", html=True)
@@ -550,3 +551,99 @@ class CredentialCorrectionTests(DiscoveryTestCase):
         self.assertEqual(
             sum(item.snapshot is not None for item in read_discovery(server).history), 1
         )
+
+
+class HostIdentityTests(ControllerConfigTestCase):
+    """The fingerprint step on the server page, from stored challenge evidence."""
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        from paramiko import ECDSAKey
+
+        from discovery.fakes import record_attempt
+        from servers.models import ConnectionDefinition
+
+        self.server = Server.objects.create(
+            name="Web", ssh_alias="web.example.com", connection_revision=1
+        )
+        definition = ConnectionDefinition.objects.create(
+            server=self.server,
+            revision=1,
+            mode="agent",
+            alias="web.example.com",
+            address="web.example.com",
+            username="root",
+            port=22,
+        )
+        self.key = ECDSAKey.generate()
+        attempt = record_attempt(
+            self.server,
+            DiscoveryAttempt.Status.FAILED,
+            failure="Server identity not yet trusted. Confirm its provider fingerprint.",
+        )
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
+            connection=definition,
+            challenge_key_type=self.key.get_name(),
+            challenge_key_blob=self.key.get_base64(),
+            challenge_fingerprint=self.key.fingerprint,
+            challenge_address="web.example.com",
+            challenge_port=22,
+        )
+        self.attempt = DiscoveryAttempt.objects.get(pk=attempt.pk)
+        self.confirm_url = f"/servers/{self.server.pk}/confirm-host/"
+
+    def test_only_registration_editors_see_the_confirm_control(self) -> None:
+        from django.contrib.auth.models import Permission
+
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "Confirm this is your server")
+        self.assertContains(page, self.key.fingerprint)
+        self.assertNotContains(page, 'name="fingerprint"')
+        self.assertNotContains(page, "Confirm and check")
+
+        for codename in ("change_server", "add_discoveryattempt"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "Confirm this is your server")
+        self.assertContains(page, "Confirm and check")
+        self.assertContains(page, 'name="attempt"')
+        self.assertContains(page, 'name="revision"')
+        self.assertContains(page, 'value="1"')
+
+    def test_confirmation_requires_csrf_and_the_current_revision(self) -> None:
+        from django.contrib.auth.models import Permission
+
+        for codename in ("view_server", "change_server", "add_discoveryattempt"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        data = {
+            "attempt": self.attempt.pk,
+            "revision": 1,
+            "fingerprint": self.key.fingerprint,
+        }
+        protected = Client(enforce_csrf_checks=True)
+        protected.force_login(self.user)
+        self.assertEqual(protected.post(self.confirm_url, data).status_code, 403)
+        self.client.force_login(self.user)
+        self.assertEqual(Server.objects.get(pk=self.server.pk).connection_revision, 1)
+
+        response = self.client.post(self.confirm_url, {**data, "revision": 2})
+        self.assertContains(response, "The saved connection changed", status_code=409)
+        self.assertEqual(Server.objects.get(pk=self.server.pk).connection_revision, 1)
+
+    def test_opening_the_screens_makes_no_ssh_connection(self) -> None:
+        self.grant("view_server", "add_server", "change_server", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        before = DiscoveryAttempt.objects.count()
+        with mock.patch("discovery.ssh.connect") as connect:
+            for url in (
+                "/servers/add/",
+                f"/servers/{self.server.pk}/",
+                f"/servers/{self.server.pk}/settings/",
+                f"/servers/{self.server.pk}/advanced/",
+            ):
+                self.assertEqual(self.client.get(url).status_code, 200)
+        connect.assert_not_called()
+        self.assertEqual(DiscoveryAttempt.objects.count(), before)

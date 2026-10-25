@@ -16,6 +16,7 @@ class Home(StrEnum):
     SERVER = "server"
     SERVER_SITES = "server_sites"
     SERVER_SETTINGS = "server_settings"
+    SERVER_SITE_CREATE = "server_site_create"
     SITE = "site"
 
 
@@ -28,9 +29,11 @@ class ChangeWords:
     action: str
     steps: dict[str, str] = field(default_factory=dict)
     home: Home = Home.SERVER
-    # The action offered once the change succeeded, and where it leads.
+    # The action offered once the change succeeded, where it leads, and the permission
+    # reading that page needs.
     after: str = ""
     after_home: Home = Home.SERVER
+    after_permission: str = ""
 
 
 _ENGINE_LABELS: Final[dict[str, str]] = {"mariadb": "MariaDB", "postgresql": "PostgreSQL"}
@@ -67,7 +70,8 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         },
         home=Home.SERVER,
         after="Create site",
-        after_home=Home.SERVER_SITES,
+        after_home=Home.SERVER_SITE_CREATE,
+        after_permission="operations.change_site",
     ),
     "add_runtime": ChangeWords(
         title="Add {selection} to {server}",
@@ -85,7 +89,8 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         },
         home=Home.SERVER,
         after="Create site",
-        after_home=Home.SERVER_SITES,
+        after_home=Home.SERVER_SITE_CREATE,
+        after_permission="operations.change_site",
     ),
     "create_http_site": ChangeWords(
         title="Create {site}",
@@ -147,7 +152,8 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         },
         home=Home.SERVER_SETTINGS,
         after="Create site",
-        after_home=Home.SERVER_SITES,
+        after_home=Home.SERVER_SITE_CREATE,
+        after_permission="operations.change_site",
     ),
     "create_wordpress_site": ChangeWords(
         title="Create {site}",

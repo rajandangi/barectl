@@ -13,16 +13,7 @@
       </p>
     </div>
   </div>
-  {% if not state.alias_usable %}
-    <div class="usa-alert usa-alert--warning usa-alert--slim">
-      <div class="usa-alert__body">
-        <p class="usa-alert__text">
-          The saved SSH alias is no longer a usable Host entry on this computer. Restore it, or edit the connection.
-        </p>
-      </div>
-    </div>
-  {% endif %}
-  {# Announces connection check progress, which the fragment below updates by polling. #}
+  {# Announces connection check progress, which the status poll updates. #}
   <p id="discovery-announcement" class="usa-sr-only" role="status"></p>
   {% include "servers/_next_action.html" %}
   <div class="barectl-layout">
@@ -33,9 +24,13 @@
         {% if sites_forbidden %}
           <p class="barectl-note">Your account may manage this server but not view its sites.</p>
         {% else %}
+          {% if target_host and http_site_permission %}
+            <p>
+              <a class="usa-button" href="{% url 'server_site_create' server.pk %}">Create site</a>
+            </p>
+          {% endif %}
           {% include "servers/_sites.html" %}
           {% if target_host and http_site_permission %}
-            {% include "sites/_http_create.html" %}
             {% include "sites/_wordpress_create.html" %}
             {% include "sites/_laravel_create.html" %}
           {% endif %}

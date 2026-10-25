@@ -69,6 +69,7 @@ class PlainChange:
     home_url: str
     after_label: str = ""
     after_url: str = ""
+    after_permission: str = ""
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class NextAction:
     label: str
     kind: str
     url: str
+    permission: str = ""
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,8 @@ def _home_url(home: plain_words.Home, server_id: int | None, identifier: str) ->
         return reverse("servers")
     if home is plain_words.Home.SERVER_SITES:
         return reverse("server_sites", args=[server_id])
+    if home is plain_words.Home.SERVER_SITE_CREATE:
+        return reverse("server_site_create", args=[server_id])
     if home is plain_words.Home.SERVER_SETTINGS:
         return reverse("server_settings", args=[server_id])
     if home is plain_words.Home.SITE:
@@ -148,6 +152,7 @@ def plain_change(
         home_url=_home_url(words.home, server_id, identifier),
         after_label=words.after,
         after_url=_home_url(words.after_home, server_id, identifier) if words.after else "",
+        after_permission=words.after_permission,
     )
 
 
@@ -185,7 +190,9 @@ def _run_next(run: ChangeRun, outcome: RunOutcome, after: PlainChange) -> NextAc
     if outcome == RunOutcome.RECONCILING:
         return NextAction("Check what happened", "check", reverse("run_check", args=[run.pk]))
     if outcome == RunOutcome.SUCCEEDED and after.after_url:
-        return NextAction(after.after_label, "link", after.after_url)
+        return NextAction(
+            after.after_label, "link", after.after_url, permission=after.after_permission
+        )
     if outcome == RunOutcome.FAILED and preparation_id is not None:
         return NextAction(
             "Try again", "again", reverse("change_prepare_again", args=[preparation_id])

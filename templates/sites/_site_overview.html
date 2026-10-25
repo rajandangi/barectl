@@ -1,6 +1,19 @@
 {% if site %}
   <section class="barectl-card" aria-labelledby="site-overview-heading">
     <h2 id="site-overview-heading">Site</h2>
+    {% if site_address and site.complete and not has_wordpress and not has_laravel %}
+      <div class="usa-alert usa-alert--success usa-alert--slim" id="site-ready">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            Your site is ready at <a href="{{ site_address }}">{{ site_address }}</a>.
+            {% if server.address %}
+              Point your domain's DNS at <code>{{ server.address }}</code> to reach it from
+              the internet.
+            {% endif %}
+          </p>
+        </div>
+      </div>
+    {% endif %}
     {% if site_address %}
       <p>
         <a href="{{ site_address }}">{{ site_address }}</a>

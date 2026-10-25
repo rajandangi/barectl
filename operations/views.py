@@ -35,7 +35,7 @@ from .models import (
     ChangeReview,
     Consent,
 )
-from .presentation import ChangeView, RunView, change_view, run_view
+from .presentation import ChangeView, NextAction, RunView, change_view, run_view
 
 if TYPE_CHECKING:
     from sites.continuation import StepBanner
@@ -410,6 +410,12 @@ def run_detail(request: HttpRequest, operation_id: int) -> HttpResponse:
     return render(request, "operations/run.html", _run_context(request, view, tab=tab))
 
 
+def _may_take(request: HttpRequest, action: NextAction, can_prepare_again: bool) -> bool:
+    if action.kind == "again":
+        return can_prepare_again
+    return not action.permission or request.user.has_perm(action.permission)
+
+
 def _run_context(
     request: HttpRequest, view: RunView, *, tab: str = "progress"
 ) -> dict[str, object]:
@@ -418,7 +424,7 @@ def _run_context(
     preparation = run.review.preparation
     can_prepare_again = preparation is not None and _can_prepare_again(request, preparation)
     plain = view.plain
-    if plain.next is not None and plain.next.kind == "again" and not can_prepare_again:
+    if plain.next is not None and not _may_take(request, plain.next, can_prepare_again):
         plain = replace(plain, next=None)
     return {
         "run": view,

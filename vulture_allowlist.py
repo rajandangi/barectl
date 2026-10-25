@@ -136,6 +136,7 @@ if TYPE_CHECKING:
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import ConnectionDefinition, Server
+    from servers.page import Banner
     from servers.testing import ControllerConfigTestCase
     from servers.tests import InventoryTests
     from sites.apps import SitesConfig
@@ -484,6 +485,12 @@ if TYPE_CHECKING:
     )
     # templates/servers/_connection.html presents this recorded dispatch delay.
     _saved_connection_worker_delay = AttemptView.worker_unavailable
+    # templates/servers/_next_action.html presents these banner fields.
+    _banner_template_fields = (
+        Banner.show_queue,
+        Banner.queued_at,
+        Banner.worker_unavailable,
+    )
     # Registration forms and their history/audit templates read these fields dynamically.
     _connection_revision_presentation = (
         ServerForm.expected_revision,

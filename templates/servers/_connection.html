@@ -1,68 +1,85 @@
-<section class="barectl-card" aria-labelledby="connection-heading">
+<section class="barectl-card"
+         id="connection"
+         aria-labelledby="connection-heading">
   <h2 id="connection-heading"
       {% if focus %}tabindex="-1" autofocus{% endif %}>Connection</h2>
-  {% if not attempt %}
-    <p>
-      <strong>{{ Status.NOT_VERIFIED }}.</strong> Barectl has not connected to this server.
-    </p>
-  {% elif attempt.status == Status.QUEUED %}
-    <p>
-      <strong>{{ attempt.status }}</strong> at <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>.
-    </p>
-    <p class="barectl-note">
-      {% if attempt.worker_unavailable %}
-        Worker unavailable for this check: it has not started within 10 minutes.
-      {% endif %}
-      The discovery worker runs the check outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
-    </p>
-  {% elif attempt.status == Status.RUNNING %}
-    <p>
-      <strong>{{ attempt.status }}</strong> since <time datetime="{{ attempt.started_at|date:'c' }}">{{ attempt.started_at|date:'M j, Y, H:i:s T' }}</time>. Barectl is verifying the host key and reading the server's observations.
-    </p>
-  {% elif attempt.status == Status.FAILED %}
-    <div class="usa-alert usa-alert--error usa-alert--slim">
-      <div class="usa-alert__body">
-        <h3 class="usa-alert__heading">{{ attempt.status }}</h3>
-        <p class="usa-alert__text">{{ attempt.failure }}</p>
-        <p class="usa-alert__text">
-          Attempted with connection <code>{{ attempt.ssh_alias }}</code> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time>.
-        </p>
-      </div>
+  <dl class="barectl-facts">
+    <div>
+      <dt>Address</dt>
+      <dd>
+        <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code>
+      </dd>
     </div>
+    <div>
+      <dt>SSH user</dt>
+      <dd>
+        {{ server.username }}
+      </dd>
+    </div>
+    <div>
+      <dt>Port</dt>
+      <dd>
+        {{ server.port }}
+      </dd>
+    </div>
+    <div>
+      <dt>Key</dt>
+      <dd>
+        {% if server.connection_mode == "keyfile" %}
+          Approved key file <code>{{ server.credential_reference }}</code>
+        {% elif server.connection_mode == "alias" %}
+          The SSH alias's own keys on the controller host
+        {% else %}
+          Controller SSH agent
+        {% endif %}
+      </dd>
+    </div>
+  </dl>
+  {% if perms.servers.change_server %}
+    <p>
+      <a href="{% url 'server_edit' server.pk %}">Edit connection</a>
+    </p>
+  {% endif %}
+  {% if state.attempt %}
+    {% if state.attempt.status == Status.QUEUED %}
+      <p>
+        <strong>Checking the connection…</strong>
+        {% if banner.show_queue %}
+          Queued at <time datetime="{{ state.attempt.queued_at|date:'c' }}">{{ state.attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+        {% endif %}
+      </p>
+      {% if banner.show_queue %}
+        <p class="barectl-note">
+          If it stays queued, start the worker on the controller host with <code>python manage.py db_worker</code>.
+        </p>
+      {% endif %}
+      {% if state.attempt.worker_unavailable %}
+        <p class="barectl-note">Worker unavailable for this check: it has not started within 10 minutes.</p>
+      {% endif %}
+    {% elif state.attempt.status == Status.RUNNING %}
+      <p>
+        <strong>Checking the connection…</strong> Started at <time datetime="{{ state.attempt.started_at|date:'c' }}">{{ state.attempt.started_at|date:'M j, Y, H:i:s T' }}</time>.
+      </p>
+    {% elif state.attempt.status == Status.FAILED %}
+      <div class="usa-alert usa-alert--error usa-alert--slim">
+        <div class="usa-alert__body">
+          <h3 class="usa-alert__heading">Connection failed</h3>
+          <p class="usa-alert__text">{{ state.attempt.failure }}</p>
+          <p class="usa-alert__text">
+            Attempted with connection <code>{{ state.attempt.ssh_alias }}</code> at <time datetime="{{ state.attempt.finished_at|date:'c' }}">{{ state.attempt.finished_at|date:'M j, Y, H:i:s T' }}</time>.
+          </p>
+        </div>
+      </div>
+    {% else %}
+      <p>
+        <strong>Verified</strong> at <time datetime="{{ state.attempt.finished_at|date:'c' }}">{{ state.attempt.finished_at|date:'M j, Y, H:i:s T' }}</time> with connection <code>{{ state.attempt.ssh_alias }}</code>.
+      </p>
+      <p class="barectl-note">The host key and the full check record are in <a href="{% url 'server_advanced' server.pk %}">Advanced</a>.</p>
+    {% endif %}
   {% else %}
     <p>
-      <strong>{{ attempt.status }}</strong> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time> with connection <code>{{ attempt.ssh_alias }}</code>.
+      <strong>Not verified.</strong> Barectl has not connected to this server.
     </p>
-    {% if section == "advanced" %}
-      <p class="barectl-note">The server's host key <code>{{ attempt.host_key }}</code> matched known_hosts on the controller host.</p>
-    {% else %}
-      <p class="barectl-note">The host key matched the controller's known_hosts. Native evidence is available in Advanced.</p>
-    {% endif %}
-  {% endif %}
-  {% if host_challenge %}
-    <h3>Confirm the server identity</h3>
-    <p>The server presented <code>{{ host_challenge.challenge_key_type }}</code> with fingerprint <code>{{ host_challenge.challenge_fingerprint }}</code>. No credentials were offered.</p>
-    <p>Read this key's SHA256 fingerprint through your provider console, serial console output, or provider web shell using <code>ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub</code> for an ECDSA key. Use the host key file for the displayed key type. Paste the fingerprint from that independent source.</p>
-    {% if perms.servers.change_server and perms.discovery.add_discoveryattempt %}
-      <form method="post"
-            action="{% url 'server_confirm_host' server.pk %}"
-            class="usa-form">
-        {% csrf_token %}
-        <input type="hidden" name="attempt" value="{{ host_challenge.pk }}">
-        <input type="hidden"
-               name="revision"
-               value="{{ server.connection_revision }}">
-        <label class="usa-label" for="provider-fingerprint">Provider host key fingerprint</label>
-        <input class="usa-input"
-               id="provider-fingerprint"
-               name="fingerprint"
-               type="text"
-               required
-               maxlength="80"
-               autocomplete="off">
-        <button type="submit" class="usa-button">Confirm fingerprint and check</button>
-      </form>
-    {% endif %}
   {% endif %}
   {% if state.other_active %}
     <p class="barectl-note">
@@ -71,10 +88,8 @@
   {% endif %}
   {% if perms.discovery.add_discoveryattempt and state.can_request and state.alias_usable %}
     <form method="post"
-          action="{% url 'server_verify' server.pk %}?section={{ section|default:'overview' }}"
-          hx-post="{% url 'server_verify' server.pk %}?section={{ section|default:'overview' }}"
-          hx-target="#discovery"
-          hx-swap="outerHTML">
+          action="{% url 'server_verify' server.pk %}"
+          class="usa-form">
       {% csrf_token %}
       <button type="submit" class="usa-button">{{ state.action_label }}</button>
     </form>
