@@ -44,6 +44,7 @@ from sites.bodies.common import (
     validate_pool_candidate,
     wordpress_caddy_file,
 )
+from sites.bodies.logrotate import logrotate_install, logrotate_present
 from wordpress.convention import (
     CORE_ARCHIVE_SHA256,
     CORE_ARCHIVE_SIZE,
@@ -543,6 +544,7 @@ def create_wordpress(document: dict[str, object]) -> None:  # noqa: C901 - the r
             changed = True
             account = create_account(settings, identity)
             deployment_lock = create_layout(settings)
+            logrotate_install(settings.identifier, logrotate_present(settings.identifier))
             stage("pool")
             configure_pool(settings, account, int(str(document["proxy_identity"])))
         stage("gate")

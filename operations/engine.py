@@ -262,6 +262,15 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not prove the site's cache PHP client after restarting its own master. "
         "Check the run's journal, then prepare a new review."
     ),
+    "logrotate_missing": (
+        "This server does not run logrotate, so the run stopped before changing anything. "
+        "Install and enable it with ordinary administration, check the server again, then "
+        "prepare a new review."
+    ),
+    "rotation_invalid": (
+        "logrotate refused the reviewed rotation file, so Barectl did not keep it. Check the "
+        "run's journal, then prepare a new review."
+    ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
         "database catalog changed, so Barectl stopped before creating the binding. Prepare a "
@@ -692,6 +701,8 @@ RESULT_REASONS: Final = frozenset(
         "automation_tick",
         "automation_configuration",
         "automation_units",
+        "logrotate_missing",
+        "rotation_invalid",
     }
 )
 

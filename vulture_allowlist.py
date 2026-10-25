@@ -83,6 +83,7 @@ if TYPE_CHECKING:
         LaravelDeployPostgreSQL,
     )
     from disposable.test_laravel_releases import LaravelReleaseReconstruction
+    from disposable.test_logs_validators import LogRotationValidators
     from disposable.test_mirror_nix import MirrorNixSignature
     from disposable.test_native_fixtures import NativeFixtures
     from disposable.test_native_qualification import ProfileSwitchAtomicity, SitePHPMasterRestart
@@ -117,6 +118,7 @@ if TYPE_CHECKING:
     from laravel.apps import LaravelConfig
     from laravel.bodies import settings as laravel_settings_body
     from laravel.bodies.common import laravel_read
+    from logs.apps import LogsConfig
     from operations.activity import ActivityRow
     from operations.apps import OperationsConfig
     from operations.forms import (
@@ -209,10 +211,13 @@ if TYPE_CHECKING:
         RuntimesConfig,
         SitesConfig,
         LaravelConfig,
+        LogsConfig,
         WordPressConfig,
         DatabasesConfig,
         CacheConfig,
     )
+    # The log rotation validator is found by the runner's --validators selection.
+    _log_rotation_validator = LogRotationValidators.test_the_supported_file_passes_logrotate_debug
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
     _dashboard = (

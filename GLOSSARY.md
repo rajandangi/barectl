@@ -186,6 +186,18 @@ _Avoid_: SSH key, repository key
 The application path Barectl requests with a site's primary Host after a change, `/` by default. At `/` an answer below a server error passes; at another path it must be exactly 200. A custom path is native evidence in the site's Caddy file, not a Barectl marker ([readiness](docs/sites.md#readiness)).
 _Avoid_: Health endpoint, healthcheck URL
 
+**Log read**:
+One explicit, Read-consent remote operation that returns a bounded, scrubbed page of one named site log. It occupies the server's operation slot and stores its page only on its own row. Opening the Logs section is not a log read.
+_Avoid_: Log fetch, tail, download
+
+**Log page**:
+The typed evidence of one log read: at most 500 lines and 256 KiB of text, a cursor for older lines, and the names of the files it came from. It is deleted after 24 hours or at the next read of that log.
+_Avoid_: Log file, cached log
+
+**Log rotation**:
+The root-owned `/etc/logrotate.d/barectl-site-<identifier>` file that rotates the logs Barectl creates in a site's log directory daily or at 20 MiB, keeping five compressed files for 14 days. Caddy and Laravel rotate their own logs.
+_Avoid_: Log cleanup, truncation
+
 **Site observation**:
 The observation of one site in a discovery snapshot, carrying exactly one state: managed, partly applied, or not following the convention. Only accounts allowed to view site observations see them.
 _Avoid_: Site health, managed site

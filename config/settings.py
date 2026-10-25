@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "databases",
     "automation",
     "cache",
+    "logs",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

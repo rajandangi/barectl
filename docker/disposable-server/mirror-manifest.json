@@ -8221,6 +8221,34 @@
    "size": 345086
   },
   {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/c/cron/cron-daemon-common_3.0pl1-200ubuntu1_all.deb",
+   "sha256": "1630217f880e7a6c1a689365fce3b75ce34a2f09f1688ca56d5e4063f9bd5d9c",
+   "size": 15748
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/c/cron/cron-daemon-common_3.0pl1-200ubuntu1_all.deb",
+   "sha256": "1630217f880e7a6c1a689365fce3b75ce34a2f09f1688ca56d5e4063f9bd5d9c",
+   "size": 15748
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/c/cron/cron_3.0pl1-200ubuntu1_amd64.deb",
+   "sha256": "6b2b3b88313f35b30f50af59940c0b6ba82d992021585430763ffa3f71fb6b03",
+   "size": 88556
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/c/cron/cron_3.0pl1-200ubuntu1_arm64.deb",
+   "sha256": "f022fce2059f2f93f97a2b8e382916f6163f9a130dcbe7a43146ccdcf05690e0",
+   "size": 87434
+  },
+  {
    "architecture": "x86_64-linux",
    "host": "snapshot.ubuntu.com",
    "path": "ubuntu/20261017T000000Z/pool/main/c/curl/libcurl3t64-gnutls_8.18.0-1ubuntu2.8_amd64.deb",
@@ -8541,6 +8569,20 @@
    "path": "ubuntu/20261017T000000Z/pool/main/k/krb5/libkrb5support0_1.22.1-2ubuntu4.1_arm64.deb",
    "sha256": "bc2dd02729cac287b0f6d5304b71fdb80d53591a68f6566462b996f780722e3a",
    "size": 33522
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/l/logrotate/logrotate_3.22.0-1build1_amd64.deb",
+   "sha256": "869bbc9d0321945d2c0d80820e84b57dd1487dee3c1cdfc4a50b8fb16975bed0",
+   "size": 53672
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/l/logrotate/logrotate_3.22.0-1build1_arm64.deb",
+   "sha256": "38584903af82deb096e024539b119547c8e7fe2b78e9f92de2f882ebcc75c554",
+   "size": 51960
   },
   {
    "architecture": "x86_64-linux",

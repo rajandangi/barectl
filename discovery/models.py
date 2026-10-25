@@ -251,6 +251,8 @@ class SiteObservation(models.Model):
     application = models.CharField(max_length=20, default="plain")
     application_version = models.CharField(max_length=40, blank=True)
     application_problem = models.TextField(blank=True)
+    # The supported state of the site's root-owned logrotate file (Phase C #389).
+    log_rotation = models.CharField(max_length=12, blank=True)
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
