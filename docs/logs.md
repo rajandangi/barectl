@@ -14,11 +14,17 @@ The Logs section of a site lists a fixed catalogue by plain name:
 | PHP errors | the site pool's `error_log` | Barectl's per-site logrotate file |
 | Slow PHP requests | the site pool's `slowlog` | Barectl's per-site logrotate file |
 | Application log | a Laravel site's daily `laravel-YYYY-MM-DD.log` files in shared private storage | Laravel's daily channel (`LOG_DAILY_DAYS=14`) |
+| Scheduled tasks | the journal of the site's `wpcron` or `schedule` unit | journald |
+| Queue workers | the journal of every installed `queue1`…`queueN` worker unit, merged in process order | journald |
+| Object cache | the journal of the site's packaged `valkey-server@<identifier>` unit | journald |
 | WordPress debug log | the site's `wp-debug.log` when WordPress debugging is pointed into the log directory | Barectl's per-site logrotate file |
 
 A log that does not exist is still part of the catalogue and reads as **missing** rather
 than disappearing. The WordPress debug log is listed for a WordPress site; the read reports
-it as missing until the operator enables it.
+it as missing until the operator enables it. The three background-work journals follow the
+Phase C applications: a WordPress site lists Scheduled tasks and Object cache, a Laravel
+site all three, and a plain PHP site none. A source whose unit is not installed reads as
+**not configured**, which is different from an empty, missing or unreadable log.
 
 ## Reading
 
@@ -41,6 +47,15 @@ One fixed command per read runs under the shared native read lock and returns on
   line's own timestamp where it has one (Caddy's `ts`, a leading `YYYY-MM-DD HH:MM:SS`, or
   PHP's `[DD-Mon-YYYY HH:MM:SS]`), and selects Laravel's daily files by date.
 
+A background-work journal uses one `journalctl -u` query with the units its owning
+convention names: the site's `wpcron` or `schedule` role, every installed `queue<N>`
+service, and the site's own `valkey-server@<identifier>` instance. No unit name comes from a
+request. The reader asks for the newest 501 entries in reverse order, walks older pages with
+`--cursor` and `--reverse`, and walks a live view forward with `--after-cursor`, all inside
+the same 500-line / 256 KiB page and 1 MiB scan bounds. Journal cursors are stored as the
+opaque continuation, prefixed with `older:` or `live:` so a page can never be read in the
+wrong direction.
+
 The read distinguishes exactly:
 
 | State | What the operator sees |
@@ -50,13 +65,27 @@ The read distinguishes exactly:
 | `empty` | "This log exists and is empty." (or "No lines match the filter") |
 | `unreadable` | "This log exists but Barectl may not read it." or another fixed reason |
 | `rotated` | "This log rotated since the last page. Read the newest lines again." |
+| `not_configured` | "This log is not configured for this site." |
 
 Access entries render as time, method, path, status and duration, with the raw line in a
-one-click disclosure. Every other source renders each raw line.
+one-click disclosure. Every other source renders each raw line. Barectl never classifies a
+scheduled task, worker run or cache event from these lines; they are operator reading only.
 
 A request stores its typed page (`state`, lines, cursor, file names, rotation evidence) only
 on its own row. The page is deleted after **24 hours**, and the previous page of the same log
 is deleted when that log is read again.
+
+## Live view
+
+A journal page offers **Follow new lines**. The live panel asks for the next page with
+`--after-cursor` while it is open; each poll is an explicit POST, so a page GET still queues
+nothing. The panel stops requesting while the page is hidden (`document.visibilityState`)
+and resumes when it is visible again; closing or navigating away removes the element and its
+interval. New lines are appended without replacing the controls, so keyboard focus stays
+where the operator left it, and each batch is announced once through the page's persistent
+`role="status"` region. A read that is already running leaves the panel saying **Reading**
+and the next poll continues; when another operation holds the server's single slot the
+panel says to wait rather than failing.
 
 ## Secret scrubbing
 
@@ -69,9 +98,11 @@ read. A key participates when its name contains `PASSWORD`, `SECRET`, `TOKEN`, `
 
 The controller then passes every stored page line through the same
 `operations.confidential.scrub` chokepoint. A read carries no submitted secret, so that pass
-has no values today; it keeps a future source from opening a second path to storage. The
-fast tests carry canary values through the real server-side read into the stored page and
-the rendered HTML.
+has no values today; it keeps a future source from opening a second path to storage. For a
+Laravel `base64:` value both the whole value and its encoded payload are replaced, so a job
+that prints only the key material is scrubbed too. The fast tests carry canary values through
+the real server-side read into the stored page and the rendered HTML; the journal validator
+proves a real fixture job's output is scrubbed before a page exists.
 
 ## Permission
 
@@ -138,7 +169,16 @@ re-record on the integration tree; do not hand-edit transcript JSON.
   rendering and canary scrubbing against a temporary tree.
 - `logs/test_logs.py` proves the read operation, stored pages, 24-hour and next-read
   deletion, the permission explanation, the rotation review and body, and the presets.
-- `logs/test_browser.py` reaches a PHP error line from a site page in two activations.
+- `logs/test_browser.py` reaches a PHP error line from a site page in two activations, and
+  proves a journal live panel is plain, keyboard reachable and fits a 320 px screen.
+- `logs/test_journal.py` proves unit resolution through the automation and cache
+  conventions, all queue roles, the newest/older/live cursors, the page bounds, the
+  not-configured state, the live fragment's visibility trigger and status region, and a
+  journal canary never reaching the stored page or the response.
+- `disposable/test_logs_journal.py` runs the product's reader as root against a real systemd
+  journal: a fixture unit prints the site's private `APP_KEY`, the page contains `<secret>`
+  and never the canary, a live cursor sees only the next run, and a missing cache unit reads
+  as not configured.
 - `disposable/test_logs_validators.py` proves the rendered file passes `logrotate --debug`,
   that a broken directive is rejected, and that the exact file, with its paths moved to a
   scratch tree, rotates for real: root renames `php-error.log`, `delaycompress` compresses
@@ -156,10 +196,7 @@ re-record on the integration tree; do not hand-edit transcript JSON.
   unrun in `notes/handoff-389.md`. The mirror now carries the `logrotate` package so the
   validator can install it.
 
-## Later: journal sources
+## Later: retention
 
-#397 adds the journal of each automation unit and Valkey instance. Add its sources to
-`logs.sources.CATALOGUE` and `logs.bodies.read.SOURCES`, give the server-side reader a
-`journalctl -u <unit> --cursor/--after-cursor` path that returns the same page shape and
-cursor, and keep the controller's `LogSource` slug stable. The operation, storage, cleanup,
-permission and viewer seams do not change.
+Log retention settings are Phase E. The pages here are controller-local and temporary; the
+journals themselves remain journald's own records.

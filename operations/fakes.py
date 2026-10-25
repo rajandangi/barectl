@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import override
 from unittest import mock
 
+from automation import observation as automation_observation
 from discovery.fakes import DiscoveryTestCase, FakeServer
 from discovery.ssh import CommandResult, ConnectionFailed
 from servers.models import Server
@@ -27,6 +28,8 @@ BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
 UPTIME_CENTISECONDS = 500025
 PREPARE_PERMISSIONS = ("view_server", "view_changes", "change_site")
 APPLY_PERMISSIONS = ("view_changes", "change_shared")
+# A server with no automation units: the automation read's observed empty answer.
+EMPTY_AUTOMATION = '{"version":2,"sites":[]}'
 _UNIT = re.compile(r"barectl-apply-[0-9a-f]{32}\.service")
 _SUBMITTED_UNIT = re.compile(r"--unit=(barectl-apply-[0-9a-f]{32}\.service)")
 # The reviewed target's unit and invocation are plain validated arguments to its script.
@@ -395,6 +398,11 @@ class ChangeTestCase(DiscoveryTestCase):
         self.systemd.answer(self.remote)
         self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         self.enterContext(mock.patch.object(engine, "POLL_INTERVAL", 0))
+        # The simulated server publishes no automation units, so a reviewed fence pauses
+        # nothing; a test that needs a plan answers the same read itself (automation/fence.py).
+        self.remote.answer_root(
+            automation_observation.read_command(), CommandResult(0, EMPTY_AUTOMATION)
+        )
 
     @override
     def assert_read_only(self) -> None:

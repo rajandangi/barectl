@@ -195,8 +195,12 @@ One explicit, Read-consent remote operation that returns a bounded, scrubbed pag
 _Avoid_: Log fetch, tail, download
 
 **Log page**:
-The typed evidence of one log read: at most 500 lines and 256 KiB of text, a cursor for older lines, and the names of the files it came from. It is deleted after 24 hours or at the next read of that log.
+The typed evidence of one log read: at most 500 lines and 256 KiB of text, a cursor for older lines, a cursor for the next live line when the source is a journal, and the names of the files or units it came from. It is deleted after 24 hours or at the next read of that log.
 _Avoid_: Log file, cached log
+
+**Live view**:
+A journal log's open panel that asks for lines after its newest cursor while the page is visible, and stops asking while the page is hidden or closed. It appends lines without moving focus and announces each batch through the Logs status region. It is operator reading, not monitoring.
+_Avoid_: Log streaming, tail -f, real-time monitoring
 
 **Log rotation**:
 The root-owned `/etc/logrotate.d/barectl-site-<identifier>` file that rotates the logs Barectl creates in a site's log directory daily or at 20 MiB, keeping five compressed files for 14 days. Caddy and Laravel rotate their own logs.
@@ -389,9 +393,21 @@ _Avoid_: Cron job, `schedule:work`, queue worker
 A calendar elapse that did not start a run because the previous run of the same scheduled task was still active, inferred from the run's native start and end timestamps. It is shown as skipped, never as success.
 _Avoid_: Dropped run, missed cron
 
+**Laravel queue worker**:
+One of the site's `queue1` to `queueN` services that runs the database queue as the site account from the current release, restarts after a crash within a start limit, and stops gracefully on a reviewed Stop. Its definition is the queue names, process count and job timeout.
+_Avoid_: Supervisor program, queue daemon
+
+**Retry interval**:
+The site's `DB_QUEUE_RETRY_AFTER`, written before its queue workers start and kept above their job timeout, so a job interrupted by a crash or forced stop is retried. Jobs must be safe to repeat.
+_Avoid_: Visibility timeout, lock timeout
+
 **Fence**:
-The step that stops a site's automation slice, keeps it from starting, and proves the slice has no processes before a change to that site's code, schema, runtime or settings proceeds; its restore starts exactly the work the review declared ([automation](docs/automation.md#fencing-later-changes)).
-_Avoid_: Pause, maintenance mode
+The step that runtime-masks a site's automation units, stops its slice, and proves the slice has no processes before a change to that site's code, schema, runtime, settings or files proceeds. Its restore starts exactly the work the review declared, and only after the change verifies ([automation](docs/automation.md#fencing-site-changes)).
+_Avoid_: Pause, maintenance mode, lockdown
+
+**Paused by an unfinished change**:
+The site's own evidence that a change fenced its background work and did not finish: its automation units carry a runtime mask, or a maintenance page is up with boot activation off. It is read from the server, never from a Barectl marker or a remembered resume set, and the Overview offers one safe next action ([automation](docs/automation.md#status)).
+_Avoid_: Fenced flag, disabled flag, stale change
 
 ### Later phases
 

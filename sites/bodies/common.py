@@ -61,6 +61,7 @@ SITE_GATED: Final[str] = (
 
 
 if TYPE_CHECKING:
+    from automation.bodies.units import fence, restore
     from sites.configuration import SiteSettings
 
 
@@ -733,7 +734,9 @@ def set_site_node(document: dict[str, object]) -> None:
         os.close(descriptor)
 
 
-def node_locked_change(document: dict[str, object], descriptor: int) -> None:
+def node_locked_change(  # noqa: C901 - reviewed stages
+    document: dict[str, object], descriptor: int
+) -> None:
     changed = False
     identifier, selection = str(document["identifier"]), str(document["selection"])
     try:
@@ -752,6 +755,9 @@ def node_locked_change(document: dict[str, object], descriptor: int) -> None:
         if not safe(str(directory), directory=True) or not same_site_lock(descriptor, identifier):
             result("refused", "evidence")
             return
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
+            return
         stage("links")
         with tempfile.TemporaryDirectory(prefix=".node-", dir=directory) as temporary:
             for name in ("node", "npm", "npx"):
@@ -764,6 +770,9 @@ def node_locked_change(document: dict[str, object], descriptor: int) -> None:
         selected, problem, _ = node_command_links(identifier)
         if selected != selection or problem or not same_site_lock(descriptor, identifier):
             raise ValueError("The selected native command links could not be verified.")
+        if not restore(document, identifier):
+            result("partial", "automation_restore")
+            return
         result("succeeded")
     except OSError, ValueError, KeyError, StopIteration, subprocess.TimeoutExpired:
         result("partial", "runtime_config") if changed else result("refused", "evidence")
@@ -2694,6 +2703,9 @@ def pool_locked_change(document: dict[str, object], descriptor: int) -> None:  #
         if native_state("observed", "", protections=False)["digest"] != before["digest"]:
             result("refused", "evidence")
             return
+        if not fence(document, identifier):
+            result("refused", "automation_fence")
+            return
         stage("pool")
         replace_site_file(path, candidate, preimage)
         changed = True
@@ -2711,6 +2723,9 @@ def pool_locked_change(document: dict[str, object], descriptor: int) -> None:  #
             or SitePool.from_document(current["pool"]) != pool
         ):
             raise ValueError("The reloaded pool did not verify.")
+        if not restore(document, identifier):
+            result("partial", "automation_restore")
+            return
         result("succeeded")
     except ValueError, OSError, KeyError, subprocess.TimeoutExpired:
         if (

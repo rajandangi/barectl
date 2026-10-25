@@ -32,6 +32,7 @@ class InputShape(StrEnum):
     WORDPRESS_SETTINGS = "wordpress_settings"
     CERTIFICATE_EMAIL = "certificate_email"
     AUTOMATION_SCHEDULE = "automation_schedule"
+    LARAVEL_QUEUE_WORKERS = "laravel_queue_workers"
     SITE_LOG_ROTATION = "site_log_rotation"
 
 
@@ -87,6 +88,12 @@ class PreparationInputs:
     certificate_email: str | None = None
     # A site's scheduled-task change: "on", "off" or "run" (Phase C #357).
     schedule_state: str = ""
+    # A Laravel site's queue-worker action ("start", "stop", "restart") and, for a start,
+    # the reviewed definition (Phase C #266).
+    worker_action: str = ""
+    worker_queues: tuple[str, ...] = ()
+    worker_processes: int = 0
+    worker_timeout: int = 0
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -121,7 +128,20 @@ class PreparationInputs:
             laravel["fingerprint"] = self.fingerprint
         return laravel
 
-    def document(self) -> dict[str, object]:
+    def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
+        if self.worker_action:
+            value: dict[str, object] = {
+                "version": 1,
+                "identifier": self.identifier,
+                "action": self.worker_action,
+            }
+            if self.worker_action == "start":
+                value.update(
+                    queues=list(self.worker_queues),
+                    processes=self.worker_processes,
+                    timeout=self.worker_timeout,
+                )
+            return value
         if self.schedule_state:
             return {
                 "version": 1,
@@ -703,6 +723,50 @@ def _schedule_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> Pre
     return PreparationInputs("", identifier, schedule_state=str(state))
 
 
+def _worker_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    from automation import workers
+    from sites.names import valid_identifier
+
+    if "version" not in value or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    if set(value) not in (
+        {"version", "identifier", "action"},
+        {"version", "identifier", "action", "queues", "processes", "timeout"},
+    ):
+        raise ValueError(INVALID_INPUTS)
+    identifier, action = value["identifier"], value["action"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or action not in ("start", "stop", "restart")
+    ):
+        raise ValueError(INVALID_INPUTS)
+    if action != "start":
+        if set(value) != {"version", "identifier", "action"}:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs("", identifier, worker_action=str(action))
+    queues, processes, timeout = value["queues"], value["processes"], value["timeout"]
+    if (
+        not isinstance(queues, list)
+        or not all(isinstance(name, str) for name in queues)
+        or type(processes) is not int
+        or type(timeout) is not int
+    ):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        definition = workers.parse_definition(",".join(queues), processes, timeout)
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    return PreparationInputs(
+        "",
+        identifier,
+        worker_action="start",
+        worker_queues=definition.queues,
+        worker_processes=definition.processes,
+        worker_timeout=definition.timeout,
+    )
+
+
 def _site_log_rotation_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -750,5 +814,6 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.WORDPRESS_SETTINGS: _settings_inputs,
     InputShape.CERTIFICATE_EMAIL: _certificate_email_inputs,
     InputShape.AUTOMATION_SCHEDULE: _schedule_inputs,
+    InputShape.LARAVEL_QUEUE_WORKERS: _worker_inputs,
     InputShape.SITE_LOG_ROTATION: _site_log_rotation_inputs,
 }

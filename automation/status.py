@@ -37,17 +37,21 @@ STATUS_SENTENCE: Final[dict[ScheduleStatus, str]] = {
     ScheduleStatus.FAILED: "On, the last run failed",
     ScheduleStatus.TIMED_OUT: "On, the last run timed out",
     ScheduleStatus.SKIPPED: "On, a run took too long so the next one was skipped",
-    ScheduleStatus.PAUSED: "Paused while a change finishes",
-    ScheduleStatus.OFF_MAINTENANCE: "Off while the site is in maintenance",
+    ScheduleStatus.PAUSED: "Paused by an unfinished change",
+    ScheduleStatus.OFF_MAINTENANCE: "Background work is off while the site is in maintenance",
     ScheduleStatus.NO_CRON: "No cron is running",
     ScheduleStatus.UNCONFIRMED: "Could not confirm",
 }
 
+# Paused and Off during maintenance are not failures, but they always need one safe next
+# action, so the Overview's attention banner carries them (docs/automation.md#status).
 ATTENTION_STATUSES: Final = frozenset(
     {
         ScheduleStatus.FAILED,
         ScheduleStatus.TIMED_OUT,
         ScheduleStatus.SKIPPED,
+        ScheduleStatus.PAUSED,
+        ScheduleStatus.OFF_MAINTENANCE,
         ScheduleStatus.NO_CRON,
         ScheduleStatus.UNCONFIRMED,
     }
@@ -70,7 +74,6 @@ class ScheduleEvidence:
     timer_present: bool = False
     timer_active: bool = False
     timer_enabled: bool = False
-    service_present: bool = False
     service_active: bool = False
     masked: bool = False
     result: str = ""
@@ -138,8 +141,17 @@ def project(evidence: ScheduleEvidence) -> ScheduleStatus:  # noqa: C901 - the o
 def attention_problem(evidence: ScheduleEvidence, status: ScheduleStatus) -> str:
     """The one sentence an attention row shows, or an empty string when nothing is wrong.
 
-    A deliberate Off, Paused or maintenance stop is not an alarm (docs/automation.md).
+    A deliberate Off is not an alarm. A paused or maintenance stop is: it is native evidence
+    that background work is not running, and the operator needs one safe next action
+    (docs/automation.md#status).
     """
+    if status == ScheduleStatus.PAUSED:
+        return (
+            f"Background work for {evidence.identifier} is paused by an unfinished change, "
+            "so its scheduled tasks are not running."
+        )
+    if status == ScheduleStatus.OFF_MAINTENANCE:
+        return f"Background work for {evidence.identifier} is off while the site is in maintenance."
     if status in (ScheduleStatus.FAILED, ScheduleStatus.TIMED_OUT):
         return f"Scheduled tasks for {evidence.identifier} {STATUS_SENTENCE[status].lower()}."
     if status == ScheduleStatus.SKIPPED:

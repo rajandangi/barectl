@@ -25,6 +25,8 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from automation.presentation import FenceSummary
+
     from .services import ChangeRow
 
 Status = RemoteOperation.Status
@@ -303,6 +305,8 @@ class ReviewView:
     secret_generate: bool = False
     # One input per changed settings key, instead of the single secret above (Phase B #383).
     secret_fields: list[dict[str, object]] = field(default_factory=list)
+    # What this change pauses and starts again, or None for a change that never fences.
+    fence: FenceSummary | None = None
 
     @property
     def eligible(self) -> bool:
@@ -363,6 +367,8 @@ def review_view(review: ChangeReview) -> ReviewView:
         run_id: int | None = review.run.pk
     except ObjectDoesNotExist:
         run_id = None
+    from automation.presentation import fence_summary
+
     return ReviewView(
         review=review,
         consent_label=Consent(review.consent).label,
@@ -400,6 +406,7 @@ def review_view(review: ChangeReview) -> ReviewView:
             if isinstance(document.get("secret_label", "Confidential value"), str)
             else "Confidential value"
         ),
+        fence=fence_summary(document),
         secret_generate=document.get("secret_generate") is True,
         secret_fields=[
             {

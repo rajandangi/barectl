@@ -2,7 +2,9 @@
      {% if logs_selected.active %}hx-get="{% url 'site_log_page' server.pk identifier %}?log={{ logs_selected.source.slug }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h3 id="log-viewer-heading">{{ logs_selected.source.label }}</h3>
   <p class="barectl-note">{{ logs_selected.source.summary }}</p>
-  {% if logs_selected.active %}
+  {% if logs_live %}
+    {% include "logs/_live_panel.html" %}
+  {% elif logs_selected.active %}
     <p role="status">Reading this log…</p>
   {% else %}
     {% with page=logs_selected.page %}
@@ -105,6 +107,10 @@
                    value="{{ logs_filter.until.value|default_if_none:'' }}">
             <button class="usa-button usa-button--outline" type="submit">Load older lines</button>
           </form>
+        {% endif %}
+        {% if logs_can_follow %}
+          <a class="usa-button usa-button--outline"
+             href="?log={{ logs_selected.source.slug }}&live=1">Follow new lines</a>
         {% endif %}
       </div>
     {% endwith %}

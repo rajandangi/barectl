@@ -5,6 +5,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
+from automation.testing import AutomationReplay
 from discovery.recorded import ReplayShell, load
 from operations.consent import consent_of
 from operations.fakes import ChangeTestCase
@@ -57,7 +58,9 @@ class RecordedNodeEngineTests(ChangeTestCase):
             self.fail("No preparation was queued.")
         with mock.patch(
             "discovery.ssh.connect_operation",
-            return_value=contextlib.nullcontext(ReplayShell(load("site-node-26.04"))),
+            return_value=contextlib.nullcontext(
+                AutomationReplay(ReplayShell(load("site-node-26.04")))
+            ),
         ):
             self.run_worker()
         preparation.refresh_from_db()

@@ -21,7 +21,9 @@ def apply_change(
     reason: str = "",
 ) -> ChangeReview:
     with test.shell() as shell:
-        draft = kind.review(kind.inspect(shell, inputs), inputs)
+        # The worker also records the reviewed fence (automation/fence.py) before it stores
+        # the review, so a scenario that applies a fenced change uses the same review.
+        draft = engine._planned(shell, kind.review(kind.inspect(shell, inputs), inputs))
         test.assertTrue(draft.eligible, draft.refusals)
         stored = ChangeReview(
             document=draft.document,

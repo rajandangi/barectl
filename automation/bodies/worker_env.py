@@ -1,24 +1,19 @@
-"""Gracefully restart a Laravel site's enabled queue workers after a `.env` change.
+"""Gracefully restart a Laravel site's enabled queue workers after an environment change.
 
-Phase C #393 needs this before #266's worker change kind lands: an Edit settings body (or the
-object cache change) must make running workers load the new configuration. Only an enabled
-worker is restarted, so a deliberate Stop survives an unrelated environment change.
-``systemctl restart`` sends SIGTERM, so each process finishes its current job within its own
-stop budget (docs/automation.md#queue-workers).
-
-This helper is the one #266 installs as well; when that branch merges, keep its definition
-and delete this note rather than forking a second restart path.
+Called from the Edit-settings body between its configuration rebuild and its verify stage.
+Only an enabled worker is restarted: a deliberate Stop must survive an unrelated
+environment change. ``systemctl restart`` sends SIGTERM, so each process finishes its
+current job within its own stop budget.
 """
 
 import subprocess
 from typing import Final
 
 from automation.convention import service_name
+from automation.workers import WORKER_ROLES
 
-WORKER_ROLES: Final = ("queue1", "queue2", "queue3", "queue4")
 ENABLED_STATES: Final = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
 RESTART_TIMEOUT: Final = 180
-SHOW_TIMEOUT: Final = 20
 
 
 def _unit_file_state(name: str) -> str:
@@ -27,7 +22,7 @@ def _unit_file_state(name: str) -> str:
             ["/usr/bin/systemctl", "show", "--value", "-p", "UnitFileState", name],
             capture_output=True,
             text=True,
-            timeout=SHOW_TIMEOUT,
+            timeout=20,
             check=False,
         )
     except OSError, subprocess.TimeoutExpired:
@@ -58,4 +53,4 @@ def restart_workers(identifier: str) -> tuple[bool, bool]:
     return restarted, True
 
 
-__all__ = ["ENABLED_STATES", "WORKER_ROLES", "restart_workers"]
+__all__ = ["ENABLED_STATES", "restart_workers"]

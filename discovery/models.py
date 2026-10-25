@@ -103,6 +103,12 @@ class DiscoverySnapshot(models.Model):
     )
     automation_source = models.TextField(blank=True, default="")
     automation_warning = models.TextField(blank=True, default="")
+    # Each Laravel site's queue-worker definition and state (Phase C #266).
+    workers_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    workers_source = models.TextField(blank=True, default="")
+    workers_warning = models.TextField(blank=True, default="")
     host_standing = models.CharField(max_length=32, blank=True)
     host_standing_reasons = models.TextField(blank=True)
     host_standing_warnings = models.TextField(blank=True)

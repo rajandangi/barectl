@@ -8,6 +8,7 @@ controller's review, the native body and native discovery. It runs nothing.
 
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
@@ -15,7 +16,15 @@ SITE_IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}\Z")
 ROLE: Final = re.compile(r"[a-z][a-z0-9]{2,20}\Z")
 ROLE_WPCRON: Final = "wpcron"
 ROLE_SCHEDULE: Final = "schedule"
-ROLES: Final = (ROLE_WPCRON, ROLE_SCHEDULE)
+# One Laravel queue process per role. They share the scheduled roles' slice and identity;
+# their service text is owned by automation.workers (Phase C #266).
+WORKER_ROLES: Final = tuple(f"queue{process}" for process in range(1, 5))
+ROLES: Final = (ROLE_WPCRON, ROLE_SCHEDULE, *WORKER_ROLES)
+# A site starts one worker process per reviewed process count (#266). The role carries its
+# position so every installed ``queue<N>`` unit is found from the convention, never from a
+# second naming scheme (docs/automation.md).
+QUEUE_PROCESSES: Final = (1, 2, 3, 4)
+QUEUE_ROLE: Final = re.compile(r"queue([1-9][0-9]{0,2})\Z")
 SYSTEMD_DIRECTORY: Final = "/etc/systemd/system"
 SLICE_TEMPLATE: Final = "barectl-site-{identifier}.slice"
 UNIT_TEMPLATE: Final = "barectl-site-{identifier}-{role}"
@@ -125,6 +134,34 @@ def role_of(name: str, identifier: str) -> str | None:
     if kind not in ("service", "timer") or ROLE.fullmatch(remainder) is None:
         return None
     return remainder
+
+
+def queue_role(index: int) -> str:
+    """The role of one reviewed worker process."""
+    if index not in QUEUE_PROCESSES:
+        raise ValueError("Not a reviewed queue process.")
+    return f"queue{index}"
+
+
+def queue_index(role: str) -> int | None:
+    """The process number a role carries, or ``None`` for another role."""
+    match = QUEUE_ROLE.fullmatch(role)
+    if match is None:
+        return None
+    index = int(match.group(1))
+    return index if index in QUEUE_PROCESSES else None
+
+
+def queue_roles(names: Iterable[str], identifier: str) -> tuple[str, ...]:
+    """Every ``queue<N>`` service role among a site's unit names, in process order."""
+    found: set[str] = set()
+    for name in names:
+        base = name.rsplit("/", 1)[-1]
+        role = role_of(base, identifier)
+        if role is None or not base.endswith(".service") or queue_index(role) is None:
+            continue
+        found.add(role)
+    return tuple(sorted(found, key=lambda role: queue_index(role) or 0))
 
 
 def render_slice(identifier: str) -> str:

@@ -6,6 +6,7 @@ from typing import Final
 from django.urls import reverse
 
 from automation.presentation import findings as automation_findings
+from automation.worker_presentation import findings as worker_findings
 from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome, SiteState
 from discovery.snapshot import CollectedSnapshot
@@ -69,6 +70,7 @@ def needs_attention(
         *host,
         *_sites(server, collected),
         *_automation(server, collected),
+        *_workers(server, collected),
         *_runtimes(server, collected),
     )
 
@@ -100,6 +102,20 @@ def _automation(server: int, collected: CollectedSnapshot) -> tuple[Attention, .
             reverse("site_detail", args=(server, identifier)),
         )
         for identifier, finding, action in automation_findings(collected)
+    )
+
+
+def _workers(server: int, collected: CollectedSnapshot) -> tuple[Attention, ...]:
+    return tuple(
+        Attention(
+            "Queue workers",
+            identifier,
+            finding,
+            action,
+            reverse("site_settings", args=(server, identifier)) + "#queue-workers",
+            reverse("site_detail", args=(server, identifier)),
+        )
+        for identifier, finding, action in worker_findings(collected)
     )
 
 

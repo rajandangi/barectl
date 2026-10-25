@@ -30,10 +30,8 @@ from automation.testing import (
     site_record,
 )
 from bootstrap.standing import Standing
-from discovery.fakes import COLLECTED
 from discovery.models import ObservationOutcome, SiteState
 from discovery.snapshot import (
-    Observation,
     ObservedSite,
     SiteAccount,
     current_snapshot,
@@ -573,32 +571,26 @@ class ProjectionTests(SimpleTestCase):
 
 
 class FencePlanTests(SimpleTestCase):
-    def test_a_running_scheduler_joins_the_resume_set(self) -> None:
-        from automation.fence import review_fence_plan
+    def test_a_running_scheduler_joins_the_reviewed_resume_set(self) -> None:
+        from automation.fence import plan_from
 
-        row = schedule(
-            role=convention.ROLE_SCHEDULE,
-            status=ScheduleStatus.SUCCEEDED,
-            installed=True,
-            timer_active=True,
-            timer_enabled=True,
-            result="success",
-            last_start_us=1_761_393_600_000_000,
-            last_exit_us=1_761_393_605_000_000,
+        value = automation(
+            units=installed_schedule(),
+            schedule_timer=show(load="loaded", active="active"),
+            schedule_service=show(),
         )
-        collected = replace(
-            COLLECTED,
-            automation=Observation(
-                ObservationOutcome.OBSERVED, ("/etc/systemd/system",), "", (row,)
-            ),
-        )
-        plan = review_fence_plan(collected, "shop")
-        if plan is None:
+        document = plan_from(value, ("shop",))
+        if document is None:
             self.fail("The fence plan was built.")
+        sites = document["sites"]
+        if not isinstance(sites, list) or not sites:
+            self.fail("The scheduler's plan was not recorded.")
         self.assertEqual(
-            plan.fence.timers, (convention.timer_name("shop", convention.ROLE_SCHEDULE),)
+            sites[0]["timers"], [convention.timer_name("shop", convention.ROLE_SCHEDULE)]
         )
-        self.assertEqual(plan.resume, (convention.timer_name("shop", convention.ROLE_SCHEDULE),))
+        self.assertEqual(
+            sites[0]["resume"], [convention.timer_name("shop", convention.ROLE_SCHEDULE)]
+        )
 
 
 class ReconstructionTests(TestCase):

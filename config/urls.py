@@ -3,6 +3,7 @@ from django.urls import path
 from django.views.generic import RedirectView
 
 from automation.views import prepare_schedule
+from automation.worker_views import prepare_workers
 from bootstrap.certificate_email_views import prepare_certificate_email
 from cache.views import object_cache_prepare, prepare_site_cache, read_site_cache
 from dashboard.forms import SignInForm
@@ -10,7 +11,7 @@ from dashboard.settings_views import settings_page
 from databases.site_views import prepare_site_database
 from databases.views import database_prepare
 from laravel.settings_views import prepare_environment
-from logs.views import log_page, prepare_rotation, read_log
+from logs.views import live_log, log_page, prepare_rotation, read_log
 from operations.views import (
     change_apply,
     change_detail,
@@ -198,6 +199,11 @@ urlpatterns = [
         name="site_log_page",
     ),
     path(
+        "servers/<int:pk>/sites/<str:identifier>/logs/live/",
+        live_log,
+        name="site_log_live",
+    ),
+    path(
         "servers/<int:pk>/sites/<str:identifier>/logs/rotation/prepare/",
         prepare_rotation,
         name="site_log_rotation_prepare",
@@ -259,6 +265,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/settings/scheduled-tasks/prepare/",
         prepare_schedule,
         name="site_scheduled_tasks_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/settings/queue-workers/prepare/",
+        prepare_workers,
+        name="site_queue_workers_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/environment/",

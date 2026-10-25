@@ -10,6 +10,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final, cast
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
@@ -39,9 +40,11 @@ SOURCE: Final = (
     .replace("import sites.bodies.admission as admission\n", "")
     .replace("admission.", "")
 )
+# The body also carries the automation fence helpers; the readiness read does not need them.
+FENCED_SOURCE: Final = AUTOMATION_SOURCE + "\n" + SOURCE
 READ_SOURCE: Final = SOURCE + "\nprint(canonical(php_state(sys.argv[1])))\n"
 BODY_SOURCE: Final = (
-    SOURCE + "\nswitch_php(json.loads(gzip.decompress(base64.b64decode(sys.argv[1]))))\n"
+    FENCED_SOURCE + "\nswitch_php(json.loads(gzip.decompress(base64.b64decode(sys.argv[1]))))\n"
 )
 BODY_BYTES: Final = (
     "#!/bin/sh\nexec python3 -c "

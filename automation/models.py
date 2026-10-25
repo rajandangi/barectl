@@ -49,3 +49,43 @@ class AutomationObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"{self.role} of {self.identifier} in {self.snapshot}"
+
+
+class WorkerObservation(models.Model):
+    """One site's queue workers, as native evidence and the pure projection recorded them."""
+
+    snapshot = models.ForeignKey(
+        "discovery.DiscoverySnapshot", on_delete=models.CASCADE, related_name="workers"
+    )
+    identifier = models.CharField(max_length=24)
+    status = models.CharField(max_length=24)
+    queues = models.TextField(blank=True)
+    processes = models.PositiveSmallIntegerField(default=0)
+    timeout = models.PositiveIntegerField(default=0)
+    active_processes = models.PositiveSmallIntegerField(default=0)
+    installed = models.BooleanField(default=False)
+    enabled = models.BooleanField(default=False)
+    masked = models.BooleanField(default=False)
+    start_limited = models.BooleanField(default=False)
+    slice_populated = models.BooleanField(default=False)
+    result = models.CharField(max_length=24, blank=True)
+    exec_status = models.PositiveIntegerField(default=0)
+    last_start_us = models.BigIntegerField(default=0)
+    last_exit_us = models.BigIntegerField(default=0)
+    nrestarts = models.PositiveIntegerField(default=0)
+    duplicate = models.TextField(blank=True)
+    problem = models.TextField(blank=True)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["snapshot", "identifier"],
+                name="unique_worker_per_snapshot",
+            )
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"queue workers of {self.identifier} in {self.snapshot}"

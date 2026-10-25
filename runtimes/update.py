@@ -17,6 +17,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Final
 
+from automation import fence as automation_fence
 from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome, SiteState
 from discovery.root_read import run_root
@@ -43,7 +44,7 @@ _END: Final = "# END-COMPOSED-SITE-PROGRAM"
 UPDATE_SOURCE: Final = (
     _UPDATE_RAW[: _UPDATE_RAW.index(_START)] + _UPDATE_RAW[_UPDATE_RAW.index(_END) + len(_END) :]
 )
-BODY_SOURCE: Final = php_change.SOURCE + "\n" + UPDATE_SOURCE
+BODY_SOURCE: Final = php_change.FENCED_SOURCE + "\n" + UPDATE_SOURCE
 _PACKED: Final = base64.b64encode(gzip.compress(BODY_SOURCE.encode(), mtime=0)).decode()
 _CODE: Final = (
     "import base64,gzip,json,sys\n"
@@ -78,6 +79,7 @@ class UpdateEvidence:
     site_files: dict[str, str]
     sites_outcome: ObservationOutcome
     incomplete_sites: tuple[str, ...]
+    automation: dict[str, object] | None
 
 
 def profile_command() -> str:
@@ -134,6 +136,7 @@ def read_profiles(shell: RemoteShell) -> Profiles | None:
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> UpdateEvidence:
+    from automation import observation as automation_observation
     from discovery.observations import collect
 
     snapshot = collect(shell)
@@ -175,6 +178,7 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> UpdateEvidence:
                 if site.identifier and site.state == SiteState.PARTLY_APPLIED
             )
         ),
+        automation_observation.read(shell),
     )
 
 
@@ -240,6 +244,16 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         raise ValueError("A catalog update needs validated native evidence.")
     refusals = _refusals(evidence)
     detected = evidence.detected
+    moved = tuple(sorted({site for update in detected for site in update.sites}))
+    # The moved sites' background work pauses for the move and starts again afterwards
+    # (docs/adr/0036); an unreadable answer refuses rather than fencing blind.
+    plan = (
+        automation_fence.plan_from(evidence.automation, moved)
+        if moved and evidence.automation is not None
+        else None
+    )
+    if moved and plan is None:
+        refusals.append(automation_fence.UNREADABLE_REFUSAL)
     document: dict[str, object] = {
         "version": 1,
         "body_sha256": BODY_SHA256,
@@ -252,6 +266,8 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         },
         "details": _details(detected),
     }
+    if plan is not None:
+        document["automation_fence"] = plan
     boot_id = evidence.profiles.boot if evidence.profiles else ""
     uptime = evidence.profiles.uptime if evidence.profiles else None
     if not detected:
@@ -289,6 +305,10 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         postconditions=(
             "Every updated profile selects this release's exact catalog build.",
             "Every affected site serves from its original runtime on the new build.",
+            (
+                "Every moved site's background work pauses for the move and starts again "
+                "on the new build; a failure leaves it paused."
+            ),
             "Caddy and every site proxy serve their reviewed configuration.",
             "The previous generation stays; older generations are collected afterwards.",
         ),
@@ -462,6 +482,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     _architecture, entries, states = decode_document(document)
     payload = {
         "version": 1,
+        "automation_fence": automation_fence.checked(document),
         "entries": [
             {
                 "entry": row.entry,

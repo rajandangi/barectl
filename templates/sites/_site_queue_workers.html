@@ -1,0 +1,128 @@
+{% if queue_workers %}
+  <section class="barectl-card" aria-labelledby="queue-workers">
+    <h2 id="queue-workers">Queue workers</h2>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Status</dt>
+        <dd>
+          {{ queue_workers.state }}
+        </dd>
+      </div>
+      {% if queue_workers.queues %}
+        <div>
+          <dt>Queues</dt>
+          <dd>
+            {{ queue_workers.queues }}
+          </dd>
+        </div>
+        <div>
+          <dt>Processes</dt>
+          <dd>
+            {{ queue_workers.processes }}
+          </dd>
+        </div>
+        <div>
+          <dt>Job timeout</dt>
+          <dd>
+            {{ queue_workers.timeout }} seconds
+          </dd>
+        </div>
+      {% endif %}
+      <div>
+        <dt>Last checked</dt>
+        <dd>
+          {% if queue_workers.checked_at %}
+            <time datetime="{{ queue_workers.checked_at|date:'c' }}">{{ queue_workers.checked_at|date:'M j, Y, H:i:s T' }}</time>
+          {% else %}
+            Not checked yet
+          {% endif %}
+        </dd>
+      </div>
+    </dl>
+    {% if queue_workers.detail %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">{{ queue_workers.detail }}</p>
+        </div>
+      </div>
+    {% endif %}
+    <p class="barectl-note">
+      Barectl runs this site's database queue as <code>s{{ identifier }}</code> from
+      the current release. A crash or a forced stop can leave a job to be retried, so
+      your jobs must be safe to repeat. The retry interval is kept a little above the
+      job timeout.
+    </p>
+    {% if queue_workers_can_prepare %}
+      {% if queue_workers_can_stop %}
+        <form method="post"
+              action="{% url 'site_queue_workers_prepare' server.pk identifier %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="stop">
+          <button class="usa-button usa-button--secondary" type="submit">Stop</button>
+        </form>
+      {% endif %}
+      {% if queue_workers_can_restart %}
+        <form method="post"
+              action="{% url 'site_queue_workers_prepare' server.pk identifier %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="restart">
+          <button class="usa-button usa-button--secondary" type="submit">Restart</button>
+        </form>
+      {% endif %}
+      <form class="usa-form"
+            method="post"
+            action="{% url 'site_queue_workers_prepare' server.pk identifier %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="start">
+        <label class="usa-label"
+               for="{{ queue_workers_form.queues.id_for_label }}">Queue names</label>
+        <input class="usa-input"
+               id="{{ queue_workers_form.queues.id_for_label }}"
+               name="queues"
+               type="text"
+               value="{{ queue_workers_form.queues.value|default_if_none:'' }}">
+        <p class="usa-hint">In priority order, separated by commas. At most eight names.</p>
+        <label class="usa-label"
+               for="{{ queue_workers_form.processes.id_for_label }}">Processes</label>
+        <input class="usa-input"
+               id="{{ queue_workers_form.processes.id_for_label }}"
+               name="processes"
+               type="number"
+               min="1"
+               max="4"
+               value="{{ queue_workers_form.processes.value|default_if_none:1 }}">
+        <label class="usa-label"
+               for="{{ queue_workers_form.timeout.id_for_label }}">Job timeout in seconds</label>
+        <input class="usa-input"
+               id="{{ queue_workers_form.timeout.id_for_label }}"
+               name="timeout"
+               type="number"
+               min="30"
+               max="900"
+               value="{{ queue_workers_form.timeout.value|default_if_none:60 }}">
+        {% if queue_workers_form.errors %}
+          <div class="usa-alert usa-alert--error usa-alert--slim">
+            <div class="usa-alert__body">
+              <p class="usa-alert__text">Check the queue names, processes and timeout, then try again.</p>
+            </div>
+          </div>
+        {% endif %}
+        <button class="usa-button{% if queue_workers.on %} usa-button--secondary{% endif %}"
+                type="submit">
+          {% if queue_workers.on %}
+            Apply settings
+          {% else %}
+            Start
+          {% endif %}
+        </button>
+      </form>
+    {% elif blocking %}
+      {% include "operations/_blocking_operation.html" with after="Change the queue workers after it finishes." %}
+    {% else %}
+      <p class="barectl-note">
+        Changing queue workers needs a current, verified Laravel site and permission to
+        change this site. Run discovery again or wait for the current change.
+      </p>
+    {% endif %}
+  </section>
+{% endif %}

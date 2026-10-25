@@ -536,10 +536,19 @@ def _site_overview_context(
         from automation import presentation
 
         context["site_schedule_lines"] = presentation.lines(
-            state.snapshot.collected, site.identifier, state.snapshot.collected_at
+            state.snapshot.collected,
+            site.identifier,
+            state.snapshot.collected_at,
+            presentation.paused_change(server, site.identifier),
         )
     if context.get("has_wordpress"):
         context["site_wordpress_admin"] = f"{scheme}://{primary}/wp-admin/"
+    if context.get("has_laravel") and state.snapshot is not None:
+        from automation import worker_presentation
+
+        context["site_worker_lines"] = worker_presentation.lines(
+            state.snapshot.collected, site.identifier, state.snapshot.collected_at
+        )
     if not context.get("has_laravel"):
         return
     from discovery.presentation import present_releases
@@ -593,6 +602,7 @@ def site_page_response(
         context.update(cache_overview_context(server, identifier, request.user))
     if target_site and section == "settings":
         from automation.views import context_for_site as automation_context_for_site
+        from automation.worker_views import context_for_site as worker_context_for_site
         from sites.domains_views import context_for_site as domains_context_for_site
         from sites.node_views import context_for_site
         from sites.php_views import context_for_site as php_context_for_site
@@ -617,6 +627,7 @@ def site_page_response(
         context.update(cache_context_for_site(server, identifier, request.user))
         context.update(remove_context_for_site(server, identifier, request.user))
         context.update(automation_context_for_site(server, identifier, request.user))
+        context.update(worker_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
     if target_site and section == "database":
@@ -653,7 +664,11 @@ def site_page_response(
 
         context.update(
             logs_context_for_site(
-                server, identifier, request.user, selected=request.GET.get("log", "")
+                server,
+                identifier,
+                request.user,
+                selected=request.GET.get("log", ""),
+                live=request.GET.get("live") == "1",
             )
         )
     return render(request, "sites/detail.html", context, status=status)

@@ -29,6 +29,8 @@ class RecordedHostStandingTests(TestCase):
         "laravel-create-26.04": (Standing.TARGET_STACK, ()),
         "automation-wordpress-26.04": (Standing.TARGET_STACK, ()),
         "automation-laravel-26.04": (Standing.TARGET_STACK, ()),
+        "automation-laravel-workers-26.04": (Standing.TARGET_STACK, ()),
+        "fence-wordpress-26.04": (Standing.TARGET_STACK, ()),
         "valkey-installed-26.04": (Standing.TARGET_STACK, ()),
         "object-cache-26.04": (Standing.TARGET_STACK, ()),
         "object-cache-edited-26.04": (Standing.TARGET_STACK, ()),

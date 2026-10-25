@@ -11,7 +11,7 @@ import gzip
 import importlib.resources
 import json
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 from discovery.root_read import run_root
@@ -21,13 +21,35 @@ from operations.confidential import scrub
 
 from .models import LogOutcome
 
+
+def _without_imports(text: str) -> str:
+    """Drop the imports the assembled server program provides by concatenation."""
+    lines: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        if line.startswith(("from automation.convention import", "from cache.convention import")):
+            skipping = line.rstrip().endswith("(")
+            continue
+        if skipping:
+            skipping = not line.strip().endswith(")")
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
 READ_SOURCE: Final = (
     importlib.resources.files("sites.bodies").joinpath("logrotate.py").read_text()
     + "\n"
-    + importlib.resources.files("logs.bodies")
-    .joinpath("read.py")
-    .read_text()
-    .replace("from sites.bodies.logrotate import logrotate_present, logrotate_state\n", "")
+    + importlib.resources.files("automation").joinpath("convention.py").read_text()
+    + "\n"
+    + importlib.resources.files("cache").joinpath("convention.py").read_text()
+    + "\n"
+    + _without_imports(
+        importlib.resources.files("logs.bodies")
+        .joinpath("read.py")
+        .read_text()
+        .replace("from sites.bodies.logrotate import logrotate_present, logrotate_state\n", "")
+    )
 )
 PAGE_PREFIX: Final = "barectl-log-page "
 
@@ -84,6 +106,10 @@ class LogPage:
     files: tuple[str, ...] = ()
     note: str = ""
     bytes: int = 0
+    # A journal page continues toward older lines with ``cursor`` and toward new lines with
+    # ``newest``; ``live`` marks a page a live view asked for (Phase C #397).
+    newest: str = ""
+    live: bool = False
     # The site's own log rotation, read in the same bounded command (Phase C #389).
     rotation: str = ""
     rotation_problem: str = ""
@@ -104,6 +130,8 @@ class LogPage:
             "files": list(self.files),
             "note": self.note,
             "bytes": self.bytes,
+            "newest": self.newest,
+            "live": self.live,
             "rotation": self.rotation,
             "rotation_problem": self.rotation_problem,
             "rotation_files": list(self.rotation_files),
@@ -134,6 +162,8 @@ class LogPage:
             files=tuple(str(name) for name in files) if isinstance(files, list) else (),
             note=str(value.get("note", ""))[:200],
             bytes=value["bytes"] if isinstance(value.get("bytes"), int) else 0,
+            newest=str(value.get("newest", ""))[:200],
+            live=value.get("live") is True,
             rotation=str(value.get("rotation", ""))[:20],
             rotation_problem=str(value.get("rotation_problem", ""))[:200],
             rotation_files=_strings(value.get("rotation_files")),
@@ -157,6 +187,8 @@ def state_wording(state: str, note: str) -> str:
         return note or "Barectl could not read this log."
     if state == LogOutcome.ROTATED:
         return "This log rotated since the last page. Read the newest lines again to continue."
+    if state == LogOutcome.NOT_CONFIGURED:
+        return note or "This log is not configured for this site."
     return "Barectl has not read this log yet."
 
 
@@ -229,23 +261,7 @@ def scrubbed(page: LogPage, values: tuple[str, ...] = ()) -> LogPage:
     """
     if not values:
         return page
-    return LogPage(
-        page.state,
-        tuple(
-            LogLine(
-                line.time,
-                line.method,
-                line.path,
-                line.status,
-                line.duration,
-                scrub(line.raw, values),
-                line.truncated,
-            )
-            for line in page.lines
-        ),
-        page.cursor,
-        page.at_end,
-        page.files,
-        page.note,
-        page.bytes,
+    return replace(
+        page,
+        lines=tuple(replace(line, raw=scrub(line.raw, values)) for line in page.lines),
     )

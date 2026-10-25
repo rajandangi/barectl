@@ -28,6 +28,7 @@ from sites.configuration import PHP_RUNTIMES
 from wordpress import observation as wordpress_observation
 
 from . import convention, observation
+from .bodies.source import AUTOMATION_SOURCE, without_imports
 from .status import STATUS_SENTENCE, ScheduleStatus
 
 SLUG: Final = "set_wordpress_server_cron"
@@ -54,31 +55,14 @@ _IMPORTS: Final = (
 )
 
 
-def _without_imports(text: str) -> str:
-    """Drop the imports the assembled body receives from its concatenated neighbours."""
-    kept: list[str] = []
-    skipping = False
-    for line in text.splitlines():
-        if any(line.startswith(f"from {module} import") for module in _IMPORTS):
-            skipping = line.rstrip().endswith("(")
-            continue
-        if skipping:
-            skipping = not line.strip().endswith(")")
-            continue
-        kept.append(line)
-    return "\n".join(kept)
-
-
 BODY_SOURCE: Final = "\n".join(
     (
         site_observation.COMMON_SOURCE,
         importlib.resources.files("wordpress").joinpath("convention.py").read_text(),
-        importlib.resources.files("automation").joinpath("convention.py").read_text(),
-        _without_imports(
-            importlib.resources.files("automation.bodies").joinpath("units.py").read_text()
-        ),
-        _without_imports(
-            importlib.resources.files("automation.bodies").joinpath("schedule.py").read_text()
+        AUTOMATION_SOURCE,
+        without_imports(
+            importlib.resources.files("automation.bodies").joinpath("schedule.py").read_text(),
+            _IMPORTS,
         ),
     )
 )

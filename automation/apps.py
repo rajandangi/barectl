@@ -12,6 +12,8 @@ class AutomationConfig(AppConfig):
 
         from .change import SET_WORDPRESS_SERVER_CRON
         from .scheduler import SET_LARAVEL_SCHEDULER
+        from .worker_change import SET_LARAVEL_QUEUE_WORKERS
 
         register_kind(SET_WORDPRESS_SERVER_CRON)
         register_kind(SET_LARAVEL_SCHEDULER)
+        register_kind(SET_LARAVEL_QUEUE_WORKERS)

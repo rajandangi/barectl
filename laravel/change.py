@@ -11,6 +11,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Final
 
+from automation.bodies.source import AUTOMATION_SOURCE
 from bootstrap.standing import Standing
 from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
@@ -31,12 +32,16 @@ MIGRATION_ACKNOWLEDGEMENT: Final = (
     "reverse them, and that Barectl has no automatic backup."
 )
 BODY_SOURCE: Final = (
-    observation.LARAVEL_SOURCE
+    AUTOMATION_SOURCE
+    + "\n"
+    + observation.LARAVEL_SOURCE
     + "\n"
     + importlib.resources.files("laravel.bodies")
     .joinpath("deploy.py")
     .read_text()
     .replace("from laravel.bodies.common import deploy\n", "")
+    + "\n"
+    + AUTOMATION_SOURCE
 )
 BODY_BYTES: Final = (
     (

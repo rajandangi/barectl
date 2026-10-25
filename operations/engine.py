@@ -15,7 +15,7 @@ import shlex
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Final
 
@@ -33,6 +33,7 @@ from operations.models import RemoteOperation
 from .consent import (
     PREPARE_PERMISSIONS,
     DeclaredEffect,
+    Scope,
     affected_sites_of,
     consent_of,
     permissions_for,
@@ -471,6 +472,32 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not remove the site's scheduled task, so it may still be installed. "
         "Check the run's journal, then prepare a new review."
     ),
+    "queue_workers": (
+        "Barectl could not change the site's queue workers, so the run stopped. The site "
+        "may be partly changed; check the run's journal on the server, then prepare a new "
+        "review."
+    ),
+    "queue_workers_site": (
+        "The site's account, current release or private files were not the reviewed ones, "
+        "so the run stopped before changing anything. Run discovery again and prepare a new "
+        "review."
+    ),
+    "queue_workers_activation": (
+        "The site's current release changed before the workers could start, so the run "
+        "stopped without changing them. Deploy again, then prepare a new review."
+    ),
+    "queue_workers_environment": (
+        "Barectl could not write the site's retry interval, so no worker was started. Check "
+        "the run's journal, then prepare a new review."
+    ),
+    "queue_workers_start": (
+        "Barectl could not confirm that every queue worker process is running. Check the "
+        "run's journal, then prepare a new review."
+    ),
+    "queue_workers_stop": (
+        "Barectl could not confirm that every queue worker stopped. Check the run's journal, "
+        "then prepare a new review."
+    ),
     "automation_scheduler": (
         "The site's Laravel files, account or scheduler units were not the reviewed ones, so "
         "the run stopped before changing anything. Run discovery again and prepare a new "
@@ -484,6 +511,16 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
     "automation_running": (
         "The scheduler run is still going after the reviewed wait, so Barectl stopped waiting. "
         "It keeps running on the server; Scheduled tasks shows its result when it finishes."
+    ),
+    "automation_fence": (
+        "The site's background work did not stop within its budget, so the run stopped before "
+        "changing anything and the site's background work stays paused. Check the run's "
+        "journal, then prepare a new review."
+    ),
+    "automation_restore": (
+        "The change verified, but Barectl could not prove the site's background work started "
+        "again, so it stays paused and the change is partly applied. Check the run's journal, "
+        "then prepare a new review."
     ),
 }
 _FAILURES: Final[dict[Result, str]] = {
@@ -751,9 +788,17 @@ RESULT_REASONS: Final = frozenset(
         "automation_tick",
         "automation_configuration",
         "automation_units",
+        "queue_workers",
+        "queue_workers_site",
+        "queue_workers_activation",
+        "queue_workers_environment",
+        "queue_workers_start",
+        "queue_workers_stop",
         "automation_scheduler",
         "automation_run",
         "automation_running",
+        "automation_fence",
+        "automation_restore",
         "logrotate_missing",
         "rotation_invalid",
     }
@@ -1132,6 +1177,37 @@ def save_review(
     )
 
 
+def _planned(shell: RemoteShell, draft: ReviewDraft) -> ReviewDraft:
+    """Record what this change pauses, read once from the sites its own effects name.
+
+    docs/adr/0036. The plan belongs to ``automation``: the engine only asks which sites a
+    Site effect names, so a change that names no site (a server-wide one) pauses nothing.
+    An unreadable answer refuses the review rather than fencing blind, because a stopped
+    unit is not a reboot fence and guessing what was on would be worse.
+    """
+    from automation import fence
+
+    sites = fence.fenced_sites(
+        draft.kind,
+        tuple(
+            sorted(
+                {
+                    site
+                    for effect in draft.effects
+                    if effect.scope is Scope.SITE
+                    for site in effect.sites
+                }
+            )
+        ),
+    )
+    if draft.refusals or not draft.effects or not sites:
+        return draft
+    plan = fence.plan(shell, sites)
+    if plan is None:
+        return replace(draft, effects=(), refusals=(*draft.refusals, fence.UNREADABLE_REFUSAL))
+    return replace(draft, document={**draft.document, "automation_fence": plan})
+
+
 def _prepare(preparation: ChangePreparation) -> None:
     requester = preparation.requested_by
     kind = kind_of(preparation.kind_slug)
@@ -1149,7 +1225,7 @@ def _prepare(preparation: ChangePreparation) -> None:
     collected_at = timezone.now()
     with ssh.connect_operation(preparation) as shell:
         evidence = kind.inspect(shell, inputs)
-        draft = kind.review(evidence, inputs)
+        draft = _planned(shell, kind.review(evidence, inputs))
         host_key = shell.host_key
         sites_digest = _sites_digest(shell, draft)
     if draft.eligible and (not draft.boot_id or draft.uptime_centiseconds is None):

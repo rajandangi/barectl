@@ -87,10 +87,31 @@ BODY_SOURCE: Final = (
     + "\n"
     + importlib.resources.files("automation").joinpath("convention.py").read_text()
     + "\n"
+    + importlib.resources.files("automation")
+    .joinpath("workers.py")
+    .read_text()
+    .replace(
+        "from automation.convention import (\n"
+        "    KILL_MODE,\n"
+        "    WORKER_ROLES,\n"
+        "    account,\n"
+        "    digest,\n"
+        "    directives_map,\n"
+        "    parse_unit,\n"
+        "    render_slice,\n"
+        "    role_of,\n"
+        "    service_name,\n"
+        "    site_directory,\n"
+        "    slice_name,\n"
+        ")\n",
+        "",
+    )
+    + "\n"
     + importlib.resources.files("automation.bodies")
     .joinpath("worker_env.py")
     .read_text()
     .replace("from automation.convention import service_name\n", "")
+    .replace("from automation.workers import WORKER_ROLES\n", "")
     + "\n"
     + LARAVEL_COMMON_SOURCE
     + "\n"
