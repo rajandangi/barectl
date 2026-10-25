@@ -8,6 +8,7 @@ from dashboard.settings_views import settings_page
 from databases.site_views import prepare_site_database
 from databases.views import database_prepare
 from laravel.settings_views import prepare_environment
+from logs.views import log_page, prepare_rotation, read_log
 from operations.views import (
     change_apply,
     change_detail,
@@ -178,6 +179,21 @@ urlpatterns = [
         site_detail,
         {"section": "logs"},
         name="site_logs",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/logs/read/",
+        read_log,
+        name="site_log_read",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/logs/page/",
+        log_page,
+        name="site_log_page",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/logs/rotation/prepare/",
+        prepare_rotation,
+        name="site_log_rotation_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/deployments/",

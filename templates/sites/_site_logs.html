@@ -1,29 +1,71 @@
-{% include "sites/_site_advanced.html" %}
-{% include "sites/_site_runtime_diagnostics.html" %}
-<section class="barectl-card" aria-labelledby="site-native-heading">
-  <h2 id="site-native-heading">Native configuration</h2>
-  <dl class="barectl-facts">
-    <div>
-      <dt>Site file</dt>
-      <dd>
-        {% if site.file %}<code>{{ site.file }}</code>{% else %}Not observed{% endif %}
-      </dd>
-    </div>
-    <div>
-      <dt>Site user</dt>
-      <dd>
-        <code>{{ site_user }}</code>
-      </dd>
-    </div>
-    <div>
-      <dt>Public folder</dt>
-      <dd>
-        <code>{{ site_upload_path }}</code>
-      </dd>
-    </div>
-  </dl>
-  <p class="barectl-note">
-    Pools, private admission and master state for every site are on the server's
-    <a href="{% url 'server_advanced' server.pk %}?tab=php">Advanced</a> page.
-  </p>
-</section>
+{% if not logs_allowed %}
+  <section class="barectl-card" aria-labelledby="site-logs-heading">
+    <h2 id="site-logs-heading">Logs</h2>
+    <p class="barectl-note">
+      Reading this site's logs needs the logs permission. Ask an administrator to grant it
+      to your account. Your account can still view the site and its recorded state.
+    </p>
+  </section>
+{% elif not logs_target %}
+  <section class="barectl-card" aria-labelledby="site-logs-heading">
+    <h2 id="site-logs-heading">Logs</h2>
+    <p class="barectl-note">
+      Barectl reads logs for a site it manages. This site is not served from Barectl's site
+      configuration, so there is no log catalogue to read.
+    </p>
+  </section>
+{% else %}
+  <section class="barectl-card" aria-labelledby="site-logs-heading">
+    <h2 id="site-logs-heading">Logs</h2>
+    {% if logs_rotation_note %}
+      <p class="barectl-note">
+        {{ logs_rotation_note }}
+        {% if logs_rotation_can_prepare %}
+          <form method="post"
+                action="{% url 'site_log_rotation_prepare' server.pk identifier %}"
+                class="display-inline">
+            {% csrf_token %}
+            <button class="usa-button usa-button--unstyled"
+                    type="submit">Set up log rotation</button>
+          </form>
+        {% endif %}
+      </p>
+    {% endif %}
+    {% include "logs/_catalogue.html" %}
+    {% if logs_selected %}
+      {% include "logs/_viewer.html" %}
+    {% endif %}
+  </section>
+{% endif %}
+<details class="margin-top-4">
+  <summary>Advanced</summary>
+  {% include "sites/_site_advanced.html" %}
+  {% include "sites/_site_runtime_diagnostics.html" %}
+  <section class="barectl-card" aria-labelledby="site-native-heading">
+    <h2 id="site-native-heading">Native configuration</h2>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Site file</dt>
+        <dd>
+          {% if site.file %}<code>{{ site.file }}</code>{% else %}Not observed{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Site user</dt>
+        <dd>
+          <code>{{ site_user }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Public folder</dt>
+        <dd>
+          <code>{{ site_upload_path }}</code>
+        </dd>
+      </div>
+    </dl>
+    <p class="barectl-note">
+      Pools, private admission and master state for every site are on the server's
+      <a href="{% url 'server_advanced' server.pk %}?tab=php">Advanced</a> page.
+    </p>
+  </section>
+</details>
