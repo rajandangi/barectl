@@ -254,10 +254,11 @@ before an interrupted change.
   reboot). The kernel, and therefore the kernel boot ID, is shared with the Docker VM. Unit
   enablement, timers and slice parenting are re-exercised; a kernel panic or power-loss path is
   not.
-- **Hosted runs of this branch.** `98aee59` has a green `Checks`/`Native` run whose three
-  heaviest shards exceeded the 300 s target. `shard_times.json` was refreshed from that run's
-  artifacts and the matrix moved to nine shards; the 9-shard hosted run is the next revision
-  and its result belongs in the pull request, not this record.
+- **Hosted shard target.** `98aee59` had three shards over the 300 s target (354, 384 and
+  326 s). `shard_times.json` was refreshed from its artifacts and the matrix moved to nine
+  shards; `cff0ca1` then ran every shard green, with shards 5 and 6 at 331 s and 356 s. The
+  target is still missed on two shards; twelve shards are predicted at 246.5 s but were not
+  run. This record does not claim the hosted target.
 - **The local browser suite on this host.** It fails at sign-in with a 500 (a missing or
   unusable Vite manifest in this worktree) before any journey runs, so its local 425 s is not
   a suite measurement. The two focused journeys the integration fixes target pass in CI and
@@ -265,11 +266,12 @@ before an interrupted change.
 - **The scheduled breadth workflow in CI.** It is defined and runs locally by
   `run-scenarios.sh -- --breadth`; no hosted dispatch of it exists yet, so the amd64 breadth
   numbers, and the workflow's artifact/summary path, are unproven in CI.
-- **The hosted shard target.** The 8-shard run at `98aee59` passed every shard but shards 3,
-  7 and 8 took 354 s, 384 s and 326 s against the 300 s target; the earlier `bcaf565` run timed
-  out `LaravelDeployMariaDB` at 180 s. Splitting the scheduler out fixed the item limit, and
-  the refreshed hosted times partition under 300 s at nine shards (`shard_times.py` predicts
-  295.3 s). The hosted 9-shard run is not claimed here; the pull request carries it.
+- **The hosted shard target.** The 9-shard run at `cff0ca1` passed every shard, but shards 5
+  and 6 took 331 s and 356 s against the 300 s target (shard 1's validator stage alone took
+  129 s). The earlier 8-shard run `98aee59` had three shards over, and `bcaf565` timed out
+  `LaravelDeployMariaDB` at 180 s before the scheduler split. The item limit is fixed; the
+  shard target is not. The next action is a further rebalance/consolidation (twelve shards are
+  predicted at 246.5 s), tracked as a follow-up rather than claimed here.
 - **WordPress self-updates, the Generate password button, the database engine's site count and
   the WordPress interrupted install** remain as the Phase B record lists them; Phase C does
   not change those claims.
@@ -282,8 +284,13 @@ before an interrupted change.
 `98aee59`, amd64, eight shards of two lanes, passed every shard. Its heaviest shards missed
 the 300 s target: shard 3 354 s, shard 7 384 s and shard 8 326 s; shard 1 ran the 6-class
 validator stage in 132 s and its lifecycle in 103 s. The per-item times from this run are the
-new `disposable/shard_times.json`, and the matrix moved to nine shards (predicted worst stop
-295.3 s).
+new `disposable/shard_times.json`, and the matrix moved to nine shards.
+
+`Native` run [40212350965](https://github.com/rajandangi/barectl/actions/runs/40212350965) at
+`cff0ca1`, amd64, nine shards of two lanes, passed every shard. Native stages:
+shard 1 129 s validators + 7 s egress + 109 s lifecycle, shards 2/3/4 241/241/239 s, shard 5
+331 s, shard 6 356 s, shards 7/8/9 232/246/223 s. Shards 5 and 6 remain above the 300 s
+target; twelve shards are predicted at 246.5 s but were not run.
 
 `Native` run [40191609433](https://github.com/rajandangi/barectl/actions/runs/40191609433) at
 integration `bfe2339`, amd64, eight shards of two lanes, all passed:
