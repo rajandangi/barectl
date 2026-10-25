@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "laravel",
     "databases",
     "automation",
+    "cache",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

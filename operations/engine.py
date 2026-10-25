@@ -230,6 +230,21 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The server's resolved package set differs from the reviewed one, so Barectl stopped "
         "before changing packages. Prepare a new review."
     ),
+    "valkey_server": (
+        "The server's resolved package set differs from the reviewed one, so Barectl stopped "
+        "before changing packages. Prepare a new review."
+    ),
+    "valkey_mask": (
+        "Valkey was installed, but Barectl could not stop and mask the distribution's shared "
+        "service, so it may still run. Read the run's journal on the server, stop and mask "
+        "valkey-server.service through ordinary administration, then prepare a new review."
+    ),
+    "valkey_reload": (
+        "Valkey was installed and masked, but Barectl could not restart every running PHP "
+        "master and site proxy, so discovery may report them outside supported settings until "
+        "the server is restarted. Read the run's journal on the server, then prepare a new "
+        "review."
+    ),
     "site_readiness": (
         "The site did not answer its readiness path as required: the home page must answer "
         "below 500, and a path other than / must answer exactly 200. Check the site's code or "
@@ -242,6 +257,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
     "site_pool": (
         "Barectl could not prove the site's new PHP settings after reloading its own master, "
         "so it restored the previous pool. Check the run's journal, then prepare a new review."
+    ),
+    "site_client": (
+        "Barectl could not prove the site's cache PHP client after restarting its own master. "
+        "Check the run's journal, then prepare a new review."
     ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
@@ -623,6 +642,10 @@ RESULT_REASONS: Final = frozenset(
         "site_remove_accounts",
         "site_remove_verify",
         "database_engine",
+        "valkey_server",
+        "valkey_mask",
+        "valkey_reload",
+        "site_client",
         "site_database",
         "site_database_driver",
         "site_database_principal",

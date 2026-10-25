@@ -2,6 +2,7 @@
   "recorded": "hosted Native amd64, run 40066133079 at 9f42ba8, 2026-10-24",
   "scenarios": {
     "disposable.test_automation.WordPressServerCron": 150.0,
+    "disposable.test_cache.ValkeyInstall": 14.5,
     "disposable.test_catalog_update.CatalogRuntimeUpdate": 51.5,
     "disposable.test_catalog_update.CatalogRuntimeUpdateFailure": 25.6,
     "disposable.test_confidential_channel.ConfidentialChannelLifecycle": 2.9,

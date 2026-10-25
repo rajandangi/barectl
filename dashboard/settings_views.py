@@ -41,6 +41,8 @@ def catalog_rows() -> tuple[dict[str, str], ...]:
         }
         for architecture in (Architecture.X86_64, Architecture.AARCH64)
         for build in catalog.offered(architecture)
+        # A PHP extension the object cache loads is supply, not a runtime an operator adds.
+        if build.kind in labels
     )
 
 

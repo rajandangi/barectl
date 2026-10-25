@@ -13,7 +13,9 @@
         "nodejs_22": { "kind": "node", "attribute": "nodejs_22" },
         "nodejs_24": { "kind": "node", "attribute": "nodejs_24" },
         "php84": { "kind": "php", "attribute": "php84" },
+        "php84_redis": { "kind": "extension", "attribute": "php84.extensions.redis" },
         "php85": { "kind": "php", "attribute": "php85" },
+        "php85_redis": { "kind": "extension", "attribute": "php85.extensions.redis" },
         "restic": { "kind": "tool", "attribute": "restic" },
         "wp-cli": { "kind": "tool", "attribute": "wp-cli" }
       }

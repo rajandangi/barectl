@@ -19,6 +19,7 @@ class InputShape(StrEnum):
     SITE_READINESS = "site_readiness"
     SITE_DOMAINS = "site_domains"
     SITE_POOL = "site_pool"
+    SITE_CLIENT = "site_client"
     SITE_DATABASE = "site_database"
     SITE_REMOVE = "site_remove"
     LARAVEL_DEPLOY = "laravel_deploy"
@@ -50,6 +51,9 @@ class PreparationInputs:
     domains: bool = False
     # A site pool's reviewed tunables, for the one kind that changes them.
     pool: SitePool | None = None
+    # Whether the site's own cache PHP client (phpredis) is enabled (Phase C #390);
+    # ``None`` means this is not a client change.
+    php_client: bool | None = None
     # The primary domain a site-removal preparation uses when the server no longer names it.
     primary: str = ""
     # A database engine request that installs Git in the same reviewed transaction.
@@ -114,6 +118,12 @@ class PreparationInputs:
             }
         if self.certificate_email is not None:
             return {"version": 1, "email": self.certificate_email}
+        if self.php_client is not None:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "php_client": self.php_client,
+            }
         if self.pool is not None:
             return {
                 "version": 1,
@@ -432,6 +442,23 @@ def _site_pool_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> Pr
     return PreparationInputs("", identifier, pool=pool)
 
 
+def _site_client_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import request
+
+    if set(value) != {"version", "identifier", "php_client"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, enabled = value["identifier"], value["php_client"]
+    if not isinstance(identifier, str) or type(enabled) is not bool:
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, php_client=enabled)
+
+
 def _database_engine_inputs(
     value: dict[str, object], choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -624,6 +651,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.SITE_READINESS: _site_readiness_inputs,
     InputShape.SITE_DOMAINS: _domains_inputs,
     InputShape.SITE_POOL: _site_pool_inputs,
+    InputShape.SITE_CLIENT: _site_client_inputs,
     InputShape.SITE_DATABASE: _site_database_inputs,
     InputShape.SITE_REMOVE: _site_remove_inputs,
     InputShape.DATABASE_ENGINE: _database_engine_inputs,

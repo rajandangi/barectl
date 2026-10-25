@@ -142,6 +142,8 @@ class ObservedSite:
     application: str = "plain"
     application_version: str = ""
     application_problem: str = ""
+    # The PHP object-cache client enabled for this site's own master (Phase C #390).
+    client: str = ""
 
 
 @dataclass(frozen=True)

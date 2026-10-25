@@ -31,9 +31,18 @@ class ProxyNativeStateTests(TestCase):
             STATE.replace(" - 2 4 ", " - 0 5 "),
             STATE.replace("srv_port", "missing_field"),
             STATE.replace(" - 2 4 ", " /foreign.sock 2 4 "),
+            STATE.replace("1 0 0 8", "1 0 high 8"),
         ):
             with self.subTest(invalid=invalid[:100]), self.assertRaises(ValueError):
                 state_selection(invalid)
+
+    def test_a_restarted_proxy_reports_its_health_counter(self) -> None:
+        # A restart loads the state file; HAProxy then reports a non-zero check health.
+        restarted = STATE.replace(
+            "2 php 1 php84 - 2 4 1 1 0 1 0 0 8",
+            "2 php 1 php84 - 2 4 1 1 3 1 0 4 8",
+        )
+        self.assertEqual(state_selection(restarted), "php84")
 
 
 class ExecutedCommandTests(TestCase):

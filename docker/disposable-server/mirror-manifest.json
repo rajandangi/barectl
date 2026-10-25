@@ -2642,11 +2642,25 @@
    "size": 796
   },
   {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
+   "path": "ghx7d2mxgylh5mc1fli23riji47glcq7.narinfo",
+   "sha256": "7c3f10471aa65af99638ccfa242c27380b70b3f1cb16ec8f5cf1e4236e2efa8c",
+   "size": 565
+  },
+  {
    "architecture": "x86_64-linux",
    "host": "cache.nixos.org",
    "path": "gjqzjin1c6zak1kdvk1yijw3f5q40kpb.narinfo",
    "sha256": "efe4c0fa78cd0cac07e7549b48eab7fc4dc12d94504026018b5deaec4caa8043",
    "size": 884
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
+   "path": "gk5x050bdr7y5c4qlr77z7l6gfwr37vv.narinfo",
+   "sha256": "bce48a2650241b9324428043c9afe986b299a2de6c40ae1bb2e4c5a435aab13a",
+   "size": 565
   },
   {
    "architecture": "aarch64-linux",
@@ -5626,6 +5640,13 @@
   {
    "architecture": "aarch64-linux",
    "host": "cache.nixos.org",
+   "path": "nar/19p6p5rvnxd2cfq3a7b4r996v3z7bjxr9x8gdrwlp6b5zgwmla9r.nar.zst",
+   "sha256": "0964f70fab9db38d0080d41c8d0f643cc2a8f541cbc37033b06fc434897d1322",
+   "size": 259872
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
    "path": "nar/19wi4hwaw59wdnljclghh38b7vanz23a0ig7lr71rfqfqyr8v80s.nar.zst",
    "sha256": "c2abbfa03babcb62b177873d3a5e5ef437c383fd3bfb4957188687a3853296e7",
    "size": 20842
@@ -5841,6 +5862,13 @@
    "size": 100842
   },
   {
+   "architecture": "x86_64-linux",
+   "host": "cache.nixos.org",
+   "path": "nar/1db6hjzqxybyjjr9vlnm34rsw12ynr8msd3vvqh2ldkb2vkcxr6n.nar.zst",
+   "sha256": "0b4e27988478a1e3b78b0fc706a3cf9b24d550b3687fdb0243b0bd09e9d0956c",
+   "size": 266472
+  },
+  {
    "architecture": "aarch64-linux",
    "host": "cache.nixos.org",
    "path": "nar/1dh0av9gnk1wj28g7f33afs7mffw16719vgg723dpfk7j8sjfqxx.nar.zst",
@@ -6025,6 +6053,13 @@
   {
    "architecture": "aarch64-linux",
    "host": "cache.nixos.org",
+   "path": "nar/1hi359kj28h7kw9dqnh8mv0yr66vd78lh5yglxi2vpdjxzwfv1k2.nar.zst",
+   "sha256": "19d851c518fcd67450b1a33b8bb249f81d39154c3bd531a2fe19403515e18e74",
+   "size": 259863
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
    "path": "nar/1hkdgmghqh0nwh87awmrsx3538bch2b675m8pwax4d83k2yh7q6g.nar.zst",
    "sha256": "5bd02712ee041dcb922687b1228812cee221e9a052c5899862a2ca133c7e66ec",
    "size": 201008
@@ -6182,6 +6217,13 @@
    "path": "nar/1lghiag2n055h8l7nfvfgjkjgcvafinps0b2qfylmcg03d4f5wh8.nar.zst",
    "sha256": "e1fcba0e9718519c66cd416f812330576185495d3390ea6c0f7f0c7b8d6e5f43",
    "size": 5707
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "cache.nixos.org",
+   "path": "nar/1lih3zzl5dlwdirn00qjj5v3mvhdivz61ll857j6aa4p3kgd6dvp.nar.zst",
+   "sha256": "68562b4d5e601600f1f084111b67a6ce53d994dc79bb34bcc9f4527c5fd1fb3f",
+   "size": 266482
   },
   {
    "architecture": "x86_64-linux",
@@ -7040,6 +7082,13 @@
   {
    "architecture": "x86_64-linux",
    "host": "cache.nixos.org",
+   "path": "q7p0d2m8r320z5nn9296vabkxmrbw781.narinfo",
+   "sha256": "e13965d9cfaa8cd410e9e3a2c1106f5c257652289fe808bbd2608060dce5337f",
+   "size": 565
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "cache.nixos.org",
    "path": "q8g2ljg6a0yv71p14nf42vv4r6lqnznp.narinfo",
    "sha256": "49f0a581a7eacf3d92d4ac3fe740e48f01528093422de31256143e371cd5b7c7",
    "size": 628
@@ -7533,6 +7582,13 @@
    "path": "wpyc0r4d4idaq96y0dc1375ziabl4b38.narinfo",
    "sha256": "2ed0ebb3267272dacbb980379ae76f013a052590a1ddd2252890d21459dae2f5",
    "size": 603
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "cache.nixos.org",
+   "path": "wq7hgm50i8mwf88sp1gdz5y8k3q8bf77.narinfo",
+   "sha256": "f08c8c59c967841a0af684dfe5268b52fb352cc6a869da2d9f8227658bf9a993",
+   "size": 565
   },
   {
    "architecture": "aarch64-linux",
@@ -8265,6 +8321,20 @@
   {
    "architecture": "x86_64-linux",
    "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/g/gcc-16/libatomic1_16-20260322-1ubuntu1_amd64.deb",
+   "sha256": "82fa61135e7154d7958feaa91ec1808a688eb1e0e06822ab35e99e2480feb148",
+   "size": 11396
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/g/gcc-16/libatomic1_16-20260322-1ubuntu1_arm64.deb",
+   "sha256": "b9b2c94062924229201e25b694536119b153146abb8f464e31afa9e422d07d22",
+   "size": 11116
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
    "path": "ubuntu/20261017T000000Z/pool/main/g/gdbm/libgdbm-compat4t64_1.26-1build1_amd64.deb",
    "sha256": "e9ef750cc8ba426dee52f56aba0150e7e463b2658173bed8c4ca2927eec1c447",
    "size": 6796
@@ -8387,6 +8457,20 @@
    "path": "ubuntu/20261017T000000Z/pool/main/i/iptables/libxtables12_1.8.11-2ubuntu3_arm64.deb",
    "sha256": "c4ff09c24441448755d774f48f4e422a58efb516f6c3805dd59177f5eb06d492",
    "size": 36722
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/j/jemalloc/libjemalloc2_5.3.0-4_amd64.deb",
+   "sha256": "df00a1d37c735bfb1830418efb721c2c0b79cd0a735c3d35e4015eb6a4d2683d",
+   "size": 263476
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/j/jemalloc/libjemalloc2_5.3.0-4_arm64.deb",
+   "sha256": "393bc51bf9d4c527abb95a0f50280b63f4882374b52d6cf261267f7ebb43d232",
+   "size": 204790
   },
   {
    "architecture": "x86_64-linux",
@@ -9353,6 +9437,34 @@
    "path": "ubuntu/20261017T000000Z/pool/main/u/ucf/ucf_3.0052ubuntu1_all.deb",
    "sha256": "42354d322fda598511b62288123e8b4b6daf6b7bbb268d68e8e7f88efa498305",
    "size": 44280
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/v/valkey/valkey-server_9.0.4-0ubuntu0.2_amd64.deb",
+   "sha256": "bdfdc4f5ce03c307229d7dbfa45292258c5951093362ac881128680c810d6bad",
+   "size": 52916
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/v/valkey/valkey-server_9.0.4-0ubuntu0.2_arm64.deb",
+   "sha256": "ac02862e27eb13877705570cd207555d0919be7f7accab8a8ed24ec8a08dcc39",
+   "size": 52916
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/v/valkey/valkey-tools_9.0.4-0ubuntu0.2_amd64.deb",
+   "sha256": "c71098433c7aa46478c88c6e791985694df9bf039aa446f3f56551e331853b14",
+   "size": 1394156
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/v/valkey/valkey-tools_9.0.4-0ubuntu0.2_arm64.deb",
+   "sha256": "8baf04a4a2e8936c064f82bc6e3c4fd321fc5f7fa855ae7c9fd64894ead02ad3",
+   "size": 1365502
   }
  ],
  "format": 1

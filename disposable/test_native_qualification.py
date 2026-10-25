@@ -13,6 +13,7 @@ from django.test import tag
 from operations import native
 from operations.inputs import PreparationInputs
 from sites.change import CREATE_SITE
+from sites.client_change import SET_SITE_PHP_CLIENT
 
 from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
@@ -286,6 +287,67 @@ class SitePHPMasterRestart(ScenarioTestCase):
         print(  # noqa: T201 - measured for docs/phase-a-qualification.md
             f"\nrestart: {end - begin:.2f} s, {len(loop)} requests, {len(refused)} refused, "
             f"refusal window {window:.2f} s"
+        )
+
+    def test_enabling_the_object_cache_client_restarts_only_this_site_and_records_the_window(
+        self,
+    ) -> None:
+        """#390: phpredis loads from its locked store path, and only this master restarts."""
+        unit = "php-fpm-site-php84@q341restart.service"
+        runtime = "php-fpm@php84.service"
+        runtime_identity = self.native(f"systemctl show -p MainPID -p InvocationID {runtime}")
+        before = self.native(f"systemctl show --value -p MainPID {unit}").strip()
+        self.start_client()
+        # The stop waits for the in-flight request, so release it after the restart began.
+        self.native(
+            "systemd-run --collect --unit=q341restart-release -- "
+            f"/bin/sh -c 'sleep 2; touch {self.gate}/inflight.release'"
+        )
+        begin = self.now()
+        apply_change(
+            self,
+            SET_SITE_PHP_CLIENT,
+            PreparationInputs(identifier=self.prefix, php_client=True),
+            timeout=120,
+        )
+        end = self.now()
+        report = self.finish_client()
+        slow = report["slow"]
+        self.assertIsInstance(slow, dict)
+        self.assertEqual(slow, {**slow, "status": 200, "body": "released:inflight"})  # type: ignore[dict-item]
+        loop = report["loop"]
+        if not isinstance(loop, list):
+            raise AssertionError(report)
+        refused = [row for row in loop if row.get("status") != 200]
+        self.assertTrue(all(row.get("status") in (502, 503) for row in refused), refused)
+        window = (
+            (max(row["end"] for row in refused) - min(row["start"] for row in refused))
+            if refused
+            else 0.0
+        )
+        self.assertNotEqual(
+            self.native(f"systemctl show --value -p MainPID {unit}").strip(), before
+        )
+        self.assertEqual(
+            self.native(f"systemctl show -p MainPID -p InvocationID {runtime}"), runtime_identity
+        )
+        # The site's CLI commands load the same locked extension as its master.
+        modules = self.native(f"runuser -u s{self.prefix} -- /var/www/{self.prefix}/bin/php -m")
+        self.assertIn("redis", modules.split())
+        pool = self.native(f"cat /etc/php-fpm/sites/{self.prefix}/php84/pools/{self.prefix}.conf")
+        self.assertIn("php_admin_value[extension] = /nix/store/", pool)
+        # The diagnostic pool (root-only socket) reports it through the fixed probe.
+        probe = self.native(
+            "env -i SCRIPT_FILENAME=/etc/php-fpm/diagnostics/probe.php SCRIPT_NAME=/probe.php "
+            "REQUEST_METHOD=GET QUERY_STRING= REQUEST_URI=/probe.php "
+            "/nix/var/nix/profiles/barectl/fcgi/bin/cgi-fcgi -bind -connect "
+            f"/run/php-fpm/sites/{self.prefix}/php84/diagnostic/listen.sock"
+        )
+        self.assertIn('"redis"', probe)
+        self.assertIn('"Zend OPcache"', probe)
+        print(  # noqa: T201 - measured for docs/target-architecture.md and the handoff
+            f"\nclient enable: {end - begin:.2f} s, {len(loop)} requests, "
+            f"{len(refused)} refused, refusal window {window:.2f} s, only {unit} restarted"
         )
 
     def test_runtime_pool_reload_leaves_site_requests_and_masters_untouched(self) -> None:

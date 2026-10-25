@@ -56,7 +56,7 @@ where it starts a change.
 | --- | --- |
 | Sites (default) | Observed sites led by their domains, each opening its site page, and **Create site**. |
 | Activity | This server's checks and changes, newest first. |
-| Settings | Server-wide choices: **PHP versions** with the sites using each and **Add PHP version**, **Default PHP**, **Default Node.js**, **HTTPS** with the optional certificate contact email, **Database** with the server's MariaDB or PostgreSQL engine and its install or remove review, the connection with **Edit connection**, and **Remove server**. |
+| Settings | Server-wide choices: **PHP versions** with the sites using each and **Add PHP version**, **Default PHP**, **Default Node.js**, **HTTPS** with the optional certificate contact email, **Database** with the server's MariaDB or PostgreSQL engine and its install or remove review, **Object cache (Valkey)** with the installed version and the one install review, the connection with **Edit connection**, and **Remove server**. |
 | Advanced | Host standing and its evidence, the foundation stages, operating system, capacity, components, the web stack and services, the runtime catalog, masters, protections, site pools, the connection record with its host key, discovery history, and **Clean up finished runs**. |
 
 Removing a server deletes its local connection and history from this installation. It

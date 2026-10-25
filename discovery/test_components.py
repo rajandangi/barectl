@@ -17,6 +17,8 @@ from .fakes import (
     cluster_report,
     unit_report,
 )
+from .models import ObservationOutcome
+from .observations.components import version_query
 from .snapshot import Package, ServiceUnit, WebStackComponentObservation
 
 
@@ -25,7 +27,7 @@ class ServiceTests(ObservationTestCase):
         collected = self.collect()
         self.assertEqual(
             [observation.component for observation in collected.components],
-            ["nginx", "php-fpm", "mariadb", "postgresql", "certbot"],
+            ["nginx", "php-fpm", "mariadb", "postgresql", "certbot", "valkey"],
         )
         nginx = self.component("nginx")
         self.assertEqual(nginx.package.outcome, "observed")
@@ -92,6 +94,8 @@ class ServiceTests(ObservationTestCase):
         collected = self.collect()
         self.assert_statuses(collected, "service", "unsupported")
         for component in collected.components:
+            if component.package.outcome == ObservationOutcome.ABSENT:
+                continue
             with self.subTest(component=component.component):
                 self.assertIn("has no systemctl command", component.service.warning)
 
@@ -312,9 +316,10 @@ class PackageInventoryTests(ReplayObservationTestCase):
                 ("mariadb", "absent", "absent"),
                 ("postgresql", "absent", "absent"),
                 ("certbot", "absent", "absent"),
+                ("valkey", "absent", "absent"),
             ],
         )
-        self.assertEqual([c.service.value for c in collected.components], [()] * 5)
+        self.assertEqual([c.service.value for c in collected.components], [()] * 6)
         self.assertFalse([c for c in self.shell.commands if c.startswith("systemctl show")])
         self.assertEqual(
             self.component("nginx").service.source,
@@ -360,6 +365,8 @@ class PackageInventoryTests(ReplayObservationTestCase):
                 ("PostgreSQL service units", "unsupported"),
                 ("Certbot packages", "unsupported"),
                 ("Certbot service units", "unsupported"),
+                ("Valkey packages", "unsupported"),
+                ("Valkey service units", "unsupported"),
             ],
         )
 
@@ -608,3 +615,65 @@ class PostgresClusterTests(ObservationTestCase):
                 self.collect()
                 self.assertEqual(self.postgres_commands(), [])
                 self.assertEqual(self.postgres().service.outcome, status)
+
+
+VALKEY_VERSION_QUERY = version_query(("valkey-server", "valkey-tools"))
+VALKEY_PACKAGES = "valkey-server 9.0.3-0ubuntu2 ii\nvalkey-tools 9.0.3-0ubuntu2 ii\n"
+VALKEY_NAMES = "".join(
+    f"{line.split()[0]} {line.split()[-1]}\n" for line in DPKG_OUTPUT.splitlines()
+)
+MASKED_VALKEY_UNIT = (
+    "Id=valkey-server.service\nLoadState=masked\nActiveState=inactive\nSubState=dead\n"
+    "UnitFileState=masked\n"
+)
+
+
+class ValkeyComponentTests(ObservationTestCase):
+    """Valkey is one package set and one documented unit, like every other component."""
+
+    def install(self) -> None:
+        self.remote.results[PACKAGE_NAMES_QUERY] = ssh.CommandResult(
+            0, VALKEY_NAMES + "valkey-server ii\nvalkey-tools ii\n"
+        )
+        self.remote.results[VALKEY_VERSION_QUERY] = ssh.CommandResult(0, VALKEY_PACKAGES)
+        self.remote.results[UNIT_QUERY.format("valkey-server.service")] = ssh.CommandResult(
+            0, MASKED_VALKEY_UNIT
+        )
+
+    def test_installed_valkey_is_observed_with_its_version_and_masked_unit(self) -> None:
+        self.install()
+        self.collect()
+        valkey = self.component("valkey")
+        self.assertEqual(
+            valkey.package.value,
+            (
+                Package("valkey-server", "9.0.3-0ubuntu2"),
+                Package("valkey-tools", "9.0.3-0ubuntu2"),
+            ),
+        )
+        self.assertEqual(
+            valkey.service.value,
+            (ServiceUnit("valkey-server.service", "masked", "inactive", "dead", "masked"),),
+        )
+        self.assertTrue(valkey.managed)
+        self.assertEqual(valkey.deviations, ())
+        self.assertIn(VALKEY_VERSION_QUERY, self.remote.commands)
+
+    def test_absent_valkey_is_absent_without_a_unit_query(self) -> None:
+        self.remote.commands.clear()
+        self.collect()
+        valkey = self.component("valkey")
+        self.assertEqual((valkey.package.outcome, valkey.service.outcome), ("absent", "absent"))
+        self.assertFalse([command for command in self.remote.commands if "valkey" in command])
+
+    def test_another_valkey_package_is_named_as_outside_the_profile(self) -> None:
+        self.remote.results[PACKAGE_NAMES_QUERY] = ssh.CommandResult(
+            0, VALKEY_NAMES + "valkey ii\n"
+        )
+        self.collect()
+        valkey = self.component("valkey")
+        self.assertEqual(valkey.package.value, ())
+        self.assertFalse(valkey.managed)
+        (deviation,) = valkey.deviations
+        self.assertIn("valkey is installed", deviation)
+        self.assertIn("Valkey profile", deviation)

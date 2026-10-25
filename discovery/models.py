@@ -141,6 +141,7 @@ class WebStackComponent(models.TextChoices):
     MARIADB = "mariadb", "MariaDB"
     POSTGRESQL = "postgresql", "PostgreSQL"
     CERTBOT = "certbot", "Certbot"
+    VALKEY = "valkey", "Valkey"
 
 
 class ComponentObservation(models.Model):
