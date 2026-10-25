@@ -5,7 +5,6 @@
     "egress control": 10.0
   },
   "scenarios": {
-    "disposable.test_automation.WordPressServerCron": 150.0,
     "disposable.test_cache.ValkeyInstall": 14.5,
     "disposable.test_catalog_update.CatalogRuntimeUpdate": 51.5,
     "disposable.test_catalog_update.CatalogRuntimeUpdateFailure": 25.6,
@@ -71,10 +70,8 @@
     "disposable.test_target_race.TwoControllerNativeLock": 47.5,
     "disposable.test_target_reconstruction.FreshControllerReconstruction": 87.3,
     "disposable.test_target_shape.JudgeByShape": 51.1,
-    "disposable.test_wordpress_create.WordPressCreateMariaDB": 135.1
-  },
-  "stages": {
-    "egress control": 10.0,
-    "validators": 104.0
+    "disposable.test_wordpress_create.WordPressCreateMariaDB": 135.1,
+    "disposable.test_cache.SiteObjectCache": 35.2,
+    "disposable.test_automation.WordPressServerCron": 150.0
   }
 }

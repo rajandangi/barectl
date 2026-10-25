@@ -7,6 +7,7 @@ import shlex
 from automation import observation as automation_observation
 from automation.observation import ObservedSchedule
 from bootstrap.standing import HostJudgment, Standing
+from cache import instance as cache_instance
 from laravel import observation as laravel_observation
 from runtimes import defaults as runtime_defaults
 from runtimes import observation as runtime_observation
@@ -20,6 +21,7 @@ from ..snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedCache,
     ObservedRelease,
     ObservedSetting,
     ObservedSite,
@@ -92,6 +94,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     release_observation, settings_observation = _hosting_inventories(
         shell, standing, sites=sites, releases=releases
     )
+    cache_observation = _hosting_cache(shell, standing, hosting, sites_requested=sites)
     scheduled = _automation(
         shell,
         standing,
@@ -117,6 +120,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         runtime_defaults=defaults,
         releases=release_observation,
         settings=settings_observation,
+        cache=cache_observation,
         automation=scheduled,
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
@@ -197,6 +201,33 @@ def _hosting_inventories(
                 )
         settings = Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", tuple(records))
     return laravel_observation.releases_from(inventory), settings
+
+
+def _hosting_cache(
+    shell: RemoteShell,
+    standing: HostJudgment,
+    sites: Observation[tuple[ObservedSite, ...]],
+    *,
+    sites_requested: bool,
+) -> Observation[tuple[ObservedCache, ...]]:
+    if not sites_requested:
+        return Observation(ObservationOutcome.OBSERVED, (), "", ())
+    if standing.standing != Standing.TARGET_STACK:
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+    value = cache_instance.read(shell)
+    if value is None:
+        return Observation(
+            ObservationOutcome.INACCESSIBLE,
+            ("/etc/valkey", "/var/www"),
+            "The object cache could not be reconstructed.",
+            (),
+        )
+    return Observation(
+        ObservationOutcome.OBSERVED,
+        ("/etc/valkey", "/var/www"),
+        "",
+        cache_instance.observed(value, sites.value),
+    )
 
 
 def _automation(

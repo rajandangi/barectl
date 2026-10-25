@@ -91,6 +91,12 @@ class DiscoverySnapshot(models.Model):
     )
     settings_source = models.TextField(blank=True, default="")
     settings_warning = models.TextField(blank=True, default="")
+    # Each site's object cache instance and application wiring (Phase C #392).
+    cache_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    cache_source = models.TextField(blank=True, default="")
+    cache_warning = models.TextField(blank=True, default="")
     # Each WordPress site's scheduled work and its last result (Phase C #357).
     automation_status = models.CharField(
         max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
@@ -251,6 +257,8 @@ class SiteObservation(models.Model):
     application = models.CharField(max_length=20, default="plain")
     application_version = models.CharField(max_length=40, blank=True)
     application_problem = models.TextField(blank=True)
+    # The site's own cache PHP client (Phase C #390), read from its own pool and commands.
+    client = models.CharField(max_length=16, blank=True)
     # The supported state of the site's root-owned logrotate file (Phase C #389).
     log_rotation = models.CharField(max_length=12, blank=True)
 

@@ -258,6 +258,27 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not prove the site's new PHP settings after reloading its own master, "
         "so it restored the previous pool. Check the run's journal, then prepare a new review."
     ),
+    "object_cache": (
+        "The object cache change stopped before it finished. Nothing on the server was "
+        "rolled back; read the run's journal, then prepare a new review that proposes only "
+        "what remains."
+    ),
+    "object_cache_instance": (
+        "The site's own cache instance did not start or is not the reviewed shape. Read the "
+        "run's journal on the server, then prepare a new review."
+    ),
+    "object_cache_wiring": (
+        "The cache instance is running, but Barectl could not finish the site's WordPress "
+        "connection. Read the run's journal, then prepare a new review."
+    ),
+    "object_cache_plugin": (
+        "The pinned Redis Object Cache plugin could not be installed, activated or connected. "
+        "Read the run's journal on the server, then prepare a new review."
+    ),
+    "object_cache_verify": (
+        "The object cache changed, but the site did not report the reviewed state afterwards. "
+        "Read the run's journal, then prepare a new review that proposes only what remains."
+    ),
     "site_client": (
         "Barectl could not prove the site's cache PHP client after restarting its own master. "
         "Check the run's journal, then prepare a new review."
@@ -655,6 +676,11 @@ RESULT_REASONS: Final = frozenset(
         "valkey_mask",
         "valkey_reload",
         "site_client",
+        "object_cache",
+        "object_cache_instance",
+        "object_cache_wiring",
+        "object_cache_plugin",
+        "object_cache_verify",
         "site_database",
         "site_database_driver",
         "site_database_principal",
