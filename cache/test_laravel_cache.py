@@ -470,7 +470,7 @@ class LaravelObjectCacheDocumentTests(SimpleTestCase):
         self.assertLess(workers, stop)
 
     def test_a_fenced_cache_change_leaves_the_workers_to_restore(self) -> None:
-        plan = {
+        plan: dict[str, object] = {
             "automation_fence": {
                 "version": 1,
                 "sites": [
