@@ -176,7 +176,8 @@ def move_site(identifier: str, target: str) -> None:
         finish_source_php(settings, state, source, source_evidence, descriptor)
         for name in ("php", "composer", "wp"):
             replace_php_wrapper(
-                pathlib.Path(settings.directory) / "bin" / name, wrapper(settings, name)
+                pathlib.Path(settings.directory) / "bin" / name,
+                wrapper(settings, name, getattr(settings, "client", "")),
             )
         final = php_state(identifier)
         if (

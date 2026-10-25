@@ -123,9 +123,10 @@ def master_config(settings: SiteSettings | SimpleNamespace) -> str:
     )
 
 
-def diagnostic_pool(settings: SiteSettings | SimpleNamespace) -> str:
+def diagnostic_pool(settings: SiteSettings | SimpleNamespace, extension: str = "") -> str:
     private = f"/var/lib/php-fpm/sites/{settings.identifier}/{settings.runtime}/diagnostic"
     temporary = PurePosixPath(private) / "tmp"
+    client = f"php_admin_value[extension] = {extension}\n" if extension else ""
     return f"""[diagnostic]
 user = php-probe
 group = php-probe
@@ -140,7 +141,7 @@ security.limit_extensions = .php
 php_admin_value[session.save_path] = {private}/session
 php_admin_value[upload_tmp_dir] = {private}/upload
 php_admin_value[sys_temp_dir] = {temporary}
-"""
+{client}"""
 
 
 def service_units() -> dict[str, str]:

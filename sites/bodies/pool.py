@@ -10,6 +10,13 @@ SITE_POOL_TEMPLATE = ""
 with contextlib.suppress(ImportError, OSError):
     SITE_POOL_TEMPLATE = importlib.resources.files("sites.bodies").joinpath("pool.conf").read_text()
 PROCESS_MANAGERS = ("ondemand", "static", "dynamic")
+# The one Barectl-owned pool directive for the object cache's PHP client (#390). FPM applies
+# a pool's php_admin_value entries before it loads the extension, so this is the site-local
+# way to load phpredis: the site's own master reads it at start and needs no unit change.
+EXTENSION_KEY = "php_admin_value[extension]"
+STORE_PATH = re.compile(
+    r"/nix/store/[0-9a-df-np-sv-z]{32}-php-redis-[0-9A-Za-z.+_-]{1,64}/lib/php/extensions/redis\.so"
+)
 
 
 def pool_settings(identifier: str, runtime: str) -> SimpleNamespace:
@@ -27,11 +34,13 @@ def bounded_integer(value: str, minimum: int, maximum: int) -> bool:
     return value.isdecimal() and minimum <= int(value) <= maximum
 
 
-def supported_pool(identifier: str, runtime: str, text: str) -> bool:
+def supported_pool(identifier: str, runtime: str, text: str, extension: str = "") -> bool:
     if re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None or runtime not in (
         "php84",
         "php85",
     ):
+        return False
+    if extension and STORE_PATH.fullmatch(extension) is None:
         return False
     actual = ini_pool(text, identifier)
     expected = ini_pool(
@@ -39,6 +48,8 @@ def supported_pool(identifier: str, runtime: str, text: str) -> bool:
     )
     if actual is None or expected is None:
         return False
+    if extension:
+        expected[EXTENSION_KEY] = extension
     mutable = {
         "pm",
         "pm.max_children",
@@ -260,9 +271,29 @@ def _unit_value(value: str | None, suffix: str, minimum: int, maximum: int) -> i
     return _unshown(value[: -len(suffix)], minimum, maximum)
 
 
-def parse_pool(identifier: str, runtime: str, text: str) -> SitePool | None:
+def pool_extension(text: str, identifier: str) -> str:
+    """The pool's Barectl-owned PHP client directive, or ``""`` when no client is enabled."""
+    actual = ini_pool(text, identifier)
+    return "" if actual is None else actual.get(EXTENSION_KEY, "")
+
+
+def extension_line(path: str) -> str:
+    """The pool directive that loads the object cache's PHP client for one site."""
+    return f"{EXTENSION_KEY} = {path}\n"
+
+
+def without_extension(text: str) -> str:
+    """``text`` with the Barectl-owned client directive removed, everything else intact."""
+    return "".join(
+        line
+        for line in text.splitlines(keepends=True)
+        if line.partition("=")[0].strip() != EXTENSION_KEY
+    )
+
+
+def parse_pool(identifier: str, runtime: str, text: str, extension: str = "") -> SitePool | None:
     """The supported pool values of one site's own configuration, or ``None``."""
-    if not supported_pool(identifier, runtime, text):
+    if not supported_pool(identifier, runtime, text, extension):
         return None
     actual = ini_pool(text, identifier)
     if actual is None:
