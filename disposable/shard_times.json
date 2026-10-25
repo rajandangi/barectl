@@ -40,7 +40,7 @@
     "disposable.test_l0_discovery.PlainL0Discovery": 8.2,
     "disposable.test_laravel_create.LaravelCreateMariaDB": 86.0,
     "disposable.test_laravel_deploy.LaravelDeployBootFailure": 66.3,
-    "disposable.test_laravel_deploy.LaravelDeployMariaDB": 105.8,
+    "disposable.test_laravel_deploy.LaravelDeployMariaDB": 170.0,
     "disposable.test_laravel_deploy.LaravelDeployOutcomes": 110.9,
     "disposable.test_laravel_deploy.LaravelDeployPostgreSQL": 56.8,
     "disposable.test_laravel_releases.LaravelReleaseReconstruction": 40.3,

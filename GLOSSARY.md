@@ -377,6 +377,10 @@ _Avoid_: Cron job, background process
 A WordPress site's scheduled events run every minute by the managed server instead of by page loads. Barectl sets the site's `DISABLE_WP_CRON` only after one server run has succeeded and clears it before the server task stops.
 _Avoid_: WP-Cron, system cron
 
+**Laravel scheduler**:
+A Laravel site's schedule, run by one native timer and bounded oneshot service every minute as the site account from its current release and selected PHP. Barectl can turn it on or off and run one tick now; turning on and running now need a verified ungated release with no pending migrations ([automation](docs/automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
+_Avoid_: Cron job, `schedule:work`, queue worker
+
 **Skipped tick**:
 A calendar elapse that did not start a run because the previous run of the same scheduled task was still active, inferred from the run's native start and end timestamps. It is shown as skipped, never as success.
 _Avoid_: Dropped run, missed cron

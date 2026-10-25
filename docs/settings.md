@@ -38,6 +38,10 @@ writes the configuration atomically as the site user at 0600. WordPress's extra 
 must follow a strict uppercase key grammar and a single-quoted string value; a line outside
 that grammar is reported as unsupported and is never rewritten.
 
+## Scheduled tasks
+
+A Laravel site's **Settings > Scheduled tasks** turns its scheduler on or off and offers **Run now**. Turning on and Run now need a verified Deploy or Roll back outcome for the current release, with no maintenance gate and no pending migrations; turning off is always available. The review states the one-hour run limit, the no-catch-up behaviour and the sub-minute and `runInBackground` limits in plain words ([automation](automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
+
 ## Permissions and discovery
 
 Preparing either change needs the site-change permissions and the separate

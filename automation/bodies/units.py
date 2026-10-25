@@ -207,6 +207,24 @@ def wait_for_tick(identifier: str, role: str, budget_seconds: int) -> bool:
     return False
 
 
+def start_and_wait(identifier: str, role: str, budget_seconds: int) -> str:
+    """Start one installed oneshot service and wait for its result.
+
+    Returns systemd's ``Result`` when the run finished (``success``, ``timeout`` or a
+    failure), or ``running`` when it is still in progress at the reviewed budget. The
+    timer is never touched, so a Run now adds no unit and changes no schedule.
+    """
+    service = service_name(identifier, role)
+    systemctl("start", "--no-block", service)
+    deadline = time.monotonic() + budget_seconds
+    while time.monotonic() < deadline:
+        values = properties(service)
+        if values.get("ActiveState") in ("inactive", "failed"):
+            return values.get("Result") or "failed"
+        time.sleep(1)
+    return "running"
+
+
 def timer_ready(identifier: str, role: str) -> bool:
     timer = timer_name(identifier, role)
     return active_state(timer) == "active" and unit_file_state(timer) in (
@@ -325,6 +343,7 @@ __all__ = [
     "remove_units",
     "restore",
     "slice_empty",
+    "start_and_wait",
     "systemctl",
     "timer_ready",
     "unit_digests",

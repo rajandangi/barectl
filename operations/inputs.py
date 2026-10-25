@@ -74,7 +74,7 @@ class PreparationInputs:
     settings_changes: tuple[tuple[str, str], ...] = ()
     # A certificate contact email change: the optional address, or "" to remove the line.
     certificate_email: str | None = None
-    # A site's scheduled-task change: "on" or "off" (Phase C #357).
+    # A site's scheduled-task change: "on", "off" or "run" (Phase C #357).
     schedule_state: str = ""
 
     def _settings_document(self) -> dict[str, object]:
@@ -624,7 +624,7 @@ def _schedule_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> Pre
     if (
         not isinstance(identifier, str)
         or not valid_identifier(identifier)
-        or state not in ("on", "off")
+        or state not in ("on", "off", "run")
         or not isinstance(state, str)
     ):
         raise ValueError(INVALID_INPUTS)

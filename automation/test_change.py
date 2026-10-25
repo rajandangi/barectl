@@ -70,6 +70,11 @@ class ReviewTests(SimpleTestCase):
         self.assertEqual(draft.stages, change.OFF_STAGES)
         self.assertLess(draft.stages.index("configuration"), draft.stages.index("install"))
 
+    def test_run_now_is_never_a_wordpress_action(self) -> None:
+        draft = change.review(evidence(), PreparationInputs("", "shop", schedule_state="run"))
+        self.assertFalse(draft.eligible)
+        self.assertIn("Choose whether to turn server cron on or off.", draft.refusals)
+
     def test_a_site_that_is_not_wordpress_is_refused(self) -> None:
         draft = change.review(evidence(site=site_record(application="plain")), ON)
         self.assertFalse(draft.eligible)

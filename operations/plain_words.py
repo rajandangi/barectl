@@ -287,6 +287,30 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to the site",
         after_home=Home.SITE,
     ),
+    "set_laravel_scheduler": ChangeWords(
+        title="Change scheduled tasks for {site}",
+        summary=(
+            (
+                "Laravel runs the tasks in the site's schedule from the server, every "
+                "minute, as the site's own account and from its current release."
+            ),
+            (
+                "Each run is limited to one hour; a slow run delays the next one instead of "
+                "overlapping it, and missed runs while the server is down are not caught up."
+            ),
+            "Run now starts one run immediately so you can check the schedule after a deploy.",
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the site",
+            "install": "Changing the scheduled task",
+            "run": "Running the schedule once",
+            "verify": "Checking it works",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
 }
 
 
