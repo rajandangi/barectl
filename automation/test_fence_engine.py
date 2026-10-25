@@ -203,8 +203,8 @@ class FenceSetTests(SimpleTestCase):
     def test_the_two_wordpress_actions_never_fence(self) -> None:
         self.assertLessEqual({"reset_wordpress_password", "verify_wordpress_core"}, fence.NO_FENCE)
 
-    def test_the_change_that_owns_the_units_never_fences_itself(self) -> None:
-        self.assertIn("set_wordpress_server_cron", fence.NO_FENCE)
+    def test_the_changes_that_own_the_units_never_fence_themselves(self) -> None:
+        self.assertLessEqual({"set_wordpress_server_cron", "set_laravel_scheduler"}, fence.NO_FENCE)
 
     def test_a_change_outside_the_set_pauses_nothing(self) -> None:
         self.assertEqual(fence.fenced_sites("cleanup_runs", ("shop",)), ())

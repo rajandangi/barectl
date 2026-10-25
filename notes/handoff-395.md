@@ -1,7 +1,7 @@
 # Handoff: #395 Pause and restore a site's background work
 
 - Branch: `feat/357-395`
-- Head: see `git log -1 --format=%H` on the branch (the merge of `origin/feat/357-phase-c-automation` is the last commit before the review commit)
+- Head: see `git log -1 --format=%H` on the branch (merged with `origin/feat/357-phase-c-automation` at `38e5c82`, which brought #265's Laravel scheduler, #390's object cache and the cache/logs work; the merge commit is the branch head)
 - Worktree: `/private/var/folders/64/9bmxj8cn3mx00_vdnl9j0zmm0000gn/T/barectl-phase-c/wt-395`
 - No pull request opened.
 
@@ -34,7 +34,9 @@
 | `remove_site` | `sites/bodies/remove.py::remove` | fence before the caddy/gate stages; `remove_automation` deletes the reviewed unit files and the slice in the `configuration` stage, clears the masks and drop-ins, and **never restores** |
 | `update_catalog` | `runtimes/bodies/update.py::move_site` | per moved site, both directions of the move (fence at the start, restore after `verify_readiness`); `FenceStopped` maps to refused/partial with the fence reason |
 
-`NO_FENCE` holds reset WordPress administrator password, verify core files, and `set_wordpress_server_cron` (the change that owns the units and stops, starts and removes them in its own order). A change that names no site pauses nothing.
+`NO_FENCE` holds reset WordPress administrator password, verify core files, `set_wordpress_server_cron` and `set_laravel_scheduler` (the changes that own their units and stop, start and remove them in their own order). A change that names no site pauses nothing.
+
+**#265's scheduler arrives for free.** A fenced PHP or Deploy change on a Laravel site now carries the scheduler's timer and service in its plan and restores them on the new release, because the plan is built from `barectl-site-<id>-<role>` unit names and the read's per-role properties (`row["roles"]`), not from a role list. #266's queue services will do the same.
 
 ## Paused / off-maintenance projection and recovery wording
 

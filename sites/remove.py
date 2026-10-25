@@ -180,7 +180,7 @@ def valid_inventory(value: object, identifier: str) -> bool:  # noqa: C901 - a c
     paths = value["paths"]
     if (
         not isinstance(paths, dict)
-        or len(paths) != 8
+        or len(paths) != 12
         or not all(
             isinstance(path, str) and type(present) is bool for path, present in paths.items()
         )
@@ -223,7 +223,7 @@ def valid_inventory(value: object, identifier: str) -> bool:  # noqa: C901 - a c
     services = value["services"]
     if (
         not isinstance(services, dict)
-        or len(services) != 3
+        or len(services) != 4
         or not all(
             isinstance(unit, str)
             and unit.endswith(".service")
@@ -349,8 +349,8 @@ def _effects(identifier: str, primary: str) -> tuple[DeclaredEffect, ...]:
         DeclaredEffect(
             Scope.SITE,
             (
-                f"Delete site {primary}: its Caddy file, services, PHP-FPM and HAProxy "
-                "configuration, database and principal, stored certificate, directory, "
+                f"Delete site {primary}: its Caddy file, services, PHP-FPM, HAProxy and object "
+                "cache configuration, database and principal, stored certificate, directory, "
                 "accounts and background work. The database and every site file are "
                 "destroyed, and its scheduled tasks are never started again."
             ),

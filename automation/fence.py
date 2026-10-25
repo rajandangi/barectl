@@ -40,7 +40,12 @@ FENCING: Final = frozenset(
 # runtime or file that background work reads; turning server cron on or off already stops,
 # starts and removes its own units in the one order that keeps page loads covered.
 NO_FENCE: Final = frozenset(
-    {"reset_wordpress_password", "verify_wordpress_core", "set_wordpress_server_cron"}
+    {
+        "reset_wordpress_password",
+        "verify_wordpress_core",
+        "set_wordpress_server_cron",
+        "set_laravel_scheduler",
+    }
 )
 # What a review says when it cannot read the site's background work: the change would not
 # know what to pause, so it stops before changing anything.

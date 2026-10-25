@@ -65,12 +65,124 @@ so a server without Valkey issues exactly the fixed reads earlier recorded trans
 hold. A masked, inactive unit and the package version are all a fresh controller needs; no
 Barectl file or database participates.
 
-## Per-site instances (planned, #392/#393)
+## A site's own cache (implemented, #392)
 
-`cache/convention.py` is the reviewed extension point for those tickets: the packaged
-instance unit, the identifier-bound paths (`/etc/valkey/<id>.conf`, `/var/lib/valkey/<id>`,
-`/run/valkey/<id>/valkey.sock`), the reviewed memory sizes, and the configuration renderer
-for a socket-only, non-persistent, `allkeys-lru` instance whose default user loses
-administration commands but keeps the flushes an application needs.
-`cache.presentation.prerequisite` is the "install first, then continue" hook a site screen
-uses until the server-wide install exists.
+A WordPress site's **Settings > Object cache** turns on one cache that belongs to that
+site. The same primitive serves a Laravel site in #393; a plain PHP site is not offered it.
+Turning it on is one reviewed Site change: no other site, serving process or cache changes.
+Turning it off is one reviewed Site change too.
+
+### The instance
+
+The packaged `valkey-server@<identifier>.service` template runs the instance. Barectl adds a
+root-owned drop-in at `/etc/systemd/system/valkey-server@<identifier>.service.d/barectl.conf`
+that names the site's own configuration, runs the process as `s<identifier>`, and gives it
+its own runtime directory:
+
+```
+[Service]
+User=s<identifier>
+Group=s<identifier>
+ExecStart=
+ExecStart=/usr/bin/valkey-server /etc/valkey/<identifier>.conf --supervised systemd --daemonize no
+PIDFile=/run/valkey/<identifier>/valkey-server.pid
+RuntimeDirectory=valkey/<identifier>
+RuntimeDirectoryMode=0700
+ReadWritePaths=/run/valkey/<identifier> /var/lib/valkey/<identifier>
+```
+
+The configuration `/etc/valkey/<identifier>.conf` is root-owned and readable by the site
+account (`0640 root:s<identifier>`), and the site's data directory is
+`/var/lib/valkey/<identifier>` (site-owned, `0700`). The instance listens only on
+`/run/valkey/<identifier>/valkey.sock` with `unixsocketperm 600`: `port 0`, no password, no
+TCP listener, `save ""` and `appendonly no`, `protected-mode yes`, `maxmemory` from
+{32, 64, 128, 256} MiB (default 64) and `maxmemory-policy allkeys-lru`. The default ACL user
+keeps ordinary data commands, including `FLUSHDB`/`FLUSHALL` that `cache:clear` and the
+plugin use, and loses the administration commands one site must not run against its cache:
+`+@all -@admin -debug -module`. `CONFIG`, `MODULE`, `DEBUG`, `ACL` and `SHUTDOWN` are
+refused; `PING`, `INFO`, `GET`, `SET` and the flushes work.
+
+Valkey stays outside the site's automation slice, so pausing a site's background work never
+stops its cache or its serving.
+
+### WordPress wiring and ordering
+
+Turning on, in this order:
+
+1. create and start the instance, and prove the site account can open its connection;
+2. write the three Barectl-owned constants into `private/wp-config.php` through the same
+   atomic site-owned writer the WordPress settings change uses:
+
+   ```php
+   define( 'WP_REDIS_SCHEME', 'unix' );
+   define( 'WP_REDIS_PATH', '/run/valkey/<identifier>/valkey.sock' );
+   define( 'WP_REDIS_PREFIX', 's<identifier>:' );
+   ```
+
+   `WP_REDIS_*` stays reserved: the WordPress settings screen can never edit these lines,
+   and any other value is outside the supported grammar;
+3. install the one pinned **Redis Object Cache** plugin (version `3.0.0`, archive size
+   `730620` bytes and SHA-256 `7a03342d…8f54a` in `cache/plugin.py`) from the site's own
+   private staging directory after checking both, activate it, and enable its drop-in with
+   `wp redis enable`;
+4. prove `wp redis status` reports `Status: Connected`, `Client: PhpRedis`, `Drop-in: Valid`
+   and the pinned `Plugin Version`, and that the instance answers as the site account.
+
+The client is phpredis from the runtime catalog ([PHP extensions](runtimes.md#php-extensions)).
+The site's own PHP master and command wrappers must already load it; the review refuses
+otherwise and the card offers **Load the cache client**, which prepares #390's Site change
+first. The review names phpredis, the plugin version and the reviewed memory limit.
+
+Turning off disconnects the application first: disable the plugin drop-in, clear the three
+constants, deactivate the plugin, and only then stop, disable and remove the instance, its
+configuration, its drop-in, its data and its runtime directory. Afterwards there is no
+instance, no drop-in and no `WP_REDIS_*` line.
+
+The card refuses with a reason when Valkey is not installed on the server (offering
+**Install Valkey** first, through the same install review Server Settings uses), when the
+site is not a verified WordPress installation, when a fresh observation of the site is
+unavailable, or when the site does not load phpredis. Turning off stays available for a
+site whose cache artifacts exist, so a broken cache can always be removed from the
+dashboard.
+
+The plugin archive comes from `downloads.wordpress.org` in production and from the local
+byte-exact mirror in the native lanes; `disposable/mirror.py` pins the same version and the
+daily **Native drift** job watches it, exactly as it does Phase B's WordPress archive.
+
+### Reading the cache on demand
+
+**Check the cache** queues one read through the worker and `RemoteShell` as the site's own
+account, never on a page GET. It runs one fixed `valkey-cli INFO` under the shared read
+lock and keeps only four numbers on the request row: `used_memory`, `maxmemory`,
+`evicted_keys` and `connected_clients`, plus `running`, `stopped` or `unreadable`. The row
+is replaced by the next reading and expires after a day; nothing is copied into a snapshot
+or a second history. The Overview line shows the cache's state from the last observation,
+the reading's memory against its limit and its evictions when one was asked for, and the
+time it was checked. Caddy access logs are not used for this.
+
+### Discovery, hand edits and reconstruction
+
+A discovery read recognizes each site's instance from the configuration digest, the
+drop-in, the unit's own properties, the socket's owner and mode, and the application's
+constants, plugin version and drop-in. It reports one state per site:
+
+- **On** — a reviewed configuration, the drop-in and unit as written, a running instance,
+  the site-owned socket at `0600`, and (for WordPress) complete wiring, the plugin at the
+  pinned version and phpredis;
+- **Off** — no instance artifacts and no wiring;
+- **Partly on** — an instance or wiring that is incomplete (stopped, no socket, missing
+  drop-in, partial constants, another plugin version, no phpredis);
+- **Outside supported settings** — a hand edit the convention does not interpret, such as a
+  changed `User`, `ExecStart` or socket path, or a configuration other than a reviewed one.
+
+A hand edit of the memory limit to another reviewed size is supported: discovery adopts it
+as **On** with that limit, and a review prepared for it proposes nothing. Any other change
+is reported once and blocks turning the cache on; turning it off remains available. A
+fresh controller reconstructs all of it from `systemctl show`, the files and the constants,
+without a Barectl marker or database.
+
+### Removal
+
+Removing a site stops, disables and removes its `valkey-server@<identifier>.service`, its
+configuration, drop-in, data and runtime directories along with its other resources. The
+removal inventory is closed: the reviewed path and service lists carry the cache artifacts.

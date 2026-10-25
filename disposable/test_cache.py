@@ -6,12 +6,16 @@ are running, then proves the transaction's ``daemon-reload`` recovery on those r
 (issue #428).
 """
 
+import os
 import shlex
-from typing import cast
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import cast, override
 
 from django.test import tag
 
 from discovery.observations import collect
+from discovery.snapshot import CollectedSnapshot, ObservedCache
 from discovery.ssh import RemoteShell
 from operations.engine import ChangeKind, ReviewDraft
 from operations.inputs import PreparationInputs
@@ -180,3 +184,227 @@ class ValkeyInstall(ValkeyCase):
         self.assertTrue(current.managed)
         self.assertTrue(current.masked)
         self.assertTrue(current.inactive)
+
+
+OBJECT_CACHE_STATE = "object-cache-26.04"
+OBJECT_CACHE_EDITED_STATE = "object-cache-edited-26.04"
+
+
+@tag(SCENARIO_TAG)
+class SiteObjectCache(ValkeyCase):
+    """C1 part 1: one WordPress site's own cache, isolated, edited, and turned off."""
+
+    layer = "L4"
+    exclusive = True
+    prefix = "l3wordpress"
+    records: tuple[str, ...] = (OBJECT_CACHE_STATE, OBJECT_CACHE_EDITED_STATE)
+
+    @property
+    def site(self) -> str:
+        from .test_prepared_wordpress import WORDPRESS_SITE
+
+        return WORDPRESS_SITE
+
+    @property
+    def other(self) -> str:
+        from .test_prepared_wordpress import OTHER_SITE
+
+        return OTHER_SITE
+
+    @override
+    @contextmanager
+    def shell(self) -> Iterator[RemoteShell]:
+        """A plain connection: setup applies reviewed changes a recording shell refuses."""
+        from discovery import ssh
+
+        os.environ["SSH_AUTH_SOCK"] = ""
+        with ssh.connect(self.target()) as connection:
+            yield connection
+
+    def status(self, command: str) -> str:
+        return self.native("{ " + command + "; } 2>&1 || true").strip()
+
+    def as_site(self, *arguments: str) -> str:
+        command = " ".join(shlex.quote(argument) for argument in arguments)
+        return self.native(f"runuser -u s{self.site} -- {command}")
+
+    def valkey(self, *arguments: str) -> str:
+        socket = f"/run/valkey/{self.site}/valkey.sock"
+        return self.status(
+            f"runuser -u s{self.site} -- /usr/bin/valkey-cli -s {socket} "
+            + " ".join(shlex.quote(argument) for argument in arguments)
+            + "; printf 'status=%s' $?"
+        )
+
+    def wp(self, *arguments: str) -> str:
+        return self.as_site(
+            f"/var/www/{self.site}/bin/wp",
+            f"--path=/var/www/{self.site}/current/public",
+            *arguments,
+        )
+
+    def constant_lines(self) -> str:
+        return self.native(
+            f'grep -E "WP_REDIS_(SCHEME|PATH|PREFIX)" '
+            f"/var/www/{self.site}/private/wp-config.php || true"
+        ).strip()
+
+    def dropin(self) -> bool:
+        return (
+            self.native(
+                f"test -f /var/www/{self.site}/current/public/wp-content/object-cache.php "
+                "&& echo present || true"
+            ).strip()
+            == "present"
+        )
+
+    def record(self, state: str) -> tuple[CollectedSnapshot, ReviewDraft]:
+        from cache import instance
+        from discovery import recorded, ssh
+        from operations.inputs import PreparationInputs
+
+        with ssh.connect(self.target()) as connection:
+            shell = recorded.RecordingShell(connection, state, secrets=(recorded.SEEDED_SECRET,))
+            collected = collect(shell)
+            inputs = PreparationInputs(identifier=self.site)
+            draft = instance.review(instance.inspect(shell, inputs), inputs)
+            self.checkpoint(state, shell)
+        return collected, draft
+
+    def cache_row(self, collected: CollectedSnapshot) -> ObservedCache:
+        return next(row for row in collected.cache.value if row.identifier == self.site)
+
+    def test_1_turns_on_the_site_cache_and_proves_it_is_private(self) -> None:
+        from cache import instance
+        from operations.inputs import PreparationInputs
+
+        # L4 already carries Valkey and the site's PHP client; their own scenarios prove
+        # those installs (#391, #390).
+        apply_change(
+            self,
+            instance.SET_SITE_OBJECT_CACHE,
+            PreparationInputs(identifier=self.site, object_cache=True, cache_mib=64),
+            timeout=120,
+        )
+        self.assertEqual(
+            self.native(f"systemctl is-active valkey-server@{self.site}.service").strip(),
+            "active",
+        )
+        socket = self.native(f"stat -c '%U %a %F' /run/valkey/{self.site}/valkey.sock").strip()
+        self.assertEqual(socket, f"s{self.site} 600 socket")
+        self.assertIn("PONG", self.valkey("PING"))
+        self.assertIn("status=0", self.valkey("FLUSHALL"))
+        self.assertIn("NOPERM", self.valkey("CONFIG", "SET", "maxmemory", "1"))
+        self.assertIn("NOPERM", self.valkey("MODULE", "LIST"))
+        status = self.wp("redis", "status")
+        self.assertIn("Status: Connected", status)
+        self.assertIn("Client: PhpRedis", status)
+        self.assertIn("Drop-in: Valid", status)
+        self.assertIn("Plugin Version: 3.0.0", status)
+        self.assertTrue(self.dropin())
+        lines = self.constant_lines()
+        self.assertIn("WP_REDIS_SCHEME', 'unix'", lines)
+        self.assertIn(f"WP_REDIS_PATH', '/run/valkey/{self.site}/valkey.sock'", lines)
+        self.assertIn(f"WP_REDIS_PREFIX', 's{self.site}:'", lines)
+        # Another site's account can neither open the connection nor read the configuration.
+        refused = self.status(
+            f"runuser -u s{self.other} -- /usr/bin/valkey-cli -s "
+            f"/run/valkey/{self.site}/valkey.sock PING"
+        )
+        self.assertIn("Could not connect to Valkey", refused)
+        self.assertIn("Permission denied", refused)
+        self.assertIn(
+            "Permission denied",
+            self.status(f"runuser -u s{self.other} -- cat /etc/valkey/{self.site}.conf"),
+        )
+        collected, draft = self.record(OBJECT_CACHE_STATE)
+        row = self.cache_row(collected)
+        self.assertEqual(row.state, "on", row.problem)
+        self.assertTrue(draft.eligible, draft.refusals)
+
+    def test_2_a_repeated_review_proposes_nothing(self) -> None:
+        from cache import instance
+        from operations.inputs import PreparationInputs
+
+        inputs = PreparationInputs(identifier=self.site, object_cache=True, cache_mib=64)
+        with self.shell() as shell:
+            draft = instance.review(instance.inspect(shell, inputs), inputs)
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertTrue(draft.no_changes)
+        self.assertEqual(draft.effects, ())
+
+    def test_3_a_supported_hand_edit_is_adopted_and_an_unsupported_one_is_reported(self) -> None:
+        from cache import instance
+        from operations.inputs import PreparationInputs
+
+        config = f"/etc/valkey/{self.site}.conf"
+        drop_in = f"/etc/systemd/system/valkey-server@{self.site}.service.d/barectl.conf"
+        unit = f"valkey-server@{self.site}.service"
+        self.native(f"sed -i 's/^maxmemory .*/maxmemory 134217728/' {config}")
+        self.native(f"systemctl restart {unit}")
+        inputs = PreparationInputs(identifier=self.site, object_cache=True, cache_mib=128)
+        with self.shell() as shell:
+            collected = collect(shell)
+            draft = instance.review(instance.inspect(shell, inputs), inputs)
+        self.assertEqual(self.cache_row(collected).state, "on")
+        self.assertTrue(draft.no_changes, draft.refusals)
+        self.native(f"sed -i 's/^User=.*/User=root/' {drop_in}")
+        self.native(f"systemctl restart {unit}")
+        with self.shell() as shell:
+            collected = collect(shell)
+            refused = instance.review(
+                instance.inspect(shell, PreparationInputs(identifier=self.site)),
+                PreparationInputs(identifier=self.site, object_cache=True, cache_mib=128),
+            )
+        self.assertEqual(self.cache_row(collected).state, "unsupported")
+        self.assertFalse(refused.eligible)
+        self.assertIn("outside supported settings", " ".join(refused.refusals))
+        self.record(OBJECT_CACHE_EDITED_STATE)
+        self.native(f"sed -i 's/^User=.*/User=s{self.site}/' {drop_in}")
+        self.native(f"sed -i 's/^maxmemory .*/maxmemory 67108864/' {config}")
+        self.native(f"systemctl restart {unit}")
+        self.assertEqual(
+            self.native(f"systemctl show --value -p User {unit}").strip(), f"s{self.site}"
+        )
+
+    def test_4_a_fresh_controller_reconstructs_the_cache_and_the_settings(self) -> None:
+        from cache import instance
+        from operations.inputs import PreparationInputs
+
+        inputs = PreparationInputs(identifier=self.site, object_cache=True, cache_mib=64)
+        with self.shell() as shell:
+            collected = collect(shell)
+            draft = instance.review(instance.inspect(shell, inputs), inputs)
+        row = self.cache_row(collected)
+        self.assertEqual(row.state, "on", row.problem)
+        self.assertEqual(row.memory_mib, 64)
+        self.assertEqual(row.plugin_version, "3.0.0")
+        self.assertEqual(row.client, "phpredis")
+        self.assertTrue(draft.no_changes, draft.refusals)
+
+    def test_5_turning_it_off_leaves_no_instance_dropin_or_constants(self) -> None:
+        from cache import instance
+        from operations.inputs import PreparationInputs
+
+        apply_change(
+            self,
+            instance.SET_SITE_OBJECT_CACHE,
+            PreparationInputs(identifier=self.site, object_cache=False),
+            timeout=120,
+        )
+        self.assertNotEqual(
+            self.status(f"systemctl show --value -p ActiveState valkey-server@{self.site}.service"),
+            "active",
+        )
+        for path in (
+            f"/etc/valkey/{self.site}.conf",
+            f"/var/lib/valkey/{self.site}",
+            f"/run/valkey/{self.site}",
+            f"/etc/systemd/system/valkey-server@{self.site}.service.d",
+            f"/var/www/{self.site}/current/public/wp-content/object-cache.php",
+        ):
+            self.assertFalse(self.native(f"test -e {path} && echo present || true").strip(), path)
+        self.assertEqual(self.constant_lines(), "")
+        with self.shell() as shell:
+            collected = collect(shell)
+        self.assertEqual(self.cache_row(collected).state, "off")

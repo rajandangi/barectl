@@ -40,7 +40,7 @@ class AutomationReplay:
 
     def __init__(self, inner: RemoteShell, value: dict[str, object] | None = None) -> None:
         self._inner = inner
-        self._value = {"version": 1, "sites": []} if value is None else value
+        self._value = {"version": 2, "sites": []} if value is None else value
 
     @property
     def host_key(self) -> str:
@@ -147,24 +147,28 @@ def wordpress(
     }
 
 
-def installed_units(identifier: str = IDENTIFIER) -> list[dict[str, str]]:
+def installed_units(
+    identifier: str = IDENTIFIER, role: str = convention.ROLE_WPCRON
+) -> list[dict[str, str]]:
     return [
         {
             "name": name,
             "kind": kind,
-            "text": convention.render(identifier, convention.ROLE_WPCRON, kind),
+            "text": convention.render(identifier, role, kind),
         }
         for kind, name in (
             ("slice", convention.slice_name(identifier)),
-            ("service", convention.service_name(identifier, convention.ROLE_WPCRON)),
-            ("timer", convention.timer_name(identifier, convention.ROLE_WPCRON)),
+            ("service", convention.service_name(identifier, role)),
+            ("timer", convention.timer_name(identifier, role)),
         )
     ]
 
 
-def unit_digests(identifier: str = IDENTIFIER) -> dict[str, str]:
+def unit_digests(
+    identifier: str = IDENTIFIER, role: str = convention.ROLE_WPCRON
+) -> dict[str, str]:
     return {
-        kind: convention.digest(convention.render(identifier, convention.ROLE_WPCRON, kind))
+        kind: convention.digest(convention.render(identifier, role, kind))
         for kind in ("slice", "service", "timer")
     }
 
@@ -176,25 +180,39 @@ def automation(
     service: dict[str, str] | None = None,
     timer: dict[str, str] | None = None,
     slice_values: dict[str, str] | None = None,
+    schedule_service: dict[str, str] | None = None,
+    schedule_timer: dict[str, str] | None = None,
     duplicate: str = "",
+    schedule_duplicate: str = "",
     unreadable: bool = False,
     slice_populated: bool = False,
 ) -> dict[str, object]:
     absent = show(load="not-found", enabled="", active="inactive")
     return {
-        "version": 1,
+        "version": 2,
         "sites": [
             {
                 "identifier": identifier,
                 "units": installed_units(identifier) if units is None else units,
-                "show": {
-                    "service": absent if service is None else service,
-                    "timer": absent if timer is None else timer,
-                    "slice": absent if slice_values is None else slice_values,
+                "roles": {
+                    convention.ROLE_WPCRON: {
+                        "service": absent if service is None else service,
+                        "timer": absent if timer is None else timer,
+                    },
+                    convention.ROLE_SCHEDULE: {
+                        "service": absent if schedule_service is None else schedule_service,
+                        "timer": absent if schedule_timer is None else schedule_timer,
+                    },
                 },
+                "slice": absent if slice_values is None else slice_values,
                 "slice_populated": slice_populated,
-                "unreadable": unreadable,
-                "duplicate": duplicate,
+                "unreadable": [convention.ROLE_WPCRON, convention.ROLE_SCHEDULE]
+                if unreadable
+                else [],
+                "duplicates": {
+                    convention.ROLE_WPCRON: duplicate,
+                    convention.ROLE_SCHEDULE: schedule_duplicate,
+                },
             }
         ],
     }
@@ -202,6 +220,7 @@ def automation(
 
 def schedule(
     *,
+    identifier: str = IDENTIFIER,
     role: str = convention.ROLE_WPCRON,
     status: ScheduleStatus = ScheduleStatus.OFF,
     installed: bool = False,
@@ -214,7 +233,7 @@ def schedule(
     last_exit_us: int = 0,
 ) -> ObservedSchedule:
     return ObservedSchedule(
-        identifier=IDENTIFIER,
+        identifier=identifier,
         role=role,
         status=status,
         duplicate=duplicate,
@@ -235,9 +254,11 @@ def record_schedule(
     identifier: str = IDENTIFIER,
     rows: tuple[ObservedSchedule, ...] | None = None,
     disable: str = "",
+    application: str = "wordpress",
+    application_version: str = "7.1.3",
     checked_at: datetime | None = None,
 ) -> None:
-    """A WordPress site whose stored snapshot carries the projected scheduled work."""
+    """A site whose stored snapshot carries the projected scheduled work."""
     site = ObservedSite(
         identifier,
         (f"{identifier}.example.com",),
@@ -247,8 +268,8 @@ def record_schedule(
         ObservationOutcome.OBSERVED,
         file=f"/etc/caddy/sites/{identifier}.caddy",
         https=True,
-        application="wordpress",
-        application_version="7.1.3",
+        application=application,
+        application_version=application_version,
     )
     collected = replace(
         COLLECTED,
@@ -259,9 +280,15 @@ def record_schedule(
             ObservationOutcome.OBSERVED,
             ("/var/www",),
             "",
-            (ObservedSetting(identifier, "wordpress", "DISABLE_WP_CRON", DIGEST, disable),)
-            if disable
-            else (),
+            (
+                (ObservedSetting(identifier, "laravel", "APP_ENV", DIGEST),)
+                if application == "laravel"
+                else (
+                    (ObservedSetting(identifier, "wordpress", "DISABLE_WP_CRON", DIGEST, disable),)
+                    if disable
+                    else ()
+                )
+            ),
         ),
         automation=Observation(
             ObservationOutcome.OBSERVED,
@@ -275,3 +302,23 @@ def record_schedule(
 
     attach_current_connection(server, attempt)
     save_snapshot(attempt, collected, checked_at or timezone.now())
+
+
+def record_laravel_schedule(
+    server: Server,
+    *,
+    identifier: str = IDENTIFIER,
+    rows: tuple[ObservedSchedule, ...] | None = None,
+    checked_at: datetime | None = None,
+) -> None:
+    """A Laravel site whose stored snapshot carries the projected scheduler."""
+    record_schedule(
+        server,
+        identifier=identifier,
+        rows=rows
+        if rows is not None
+        else (schedule(identifier=identifier, role=convention.ROLE_SCHEDULE),),
+        application="laravel",
+        application_version="",
+        checked_at=checked_at,
+    )

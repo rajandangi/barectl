@@ -2,7 +2,7 @@
 
 A site's scheduled tasks and queue workers run as native systemd units on the managed server, under that site's own account. Barectl reviews and applies a change; the server keeps running the work with every Barectl controller closed, and the next discovery reconstructs the setting and its last result. Accepted in [ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md).
 
-Phase C starts with **server cron** for a WordPress site ([#357](https://github.com/rajandangi/barectl/issues/357), [#394](https://github.com/rajandangi/barectl/issues/394)). The Laravel scheduler, queue workers and object cache are the later Phase C tickets and reuse the same convention, projection and fence.
+Phase C starts with **server cron** for a WordPress site ([#357](https://github.com/rajandangi/barectl/issues/357), [#394](https://github.com/rajandangi/barectl/issues/394)) and the **Laravel scheduler** ([#265](https://github.com/rajandangi/barectl/issues/265)). Queue workers and the object cache are later Phase C tickets that reuse the same convention, projection and fence.
 
 ## Units and the slice
 
@@ -41,9 +41,21 @@ The service runs the site's own WP-CLI wrapper (`/var/www/<id>/bin/wp`) with the
 
 `DISABLE_WP_CRON` is a Barectl-owned name in the private configuration, alongside the salts and database settings; the WordPress settings section cannot edit it. The grammar accepts exactly `true` or `false` for it, and reserves `WP_REDIS_SCHEME`, `WP_REDIS_PATH` and `WP_REDIS_PREFIX` the same way for the object cache. Discovery reads only that constant's value from the private file, never another line.
 
-## Refusals
+## Turning the Laravel scheduler on and off, and Run now
 
-Turning on is refused, with the reason, when:
+A Laravel application keeps the tasks in `routes/console.php` in its own schedule. **Settings > Scheduled tasks** offers one reviewed change, with Site consent, and three actions:
+
+- **Turn on** publishes the slice, service and timer and starts the timer. A tick runs `artisan schedule:run` every minute as the site account, with `/var/www/<id>/bin/php` from `/var/www/<id>/current`, so it always uses the selected PHP and the release the `current` link points at. Each run is bounded by `TimeoutStartSec=1h` (not `RuntimeMaxSec`, which does not bound a oneshot service) and the whole process group is stopped at that limit.
+- **Turn off** stops and disables the timer before it stops the service, then removes the three unit files. It is available even when the site is in maintenance, partly deployed or has pending migrations, and even when a duplicate scheduler exists.
+- **Run now** starts the installed oneshot service once and waits for its result. It adds no unit and changes no schedule; the timer stays exactly as it was.
+
+Turning on and Run now are refused, with the reason, unless the site has a verified Deploy or Roll back outcome for its current release: the release is complete (not partly deployed), the maintenance gate is down, and every migration the release carries is recorded in the database. A pending migration, an unknown outcome or unreadable migration state refuses both actions. A hand-made crontab line naming `schedule:run`, a Supervisor program, or a foreign service running in the site's account is a duplicate that blocks turning on. Run now only runs the managed service, so a duplicate does not block it.
+
+The review states the limits in plain words: schedules more frequent than once a minute are not supported, and work that relies on `runInBackground` outliving the tick is not supported because the run's whole process group is stopped at its one-hour limit. There is no catch-up after downtime, and a slow run delays the next calendar tick instead of overlapping it.
+
+## WordPress refusals
+
+Turning server cron on is refused, with the reason, when:
 
 - the host is not on the target stack, or the site's native evidence is unavailable;
 - the site is not a WordPress application, or its WordPress installation is not complete and verified (including a site whose maintenance page is up);
@@ -70,11 +82,11 @@ One pure projection (`automation/status.py`) turns native evidence into the stat
 | No cron is running | `DISABLE_WP_CRON` is set but no timer exists |
 | Could not confirm | the native read was unavailable or outside supported settings |
 
-A deliberate Off is not an alarm. Paused, off-during-maintenance, failed, timed out, skipped, no-cron and unconfirmed states appear in the site's Overview line and in the server's Needs attention list with one next action: turning the work back on is the ordinary Scheduled tasks change, which asks for the state it should have and preselects nothing.
+A deliberate Off is not an alarm. Paused, off-during-maintenance, failed, timed out, skipped, no-cron and unconfirmed states appear in the site's Overview line and in the server's Needs attention list with one next action: turning the work back on is the ordinary Scheduled tasks change, which asks for the state it should have and preselects nothing. Both roles share this projection; the WordPress-only **No cron is running** state appears only for the WordPress role.
 
 ## Discovery and reconstruction
 
-Full discovery runs one bounded root read ([`automation/observation.py`](../automation/observation.py)): the three unit files, `systemctl show` fields (states, result, exit status, start and exit timestamps, last trigger and next elapse, control group), the slice's process count, and the crontab, Supervisor and foreign-unit files used for duplicate detection. It never runs PHP, WP-CLI or Artisan, and it never reads a private site file.
+Full discovery runs one bounded root read ([`automation/observation.py`](../automation/observation.py)): the site's slice and its role's service and timer files, `systemctl show` fields (states, result, exit status, start and exit timestamps, last trigger and next elapse, control group), the slice's process count, and the crontab, Supervisor and foreign-unit files used for duplicate detection. It recognises WordPress sites by their WP-CLI wrapper and Laravel sites by their `current/artisan`, and reads both roles' units. It never runs PHP, WP-CLI or Artisan, and it never reads a private site file.
 
 The projected rows are stored in `automation_observation` (ADR 0003), so a controller with an empty database reconstructs the setting and its last result from the server alone. Repeated reviews propose no change.
 

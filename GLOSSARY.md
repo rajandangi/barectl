@@ -144,6 +144,10 @@ _Avoid_: Redis, cache service
 A site's use of its own Valkey instance for application caching. Enabling it is a Site change; the server-wide Valkey install is its prerequisite.
 _Avoid_: Shared cache, Redis cache
 
+**Object cache instance**:
+The packaged `valkey-server@<identifier>` service that runs one site's cache as that site's Linux account, on a private Unix socket with no TCP, password or persistence, a reviewed memory limit and `allkeys-lru`. It stays outside the site's automation slice, and removing the site removes it.
+_Avoid_: Cache server, Redis instance
+
 ### Sites
 
 **Site**:
@@ -376,6 +380,10 @@ _Avoid_: Cron job, background process
 **Server cron**:
 A WordPress site's scheduled events run every minute by the managed server instead of by page loads. Barectl sets the site's `DISABLE_WP_CRON` only after one server run has succeeded and clears it before the server task stops.
 _Avoid_: WP-Cron, system cron
+
+**Laravel scheduler**:
+A Laravel site's schedule, run by one native timer and bounded oneshot service every minute as the site account from its current release and selected PHP. Barectl can turn it on or off and run one tick now; turning on and running now need a verified ungated release with no pending migrations ([automation](docs/automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
+_Avoid_: Cron job, `schedule:work`, queue worker
 
 **Skipped tick**:
 A calendar elapse that did not start a run because the previous run of the same scheduled task was still active, inferred from the run's native start and end timestamps. It is shown as skipped, never as success.

@@ -32,6 +32,7 @@ class ScheduleView:
     detail: str
     attention: bool
     on: bool
+    running: bool = False
 
 
 def schedule_view(
@@ -68,8 +69,11 @@ def schedule_view(
             ScheduleStatus.WAITING,
             ScheduleStatus.RUNNING,
             ScheduleStatus.SUCCEEDED,
+            ScheduleStatus.FAILED,
+            ScheduleStatus.TIMED_OUT,
             ScheduleStatus.SKIPPED,
         },
+        running=row.service_active,
     )
 
 

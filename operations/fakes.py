@@ -29,7 +29,7 @@ UPTIME_CENTISECONDS = 500025
 PREPARE_PERMISSIONS = ("view_server", "view_changes", "change_site")
 APPLY_PERMISSIONS = ("view_changes", "change_shared")
 # A server with no automation units: the automation read's observed empty answer.
-EMPTY_AUTOMATION = '{"version":1,"sites":[]}'
+EMPTY_AUTOMATION = '{"version":2,"sites":[]}'
 _UNIT = re.compile(r"barectl-apply-[0-9a-f]{32}\.service")
 _SUBMITTED_UNIT = re.compile(r"--unit=(barectl-apply-[0-9a-f]{32}\.service)")
 # The reviewed target's unit and invocation are plain validated arguments to its script.

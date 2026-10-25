@@ -159,6 +159,8 @@ def _unit_digests(
         )
         if kind not in KINDS:
             continue
+        if kind != "slice" and convention.role_of(name, identifier) != convention.ROLE_WPCRON:
+            continue
         shape = convention.parse_unit(name, text, identifier, convention.ROLE_WPCRON, kind)
         if not shape.supported:
             problems.append(shape.problem)
@@ -185,6 +187,7 @@ def _refusals(  # noqa: C901 - one list of every refusal
     refusals: list[str] = []
     if inputs.schedule_state not in ("on", "off"):
         refusals.append("Choose whether to turn server cron on or off.")
+        return refusals, None, None, None
     if evidence.standing != Standing.TARGET_STACK:
         refusals.append("Set up and verify the host foundation before changing a site.")
     if evidence.native is None:

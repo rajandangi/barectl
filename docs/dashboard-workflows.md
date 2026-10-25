@@ -74,14 +74,14 @@ site its current release and **Deploy**.
 
 | Section | What it holds |
 | --- | --- |
-| Overview (default) | Address, platform, PHP version, status, last checked time and upload path. |
+| Overview (default) | Address, platform, PHP version, status, last checked time, upload path, and — for a WordPress site — one line for its object cache with **Check the cache** ([object cache](object-cache.md#reading-the-cache-on-demand)). |
 | Activity | The site's changes, newest first. |
 | Database | The site's database binding, or the review that adds one ([databases](databases.md)). |
 | Deployments | A Laravel site's releases, **Deploy** and **Roll back** ([deploying](sites.md#deploying-a-laravel-site)). |
 | Environment | A Laravel site's environment keys ([settings](settings.md)). |
 | WordPress | A WordPress site's constants, password reset and core verification ([WordPress](wordpress.md#actions)). |
-| Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, PHP settings and the readiness path, domains and HTTPS, **Scheduled tasks** for a WordPress site, and **Remove site**. |
-| Logs | The log catalogue named in plain words, a bounded viewer on request with older pages, a search term and a time range, and the site's log rotation state with **Set up log rotation** when it is missing or outside the supported shape ([logs](logs.md)). Native detail stays under **Advanced**. |
+| Settings | **PHP version** with **Change PHP version**, **Node.js** with the same choice, **Object cache** for a WordPress site with its state, **Turn on object cache**, **Turn off object cache** and **Check the cache**, PHP settings and the readiness path, domains and HTTPS, **Scheduled tasks** for a WordPress site or the Laravel scheduler with **Turn on**, **Turn off** and **Run now**, and **Remove site** ([object cache](object-cache.md#a-sites-own-cache-implemented-392), [automation](automation.md)). |
+| Logs | The log catalogue named in plain words, a bounded viewer on request with older pages, a search term and a time range, and the site's log rotation state with **Set up log rotation** when it is missing or outside the supported shape ([logs](logs.md)). The object cache's and automation units' journals are sources. Native detail stays under **Advanced**. |
 
 A version this server does not have is marked **Installed first**. Choosing it prepares Add
 runtime as step one; the run page then offers to continue the switch with the same choice.

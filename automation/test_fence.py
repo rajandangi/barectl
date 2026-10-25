@@ -9,7 +9,7 @@ from typing import cast
 
 from django.test import SimpleTestCase
 
-from automation import convention, fence
+from automation import fence
 from automation.testing import automation, show
 
 SHOP = "shop"
@@ -43,8 +43,7 @@ def with_roles(
     """One site whose read answers each installed role's timer and service properties."""
     value = automation(units=units)
     row = cast("list[dict[str, object]]", value["sites"])[0]
-    read = cast("dict[str, object]", row["show"])
-    read["roles"] = {
+    row["roles"] = {
         role: {"timer": timer, "service": service} for role, (timer, service) in roles.items()
     }
     return value
@@ -78,11 +77,11 @@ class FencePlanTests(SimpleTestCase):
         self.assertIsNone(fence.plan_from(automation(unreadable=True), (SHOP,)))
 
     def test_a_role_without_its_properties_is_not_a_plan(self) -> None:
-        # The scheduler's units are installed, but the read carried only the default role.
+        # A role is installed, but the read carried no properties for it: starting it again
+        # would be a guess, and leaving it stopped silently would be worse.
         units = [
             unit(SLICE, "slice"),
-            unit(SCHEDULE_SERVICE, "service", convention.render(SHOP, "schedule", "service")),
-            unit(SCHEDULE_TIMER, "timer", convention.render(SHOP, "schedule", "timer")),
+            unit("barectl-site-shop-queue1.service", "service", "[Service]\nType=exec\n"),
         ]
         self.assertIsNone(fence.plan_from(automation(units=units), (SHOP,)))
 

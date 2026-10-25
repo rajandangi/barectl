@@ -10,12 +10,13 @@ from django.utils import timezone
 from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
+from discovery.snapshot import ObservedCache
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import ReviewDraft, save_review
 from operations.fakes import BOOT_ID
 from operations.models import ChangePreparation, ChangeRun, RemoteOperation
 from servers.models import Server
-from sites.ui_testing import record_http_sites
+from sites.ui_testing import record_http_sites, record_site_settings
 
 
 @tag("browser")
@@ -97,3 +98,69 @@ class ValkeyInstallBrowserTests(BrowserTestCase):
         page.goto(f"{self.live_server_url}/servers/{self.server.pk}/settings/")
         selector = "main .usa-button:not(.usa-button--outline):not(.usa-button--unstyled)"
         self.assertLessEqual(page.locator(selector).count(), 1)
+
+
+@tag("browser")
+class SiteObjectCacheBrowserTests(BrowserTestCase):
+    @classmethod
+    @override
+    def serve_assets(cls) -> None:
+        static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
+        cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
+        call_command("collectstatic", interactive=False, verbosity=0)
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        for codename in ("view_siteobservation", "change_site", "view_changes"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.server = Server.objects.get(name="Production")
+        Server.objects.exclude(pk=self.server.pk).delete()
+        record_site_settings(
+            self.server,
+            identifier="alpha",
+            application="wordpress",
+            cache=(ObservedCache("alpha", "off", None, "", "", "phpredis", ""),),
+            installed_valkey=True,
+            client="phpredis",
+        )
+        self.sign_in()
+
+    def test_turning_the_cache_on_from_site_settings_in_three_activations(self) -> None:
+        page = self.page
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/sites/alpha/settings/")
+        self.assert_no_native_terms()
+        page.get_by_label("Memory limit").select_option("128")
+        page.get_by_role("button", name="Turn on object cache", exact=True).click()
+
+        preparation = ChangePreparation.objects.get(kind_slug="set_site_object_cache")
+        save_review(
+            preparation,
+            ReviewDraft(
+                kind=preparation.kind_slug,
+                intent="Turn on the object cache for alpha.",
+                effects=(
+                    DeclaredEffect(
+                        Scope.SITE,
+                        "Turn on this site's own object cache.",
+                        ("alpha",),
+                    ),
+                ),
+                stages=("preflight", "instance", "wiring", "plugin", "verify"),
+                boot_id=BOOT_ID,
+                uptime_centiseconds=500000,
+            ),
+            host_key="ssh-ed25519 key",
+            collected_at=timezone.now(),
+            sites_digest="",
+        )
+        ChangePreparation.objects.filter(pk=preparation.pk).update(
+            status=RemoteOperation.Status.SUCCEEDED
+        )
+        page.reload()
+        self.assert_no_native_terms()
+        page.get_by_role("button", name="Turn on object cache", exact=True).click()
+
+        run = ChangeRun.objects.get(review__preparation=preparation)
+        expect(page).to_have_url(f"{self.live_server_url}/runs/{run.pk}/")
+        self.assertEqual(run.review.consent, "site")
