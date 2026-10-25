@@ -99,9 +99,13 @@ class SiteLogsBrowserTests(BrowserTestCase):
             self.page.get_by_text("Following new lines while this page is visible.")
         ).to_be_visible()
         self.assert_no_native_terms()
+        # The open panel asks for its first live page through the explicit poll POST.
+        self.wait_for_reads(1)
         self.page.get_by_role("link", name="Stop following").focus()
         self.page.keyboard.press("Enter")
         expect(self.page.get_by_role("link", name="Follow new lines")).to_be_visible()
+        # Closing the panel removes the element that carries the polling interval.
+        self.assertEqual(self.page.locator("[hx-trigger*='every 2s']").count(), 0)
         self.page.set_viewport_size({"width": 320, "height": 740})
         self.page.goto(
             f"{self.live_server_url}/servers/{server.pk}/sites/alpha/logs/?log=queue_workers&live=1"
