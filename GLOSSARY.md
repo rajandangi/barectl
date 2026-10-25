@@ -381,6 +381,14 @@ _Avoid_: WP-Cron, system cron
 A calendar elapse that did not start a run because the previous run of the same scheduled task was still active, inferred from the run's native start and end timestamps. It is shown as skipped, never as success.
 _Avoid_: Dropped run, missed cron
 
+**Laravel queue worker**:
+One of the site's `queue1` to `queueN` services that runs the database queue as the site account from the current release, restarts after a crash within a start limit, and stops gracefully on a reviewed Stop. Its definition is the queue names, process count and job timeout.
+_Avoid_: Supervisor program, queue daemon
+
+**Retry interval**:
+The site's `DB_QUEUE_RETRY_AFTER`, written before its queue workers start and kept above their job timeout, so a job interrupted by a crash or forced stop is retried. Jobs must be safe to repeat.
+_Avoid_: Visibility timeout, lock timeout
+
 **Fence**:
 The step that stops a site's automation slice, keeps it from starting, and proves the slice has no processes before a change to that site's code, schema, runtime or settings proceeds; its restore starts exactly the work the review declared ([automation](docs/automation.md#fencing-later-changes)).
 _Avoid_: Pause, maintenance mode

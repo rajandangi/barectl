@@ -287,6 +287,40 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to the site",
         after_home=Home.SITE,
     ),
+    "set_laravel_queue_workers": ChangeWords(
+        title="Change queue workers for {site}",
+        summary=(
+            (
+                "Barectl can run this site's queued jobs in the background on the server, "
+                "or stop them, without Supervisor or a hand-written service file."
+            ),
+            (
+                "Start sets the retry interval a little above each job's timeout, then starts "
+                "one process per reviewed process. The workers return after a reboot."
+            ),
+            (
+                "Stop keeps them stopped after a reboot. Restart lets each process finish "
+                "the job it is running before it starts again."
+            ),
+            (
+                "A crash or a forced stop can leave a job to be retried, so your jobs must be "
+                "safe to repeat."
+            ),
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the site",
+            "environment": "Saving the retry interval",
+            "units": "Saving the worker definition",
+            "start": "Starting the workers",
+            "restart": "Restarting the workers",
+            "stop": "Stopping the workers",
+            "verify": "Checking it works",
+        },
+        home=Home.SITE,
+        after="Back to the site",
+        after_home=Home.SITE,
+    ),
 }
 
 

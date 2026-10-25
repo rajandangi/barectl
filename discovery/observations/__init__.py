@@ -5,7 +5,9 @@ import re
 import shlex
 
 from automation import observation as automation_observation
+from automation import worker_observation
 from automation.observation import ObservedSchedule
+from automation.worker_observation import ObservedWorker
 from bootstrap.standing import HostJudgment, Standing
 from laravel import observation as laravel_observation
 from runtimes import defaults as runtime_defaults
@@ -100,6 +102,15 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         sites=sites,
         releases=releases,
     )
+    workers = _workers(
+        shell,
+        standing,
+        hosting,
+        release_observation,
+        settings_observation,
+        sites=sites,
+        release_inventory=releases,
+    )
     certificate_email, certificate_email_state = "", ""
     if sites and standing.standing == Standing.TARGET_STACK:
         certificate_email_state, certificate_email = caddy_email.read(shell)
@@ -118,6 +129,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         releases=release_observation,
         settings=settings_observation,
         automation=scheduled,
+        workers=workers,
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
     )
@@ -227,6 +239,44 @@ def _automation(
             (),
         )
     return Observation(ObservationOutcome.OBSERVED, ("/etc/systemd/system",), "", schedules)
+
+
+def _workers(
+    shell: RemoteShell,
+    standing: HostJudgment,
+    hosting: Observation[tuple[ObservedSite, ...]],
+    releases: Observation[tuple[ObservedRelease, ...]],
+    settings: Observation[tuple[ObservedSetting, ...]],
+    *,
+    sites: bool,
+    release_inventory: bool,
+) -> Observation[tuple[ObservedWorker, ...]]:
+    """Each Laravel site's queue workers, read only on a full target-host discovery."""
+    if not (sites and release_inventory):
+        return Observation(ObservationOutcome.OBSERVED, (), "", ())
+    if standing.standing != Standing.TARGET_STACK:
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+    laravel = frozenset(
+        site.identifier
+        for site in hosting.value
+        if any(release.identifier == site.identifier for release in releases.value)
+        or any(
+            setting.identifier == site.identifier and setting.application == "laravel"
+            for setting in settings.value
+        )
+    )
+    if not laravel:
+        return Observation(ObservationOutcome.OBSERVED, ("/etc/systemd/system",), "", ())
+    value = worker_observation.read(shell)
+    workers = worker_observation.observations(value, sites=hosting.value, laravel=laravel)
+    if workers is None:
+        return Observation(
+            ObservationOutcome.INACCESSIBLE,
+            ("/etc/systemd/system",),
+            "The queue workers could not be read.",
+            (),
+        )
+    return Observation(ObservationOutcome.OBSERVED, ("/etc/systemd/system",), "", workers)
 
 
 def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:

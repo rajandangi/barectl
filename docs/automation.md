@@ -2,7 +2,7 @@
 
 A site's scheduled tasks and queue workers run as native systemd units on the managed server, under that site's own account. Barectl reviews and applies a change; the server keeps running the work with every Barectl controller closed, and the next discovery reconstructs the setting and its last result. Accepted in [ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md).
 
-Phase C starts with **server cron** for a WordPress site ([#357](https://github.com/rajandangi/barectl/issues/357), [#394](https://github.com/rajandangi/barectl/issues/394)). The Laravel scheduler, queue workers and object cache are the later Phase C tickets and reuse the same convention, projection and fence.
+Phase C starts with **server cron** for a WordPress site ([#357](https://github.com/rajandangi/barectl/issues/357), [#394](https://github.com/rajandangi/barectl/issues/394)) and adds a Laravel site's **database queue workers** ([#266](https://github.com/rajandangi/barectl/issues/266)). The Laravel scheduler and object cache are later Phase C tickets and reuse the same convention, projection and fence.
 
 ## Units and the slice
 
@@ -52,6 +52,38 @@ Turning on is refused, with the reason, when:
 
 Turning off is available whenever the site's own evidence is readable, even with a duplicate scheduler present.
 
+## Laravel database queue workers
+
+A Laravel site has one worker definition, edited under **Settings > Queue workers**: the database connection only, up to eight queue names in priority order, one to four processes, and a job timeout from 30 to 900 seconds (default 60). Start, Stop and Restart are ordinary reviewed Site changes.
+
+Each process is a `Type=exec` service in the site's slice, running as the site account from `current`:
+
+```
+/var/www/<id>/bin/php artisan queue:work --connection=database --queue=<names> \
+    --sleep=3 --tries=3 --max-time=3600 --timeout=<timeout>
+```
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `Restart` | `always` | a clean exit or a crash restarts the process |
+| `RestartSec` | `5s` | a short pause between attempts |
+| `StartLimitIntervalSec`, `StartLimitBurst` | `60s`, `5` | a crash loop stops instead of spinning |
+| `KillMode` | `control-group` | no child outlives the process |
+| `TimeoutStopSec` | timeout + 15 s | SIGTERM has room to finish the current job |
+
+Start sets `DB_QUEUE_RETRY_AFTER` to the timeout + 30 seconds through the same private `.env` path as [Edit settings](sites.md), **before** any process starts. Laravel's default `config/queue.php` reads that variable, so `--timeout` stays several seconds below `retry_after`. The review states the assumption and that a crash or a forced stop can leave a job to be retried, so jobs must be safe to repeat. Start enables boot activation, so the workers return after a reboot; Stop disables it, so an explicit stop survives a reboot. Restart is `systemctl restart`, not `queue:restart`: each process receives SIGTERM and finishes its current job within its own stop budget.
+
+Start and Restart are refused, with the reason, when:
+
+- the site is not Laravel, is gated, partly deployed or not completely applied, or its current release did not pass `/up`;
+- the current release has migrations that are not recorded, the database has no `jobs` table, or the site's PHP command-line build does not load PCNTL;
+- a site-account or root crontab line, a Supervisor program, or a foreign service already runs `queue:work` for the site or in the site's account;
+- an installed worker has settings Barectl did not write. A queue-list, process-count or timeout edit inside the bounds is adopted; anything else is reported once and blocks only Start and Restart.
+
+Stop is available whenever the site's own evidence is readable, even with a duplicate worker or an unsupported edit.
+
+Discovery reads the worker unit files and each process's `systemctl show` fields in one bounded root read, and stores the adopted definition and the aggregate state. A fresh controller reconstructs the definition and its state from the server alone.
+
 ## Status
 
 One pure projection (`automation/status.py`) turns native evidence into the state every screen shows, with the time it was checked:
@@ -70,13 +102,15 @@ One pure projection (`automation/status.py`) turns native evidence into the stat
 | No cron is running | `DISABLE_WP_CRON` is set but no timer exists |
 | Could not confirm | the native read was unavailable or outside supported settings |
 
+Queue workers use the same projection with their own states: Off, On and running, On and restarting after a crash, Stopped after repeated crashes (systemd's start limit), Paused by a change, Off during maintenance and Could not confirm.
+
 Deliberate Off, Paused and maintenance states are not alarms. Failed, timed out, skipped, no-cron and unconfirmed states appear in the site's Overview line and in the server's Needs attention list with one next action.
 
 ## Discovery and reconstruction
 
 Full discovery runs one bounded root read ([`automation/observation.py`](../automation/observation.py)): the three unit files, `systemctl show` fields (states, result, exit status, start and exit timestamps, last trigger and next elapse, control group), the slice's process count, and the crontab, Supervisor and foreign-unit files used for duplicate detection. It never runs PHP, WP-CLI or Artisan, and it never reads a private site file.
 
-The projected rows are stored in `automation_observation` (ADR 0003), so a controller with an empty database reconstructs the setting and its last result from the server alone. Repeated reviews propose no change.
+The projected rows are stored in `automation_observation` and `worker_observation` (ADR 0003), so a controller with an empty database reconstructs the setting, the worker definition and each state from the server alone. The recorded `automation-laravel-26.04` state proves it; repeated reviews propose no change.
 
 ## Fencing later changes
 

@@ -11,6 +11,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet
 
 from automation.observation import ObservedSchedule
+from automation.worker_observation import ObservedWorker
+from automation.workers import WorkerDefinition
 from bootstrap.standing import HostJudgment, Standing
 from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
@@ -202,6 +204,11 @@ class CollectedSnapshot:
     automation: Observation[tuple[ObservedSchedule, ...]] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
     )
+    # Each Laravel site's queue-worker definition and state, read from its units
+    # (docs/automation.md, Phase C #266).
+    workers: Observation[tuple[ObservedWorker, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
     certificate_email: str = ""
     certificate_email_state: str = ""
@@ -269,6 +276,9 @@ def save_snapshot(
         automation_status=collected.automation.outcome,
         automation_source=_joined(collected.automation.source),
         automation_warning=collected.automation.warning,
+        workers_status=collected.workers.outcome,
+        workers_source=_joined(collected.workers.source),
+        workers_warning=collected.workers.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -354,6 +364,7 @@ def save_snapshot(
     _save_releases(snapshot, collected.releases.value)
     _save_settings(snapshot, collected.settings.value)
     _save_automation(snapshot, collected.automation.value)
+    _save_workers(snapshot, collected.workers.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -461,6 +472,35 @@ def _save_automation(snapshot: DiscoverySnapshot, schedules: tuple[ObservedSched
     )
 
 
+def _save_workers(snapshot: DiscoverySnapshot, workers: tuple[ObservedWorker, ...]) -> None:
+    from automation.models import WorkerObservation
+
+    WorkerObservation.objects.bulk_create(
+        WorkerObservation(
+            snapshot=snapshot,
+            identifier=worker.identifier,
+            status=worker.status,
+            queues="\n".join(worker.queues),
+            processes=worker.processes,
+            timeout=worker.timeout,
+            active_processes=worker.active_processes,
+            installed=worker.installed,
+            enabled=worker.enabled,
+            masked=worker.masked,
+            start_limited=worker.start_limited,
+            slice_populated=worker.slice_populated,
+            result=worker.result,
+            exec_status=worker.exec_status,
+            last_start_us=worker.last_start_us,
+            last_exit_us=worker.last_exit_us,
+            nrestarts=worker.nrestarts,
+            duplicate=worker.duplicate,
+            problem=worker.problem,
+        )
+        for worker in workers
+    )
+
+
 class AttemptSnapshot(NamedTuple):
     attempt: DiscoveryAttempt
     snapshot: Snapshot | None
@@ -474,6 +514,7 @@ _OBSERVATION_ROWS = (
     "releases",
     "settings",
     "automation",
+    "workers",
 )
 
 
@@ -592,6 +633,12 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             _reads(row.automation_source),
             row.automation_warning,
             tuple(_read_automation(automation) for automation in row.automation.all()),
+        ),
+        workers=Observation(
+            ObservationOutcome(row.workers_status),
+            _reads(row.workers_source),
+            row.workers_warning,
+            tuple(_read_worker(worker) for worker in row.workers.all()),
         ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
@@ -732,6 +779,42 @@ def _read_automation(row: object) -> ObservedSchedule:
         last_trigger_us=row.last_trigger_us,
         next_elapse_us=row.next_elapse_us,
         slice_populated=row.slice_populated,
+    )
+
+
+def _read_worker(row: object) -> ObservedWorker:
+    from automation.models import WorkerObservation
+    from automation.worker_status import WorkerStatus
+
+    if not isinstance(row, WorkerObservation):
+        raise TypeError("Not a queue-worker observation.")
+    definition = (
+        WorkerDefinition(
+            tuple(line for line in row.queues.splitlines() if line),
+            row.processes,
+            row.timeout,
+        )
+        if row.queues and row.timeout
+        else None
+    )
+    return ObservedWorker(
+        identifier=row.identifier,
+        status=WorkerStatus(row.status),
+        definition=definition,
+        processes=row.processes,
+        active_processes=row.active_processes,
+        installed=row.installed,
+        enabled=row.enabled,
+        masked=row.masked,
+        result=row.result,
+        exec_status=row.exec_status,
+        start_limited=row.start_limited,
+        last_start_us=row.last_start_us,
+        last_exit_us=row.last_exit_us,
+        nrestarts=row.nrestarts,
+        slice_populated=row.slice_populated,
+        duplicate=row.duplicate,
+        problem=row.problem,
     )
 
 

@@ -22,6 +22,7 @@ from automation.convention import (
     timer_name,
     unit_file,
 )
+from automation.workers import checked_definition, render_worker_units
 from sites.bodies.common import replace_site_file, run, safe
 
 NAME = re.compile(
@@ -315,14 +316,20 @@ __all__ = [
     "active_state",
     "daemon_reload",
     "disable_and_stop",
+    "disable_and_stop_service",
+    "enable_service",
     "enable_timer",
     "fence",
     "load_state",
     "properties",
     "publish",
     "publish_units",
+    "publish_worker_units",
     "remove",
     "remove_units",
+    "remove_worker_service",
+    "reset_failed",
+    "restart_service",
     "restore",
     "slice_empty",
     "systemctl",
@@ -330,5 +337,59 @@ __all__ = [
     "unit_digests",
     "unit_file_state",
     "wait_for_tick",
+    "wait_services_active",
     "wait_slice_empty",
+    "worker_unit_digests",
 ]
+
+
+def worker_unit_digests(identifier: str, definition: object) -> dict[str, str]:
+    """Each rendered worker file's digest, or ``absent``; the reviewed preimage."""
+    values: dict[str, str] = {}
+    for kind, name, _text in render_worker_units(identifier, checked_definition(definition)):
+        role = "slice" if kind == "slice" else role_of(name, identifier) or ""
+        path = f"{SYSTEMD_DIRECTORY}/{name}"
+        text = current_text(pathlib.Path(path))
+        values[role] = "absent" if text is None else digest(text)
+    return values
+
+
+def publish_worker_units(identifier: str, definition: object, expected: dict[str, str]) -> None:
+    value = checked_definition(definition)
+    for kind, name, text in render_worker_units(identifier, value):
+        role = "slice" if kind == "slice" else role_of(name, identifier) or ""
+        path = f"{SYSTEMD_DIRECTORY}/{name}"
+        publish(path, text, _reviewed_preimage(path, expected.get(role, "")))
+
+
+def remove_worker_service(identifier: str, role: str, expected: str) -> None:
+    path = unit_file(identifier, role, "service")
+    remove(path, _reviewed_preimage(path, expected))
+    with contextlib.suppress(ValueError):
+        systemctl("reset-failed", service_name(identifier, role))
+
+
+def reset_failed(name: str) -> None:
+    with contextlib.suppress(ValueError):
+        systemctl("reset-failed", name)
+
+
+def restart_service(name: str) -> None:
+    systemctl("restart", name)
+
+
+def enable_service(name: str) -> None:
+    systemctl("enable", name)
+
+
+def disable_and_stop_service(name: str) -> None:
+    systemctl("disable", "--now", name)
+
+
+def wait_services_active(names: list[str], budget_seconds: int) -> bool:
+    deadline = time.monotonic() + budget_seconds
+    while time.monotonic() < deadline:
+        if all(active_state(name) == "active" for name in names):
+            return True
+        time.sleep(POLL_SECONDS)
+    return all(active_state(name) == "active" for name in names)

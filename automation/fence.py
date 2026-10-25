@@ -11,8 +11,9 @@ from typing import Final
 
 from discovery.snapshot import CollectedSnapshot
 
-from . import convention
+from . import convention, workers
 from .status import ScheduleStatus
+from .worker_status import WorkerStatus
 
 # The longest a change waits for a fence to drain, in seconds (docs/adr/0036).
 FENCE_BUDGET_SECONDS: Final = 30
@@ -26,6 +27,13 @@ RESUMABLE: Final = frozenset(
         ScheduleStatus.TIMED_OUT,
         ScheduleStatus.SKIPPED,
         ScheduleStatus.PAUSED,
+    }
+)
+RESUMABLE_WORKERS: Final = frozenset(
+    {
+        WorkerStatus.RUNNING,
+        WorkerStatus.RESTARTING,
+        WorkerStatus.PAUSED,
     }
 )
 
@@ -59,7 +67,9 @@ class RestorePlan:
         }
 
 
-def review_fence_plan(collected: CollectedSnapshot, identifier: str) -> RestorePlan | None:
+def review_fence_plan(  # noqa: C901 - schedules and workers together
+    collected: CollectedSnapshot, identifier: str
+) -> RestorePlan | None:
     """The resume set at review time, or ``None`` when the site's work cannot be read.
 
     A fresh controller never guesses: when the evidence is unavailable the caller refuses
@@ -68,11 +78,25 @@ def review_fence_plan(collected: CollectedSnapshot, identifier: str) -> RestoreP
     if collected.automation.outcome.value != "observed":
         return None
     schedules = tuple(row for row in collected.automation.value if row.identifier == identifier)
-    if not schedules:
+    worker_rows = tuple(row for row in collected.workers.value if row.identifier == identifier)
+    if not schedules and not worker_rows:
         return None
     timers: list[str] = []
     services: list[str] = []
     resume: list[str] = []
+    for worker in worker_rows:
+        if not worker.installed:
+            continue
+        roles = (
+            worker.definition.roles
+            if worker.definition is not None
+            else workers.WORKER_ROLES[: worker.processes]
+        )
+        for role in roles:
+            service = convention.service_name(identifier, role)
+            services.append(service)
+            if worker.enabled and worker.status in RESUMABLE_WORKERS:
+                resume.append(service)
     for schedule in schedules:
         if not schedule.installed:
             continue

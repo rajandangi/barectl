@@ -31,12 +31,40 @@ from .bodies.common import ENVIRONMENT_KEY, NON_SECRET_KEYS
 
 SLUG: Final = "edit_laravel_environment"
 LABEL: Final = "Edit Laravel environment"
+
+
+def _without_automation_imports(text: str) -> str:
+    """Drop the imports the assembled body receives from its concatenated neighbours."""
+    kept: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        if line.startswith(("from automation.", "from .")):
+            skipping = line.rstrip().endswith("(")
+            continue
+        if skipping:
+            skipping = not line.strip().endswith(")")
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 BODY_SOURCE: Final = (
     observation.LARAVEL_SOURCE
+    + "\n"
+    + importlib.resources.files("automation").joinpath("convention.py").read_text()
+    + "\n"
+    + _without_automation_imports(
+        importlib.resources.files("automation").joinpath("workers.py").read_text()
+    )
+    + "\n"
+    + _without_automation_imports(
+        importlib.resources.files("automation.bodies").joinpath("worker_env.py").read_text()
+    )
     + "\n"
     + importlib.resources.files("laravel.bodies")
     .joinpath("settings.py")
     .read_text()
+    .replace("from automation.bodies.worker_env import restart_workers\n", "")
     .replace(
         "from laravel.bodies.common import (\n"
         "    ENVIRONMENT_KEY,\n"
