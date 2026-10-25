@@ -49,6 +49,8 @@ def _layer(layer: str) -> tuple[str, str, str]:
         return RELEASE, "l3", "l3"
     if layer == "L4":
         return RELEASE, "l4", "l4"
+    if layer == "L5":
+        return RELEASE, "l5", "l5"
     if layer == "L0-standing":
         return RELEASE, "l0-standing", "standing-26.04"
     if layer == "fixture":
@@ -70,6 +72,8 @@ def key(layer: str = "L0") -> str:
         digest.update(prepared_wordpress_inputs())
     if layer == "L4":
         digest.update(prepared_cache_inputs())
+    if layer == "L5":
+        digest.update(prepared_laravel_cache_inputs())
     certificate, _ = mirror.fixture_ca()
     digest.update(certificate.read_bytes())
     return digest.hexdigest()[:12]
@@ -123,6 +127,30 @@ def prepared_cache_inputs(l3_key: str | None = None) -> bytes:
     digest.update(client_change.BODY_BYTES)
     # The layer also carries a second site, so a per-site cache can be proved isolated.
     digest.update(b"l4-other-site-v1")
+    return digest.digest()
+
+
+def prepared_laravel_cache_inputs(l1_key: str | None = None) -> bytes:
+    """The prepared-Laravel cache layer follows L1 and the bodies its setup applies."""
+    _django()
+    from automation import worker_change
+    from cache import engine as cache_engine
+    from laravel import change as laravel_change
+    from laravel import create as laravel_create
+    from sites import client_change
+
+    digest = hashlib.sha256((key("L1") if l1_key is None else l1_key).encode())
+    for body in (
+        laravel_create.BODY_BYTES,
+        laravel_change.BODY_BYTES,
+        worker_change.BODY_BYTES,
+        cache_engine.BODY_BYTES,
+        client_change.BODY_BYTES,
+    ):
+        digest.update(body)
+    # The fixture files the preparation pushes live in the scenario; bump this when they
+    # change so the key cannot serve a stale image.
+    digest.update(b"l5-laravel-cache-v1")
     return digest.digest()
 
 
@@ -283,6 +311,10 @@ def ensure(layer: str = "L0") -> str:
         raise DockerError(
             "The prepared-cache L4 snapshot is missing. Run its preparation scenario first."
         )
+    if layer == "L5":
+        raise DockerError(
+            "The prepared-Laravel L5 snapshot is missing. Run its preparation scenario first."
+        )
     build(layer)
     store(layer)
     return image
@@ -294,7 +326,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="images", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("cache-key", "build"))
-    parser.add_argument("--layer", default="L0", choices=("L0", "L1", "L2", "L3", "L4", "fixture"))
+    parser.add_argument(
+        "--layer", default="L0", choices=("L0", "L1", "L2", "L3", "L4", "L5", "fixture")
+    )
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if options.command == "cache-key":
         print(cache_key(options.layer))  # noqa: T201

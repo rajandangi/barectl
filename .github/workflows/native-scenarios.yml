@@ -49,6 +49,7 @@ jobs:
           echo "l2=$(uv run python -m disposable.images cache-key --layer L2)" >> "$GITHUB_OUTPUT"
           echo "l3=$(uv run python -m disposable.images cache-key --layer L3)" >> "$GITHUB_OUTPUT"
           echo "l4=$(uv run python -m disposable.images cache-key --layer L4)" >> "$GITHUB_OUTPUT"
+          echo "l5=$(uv run python -m disposable.images cache-key --layer L5)" >> "$GITHUB_OUTPUT"
           echo "fixture=$(uv run python -m disposable.images cache-key --layer fixture)" >> "$GITHUB_OUTPUT"
       - name: Restore the fixture snapshot
         id: fixture
@@ -65,6 +66,7 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
           key: native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
       - name: Restore the L1 snapshot
@@ -95,6 +97,13 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
           key: native-l4-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l4 }}
+      # L5 is L1 plus the deployed Laravel queue-worker fixture and its cache prerequisites.
+      - name: Restore the L5 snapshot
+        id: l5
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+          key: native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
       # One 900 s build stop covers every native stage of the shard.
       - run: |
           deadline=$(( $(date +%s) + 900 ))
@@ -156,6 +165,18 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
           key: ${{ steps.l4.outputs.cache-primary-key }}
+      - id: l5-archive
+        if: always() && steps.l5.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l5.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L5 snapshot
+        if: always() && steps.l5-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+          key: ${{ steps.l5.outputs.cache-primary-key }}
       - id: fixture-archive
         if: always() && steps.fixture.outputs.cache-hit != 'true'
         run: |

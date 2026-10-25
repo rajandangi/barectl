@@ -151,7 +151,7 @@ def _wanted(
 
 def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
     layer = getattr(cls, "layer", None)
-    if layer not in {"L0", "L1", "L2", "L3", "L4", "L0-standing", "L0-24.04"}:
+    if layer not in {"L0", "L1", "L2", "L3", "L4", "L5", "L0-standing", "L0-24.04"}:
         raise ScenarioError(f"{cls.__name__} declares no known layer ({layer!r}).")
     return Scenario(
         label=f"{cls.__module__}.{cls.__qualname__}",
@@ -866,7 +866,7 @@ def prepare_layers(
     """
     layers = {scenario.layer for scenario in scenarios}
     requirements = []
-    if layers & {"L1", "L2", "L3", "L4"}:
+    if layers & {"L1", "L2", "L3", "L4", "L5"}:
         requirements.append(("L1", "disposable.test_foundation.HostFoundation"))
     if layers & {"L2", "L3", "L4"}:
         requirements.append(("L2", "disposable.test_prepared_sites.PrepareSites"))
@@ -874,6 +874,8 @@ def prepare_layers(
         requirements.append(("L3", "disposable.test_prepared_wordpress.PrepareWordPress"))
     if "L4" in layers:
         requirements.append(("L4", "disposable.test_prepared_wordpress.PrepareWordPressCache"))
+    if "L5" in layers:
+        requirements.append(("L5", "disposable.test_prepared_laravel.PrepareLaravel"))
     for layer, label in requirements:
         if images.load(layer):
             continue

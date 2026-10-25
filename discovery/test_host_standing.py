@@ -33,6 +33,7 @@ class RecordedHostStandingTests(TestCase):
         "fence-wordpress-26.04": (Standing.TARGET_STACK, ()),
         "valkey-installed-26.04": (Standing.TARGET_STACK, ()),
         "object-cache-26.04": (Standing.TARGET_STACK, ()),
+        "object-cache-laravel-26.04": (Standing.TARGET_STACK, ()),
         "object-cache-edited-26.04": (Standing.TARGET_STACK, ()),
         "nginx-26.04": (Standing.NOT_MANAGEABLE, ("Nginx packages",)),
         "apache-26.04": (Standing.NOT_MANAGEABLE, ("Apache packages",)),
