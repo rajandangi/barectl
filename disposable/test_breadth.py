@@ -19,6 +19,7 @@ import os
 import shlex
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import override
 
@@ -29,7 +30,7 @@ from operations.inputs import PreparationInputs
 
 from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG
-from .test_laravel_deploy import _GOOD_BOOTSTRAP, _HEALTH_RENAMED, LaravelDeployCase
+from .test_laravel_deploy import _HEALTH_RENAMED, LaravelDeployCase
 
 SITE = "sqwalpha"
 DOMAIN = "site.fixture.test"
@@ -102,6 +103,16 @@ class BreadthCase(LaravelDeployCase):
         )
         self.assert_succeeded(line, unit)
 
+    def ensure_scheduler(self) -> None:
+        from automation.convention import timer_name
+
+        timer = timer_name(self.identity, "schedule")
+        if self.unit_property(timer, "ActiveState") == "active" and "enabled" in self.unit_property(
+            timer, "UnitFileState"
+        ):
+            return
+        self.start_scheduler()
+
     def wait_active(self, unit: str, *, timeout: float = 40) -> None:
         end = time.monotonic() + timeout
         state = self.unit_property(unit, "ActiveState")
@@ -163,59 +174,134 @@ class RebootAutomation(BreadthCase):
 
 @tag(SCENARIO_TAG)
 class RebootGateFence(BreadthCase):
-    """A maintenance gate keeps work off across a boot; the next Deploy restores it."""
+    """The gate fence: paused during a Deploy and a Roll back, and kept off across a boot."""
 
-    def test_the_gate_fence_holds_across_a_boot_and_restores(self) -> None:
+    def _wait_for_gate(self, *, timeout: float = 90) -> bool:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if self.https_status("/") == 503:
+                return True
+            time.sleep(0.3)
+        return False
+
+    def _assert_fenced(self, timer: str, service: str) -> None:
+        self.assertEqual(self.unit_property(timer, "RefuseManualStart"), "yes")
+        self.assertIn(self.unit_property(timer, "ActiveState"), ("inactive", "failed"))
+        self.assertNotIn(self.unit_property(timer, "UnitFileState"), ("enabled", "enabled-runtime"))
+        for name in (service, *self.worker_units()):
+            self.assertEqual(self.unit_property(name, "RefuseManualStart"), "yes", name)
+            self.assertNotIn(
+                self.unit_property(name, "ActiveState"), ("active", "activating"), name
+            )
+        for name in self.worker_units():
+            self.assertNotIn(
+                self.unit_property(name, "UnitFileState"), ("enabled", "enabled-runtime")
+            )
+
+    def _assert_resumed(self, timer: str, service: str) -> None:
+        self.assertEqual(self.unit_property(timer, "ActiveState"), "active")
+        self.assertIn("enabled", self.unit_property(timer, "UnitFileState"))
+        self.assertEqual(self.unit_property(service, "RefuseManualStart"), "no")
+        for unit in self.worker_units():
+            self.wait_active(unit)
+            self.assertIn("enabled", self.unit_property(unit, "UnitFileState"))
+            self.assertEqual(self.unit_property(unit, "RefuseManualStart"), "no")
+
+    def test_a_deploy_fences_the_work_and_restores_it_after_up(self) -> None:
+        from automation import scheduler
         from automation.convention import service_name, timer_name
-        from laravel import change
+        from laravel import change, rollback
 
         self.start_scheduler()
         timer = timer_name(self.identity, "schedule")
         service = service_name(self.identity, "schedule")
-        units = (timer, service, *self.worker_units())
+        previous = self.current_release()
+        self.push(
+            {"database/migrations/2026_10_26_000000_create_gate_table.php": _GATE_MIGRATION},
+            "gate deploy",
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            running = pool.submit(self.apply, change.DEPLOY_SITE, self.deploy_inputs(), timeout=150)
+            # The migration sleeps, so the gate is up long enough to read the fence while
+            # the change is still between its gate and its switch.
+            self.assertTrue(self._wait_for_gate(), "the maintenance gate never answered 503")
+            self._assert_fenced(timer, service)
+            self.assertEqual(
+                self.current_release(), previous, "the code switched while the gate was up"
+            )
+            line, unit, _ = running.result()
+        self.assert_succeeded(line, unit)
+        self.assertNotEqual(self.current_release(), previous)
+        self.assertTrue(self.served())
+        self._assert_resumed(timer, service)
+        # The restored scheduler runs the new release: Run now starts its installed service.
+        line, unit, _ = self.apply(
+            scheduler.SET_LARAVEL_SCHEDULER,
+            PreparationInputs("", self.identity, schedule_state="run"),
+            timeout=60,
+        )
+        self.assert_succeeded(line, unit)
+        # A Roll back gates and restores the same work on the release it reactivates.
+        line, unit, _ = self.apply(
+            rollback.ROLLBACK_SITE,
+            PreparationInputs("", self.identity, (), previous),
+            timeout=120,
+        )
+        self.assert_succeeded(line, unit)
+        self.assertEqual(self.current_release(), previous)
+        self.assertTrue(self.served())
+        self._assert_resumed(timer, service)
+
+    def test_the_gate_fence_holds_across_a_boot(self) -> None:
+        from automation.convention import service_name, timer_name
+        from laravel import change
+
+        self.ensure_scheduler()
+        timer = timer_name(self.identity, "schedule")
+        service = service_name(self.identity, "schedule")
         self.push(
             {
                 "bootstrap/app.php": _HEALTH_RENAMED,
-                "database/migrations/2026_10_26_000000_create_gate_table.php": _GATE_MIGRATION,
+                "database/migrations/2026_10_26_000001_create_boot_gate_table.php": (
+                    _BOOT_GATE_MIGRATION
+                ),
             },
-            "breadth gate",
+            "boot gate",
         )
         line, unit, _ = self.apply(change.DEPLOY_SITE, self.deploy_inputs())
         self.assert_failed(line, "partial", "laravel_readiness", unit)
-        self.assertEqual(self.https_status(), 503)
-        for name in units:
-            # A oneshot service has no install section (static); the timer and the worker
-            # services are the boot activation and must be disabled.
-            state = self.unit_property(name, "UnitFileState")
-            self.assertNotIn(state, ("enabled", "enabled-runtime"), name)
-            if name != service:
-                self.assertEqual(state, "disabled", name)
-            self.assertNotIn(self.unit_property(name, "ActiveState"), ("active", "activating"))
-        # Boot activation is off for the timers and the worker services, so a boot cannot
+        self.assertEqual(self.https_status("/"), 503)
+        self._assert_fenced(timer, service)
+        # Boot activation is off for the timer and the worker services, so a boot cannot
         # start work against the half-migrated release.
         self.stop_for(20)
         boot_epoch = self.unit_unix_manager("UserspaceTimestamp")
-        for name in units:
-            state = self.unit_property(name, "UnitFileState")
-            self.assertNotIn(state, ("enabled", "enabled-runtime"), name)
-            if name != service:
-                self.assertEqual(state, "disabled", name)
-            self.assertNotIn(self.unit_property(name, "ActiveState"), ("active", "activating"))
+        self._assert_fenced(timer, service)
         self.assertEqual(self.starts_since(service, boot_epoch), 0)
         self.assertEqual(self.https_status("/"), 503)
-        # The next Deploy is the documented recovery: it finishes or reverses the partial
-        # state, closes the gate and restores exactly the work the review resumed.
-        self.push({"bootstrap/app.php": _GOOD_BOOTSTRAP}, "breadth recovery")
-        line, unit, _ = self.apply(
-            change.DEPLOY_SITE, self.deploy_inputs(migrations=False), timeout=120
-        )
-        self.assert_succeeded(line, unit)
-        self.assertTrue(self.served())
-        self.assertEqual(self.unit_property(timer, "ActiveState"), "active")
-        self.assertIn("enabled", self.unit_property(timer, "UnitFileState"))
-        for unit in self.worker_units():
-            self.wait_active(unit)
-            self.assertIn("enabled", self.unit_property(unit, "UnitFileState"))
+
+
+_BOOT_GATE_MIGRATION = """<?php
+
+use Illuminate\\Database\\Migrations\\Migration;
+use Illuminate\\Database\\Schema\\Blueprint;
+use Illuminate\\Support\\Facades\\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('boot_gate', function (Blueprint $table) {
+            $table->id();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('boot_gate');
+    }
+};
+"""
 
 
 _GATE_MIGRATION = """<?php
@@ -228,6 +314,7 @@ return new class extends Migration
 {
     public function up(): void
     {
+        sleep(4);
         Schema::create('breadth_gate', function (Blueprint $table) {
             $table->id();
             $table->timestamps();

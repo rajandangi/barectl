@@ -342,8 +342,12 @@ class LaravelDeployCase(ScenarioTestCase):
     ) -> tuple[engine.ResultLine, str, engine.ReviewDraft]:
         with self.shell() as shell:
             # The worker records the reviewed fence plan (automation/fence.py) before it
-            # stores the review, so a native scenario applies the same review it would.
-            draft = engine._planned(shell, kind.review(kind.inspect(shell, inputs), inputs))
+            # stores the review, so a native scenario applies the same review it would. A
+            # recording shell refuses that read by design (ADR 0032), and a preparation
+            # run's transcript is recorded at its own checkpoint, so it plans no fence.
+            draft = kind.review(kind.inspect(shell, inputs), inputs)
+            if not self.record_state:
+                draft = engine._planned(shell, draft)
             self.assertTrue(draft.eligible, draft.refusals)
             stored = ChangeReview(
                 document=draft.document,

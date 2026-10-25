@@ -206,11 +206,11 @@ The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their na
 
 ## Qualification
 
-Phase A's native scenarios exercise the items this design left open: independent site masters with their OPcache protections, private directories and admission sockets blocking cross-site access, the single-thread removability check and complete FPM drain in both switch directions, target failure, interrupted native state and fresh-controller finish or reverse, and the HAProxy service convention. The [Phase A qualification record](phase-a-qualification.md) names the revision, architectures, results and measured memory and disk, and what remains unqualified.
+Phase A's native scenarios exercise the items this design left open: independent site masters with their OPcache protections, private directories and admission sockets blocking cross-site access, the single-thread removability check and complete FPM drain in both switch directions, target failure, interrupted native state and fresh-controller finish or reverse, and the HAProxy service convention. Phase C's scenarios prove the per-site automation, cache and log conventions, the fence and restore step and the scheduled breadth job. The [Phase A qualification record](phase-a-qualification.md), the [Phase B qualification record](phase-b-qualification.md) and the [Phase C qualification record](phase-c-qualification.md) name the revisions, architectures, results, measured memory and disk, and what remains unqualified.
 
 Still open, for later phases or beyond the disposable server:
 
 - AppArmor behavior of the Nix daemon and installer on Ubuntu 26.04 hosts other than the disposable server.
 - ~~Whether a Hydra-built extension such as phpredis loads into the matching default build from its locked store path, for Phase C.~~ Settled in Phase C (#390): it loads, but only from a site pool or command line after the packaged ini; see [PHP extensions](runtimes.md#php-extensions).
-- Ubuntu's `valkey-server` template unit for per-site instances.
+- ~~Ubuntu's `valkey-server` template unit for per-site instances.~~ Settled in Phase C (#392, #393): the packaged template runs one site's instance through a root-owned drop-in; see [object cache](object-cache.md#the-instance).
 - restic with R2 end to end, retention by tag, and read-back verification of the kept copy.
