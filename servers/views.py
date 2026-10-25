@@ -651,7 +651,11 @@ def site_page_response(
 
         context.update(
             logs_context_for_site(
-                server, identifier, request.user, selected=request.GET.get("log", "")
+                server,
+                identifier,
+                request.user,
+                selected=request.GET.get("log", ""),
+                live=request.GET.get("live") == "1",
             )
         )
     return render(request, "sites/detail.html", context, status=status)

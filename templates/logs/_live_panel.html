@@ -1,0 +1,19 @@
+<section id="log-live-panel" aria-labelledby="log-live-heading">
+  <h3 id="log-live-heading">Live lines</h3>
+  <p class="barectl-note" id="log-live-status" role="status">
+    Following new lines while this page is visible.
+  </p>
+  <div id="log-live-lines"></div>
+  <div class="margin-top-2"
+       hx-post="{% url 'site_log_live' server.pk identifier %}"
+       hx-vals='{"source": "{{ logs_selected.source.slug }}"}'
+       hx-trigger="every 2s [document.visibilityState === 'visible']"
+       hx-target="#log-live-lines"
+       hx-swap="beforeend">
+    <noscript>
+      <p class="barectl-note">Live lines need JavaScript. Read the newest lines again instead.</p>
+    </noscript>
+  </div>
+  <a class="usa-button usa-button--outline"
+     href="?log={{ logs_selected.source.slug }}">Stop following</a>
+</section>

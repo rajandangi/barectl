@@ -29,6 +29,33 @@ class NameTests(SimpleTestCase):
         self.assertIsNone(convention.role_of("barectl-apply-" + "a" * 32 + ".service", "shop"))
         self.assertIsNone(convention.role_of("barectl-site-other-wpcron.timer", "shop"))
 
+    def test_every_reviewed_queue_process_has_one_role(self) -> None:
+        self.assertEqual(
+            [convention.queue_role(index) for index in (1, 2, 3, 4)],
+            ["queue1", "queue2", "queue3", "queue4"],
+        )
+        for index in (0, 5):
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                convention.queue_role(index)
+
+    def test_a_queue_role_is_recognized_only_inside_the_reviewed_bound(self) -> None:
+        self.assertEqual(convention.queue_index("queue1"), 1)
+        self.assertEqual(convention.queue_index("queue4"), 4)
+        for role in ("queue", "queue0", "queue5", "queue01", "wpcron", "queuex"):
+            with self.subTest(role=role):
+                self.assertIsNone(convention.queue_index(role))
+
+    def test_queue_roles_are_resolved_from_installed_unit_names_in_process_order(self) -> None:
+        names = (
+            "/etc/systemd/system/barectl-site-shop-queue3.service",
+            "barectl-site-shop-wpcron.service",
+            "barectl-site-shop-queue1.service",
+            "barectl-site-other-queue2.service",
+            "barectl-site-shop-queue9.service",
+            "barectl-site-shop-queue2.timer",
+        )
+        self.assertEqual(convention.queue_roles(names, "shop"), ("queue1", "queue3"))
+
 
 class RenderingTests(SimpleTestCase):
     def test_the_service_is_a_oneshot_in_the_site_identity_with_its_own_limit(self) -> None:

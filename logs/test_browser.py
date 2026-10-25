@@ -10,7 +10,7 @@ from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
 from logs.read import LogLine, LogPage
-from logs.testing import record_log_site
+from logs.testing import record_background_site, record_log_site
 from servers.models import Server
 
 
@@ -63,6 +63,40 @@ class SiteLogsBrowserTests(BrowserTestCase):
             f"{self.live_server_url}/servers/{server.pk}/sites/alpha/logs/?log=php_errors"
         )
         expect(self.page.get_by_role("heading", name="PHP errors", level=3)).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+    def test_a_journal_live_view_stays_plain_and_reachable_at_phone_width(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_background_site(
+            server,
+            application="laravel",
+            workers=1,
+            page=LogPage(
+                "observed",
+                (LogLine(raw="worker started", time="2026-10-25 08:00:00"),),
+                newest="live:s=one",
+                at_end=True,
+            ),
+        )
+        self.grant_logs()
+        self.sign_in()
+        self.page.goto(
+            f"{self.live_server_url}/servers/{server.pk}/sites/alpha/logs/?log=queue_workers&live=1"
+        )
+        expect(self.page.get_by_role("heading", name="Queue workers", level=3)).to_be_visible()
+        expect(
+            self.page.get_by_text("Following new lines while this page is visible.")
+        ).to_be_visible()
+        self.assert_no_native_terms()
+        self.page.get_by_role("link", name="Stop following").focus()
+        self.page.keyboard.press("Enter")
+        expect(self.page.get_by_role("link", name="Follow new lines")).to_be_visible()
+        self.page.set_viewport_size({"width": 320, "height": 740})
+        self.page.goto(
+            f"{self.live_server_url}/servers/{server.pk}/sites/alpha/logs/?log=queue_workers&live=1"
+        )
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
