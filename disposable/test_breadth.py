@@ -173,8 +173,8 @@ class RebootAutomation(BreadthCase):
 
 
 @tag(SCENARIO_TAG)
-class RebootGateFence(BreadthCase):
-    """The gate fence: paused during a Deploy and a Roll back, and kept off across a boot."""
+class GateFence(BreadthCase):
+    """A Deploy and a Roll back pause the site's work while their gate is up."""
 
     def _wait_for_gate(self, *, timeout: float = 90) -> bool:
         end = time.monotonic() + timeout
@@ -251,6 +251,11 @@ class RebootGateFence(BreadthCase):
         self.assertEqual(self.current_release(), previous)
         self.assertTrue(self.served())
         self._assert_resumed(timer, service)
+
+
+@tag(SCENARIO_TAG)
+class RebootGateFence(BreadthCase):
+    """A persistent gate keeps boot activation off across a container boot."""
 
     def test_the_gate_fence_holds_across_a_boot(self) -> None:
         from automation.convention import service_name, timer_name
@@ -462,6 +467,7 @@ class MemoryFourGiB(MemoryCase):
 
 
 __all__ = [
+    "GateFence",
     "LongSchedulerTick",
     "MemoryFourGiB",
     "MemoryOneGiB",

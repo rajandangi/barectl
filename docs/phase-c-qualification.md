@@ -39,17 +39,23 @@ fast-validator, browser and native stages run concurrently and each is timed.
 
 | Stage | Measured | Target | Limit | Result |
 | --- | --- | --- | --- | --- |
-| Controller fast tests (`--parallel`) | TBD | 90 s | | |
-| Fast snapshot validators, 6 classes | TBD | (joint stage) | | |
-| Joint fast stage, as the build measures it | TBD | 60 s | | |
-| Browser tests | TBD | | | |
-| Native lifecycle scenarios, 8 lanes | TBD | 300 s | 900 s | |
-| Longest native item | TBD | | 180 s | |
-| Full local build, wall time | TBD | 300 s | 900 s | |
+| Controller fast tests, 1561 tests with `--parallel` | 42 s in the build | 90 s | | Meets the target |
+| Fast snapshot validators, 6 classes | 77 s | (the joint stage) | | The validators have no separate target |
+| Joint fast stage, as the build measures it | 77 s | 60 s | | **Missed by 17 s**; the next action is below |
+| Browser tests | 83 s | | | |
+| Native lifecycle scenarios, 72 of 72 passed, 8 lanes | 261 s | 300 s | 900 s | Meets the target |
+| Longest native item | 94.0 s (`PHPFence`) | | 180 s | Within the item limit |
+| Full local build, wall time | 261 s | 300 s | 900 s | Meets the target |
 
-The breadth job is outside this budget. Its items are `RebootAutomation` (TBD),
-`RebootGateFence` (TBD), `LongSchedulerTick` (TBD) and the three memory classes (TBD). It is
-never a required check.
+The joint fast stage misses its 60 s target because the validator stage now runs six classes
+(the Phase C automation, journal, rotation, node and HTTP-site validators) in 77 s. The target
+is not raised: the next action is to consolidate the validator classes onto one prepared
+server and one real rotation, as the Phase A record did for its three Node cases, and to
+re-measure the joint stage. The 90 s fast-gate target is met with room.
+
+The breadth job is outside this budget. Its literal item times on this head are in
+[Breadth scenarios](#breadth-scenarios). It is never a required check and adds no time to a
+merge build.
 
 ## Scenarios
 
@@ -57,7 +63,33 @@ Phase C adds the C1, C2 and C3 scenario sets and the log and cache scenarios. Ea
 the class and the item time this build took; a class that holds several test methods runs them
 in one exclusive item against one prepared server.
 
-<!-- SCENARIO TABLE -->
+| Scenario | Class | Local arm64 |
+| --- | --- | --- |
+| C1 WordPress server cron | `WordPressServerCron` | 83.0 s |
+| C1 WordPress object cache | `SiteObjectCache` | 50.8 s |
+| C1 Valkey install and mask | `ValkeyInstall` | 27.7 s |
+| C2 Laravel scheduler | `LaravelScheduler` | 24.5 s |
+| C2 Laravel database queue workers | `LaravelQueueWorkers` | 66.6 s |
+| C2 Laravel object cache | `LaravelObjectCache` | 23.5 s |
+| C2 Deploy and Roll back with the gate | `LaravelDeployMariaDB` | 51.7 s |
+| C2 Deploy refusals and a failed migration | `LaravelDeployOutcomes` | 45.5 s |
+| C3 PHP switch with automation | `PHPFence` | 94.0 s |
+
+The C2 gate's own items are in [Breadth scenarios](#breadth-scenarios); the merge build does
+not run a reboot, a long tick or a memory class. Logs have no lifecycle class: the log reader
+and rotation conventions are proved by the fast layer and the validator stage
+(`LogRotationValidators`, `JournalLogValidators`), because the image carries no `logrotate`
+package and installing one would change the host standing the create review reads.
+
+## Breadth scenarios
+
+`docker/disposable-server/run-scenarios.sh --env-file .env -- --breadth`, two lanes, on this
+head. Each item starts from L5 and is selected only by `--breadth`; the merge build never
+runs them.
+
+| Class | Item time | Result |
+| --- | --- | --- |
+<!-- BREADTH TABLE -->
 
 ## Exit criterion
 
