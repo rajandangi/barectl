@@ -30,7 +30,13 @@ from operations.inputs import PreparationInputs
 
 from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG
-from .test_laravel_deploy import _HEALTH_RENAMED, LaravelDeployCase
+from .test_laravel_deploy import (
+    _GOOD_BOOTSTRAP,
+    _GOOD_CSS,
+    _GOOD_VIEW,
+    _HEALTH_RENAMED,
+    LaravelDeployCase,
+)
 
 SITE = "sqwalpha"
 DOMAIN = "site.fixture.test"
@@ -217,7 +223,12 @@ class GateFence(BreadthCase):
         service = service_name(self.identity, "schedule")
         previous = self.current_release()
         self.push(
-            {"database/migrations/2026_10_26_000000_create_gate_table.php": _GATE_MIGRATION},
+            {
+                "resources/views/welcome.blade.php": _GOOD_VIEW,
+                "bootstrap/app.php": _GOOD_BOOTSTRAP,
+                "public/app.css": _GOOD_CSS,
+                "database/migrations/2026_10_26_000000_create_gate_table.php": _GATE_MIGRATION,
+            },
             "gate deploy",
         )
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -271,6 +282,8 @@ class RebootGateFence(BreadthCase):
         service = service_name(self.identity, "schedule")
         self.push(
             {
+                "resources/views/welcome.blade.php": _GOOD_VIEW,
+                "public/app.css": _GOOD_CSS,
                 "bootstrap/app.php": _HEALTH_RENAMED,
                 "database/migrations/2026_10_26_000001_create_boot_gate_table.php": (
                     _BOOT_GATE_MIGRATION
