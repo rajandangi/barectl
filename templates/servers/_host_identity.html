@@ -1,0 +1,61 @@
+{% comment %}
+docs/ssh-connections.md#confirming-a-fresh-saved-address-host
+
+The key type and the ssh-keygen command are the one place these screens name native
+detail, because the operator compares it with the provider's console.
+{% endcomment %}
+<div class="usa-alert usa-alert--info" id="host-identity">
+  <div class="usa-alert__body">
+    <h2 class="usa-alert__heading">Confirm this is your server</h2>
+    <p class="usa-alert__text">
+      This server presented fingerprint <code>{{ host_challenge.challenge_fingerprint }}</code>.
+    </p>
+    <p class="usa-alert__text">
+      Find the same fingerprint in your provider's console, serial console, or provider web shell.
+    </p>
+    {% if perms.servers.change_server and perms.discovery.add_discoveryattempt %}
+      <form method="post"
+            action="{% url 'server_confirm_host' server.pk %}"
+            class="usa-form">
+        {% csrf_token %}
+        <input type="hidden" name="attempt" value="{{ host_challenge.pk }}">
+        <input type="hidden"
+               name="revision"
+               value="{{ server.connection_revision }}">
+        <label class="usa-label" for="provider-fingerprint">Provider fingerprint</label>
+        <span class="usa-hint"
+              id="provider-fingerprint-hint">Copy the SHA256 fingerprint from that source.</span>
+        <input class="usa-input"
+               id="provider-fingerprint"
+               name="fingerprint"
+               type="text"
+               required
+               maxlength="80"
+               autocomplete="off"
+               aria-describedby="provider-fingerprint-hint">
+        <button type="submit" class="usa-button">Confirm and check</button>
+      </form>
+    {% else %}
+      <p class="usa-alert__text">An operator with permission to confirm this server can continue.</p>
+    {% endif %}
+    <div class="usa-accordion">
+      <h3 class="usa-accordion__heading">
+        <button type="button"
+                class="usa-accordion__button"
+                aria-expanded="false"
+                aria-controls="identity-more-options">More options</button>
+      </h3>
+      <div id="identity-more-options"
+           class="usa-accordion__content usa-prose"
+           hidden>
+        <p>
+          Key type: <code>{{ host_challenge.challenge_key_type }}</code>
+        </p>
+        <p>
+          On the server, <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> prints
+          the fingerprint for an ED25519 key. Use the host key file for the displayed key type.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>

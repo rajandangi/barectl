@@ -1,2 +1,2 @@
 <span id="connection-status"
-      {% if state.checking %}hx-get="{% url 'server_status' server.pk %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>{{ status_line }}</span>
+      {% if state.checking %}hx-get="{% url 'server_status' server.pk %}?shown={{ state.shown }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>{{ status_line }}</span>

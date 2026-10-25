@@ -25,7 +25,7 @@ class ServerForm(ServerFormBase):
     expected_revision = forms.IntegerField(required=False, min_value=0, widget=forms.HiddenInput)
     credential_catalogue = forms.CharField(required=False, widget=forms.HiddenInput)
     credential_reference = forms.ChoiceField(
-        required=False, label="Authentication", widget=forms.Select(attrs={"class": "usa-select"})
+        required=False, label="Key", widget=forms.Select(attrs={"class": "usa-select"})
     )
 
     class Meta:
@@ -66,8 +66,12 @@ class ServerForm(ServerFormBase):
         )
         self.fields["credential_reference"] = forms.ChoiceField(
             required=False,
-            label="Authentication",
+            label="Key",
             widget=forms.Select(attrs={"class": "usa-select"}),
+            help_text=(
+                "The controller host supplies SSH credentials, even when your browser runs "
+                "on another computer."
+            ),
             error_messages={
                 "invalid_choice": "Choose a currently approved key or the controller SSH agent."
             },

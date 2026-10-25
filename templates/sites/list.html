@@ -14,7 +14,7 @@
       <h2 id="sites-empty-heading">Add your first server</h2>
       <p>
         Barectl needs a fresh Ubuntu 26.04 server you can reach over SSH as root, or as a
-        user who can run commands without a password. Sites come after a server is ready.
+        user with passwordless sudo. Sites come after a server is ready.
       </p>
       {% if perms.servers.add_server %}
         <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
