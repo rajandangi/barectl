@@ -21,6 +21,8 @@ from automation.workers import WORKER_ROLES
 SYSTEMD_DIRECTORY = "/etc/systemd/system"
 RUNTIME_DIRECTORY = "/run/systemd/system"
 SITE_ROOT = "/var/www"
+CRON_DIRECTORY = "/var/spool/cron/crontabs"
+ROOT_CRONTAB = pathlib.Path(CRON_DIRECTORY) / "root"
 MAX_FILE_BYTES = 16384
 MAX_SCAN_BYTES = 262144
 TEXT_BUDGET = 40000
@@ -87,15 +89,15 @@ def _named_sites() -> set[str]:
 
 
 def _crontabs() -> tuple[dict[str, str], list[str]]:
+    """The site accounts' crontab text, and every system-wide crontab including root's."""
     own = {}
-    for entry in _files("/var/spool/cron/crontabs"):
+    for entry in _files(CRON_DIRECTORY):
         match = CRON_USER.fullmatch(entry.name)
         if match is not None:
             own[match.group(1)] = _read(entry)
+    # A root crontab line runs as root, so it must name the site to be its duplicate.
     shared = [
-        _read(path)
-        for path in (pathlib.Path("/etc/crontab"), *_files("/etc/cron.d"))
-        if path.is_file()
+        _read(path) for path in (ROOT_CRONTAB, pathlib.Path("/etc/crontab"), *_files("/etc/cron.d"))
     ]
     return own, shared
 
