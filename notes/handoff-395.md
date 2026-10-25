@@ -1,7 +1,7 @@
 # Handoff: #395 Pause and restore a site's background work
 
 - Branch: `feat/357-395`
-- Head: see `git log -1 --format=%H` on the branch (merged with `origin/feat/357-phase-c-automation` at `38e5c82`, which brought #265's Laravel scheduler, #390's object cache and the cache/logs work; the merge commit is the branch head)
+- Head: see `git log -1 --format=%H` on the branch (merged with `origin/feat/357-phase-c-automation` at `d2bb815` (via `38e5c82`, which brought #265's Laravel scheduler, #390's object cache and the cache/logs work, and the validator isolation fix))
 - Worktree: `/private/var/folders/64/9bmxj8cn3mx00_vdnl9j0zmm0000gn/T/barectl-phase-c/wt-395`
 - No pull request opened.
 
@@ -76,7 +76,7 @@ New fast tests:
 | `uv run --env-file .env python manage.py check` / `makemigrations --check --dry-run` | Pass / no changes |
 | `docker/disposable-server/run-scenarios.sh --env-file .env -- --record fence-wordpress-26.04` | 5 tests, 92 s, OK; new transcript `fence-wordpress-26.04` |
 | `docker/disposable-server/run-scenarios.sh --env-file .env -- --record <state>` for every other state (24) | all 28 recorded OK on the merged tree |
-| `docker/disposable-server/run-scenarios.sh --env-file .env -- --validators` | 3 of 5 classes: **pre-existing** failure on the integration tip too (`ddcc065` fails the same 4 tests); each failing class passes alone, and `AutomationValidators`, `LogRotationValidators` and `RuntimeDefaultValidators` pass in the combined stage |
+| `docker/disposable-server/run-scenarios.sh --env-file .env -- --validators` | **5 of 5 classes, OK, 48 s** on the merged tree (the integration tip's validator-isolation fix for #428 cleared the pre-existing 4-test failure I saw on `ddcc065`) |
 
 ## What is not run, and risks
 
