@@ -10,6 +10,20 @@ _LANGUAGES = {Kind.PHP: "PHP", Kind.NODE: "Node.js", Kind.TOOL: "Tool"}
 PHP_ENTRIES: tuple[str, ...] = ("php84", "php85")
 
 
+def runtime_label(entry: str) -> str:
+    """The version-only name Settings uses for a runtime entry (PHP 8.5, Node.js 24)."""
+    if entry.startswith("php") and len(entry) == 5 and entry[3:].isdigit():
+        return f"PHP {entry[3]}.{entry[4]}"
+    if entry.startswith("nodejs_"):
+        return f"Node.js {entry.removeprefix('nodejs_').replace('_', '.')}"
+    return entry
+
+
+def download_label(size: int) -> str:
+    """The plain-words size Settings shows before adding a version."""
+    return f"Adds about {max(1, round(size / 1_000_000))} MB"
+
+
 @dataclass(frozen=True)
 class ShownBuild:
     entry: str
@@ -194,6 +208,65 @@ def _identity_known(row: RuntimeObservation) -> bool:
 
 def _sites_phrase(sites: tuple[str, ...]) -> str:
     return f"{len(sites)} site{'s' if len(sites) != 1 else ''} ({', '.join(sites)})"
+
+
+@dataclass(frozen=True)
+class ShownPhpVersion:
+    """One installed PHP version and the sites that selected it (Server Settings)."""
+
+    entry: str
+    label: str
+    version: str
+    sites: tuple[str, ...]
+    default: bool
+    problem: bool
+
+    @property
+    def sites_phrase(self) -> str:
+        return _sites_phrase(self.sites)
+
+
+@dataclass(frozen=True)
+class ShownPhpAddition:
+    """One catalog PHP version this server does not have, offered from Server Settings."""
+
+    entry: str
+    label: str
+    download_size: int
+
+    @property
+    def download_phrase(self) -> str:
+        return download_label(self.download_size)
+
+
+def settings_php_versions(snapshot: CollectedSnapshot) -> tuple[ShownPhpVersion, ...]:
+    """Installed PHP versions from the last observation, with the sites using each."""
+    usage = usage_by_entry(snapshot.sites.value)
+    defaults = snapshot.runtime_defaults
+    default = defaults.php if defaults is not None else ""
+    return tuple(
+        ShownPhpVersion(
+            row.entry,
+            runtime_label(row.entry),
+            row.version,
+            usage.get(row.entry, ()),
+            row.entry == default,
+            bool(row.problem),
+        )
+        for row in sorted(snapshot.runtimes, key=lambda row: row.entry)
+        if row.entry in PHP_ENTRIES and row.path
+    )
+
+
+def settings_php_additions(snapshot: CollectedSnapshot) -> tuple[ShownPhpAddition, ...]:
+    """Catalog PHP versions absent from the server, for Add PHP version."""
+    present = {row.entry for row in snapshot.runtimes if row.path}
+    catalog = shown_catalog(checked=True, machine=snapshot.architecture.value or None)
+    return tuple(
+        ShownPhpAddition(build.entry, runtime_label(build.entry), build.download_size)
+        for build in sorted(catalog.runtimes, key=lambda build: build.entry)
+        if build.entry in PHP_ENTRIES and build.entry not in present
+    )
 
 
 @dataclass(frozen=True)

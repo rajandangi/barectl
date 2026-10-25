@@ -38,13 +38,15 @@ class DefaultCommandPageTests(ControllerConfigTestCase):
             attempt, replace(snapshot.collected, runtime_defaults=defaults), timezone.now()
         )
 
-    def test_stack_reads_recorded_defaults_and_queues_the_exact_installed_selection(self) -> None:
+    def test_settings_reads_recorded_defaults_and_queues_the_exact_installed_selection(
+        self,
+    ) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            page = self.client.get(f"/servers/{self.server.pk}/stack/?tab=defaults")
+            page = self.client.get(f"/servers/{self.server.pk}/settings/")
             self.assertContains(page, 'value="php84" selected')
-            self.assertContains(page, "Review PHP default")
+            self.assertContains(page, "Change default PHP")
             response = self.client.post(
-                f"/servers/{self.server.pk}/stack/defaults/php/prepare/",
+                f"/servers/{self.server.pk}/settings/defaults/php/prepare/",
                 {"selection": "php85", "path": "/untrusted"},
             )
         preparation = ChangePreparation.objects.get()
@@ -52,10 +54,18 @@ class DefaultCommandPageTests(ControllerConfigTestCase):
         self.assertEqual(preparation.inputs, {"version": 1, "selection": "php85"})
         self.assertRedirects(response, f"/changes/{preparation.pk}/")
 
+    def test_the_old_prepare_path_redirects_to_settings(self) -> None:
+        response = self.client.get(f"/servers/{self.server.pk}/stack/defaults/php/prepare/")
+        self.assertRedirects(
+            response,
+            f"/servers/{self.server.pk}/settings/defaults/php/prepare/",
+            fetch_redirect_response=False,
+        )
+
     def test_an_uninstalled_runtime_and_cross_language_selection_never_queue(self) -> None:
         for selection in ("nodejs_22", "php85", "nodejs_99"):
             response = self.client.post(
-                f"/servers/{self.server.pk}/stack/defaults/node/prepare/",
+                f"/servers/{self.server.pk}/settings/defaults/node/prepare/",
                 {"selection": selection},
             )
             self.assertEqual(response.status_code, 302)
@@ -67,25 +77,25 @@ class DefaultCommandPageTests(ControllerConfigTestCase):
                 php_problem="The PHP commands are set by the administrator.", php_choices=("php84",)
             )
         )
-        page = self.client.get(f"/servers/{self.server.pk}/stack/?tab=defaults")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "set by the administrator")
-        self.assertNotContains(page, "Review PHP default")
+        self.assertNotContains(page, "Change default PHP")
         self.client.post(
-            f"/servers/{self.server.pk}/stack/defaults/php/prepare/", {"selection": "php84"}
+            f"/servers/{self.server.pk}/settings/defaults/php/prepare/", {"selection": "php84"}
         )
         self.assertFalse(ChangePreparation.objects.exists())
 
     def test_failed_refresh_does_not_authorize_the_previous_default_choices(self) -> None:
         record_attempt(self.server, DiscoveryAttempt.Status.FAILED)
         self.client.post(
-            f"/servers/{self.server.pk}/stack/defaults/php/prepare/", {"selection": "php85"}
+            f"/servers/{self.server.pk}/settings/defaults/php/prepare/", {"selection": "php85"}
         )
         self.assertFalse(ChangePreparation.objects.exists())
 
     def test_viewer_cannot_prepare_a_shared_default_review(self) -> None:
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
         response = self.client.post(
-            f"/servers/{self.server.pk}/stack/defaults/php/prepare/", {"selection": "php85"}
+            f"/servers/{self.server.pk}/settings/defaults/php/prepare/", {"selection": "php85"}
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ChangePreparation.objects.exists())

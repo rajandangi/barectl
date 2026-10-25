@@ -1,9 +1,11 @@
-<section class="margin-top-4" aria-labelledby="server-defaults-heading">
-  <h2 id="server-defaults-heading">Server command defaults</h2>
-  <p>These commands apply to operators and new sites. Existing sites keep their own runtime selections.</p>
-  <h3>PHP</h3>
-  <p>Recorded default: {{ runtime_defaults.php|default:"Not selected" }}</p>
-  {% if runtime_defaults.php_problem %}<p>{{ runtime_defaults.php_problem }}</p>{% endif %}
+{# Server Settings: the command defaults (docs/runtime-defaults.md, #179 Journey 4). #}
+<section class="margin-top-4" aria-labelledby="settings-default-php-heading">
+  <h2 id="settings-default-php-heading">Default PHP</h2>
+  <p>
+    Current default: <strong>{{ default_php_label|default:"Not selected" }}</strong>
+  </p>
+  <p class="barectl-note">New sites start with this version. Existing sites keep their own.</p>
+  {% if runtime_defaults.php_problem %}<p class="usa-alert__text">{{ runtime_defaults.php_problem }}</p>{% endif %}
   {% if default_php_can_prepare %}
     <form method="post"
           action="{% url 'runtime_default_prepare' server.pk 'php' %}"
@@ -12,12 +14,18 @@
       <label class="usa-label"
              for="{{ default_php_form.selection.id_for_label }}">{{ default_php_form.selection.label }}</label>
       {{ default_php_form.selection }}
-      <button type="submit" class="usa-button margin-top-2">Review PHP default</button>
+      <button type="submit"
+              class="usa-button usa-button--outline margin-top-2">Change default PHP</button>
     </form>
   {% endif %}
-  <h3>Node.js</h3>
-  <p>Recorded default: {{ runtime_defaults.node|default:"Not selected" }}</p>
-  {% if runtime_defaults.node_problem %}<p>{{ runtime_defaults.node_problem }}</p>{% endif %}
+</section>
+<section class="margin-top-4" aria-labelledby="settings-default-node-heading">
+  <h2 id="settings-default-node-heading">Default Node.js</h2>
+  <p>
+    Current default: <strong>{{ default_node_label|default:"Not selected" }}</strong>
+  </p>
+  <p class="barectl-note">New sites start with this version. Existing sites keep their own.</p>
+  {% if runtime_defaults.node_problem %}<p class="usa-alert__text">{{ runtime_defaults.node_problem }}</p>{% endif %}
   {% if default_node_can_prepare %}
     <form method="post"
           action="{% url 'runtime_default_prepare' server.pk 'node' %}"
@@ -26,7 +34,8 @@
       <label class="usa-label"
              for="{{ default_node_form.selection.id_for_label }}">{{ default_node_form.selection.label }}</label>
       {{ default_node_form.selection }}
-      <button type="submit" class="usa-button margin-top-2">Review Node default</button>
+      <button type="submit"
+              class="usa-button usa-button--outline margin-top-2">Change default Node.js</button>
     </form>
   {% endif %}
 </section>

@@ -130,7 +130,12 @@ if TYPE_CHECKING:
     from operations.presentation import ReviewView, RunOutcome, RunView
     from runtimes.apps import RuntimesConfig
     from runtimes.bodies.update import update_catalog
-    from runtimes.presentation import ShownBuild, ShownCatalog
+    from runtimes.presentation import (
+        ShownBuild,
+        ShownCatalog,
+        ShownPhpAddition,
+        ShownPhpVersion,
+    )
     from servers.apps import ServersConfig
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
@@ -302,6 +307,11 @@ if TYPE_CHECKING:
         ShownCatalog(None, "", (), (), "").tools,
         _shown_build.language,
         _shown_build.unpacked_size,
+    )
+    # Server Settings lists each installed PHP version and each missing one.
+    _settings_runtimes = (
+        ShownPhpVersion("", "", "", (), False, False).sites_phrase,
+        ShownPhpAddition("", "", 0).download_phrase,
     )
     # The Status poll token keys the discovery fragment.
     _discovery_views = (DiscoveryState.poll_token,)

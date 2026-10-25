@@ -1,53 +1,62 @@
-{# Server Settings: HTTPS and the database (docs/dashboard-workflows.md, #179). #}
-<section class="margin-top-4" aria-labelledby="settings-certificate-heading">
-  <h2 id="settings-certificate-heading">HTTPS</h2>
-  {% if certificate_email_panel.observed %}
-    <dl class="barectl-facts barectl-card">
-      <div>
-        <dt>Certificate contact email</dt>
-        <dd>
-          {% if certificate_email_panel.state == "set" %}
-            <a href="mailto:{{ certificate_email_panel.email }}">{{ certificate_email_panel.email }}</a>
-          {% elif certificate_email_panel.state == "absent" %}
-            Not set. Caddy requests certificates without a contact address.
-          {% else %}
-            {{ certificate_email_panel.state|capfirst }}
-          {% endif %}
-        </dd>
-      </div>
-    </dl>
-    <p class="barectl-note">
-      Read from the server's main Caddy configuration. Caddy's automatic HTTPS issues and renews every site's certificate; the address is optional and is only used for certificate authority notices.
-    </p>
-    {% if certificate_email_problem %}
-      <div class="usa-alert usa-alert--warning usa-alert--slim">
-        <div class="usa-alert__body">
-          <p class="usa-alert__text">{{ certificate_email_problem }}</p>
-        </div>
-      </div>
-    {% endif %}
-    {% if certificate_email_panel.can_prepare %}
-      <form method="post"
-            action="{% url 'certificate_email_prepare' server.pk %}"
-            class="usa-form">
-        {% csrf_token %}
-        <label class="usa-label"
-               for="{{ certificate_email_form.email.id_for_label }}">{{ certificate_email_form.email.label }}</label>
-        <div class="usa-hint"
-             id="{{ certificate_email_form.email.id_for_label }}-hint">{{ certificate_email_form.email.help_text }}</div>
-        {{ certificate_email_form.email }}
-        <button type="submit" class="usa-button margin-top-2">Prepare review</button>
-      </form>
-    {% endif %}
+{# Server Settings: the server-wide choices (docs/dashboard-workflows.md, #179 Journey 4). #}
+<section class="margin-top-4" aria-labelledby="settings-php-versions-heading">
+  <h2 id="settings-php-versions-heading">PHP versions</h2>
+  {% if not php_versions_checked %}
+    <p>Check the connection to read this server's PHP versions.</p>
   {% else %}
-    <p>The certificate contact email has not been observed yet. Run discovery to read it from the server.</p>
-    {% if certificate_email_panel.saved %}
+    {% if php_versions %}
+      <dl class="barectl-facts barectl-card">
+        {% for runtime in php_versions %}
+          <div>
+            <dt>{{ runtime.label }}</dt>
+            <dd>
+              {% if runtime.problem %}
+                Needs attention. Open <a href="{% url 'server_advanced' server.pk %}?tab=php">Advanced</a> for details.
+              {% else %}
+                {{ runtime.version }}
+              {% endif %}
+              {% if runtime.sites %}
+                <span class="barectl-note">Used by {{ runtime.sites_phrase }}.</span>
+              {% elif runtime.default %}
+                <span class="barectl-note">The server default.</span>
+              {% else %}
+                <span class="barectl-note">No site uses it.</span>
+              {% endif %}
+            </dd>
+          </div>
+        {% endfor %}
+      </dl>
+    {% else %}
+      <p>No PHP version is installed.</p>
+    {% endif %}
+    {% if php_additions %}
+      <h3>Add PHP version</h3>
       <p class="barectl-note">
-        Last requested on this controller: {{ certificate_email_panel.saved }}. This is not the server's current setting; run discovery to read it from the server.
+        Each version is installed by one change. Nothing changes until you confirm.
       </p>
+      {% for addition in php_additions %}
+        {% if can_add_runtime %}
+          <form method="post"
+                action="{% url 'server_change_prepare' server.pk %}"
+                class="usa-form">
+            {% csrf_token %}
+            <input type="hidden" name="kind" value="add_runtime">
+            <input type="hidden" name="selection" value="{{ addition.entry }}">
+            <button type="submit"
+                    class="usa-button usa-button--outline">Add {{ addition.label }}</button>
+            <span class="usa-hint">{{ addition.download_phrase }}.</span>
+          </form>
+        {% endif %}
+      {% endfor %}
+      {% if not can_add_runtime %}
+        <p class="barectl-note">
+          Adding a version needs a ready server and permission to prepare changes.
+        </p>
+      {% endif %}
     {% endif %}
   {% endif %}
 </section>
+{% include "runtimes/defaults.html" %}
 <section class="margin-top-4" aria-labelledby="settings-database-heading">
   <h2 id="settings-database-heading">Database</h2>
   {% if database_panel %}
@@ -72,10 +81,17 @@
           </div>
         {% endfor %}
       </dl>
+      <p class="barectl-note">
+        One engine per server. Site databases are created with their sites; Barectl refuses
+        to remove an engine while any site uses it.
+      </p>
     {% else %}
       <p>No database engine is installed.</p>
+      <p class="barectl-note">
+        Installing an engine is one change that names every package and version and keeps the
+        engine reachable only from this server.
+      </p>
     {% endif %}
-    <p class="barectl-note">{{ database_panel.note }}</p>
     {% if database_can_prepare %}
       {% for engine in database_panel.installable %}
         <form method="post"
@@ -85,7 +101,8 @@
           {% csrf_token %}
           <input type="hidden" name="kind" value="{{ database_install_kind }}">
           <input type="hidden" name="selection" value="{{ engine.0 }}">
-          <button type="submit" class="usa-button">Install {{ engine.1 }}</button>
+          <button type="submit"
+                  class="usa-button usa-button--outline">Install {{ engine.1 }}</button>
         </form>
       {% endfor %}
       {% for engine in database_panel.engines %}
@@ -103,5 +120,60 @@
     {% endif %}
   {% else %}
     <p>No observation yet. Check the connection to read the server's database engine.</p>
+  {% endif %}
+</section>
+<section class="margin-top-4" aria-labelledby="settings-certificate-heading">
+  <h2 id="settings-certificate-heading">HTTPS</h2>
+  {% if certificate_email_panel.observed %}
+    <dl class="barectl-facts barectl-card">
+      <div>
+        <dt>Certificate contact email</dt>
+        <dd>
+          {% if certificate_email_panel.state == "set" %}
+            <a href="mailto:{{ certificate_email_panel.email }}">{{ certificate_email_panel.email }}</a>
+          {% elif certificate_email_panel.state == "absent" %}
+            Not set. Certificates are requested without a contact address.
+          {% else %}
+            {{ certificate_email_panel.state|capfirst }}
+          {% endif %}
+        </dd>
+      </div>
+    </dl>
+    <p class="barectl-note">
+      Read from the server's web server configuration. HTTPS certificates are issued and renewed automatically for every site; the address is optional and is only used for certificate authority notices.
+    </p>
+    {% if certificate_email_panel.state != "set" and certificate_email_panel.state != "absent" %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            This setting is outside supported settings. Resolve it through ordinary
+            administration, then check the connection again.
+          </p>
+        </div>
+      </div>
+    {% endif %}
+    {% if certificate_email_panel.can_prepare %}
+      <form method="post"
+            action="{% url 'certificate_email_prepare' server.pk %}"
+            class="usa-form">
+        {% csrf_token %}
+        <label class="usa-label"
+               for="{{ certificate_email_form.email.id_for_label }}">{{ certificate_email_form.email.label }}</label>
+        <div class="usa-hint"
+             id="{{ certificate_email_form.email.id_for_label }}-hint">
+          Optional. Leave it empty to remove the address. Certificate authority notices go here.
+        </div>
+        {{ certificate_email_form.email }}
+        <button type="submit"
+                class="usa-button usa-button--outline margin-top-2">Change certificate email</button>
+      </form>
+    {% endif %}
+  {% else %}
+    <p>The certificate contact email has not been observed yet. Run discovery to read it from the server.</p>
+    {% if certificate_email_panel.saved %}
+      <p class="barectl-note">
+        Last requested on this controller: {{ certificate_email_panel.saved }}. This is not the server's current setting; run discovery to read it from the server.
+      </p>
+    {% endif %}
   {% endif %}
 </section>

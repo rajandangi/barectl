@@ -290,7 +290,7 @@ class CatalogUpdatePageTests(ControllerConfigTestCase):
             mock.patch("runtimes.updates.load", return_value=self.catalog),
             mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")),
         ):
-            page = self.client.get(f"/servers/{self.server.pk}/stack/?tab=php")
+            page = self.client.get(f"/servers/{self.server.pk}/advanced/?tab=php")
             self.assertContains(page, "Update available")
             self.assertContains(page, "sites: alpha")
             self.assertContains(page, "caddy")
@@ -319,7 +319,7 @@ class CatalogUpdatePageTests(ControllerConfigTestCase):
             (site(),),
         )
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
-            page = self.client.get(f"/servers/{self.server.pk}/stack/?tab=php")
+            page = self.client.get(f"/servers/{self.server.pk}/advanced/?tab=php")
             self.assertContains(page, "Used by 1 site (alpha)")
             self.assertContains(page, "Remove runtime php85")
             response = self.client.post(
