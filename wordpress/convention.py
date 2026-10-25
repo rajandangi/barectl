@@ -52,6 +52,18 @@ RESERVED_CONSTANTS: Final = frozenset(
         *SALTS,
     }
 )
+# Phase C (#357) owns these names in the same private file. Their values follow a fixed
+# grammar so recovery reads them without interpreting arbitrary PHP: WordPress cron hands
+# over to the server, and the object cache names #392 writes point at one private socket.
+OWNED_CONSTANTS: Final = frozenset(
+    {"DISABLE_WP_CRON", "WP_REDIS_PATH", "WP_REDIS_PREFIX", "WP_REDIS_SCHEME"}
+)
+OWNED_VALUE: Final[dict[str, re.Pattern[str]]] = {
+    "DISABLE_WP_CRON": re.compile(r"(?:true|false)\Z"),
+    "WP_REDIS_SCHEME": re.compile(r"unix\Z"),
+    "WP_REDIS_PATH": re.compile(r"/run/[A-Za-z0-9_./-]{1,180}\Z"),
+    "WP_REDIS_PREFIX": re.compile(r"[A-Za-z0-9_:-]{1,64}\Z"),
+}
 CONSTANT_KEY: Final = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
 CONSTANT_LINE: Final = re.compile(r"define\( '([A-Z][A-Z0-9_]{0,63})', '(.*)' \);\Z")
 MAX_CONSTANT_VALUE: Final = 2048
@@ -101,8 +113,78 @@ def reserved_constant(key: str) -> bool:
     return key in RESERVED_CONSTANTS or key.startswith("WP_REDIS_")
 
 
+def owned_constant(key: str) -> bool:
+    """A name Phase C writes itself, and the operator's settings never edit."""
+    return key in OWNED_CONSTANTS
+
+
+def owned_value_problem(key: str, value: str) -> str:
+    rule = OWNED_VALUE.get(key)
+    if rule is None:
+        return f"{key} is not a name Barectl writes."
+    if rule.fullmatch(value) is None:
+        return f"{key} has a value Barectl does not write."
+    return ""
+
+
 def valid_constant_key(key: str) -> bool:
     return CONSTANT_KEY.fullmatch(key) is not None and not reserved_constant(key)
+
+
+def render_owned_constant(key: str, value: str) -> str:
+    if not owned_constant(key) or owned_value_problem(key, value):
+        raise ValueError("A Barectl-owned WordPress constant is not supported.")
+    return f"define( '{key}', '{value}' );"
+
+
+def cron_disabled(text: str, identifier: str) -> str:
+    """The DISABLE_WP_CRON value in a supported private configuration, or empty."""
+    if private_configuration_problem(text, identifier):
+        return ""
+    for line in text.splitlines():
+        parsed = parse_constant(line)
+        if parsed is not None and parsed[0] == "DISABLE_WP_CRON":
+            return parsed[1]
+    return ""
+
+
+def apply_owned_constant(text: str, key: str, value: str, identifier: str) -> str:
+    """Set ``key`` to ``value``, or remove it when ``value`` is empty, touching no other line."""
+    if not owned_constant(key) or (value and owned_value_problem(key, value)):
+        raise ValueError("A Barectl-owned WordPress constant is not supported.")
+    lines = text.splitlines(keepends=True)
+    fixed = _fixed_configuration_lines(identifier)
+    if len(lines) < len(fixed) or _fixed_problem(lines, fixed):
+        raise ValueError("The private WordPress configuration is outside the supported grammar.")
+    output: list[str] = list(lines[: len(fixed)])
+    written = False
+    for line in lines[len(fixed) :]:
+        parsed = parse_constant(line.rstrip("\r\n"))
+        if parsed is not None and parsed[0] == key:
+            if written:
+                raise ValueError(
+                    "The private WordPress configuration is outside the supported grammar."
+                )
+            written = True
+            if not value:
+                continue
+            ending = line[len(line.rstrip("\r\n")) :] or "\n"
+            output.append(render_owned_constant(key, value) + ending)
+            continue
+        if (
+            parsed is not None
+            and owned_constant(parsed[0])
+            and (owned_value_problem(parsed[0], parsed[1]))
+        ):
+            raise ValueError(
+                "The private WordPress configuration is outside the supported grammar."
+            )
+        output.append(line)
+    if value and not written:
+        if output and not output[-1].endswith(("\n", "\r")):
+            output[-1] += "\n"
+        output.append(render_owned_constant(key, value) + "\n")
+    return "".join(output)
 
 
 def constant_value(value: str) -> str:
@@ -146,7 +228,13 @@ def extra_constants(text: str, identifier: str) -> list[tuple[str, str]]:
     constants: list[tuple[str, str]] = []
     for line in lines[len(fixed) :]:
         parsed = parse_constant(line)
-        if parsed is None or not valid_constant_key(parsed[0]):
+        if parsed is None:
+            return []
+        if owned_constant(parsed[0]):
+            if owned_value_problem(parsed[0], parsed[1]):
+                return []
+            continue
+        if not valid_constant_key(parsed[0]):
             return []
         constants.append(parsed)
     return constants
@@ -177,7 +265,9 @@ def _constant_edits(changes: list[dict[str, object]]) -> dict[str, tuple[str, st
     return edits
 
 
-def apply_constants(text: str, changes: list[dict[str, object]], identifier: str) -> str:
+def apply_constants(  # noqa: C901 - one pass over every line
+    text: str, changes: list[dict[str, object]], identifier: str
+) -> str:
     """Apply extra-constant edits, leaving every untouched line byte-identical."""
     edits = _constant_edits(changes)
     lines = text.splitlines(keepends=True)
@@ -197,7 +287,18 @@ def apply_constants(text: str, changes: list[dict[str, object]], identifier: str
             ending = line[len(line.rstrip("\r\n")) :] or "\n"
             output.append(render_constant(parsed[0], value) + ending)
             continue
-        if parsed is None or not valid_constant_key(parsed[0]):
+        if parsed is None:
+            raise ValueError(
+                "The private WordPress configuration is outside the supported grammar."
+            )
+        if owned_constant(parsed[0]):
+            if owned_value_problem(parsed[0], parsed[1]):
+                raise ValueError(
+                    "The private WordPress configuration is outside the supported grammar."
+                )
+            output.append(line)
+            continue
+        if not valid_constant_key(parsed[0]):
             raise ValueError(
                 "The private WordPress configuration is outside the supported grammar."
             )
@@ -275,7 +376,12 @@ def private_configuration_problem(text: str, identifier: str) -> str:
     seen: set[str] = set()
     for number, line in enumerate(lines[len(expected) :], len(expected) + 1):
         parsed = parse_constant(line)
-        if parsed is None or not valid_constant_key(parsed[0]):
+        if parsed is None:
+            return f"The private WordPress configuration line {number} is not supported."
+        if owned_constant(parsed[0]):
+            if owned_value_problem(parsed[0], parsed[1]):
+                return f"The private WordPress configuration line {number} is not supported."
+        elif not valid_constant_key(parsed[0]):
             return f"The private WordPress configuration line {number} is not supported."
         if parsed[0] in seen:
             return f"The private WordPress configuration line {number} is not supported."

@@ -1,8 +1,11 @@
 """Read-only observations (docs/ssh-connections.md#bounds-and-read-only-commands)."""
 
+import hashlib
 import re
 import shlex
 
+from automation import observation as automation_observation
+from automation.observation import ObservedSchedule
 from bootstrap.standing import HostJudgment, Standing
 from laravel import observation as laravel_observation
 from runtimes import defaults as runtime_defaults
@@ -89,6 +92,14 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     release_observation, settings_observation = _hosting_inventories(
         shell, standing, sites=sites, releases=releases
     )
+    scheduled = _automation(
+        shell,
+        standing,
+        hosting,
+        settings_observation,
+        sites=sites,
+        releases=releases,
+    )
     certificate_email, certificate_email_state = "", ""
     if sites and standing.standing == Standing.TARGET_STACK:
         certificate_email_state, certificate_email = caddy_email.read(shell)
@@ -106,6 +117,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         runtime_defaults=defaults,
         releases=release_observation,
         settings=settings_observation,
+        automation=scheduled,
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
     )
@@ -171,8 +183,50 @@ def _hosting_inventories(
                 for entry in constants
                 if isinstance(entry, dict)
             )
+            cron = row.get("cron")
+            if isinstance(cron, dict) and cron.get("disable") in ("true", "false"):
+                value = str(cron["disable"])
+                records.append(
+                    ObservedSetting(
+                        identifier,
+                        "wordpress",
+                        "DISABLE_WP_CRON",
+                        hashlib.sha256(value.encode()).hexdigest(),
+                        value,
+                    )
+                )
         settings = Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", tuple(records))
     return laravel_observation.releases_from(inventory), settings
+
+
+def _automation(
+    shell: RemoteShell,
+    standing: HostJudgment,
+    hosting: Observation[tuple[ObservedSite, ...]],
+    settings: Observation[tuple[ObservedSetting, ...]],
+    *,
+    sites: bool,
+    releases: bool,
+) -> Observation[tuple[ObservedSchedule, ...]]:
+    """The scheduled-work inventory, read only on a full discovery of a target host."""
+    if not (sites and releases):
+        return Observation(ObservationOutcome.OBSERVED, (), "", ())
+    if standing.standing != Standing.TARGET_STACK:
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+    value = automation_observation.read(shell)
+    schedules = automation_observation.observations(
+        value,
+        sites=hosting.value,
+        disable_wp_cron=automation_observation.cron_values(settings),
+    )
+    if schedules is None:
+        return Observation(
+            ObservationOutcome.INACCESSIBLE,
+            ("/etc/systemd/system",),
+            "The scheduled tasks could not be read.",
+            (),
+        )
+    return Observation(ObservationOutcome.OBSERVED, ("/etc/systemd/system",), "", schedules)
 
 
 def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:

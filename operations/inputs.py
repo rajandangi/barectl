@@ -29,6 +29,7 @@ class InputShape(StrEnum):
     LARAVEL_ENVIRONMENT = "laravel_environment"
     WORDPRESS_SETTINGS = "wordpress_settings"
     CERTIFICATE_EMAIL = "certificate_email"
+    AUTOMATION_SCHEDULE = "automation_schedule"
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,8 @@ class PreparationInputs:
     settings_changes: tuple[tuple[str, str], ...] = ()
     # A certificate contact email change: the optional address, or "" to remove the line.
     certificate_email: str | None = None
+    # A site's scheduled-task change: "on" or "off" (Phase C #357).
+    schedule_state: str = ""
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -103,6 +106,12 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:
+        if self.schedule_state:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "state": self.schedule_state,
+            }
         if self.certificate_email is not None:
             return {"version": 1, "email": self.certificate_email}
         if self.pool is not None:
@@ -578,6 +587,22 @@ def _laravel_rollback_inputs(value: dict[str, object]) -> PreparationInputs:
     return PreparationInputs("", identifier, (), release)
 
 
+def _schedule_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier", "state"} or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    identifier, state = value["identifier"], value["state"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or state not in ("on", "off")
+        or not isinstance(state, str)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, schedule_state=str(state))
+
+
 def _certificate_email_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -609,4 +634,5 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.LARAVEL_ENVIRONMENT: _settings_inputs,
     InputShape.WORDPRESS_SETTINGS: _settings_inputs,
     InputShape.CERTIFICATE_EMAIL: _certificate_email_inputs,
+    InputShape.AUTOMATION_SCHEDULE: _schedule_inputs,
 }

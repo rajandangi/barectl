@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "wordpress",
     "laravel",
     "databases",
+    "automation",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
