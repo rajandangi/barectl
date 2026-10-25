@@ -73,7 +73,7 @@ local build stays within 15 minutes (target 10).
 | --- | --- |
 | A WordPress site runs server cron and its object cache with every controller closed | `WordPressServerCron` turns the timer on through the reviewed change, proves a due event does not run on a page load once `DISABLE_WP_CRON` is set, that the timer stays armed and that a fresh controller reads `succeeded`; `SiteObjectCache` proves the plugin reports Connected through phpredis and that another site cannot reach the socket or the configuration. The harness holds no controller connection while the timer runs. |
 | A Laravel site runs its scheduler, database queue workers and object cache with every controller closed | `LaravelScheduler` arms the timer and reads a completed tick that started after the change with no controller connection; `LaravelQueueWorkers` dispatches jobs with the controller absent, proves both processes consume them, a crash restarts, a crash loop stops at the start limit and a graceful restart finishes the in-flight job; `LaravelObjectCache` points the store at the site's own socket and reads the value back out of band. |
-| A Laravel deployment fences and restores that work | `RebootGateFence` turns the scheduler on, deploys a commit with a new migration and a broken `/up`, and proves the timer and both worker services carry runtime masks and refuse a manual start with boot activation off while the gate answers 503. The ordering inside the run (fence before `gate`, restore only after `/up` and the reopened file) is pinned by `automation/test_fence_body.py` and `automation/test_fence_callers.py`. A second boot leaves the work off; the next Deploy restores the scheduler and workers on the new release. `LaravelDeployMariaDB` proves the same gate/rollback lifecycle without automation on the site. |
+| A Laravel deployment fences and restores that work | `RebootGateFence` turns the scheduler on, pushes a release with a pending migration whose migration sleeps four seconds, and reads the site while the maintenance gate answers 503: the timer and both worker services refuse a manual start, the slice is empty, boot activation is off and `current` is still the previous release. After `/up` and the reopened site, the Deploy restores exactly the reviewed scheduler and workers on the new `current`; **Run now** then starts the scheduler service on that release. A **Roll back** to the previous release succeeds and restores the same work. A second test deploys a broken `/up`, keeps the gate, and proves the fence holds across a container boot. The ordering inside the run (fence before `gate`, restore only after `/up` and the reopened file) is pinned by `automation/test_fence_body.py` and the execution tests in `automation/test_fence_callers.py`. |
 | A PHP switch fences and restores that work | `PHPFence` switches a WordPress site's PHP with server cron on and proves the timer is masked, stopped and not started during the change, then active on the target runtime, with the site serving throughout. `automation/test_fence_callers.py` pins every fenced kind's body and its payload. |
 | Failed, skipped and unknown outcomes are shown honestly | The one projection distinguishes Off, On and waiting, Running, Last run succeeded, Last run failed, Timed out, Skipped, Stopped after repeated crashes, Paused by an unfinished change, Off during maintenance and Could not confirm (`automation/test_status.py`, `automation/test_scheduler.py`, `automation/test_worker_status.py`). `LongSchedulerTick` proves natively that a run spanning a calendar elapse is followed by the next calendar elapse rather than an immediate second start. A worker crash loop reads `Stopped after repeated crashes` natively in `LaravelQueueWorkers`. The recorded transcripts prove a missing read never becomes a success. |
 | A fresh controller reconstructs all of it and repeated reviews propose nothing | The recorded states `automation-wordpress-26.04`, `automation-laravel-26.04`, `automation-laravel-workers-26.04`, `object-cache-26.04`, `object-cache-edited-26.04`, `object-cache-laravel-26.04` and `fence-wordpress-26.04` replay through `collect()` and each area's review proposes no effects (`automation/test_recorded.py`, `automation/test_worker_recorded.py`, `cache/test_recorded.py`, `sites/test_node_recorded.py`). Each native scenario's checkpoint also runs the same collect and review on the live server. |
@@ -93,7 +93,7 @@ The native proof is `PHPFence`, `RebootGateFence` and the Deploy/Roll back bodie
 `LaravelDeployMariaDB`. Fast tests pin the body order, the gate's boot-activation removal, the
 partial restore, removal that never restores, and every fenced kind's staged program.
 
-**A defect this qualification found and fixed.** The kinds that rebuild a closed payload
+**Two defects this qualification found and fixed.** The kinds that rebuild a closed payload
 (`deploy_laravel_site`, `rollback_laravel_site`, `edit_laravel_environment`,
 `edit_wordpress_settings`, `set_site_object_cache`) filtered `automation_fence` out of the
 document they stage, so their bodies read "nothing to pause" and did nothing. The unit tests
@@ -102,6 +102,10 @@ it on a real server; every affected body now carries the validated plan and
 `automation/test_fence_callers.py::PayloadTests` pins the assembly. The native Deploy harness
 also bypassed the engine's plan (`disposable/test_laravel_deploy.py::apply`), so no Phase B
 Deploy scenario had exercised a fence; it now applies the same planned review the worker does.
+Once the plan reached the cache body, a second defect appeared: it restarted the site's
+workers while the fence had them masked, so a Laravel cache-on ended `partial/laravel_worker`.
+A fenced cache change now leaves the workers to the fence's restore, which starts the reviewed
+set on the new environment; `cache/test_laravel_cache.py` pins both the order and the skip.
 
 ## Memory
 
@@ -177,10 +181,10 @@ before an interrupted change.
   drift job's mirror manifest and is refreshed by the same CI watch as the WordPress core
   archive; there is no separate plugin bump issue, so a plugin release reaches servers only
   when Barectl ships a new pin.
-- **C2's gate evidence is the end state, not a mid-run observation.** `RebootGateFence` reads
-  the masked units after the failed Deploy, and the fast tests pin the body's stage order. No
-  native item samples the slice while the run is between `fence` and `gate`. A native
-  mid-flight probe would need a second controller or a test hook; it is not present.
+- **The Roll back's mid-run window is not sampled.** `RebootGateFence` reads the fence while a
+  four-second migration holds a Deploy's gate open, and it proves the Roll back's end state and
+  restored work; the Roll back's own gate window is too short to sample without a fixture
+  delay, so its stage order rests on the fast body tests.
 - **The cache client is phpredis in the site's own master.** Enabling it restarts that site's
   master; the measured window is 3.59 s with 2 refused requests of 210 over 0.17 s. The
   qualification does not claim zero refusals.
@@ -206,6 +210,10 @@ before an interrupted change.
 - **Hosted runs of this branch.** The final branch has no pull request and no hosted checks.
   The named hosted runs are the integration tip's; the two failures they found are fixed here
   and are proven locally.
+- **The local browser suite on this host.** It fails at sign-in with a 500 (a missing or
+  unusable Vite manifest in this worktree) before any journey runs, so its local 425 s is not
+  a suite measurement. The two focused journeys the integration fixes target pass in CI and
+  locally on the integration tree; CI is the browser authority for this record.
 - **The scheduled breadth workflow in CI.** It is defined and runs locally by
   `run-scenarios.sh -- --breadth`; no hosted dispatch of it exists yet, so the amd64 breadth
   numbers, and the workflow's artifact/summary path, are unproven in CI.
