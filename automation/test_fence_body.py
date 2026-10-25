@@ -14,6 +14,7 @@ from automation.bodies import units
 SHOP = "shop"
 TIMER = "barectl-site-shop-wpcron.timer"
 SERVICE = "barectl-site-shop-wpcron.service"
+WORKER = "barectl-site-shop-queue1.service"
 SLICE = "barectl-site-shop.slice"
 
 
@@ -35,9 +36,10 @@ class FakeSystemd:
 
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
-        self.state = {TIMER: "loaded", SERVICE: "loaded", SLICE: "loaded"}
-        self.active = {TIMER: "inactive", SERVICE: "inactive"}
-        self.file_state = {TIMER: "enabled", SERVICE: ""}
+        self.state = {TIMER: "loaded", SERVICE: "loaded", WORKER: "loaded", SLICE: "loaded"}
+        self.active = {TIMER: "inactive", SERVICE: "inactive", WORKER: "active"}
+        # A timer-driven oneshot has no install section; a queue worker carries its own.
+        self.file_state = {TIMER: "enabled", SERVICE: "", WORKER: "enabled"}
         # Units this simulated systemd refuses to start.
         self.broken: set[str] = set()
         # Units whose runtime fence drop-in is present.
@@ -65,6 +67,8 @@ class FakeSystemd:
         self.calls.append(list(args[1:]))
         if args[1] == "disable":
             self.file_state[args[2]] = "disabled"
+        elif args[1] == "enable":
+            self.file_state[args[2]] = "enabled"
         return ""
 
     def load_state(self, name: str) -> str:
@@ -131,6 +135,40 @@ class FenceBodyTests(SimpleTestCase):
         self.assertTrue(units.fence(document(), SHOP, gate=True))
         self.assertIn(["disable", TIMER], self.verbs())
         self.assertLess(self.verbs().index(["disable", TIMER]), self.verbs().index(["stop", TIMER]))
+
+    def test_a_gate_disables_boot_activation_for_every_reviewed_unit(self) -> None:
+        plan = document(services=[SERVICE, WORKER], resume=[TIMER, WORKER])
+        self.assertTrue(units.fence(plan, SHOP, gate=True))
+        self.assertEqual(
+            [call for call in self.verbs() if call[0] == "disable"],
+            [["disable", TIMER], ["disable", SERVICE], ["disable", WORKER]],
+        )
+        self.assertEqual(self.fake.file_state[WORKER], "disabled")
+        self.assertLess(
+            self.verbs().index(["disable", WORKER]), self.verbs().index(["stop", WORKER])
+        )
+
+    def test_a_gated_fence_restores_the_workers_boot_activation(self) -> None:
+        plan = document(services=[SERVICE, WORKER], resume=[WORKER, TIMER])
+        self.assertTrue(units.fence(plan, SHOP, gate=True))
+        self.assertTrue(units.restore(plan, SHOP))
+        self.assertEqual(self.fake.file_state[WORKER], "enabled")
+        self.assertEqual(self.fake.file_state[TIMER], "enabled")
+        self.assertIn(["enable", WORKER], self.verbs())
+        self.assertIn(["enable", TIMER], self.verbs())
+
+    def test_restore_re_enables_only_the_reviewed_resume_set(self) -> None:
+        self.fake.file_state[WORKER] = "disabled"
+        plan = document(services=[SERVICE, WORKER], resume=[TIMER])
+        self.assertTrue(units.restore(plan, SHOP))
+        self.assertEqual(self.fake.file_state[WORKER], "disabled")
+        self.assertNotIn(["enable", WORKER], self.verbs())
+
+    def test_a_fence_without_a_gate_leaves_boot_activation_alone(self) -> None:
+        self.assertTrue(units.fence(document(), SHOP))
+        self.assertEqual([call for call in self.verbs() if call[0] == "disable"], [])
+        self.assertEqual(self.fake.file_state[TIMER], "enabled")
+        self.assertEqual(self.fake.file_state[WORKER], "enabled")
 
     def test_a_fence_that_cannot_drain_reports_failure(self) -> None:
         self.fake.slice_empty = False

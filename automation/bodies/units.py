@@ -363,9 +363,10 @@ def fence(  # noqa: C901 - one reviewed stop sequence
     """Stop a site's background work and prove its slice has no processes.
 
     Call it after the kind's site lock and before its own mutation. A runtime mask keeps the
-    work from starting again, including from a boot, until :func:`restore` clears it. When the
-    change enters a persistent maintenance gate, ``gate`` also removes boot activation, so a
-    reboot during the gate cannot restart work.
+    work from starting again until :func:`restore` clears it. A mask does not survive a
+    reboot, so when the change enters a persistent maintenance gate, ``gate`` also removes
+    boot activation for every reviewed unit — timers and worker services alike — so a reboot
+    during the gate cannot restart work.
     """
     plan = _checked_plan(document, identifier)
     if plan is None:
@@ -379,8 +380,11 @@ def fence(  # noqa: C901 - one reviewed stop sequence
         # loaded, until systemd reads the fence's drop-in. Reload before the stops.
         daemon_reload()
         if gate:
-            for name in plan.timers:
-                # A stopped unit is not a reboot fence: drop the timer's boot activation too.
+            # A stopped unit is not a reboot fence. A runtime mask and the /run drop-in are
+            # gone after a reboot, so a persistent gate must also remove boot activation for
+            # every reviewed unit: the timers and the always-on worker services that carry
+            # their own install section (docs/adr/0036).
+            for name in [*plan.timers, *plan.services]:
                 run(["/usr/bin/systemctl", "disable", name], check=False)
         for name in plan.timers:
             if load_state(name) != "not-found":

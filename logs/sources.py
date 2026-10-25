@@ -10,6 +10,9 @@ PHP_ERRORS = "php_errors"
 PHP_SLOW = "php_slow"
 APPLICATION = "application"
 WORDPRESS = "wordpress"
+SCHEDULED_TASKS = "scheduled_tasks"
+QUEUE_WORKERS = "queue_workers"
+OBJECT_CACHE = "object_cache"
 
 
 @dataclass(frozen=True)
@@ -19,6 +22,8 @@ class LogSource:
     slug: str
     label: str
     summary: str
+    # One journal source reads the fixed units its owning convention names, by cursor.
+    journal: bool = False
 
 
 CATALOGUE = (
@@ -26,19 +31,52 @@ CATALOGUE = (
     LogSource(PHP_ERRORS, "PHP errors", "Errors the site's PHP requests reported."),
     LogSource(PHP_SLOW, "Slow PHP requests", "Requests that took longer than five seconds."),
     LogSource(APPLICATION, "Application log", "The application's own daily log."),
+    LogSource(
+        SCHEDULED_TASKS,
+        "Scheduled tasks",
+        "What this site's scheduled work reported.",
+        journal=True,
+    ),
+    LogSource(
+        QUEUE_WORKERS,
+        "Queue workers",
+        "What this site's queue workers reported.",
+        journal=True,
+    ),
+    LogSource(
+        OBJECT_CACHE,
+        "Object cache",
+        "What this site's cache instance reported.",
+        journal=True,
+    ),
     LogSource(WORDPRESS, "WordPress debug log", "Messages WordPress recorded while debugging."),
 )
 
 
-def catalogue(site: ObservedSite | None) -> tuple[LogSource, ...]:
-    """Every log the site can have, with the WordPress debug log only for WordPress.
+def catalogue(site: ObservedSite | None, application: str = "") -> tuple[LogSource, ...]:
+    """Every log the site can have, in the operator's fixed order.
 
-    The log itself is listed only when the site runs WordPress; a read then reports it as
-    missing until the operator enables WordPress debugging into the site's log directory.
+    The WordPress debug log is listed only for WordPress. Scheduled tasks, queue workers
+    and the object cache are Phase C background work: a WordPress site can have scheduled
+    tasks and a cache, a Laravel site all three, and a plain PHP site none. A source whose
+    unit is absent still reads as not configured rather than disappearing.
     """
-    if site is not None and site.application in ("wordpress", "wordpress_partial"):
-        return CATALOGUE
-    return CATALOGUE[:4]
+    if not application and site is not None:
+        application = site.application
+    if application == "wordpress_partial":
+        application = "wordpress"
+    shown = _SHOWN_BY_APPLICATION
+    return tuple(
+        entry for entry in CATALOGUE if entry.slug not in shown or application in shown[entry.slug]
+    )
+
+
+_SHOWN_BY_APPLICATION = {
+    WORDPRESS: frozenset({"wordpress"}),
+    SCHEDULED_TASKS: frozenset({"wordpress", "laravel"}),
+    QUEUE_WORKERS: frozenset({"laravel"}),
+    OBJECT_CACHE: frozenset({"wordpress", "laravel"}),
+}
 
 
 def source(slug: str) -> LogSource | None:

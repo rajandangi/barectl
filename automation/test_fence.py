@@ -128,6 +128,21 @@ class FencePlanTests(SimpleTestCase):
             },
         )
 
+    def test_a_worker_left_fenced_by_an_unfinished_change_is_not_resumed(self) -> None:
+        # A gated or interrupted change leaves the worker enabled on disk but refusing a
+        # start; a fresh review must not infer that it was on (docs/adr/0036).
+        service = show(enabled="enabled")
+        service["RefuseManualStart"] = "yes"
+        value = with_roles(
+            [unit(SLICE, "slice"), unit(QUEUE_SERVICE, "service")],
+            {"queue1": (show(load="not-found", enabled="", active="inactive"), service)},
+        )
+        document = fence.plan_from(value, (SHOP,))
+        if document is None:
+            self.fail("The fenced worker's site was not planned.")
+        sites = cast("list[dict[str, object]]", document["sites"])
+        self.assertEqual([entry["resume"] for entry in sites], [[]])
+
     def test_several_named_sites_carry_their_own_plans(self) -> None:
         first = automation(timer=show(active="active"))
         second = automation("alpha", timer=show(active="active"))

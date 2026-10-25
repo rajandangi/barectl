@@ -8,6 +8,8 @@
         — {{ entry.source.summary }}
         {% if entry.active %}
           <span class="barectl-note">Reading now…</span>
+        {% elif entry.configured is False %}
+          <span class="barectl-note">Not configured.</span>
         {% elif entry.page and entry.page.state == "observed" %}
           <span class="barectl-note">{{ entry.page.lines|length }} newest line{{ entry.page.lines|length|pluralize }}</span>
         {% elif entry.read %}

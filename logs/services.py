@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
-from discovery.snapshot import ObservedSite
+from discovery.snapshot import CollectedSnapshot, ObservedSite
 from operations import lifecycle
 from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import VIEW_CHANGES, VIEW_EVIDENCE, RemoteOperation
@@ -26,7 +26,15 @@ from sites.names import valid_identifier
 
 from . import read as log_read
 from .models import PAGE_LIFETIME, LogRead
-from .sources import CATALOGUE, LogSource, catalogue
+from .sources import (
+    CATALOGUE,
+    OBJECT_CACHE,
+    QUEUE_WORKERS,
+    SCHEDULED_TASKS,
+    LogSource,
+    catalogue,
+    source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +55,9 @@ class SourceView:
 
     source: LogSource
     read: LogRead | None = None
+    # ``None`` when discovery has no evidence for this source's units; ``True``/``False``
+    # when the stored observation can say configured or not without a read.
+    configured: bool | None = None
 
     @property
     def page(self) -> log_read.LogPage | None:
@@ -66,27 +77,46 @@ def context_for_site(
     user: User | AnonymousUser,
     *,
     selected: str = "",
+    live: bool = False,
 ) -> dict[str, object]:
     """The Logs section from stored rows only; no SSH, no queued operation."""
     _expire()
     site = _observed_site(server, identifier)
     allowed = user.has_perm(VIEW_EVIDENCE)
     target = site is not None and site.file.startswith("/etc/caddy/sites/")
-    sources = catalogue(site) if allowed and target else ()
+    application = _application(server, identifier, site)
+    sources = catalogue(site, application) if allowed and target else ()
+    snapshot = server_state(server).snapshot
     views = tuple(
-        SourceView(source, _latest(server, identifier, source.slug)) for source in sources
+        SourceView(
+            entry,
+            _latest(server, identifier, entry.slug),
+            _configured(snapshot.collected if snapshot is not None else None, identifier, entry),
+        )
+        for entry in sources
     )
     chosen = next((view for view in views if view.source.slug == selected), None)
     active = any(view.active for view in views)
     rotation, rotation_files = _rotation_evidence(server, identifier, chosen, site)
     from .forms import LogFilterForm
 
+    page = chosen.page if chosen is not None else None
+    following = live and chosen is not None and chosen.source.journal
     return {
         "logs_allowed": allowed,
         "logs_target": target,
+        "logs_application": application,
         "logs_sources": views,
         "logs_selected": chosen,
         "logs_active": active,
+        "logs_live": following,
+        "logs_can_follow": bool(
+            chosen is not None
+            and chosen.source.journal
+            and page is not None
+            and page.newest
+            and not chosen.active
+        ),
         "logs_can_read": allowed and target and user.has_perm(VIEW_CHANGES),
         "logs_rotation": rotation,
         "logs_rotation_note": _rotation_note(rotation),
@@ -100,6 +130,70 @@ def context_for_site(
             }
         ),
     }
+
+
+def _application(server: Server, identifier: str, site: ObservedSite | None) -> str:
+    """The site's application for the catalogue, from stored evidence only."""
+    if site is None:
+        return ""
+    if site.application in ("wordpress", "wordpress_partial"):
+        return "wordpress"
+    snapshot = server_state(server).snapshot
+    if snapshot is None:
+        return "plain"
+    collected = snapshot.collected
+    if collected.settings.observed and any(
+        row.identifier == identifier and row.application == "laravel"
+        for row in collected.settings.value
+    ):
+        return "laravel"
+    if any(row.identifier == identifier for row in collected.releases.value):
+        return "laravel"
+    return "plain"
+
+
+def _configured(
+    collected: CollectedSnapshot | None, identifier: str, entry: LogSource
+) -> bool | None:
+    """Whether the stored observation says this journal source has its unit.
+
+    The controller never guesses from a missing row alone: when discovery did not read the
+    automation or cache evidence, the catalogue says it has not been read yet and the
+    server-side read decides.
+    """
+    if collected is None or not entry.journal:
+        return None
+    if entry.slug == OBJECT_CACHE:
+        caches = collected.cache
+        if not caches.observed:
+            return None
+        row = next((item for item in caches.value if item.identifier == identifier), None)
+        return row is not None and row.state != "off"
+    automation = collected.automation
+    if not automation.observed:
+        return None
+    installed = tuple(
+        row for row in automation.value if row.identifier == identifier and row.installed
+    )
+    if entry.slug == SCHEDULED_TASKS:
+        from automation.convention import ROLE_SCHEDULE, ROLE_WPCRON
+
+        return any(row.role in (ROLE_WPCRON, ROLE_SCHEDULE) for row in installed)
+    if entry.slug == QUEUE_WORKERS:
+        from automation.convention import queue_index
+
+        return any(queue_index(row.role) is not None for row in installed)
+    return None
+
+
+def available_source(server: Server, identifier: str, slug: str) -> LogSource | None:
+    """One catalogue entry this site can read, from stored evidence only."""
+    entry = source(slug)
+    site = _observed_site(server, identifier)
+    if entry is None or site is None:
+        return None
+    entries = catalogue(site, _application(server, identifier, site))
+    return next((item for item in entries if item.slug == slug), None)
 
 
 def _rotation_evidence(
@@ -235,6 +329,31 @@ def _moment(value: str) -> datetime | None:
     except ValueError:
         return None
     return parsed if timezone.is_aware(parsed) else timezone.make_aware(parsed)
+
+
+def follow_read(
+    server: Server,
+    user: User,
+    identifier: str,
+    slug: str,
+) -> LogRead | None:
+    """Queue the next live page of one journal source, or ``None`` when the server is busy.
+
+    The continuation is the newest stored page's live cursor; with no page yet the newest
+    lines are read first, so a live view starts from what is on screen.
+    """
+    entry = source(slug)
+    if entry is None or not entry.journal:
+        raise ValueError("Not a live log.")
+    if lifecycle.active_operation(server) is not None:
+        return None
+    previous = _latest(server, identifier, slug)
+    cursor = ""
+    if previous is not None and previous.page:
+        page = log_read.LogPage.from_document(previous.page)
+        if page is not None and page.newest:
+            cursor = page.newest
+    return request_read(server, user, identifier, slug, cursor=cursor)
 
 
 def _authorize(read: LogRead) -> None:
