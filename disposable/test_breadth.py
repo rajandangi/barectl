@@ -117,6 +117,21 @@ class BreadthCase(LaravelDeployCase):
             time.sleep(0.3)
         return False
 
+    def _assert_gate_held(self, timer: str, service: str) -> None:
+        """The boot fence after a restart: boot activation is off and nothing started.
+
+        The runtime mask and the ``/run`` drop-in do not survive a boot, so this reads the
+        durable half the gate leaves: disabled units and no running work.
+        """
+        for name in (timer, *self.worker_units()):
+            self.assertNotIn(
+                self.unit_property(name, "UnitFileState"), ("enabled", "enabled-runtime"), name
+            )
+            self.assertNotIn(
+                self.unit_property(name, "ActiveState"), ("active", "activating"), name
+            )
+        self.assertNotIn(self.unit_property(service, "ActiveState"), ("active", "activating"))
+
     def _assert_fenced(self, timer: str, service: str) -> None:
         self.assertEqual(self.unit_property(timer, "RefuseManualStart"), "yes")
         self.assertIn(self.unit_property(timer, "ActiveState"), ("inactive", "failed"))
@@ -299,7 +314,7 @@ class RebootGateFence(BreadthCase):
         # start work against the half-migrated release.
         self.stop_for(20)
         boot_epoch = self.unit_unix_manager("UserspaceTimestamp")
-        self._assert_fenced(timer, service)
+        self._assert_gate_held(timer, service)
         self.assertEqual(self.starts_since(service, boot_epoch), 0)
         self.assertEqual(self.https_status("/"), 503)
 
