@@ -46,6 +46,7 @@ class RemoteOperation(models.Model):
         CHANGE_APPLY = "change_apply", "Change apply"
         LOG_READ = "log_read", "Log read"
         CACHE_READING = "cache_reading", "Object cache reading"
+        BACKUP_CHECK = "backup_check", "Backup check"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
@@ -101,6 +102,7 @@ class RemoteOperation(models.Model):
                         "change_apply",
                         "log_read",
                         "cache_reading",
+                        "backup_check",
                     ]
                 ),
                 name="remote_operation_kind_known",

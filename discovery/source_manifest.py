@@ -19,6 +19,8 @@ FORMAT = 1
 # one can change a command a transcript holds; record all states when any changes.
 SOURCES = (
     "automation/bodies/observe.py",
+    "backups/bodies/observe.py",
+    "databases/binding.py",
     "automation/bodies/observe_workers.py",
     "automation/bodies/source.py",
     "automation/bodies/units.py",

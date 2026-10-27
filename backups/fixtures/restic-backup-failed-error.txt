@@ -1,0 +1,2 @@
+{"message_type":"error","error":{"message":"failed to save /salpha.sql: Fatal: command failed: exit status 7"},"during":"archival","item":"/salpha.sql"}
+{"message_type":"exit_error","code":1,"message":"Fatal: unable to save snapshot: failed to save /salpha.sql: Fatal: command failed: exit status 7"}

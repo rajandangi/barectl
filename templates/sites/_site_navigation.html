@@ -4,6 +4,12 @@
       <a href="{% url 'site_detail' server.pk identifier %}"
          {% if section == 'overview' %}class="usa-current" aria-current="page"{% endif %}>Overview</a>
     </li>
+    {% if target_site %}
+      <li class="usa-sidenav__item">
+        <a href="{% url 'site_backups' server.pk identifier %}"
+           {% if section == 'backups' %}class="usa-current" aria-current="page"{% endif %}>Backups</a>
+      </li>
+    {% endif %}
     <li class="usa-sidenav__item">
       <a href="{% url 'site_activity' server.pk identifier %}"
          {% if section == 'activity' %}class="usa-current" aria-current="page"{% endif %}>Activity</a>

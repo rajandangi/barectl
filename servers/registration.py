@@ -174,6 +174,7 @@ def remove_server(server: Server) -> None:
     try:
         with transaction.atomic():
             stored = Server.objects.get(pk=server.pk)
+            from backups.check import forget_checks as forget_backup_checks
             from operations.lifecycle import active_operation
 
             if (
@@ -185,6 +186,7 @@ def remove_server(server: Server) -> None:
             forget_discovery(server)
             forget_changes(server)
             forget_log_reads(server)
+            forget_backup_checks(server)
             keep_run_audit(server)
             # Deleting through a queryset leaves the instance usable if the commit fails.
             Server.objects.filter(pk=server.pk).delete()

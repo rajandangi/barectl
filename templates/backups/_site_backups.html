@@ -1,0 +1,138 @@
+{% if not backups_target %}
+  <section class="barectl-card" aria-labelledby="backups-heading">
+    <h2 id="backups-heading">Backups</h2>
+    <p>This site is not managed by Barectl, so it has no backup controls.</p>
+  </section>
+{% else %}
+  <section class="barectl-card" aria-labelledby="backups-heading">
+    <h2 id="backups-heading">Backups</h2>
+    {% if backups.problems %}
+      <div class="usa-alert usa-alert--warning">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            {% for problem in backups.problems %}
+              {{ problem }}{% if not forloop.last %} {% endif %}
+            {% endfor %}
+          </p>
+        </div>
+      </div>
+    {% endif %}
+    {% if not backups.enabled %}
+      <p>{{ backups.note }}</p>
+      <p>
+        Barectl installs its pinned backup tool, keeps an encrypted copy of this site's
+        database on the server, and gives you a recovery kit for later.
+      </p>
+      {% if backups_can_enable %}
+        <form class="usa-form"
+              method="post"
+              action="{% url 'site_backups_enable_prepare' server.pk identifier %}">
+          {% csrf_token %}
+          <div class="barectl-page-actions">
+            <button type="submit" class="usa-button">Enable backups</button>
+          </div>
+        </form>
+      {% else %}
+        <p class="barectl-note">
+          Backups can be enabled after Barectl has a current observation of this server and
+          no other operation is running.
+        </p>
+      {% endif %}
+    {% else %}
+      {% if backups.last %}
+        <div class="barectl-card__summary" aria-live="polite">
+          <p><strong>{{ backups.last.headline }}</strong></p>
+          <p>{{ backups.last.detail }}</p>
+          <p class="barectl-note">Last result: {{ backups.last.time_label }}</p>
+        </div>
+      {% else %}
+        <p>{{ backups.note }}</p>
+      {% endif %}
+      <div class="barectl-page-actions">
+        {% if backups.database %}
+          {% if backups_can_back_up %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_backup_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <button type="submit" class="usa-button">Back up now</button>
+            </form>
+          {% else %}
+            <p class="barectl-note">Barectl cannot take a backup while another operation runs.</p>
+          {% endif %}
+        {% else %}
+          <p class="barectl-note">
+            <strong>Database only is unavailable.</strong> {{ backups_database_reason }}
+          </p>
+        {% endif %}
+      </div>
+      <div class="barectl-page-actions">
+        {% if backups_can_check %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_check' server.pk identifier %}">
+            {% csrf_token %}
+            <button type="submit" class="usa-button usa-button--outline">Check backups</button>
+          </form>
+        {% endif %}
+        <a class="usa-button usa-button--outline"
+           href="{% url 'site_backups_kit' server.pk identifier %}">Recovery kit</a>
+      </div>
+      <p class="usa-hint">Backing up runs on the server and carries on if this computer disconnects.</p>
+    {% endif %}
+  </section>
+  {% if backups.enabled %}
+    <section class="barectl-card" aria-labelledby="recovery-points-heading">
+      <h2 id="recovery-points-heading">Recovery points</h2>
+      {% if backups.checking %}
+        <p>Barectl is checking the recovery points now.</p>
+      {% elif backups.check_problem %}
+        <p>{{ backups.check_problem }}</p>
+      {% endif %}
+      {% if backups.checked_at %}
+        <p class="barectl-note">
+          Checked {{ backups.checked_at|date:"j M Y, H:i" }}.
+          {% if backups.stale %}<strong>This list may be out of date; check backups again.</strong>{% endif %}
+        </p>
+      {% elif not backups.checking %}
+        <p>Choose <strong>Check backups</strong> to list recovery points.</p>
+      {% endif %}
+      {% if backups.points %}
+        <table class="usa-table usa-table--borderless">
+          <caption class="usa-sr-only">Recovery points for this site</caption>
+          <thead>
+            <tr>
+              <th scope="col">Taken</th>
+              <th scope="col">Scope</th>
+              <th scope="col">Kept here</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for point in backups.points %}
+              <tr>
+                <td>{{ point.time_label }}</td>
+                <td>{{ point.scope }}</td>
+                <td>{{ point.status }}</td>
+                <td>
+                  {% if point.live %}Captured while the site ran.{% endif %}
+                  {% if point.keep %}Kept.{% endif %}
+                  {% if not point.restorable %}This point is not complete.{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <details class="barectl-advanced">
+          <summary>Advanced</summary>
+          <ul>
+            {% for point in backups.points %}
+              <li>{{ point.time_label }}: {{ point.short_id }}{% if point.point %} ({{ point.point }}){% endif %}</li>
+            {% endfor %}
+            {% if backups_repository %}<li>Onsite repository: {{ backups_repository }}</li>{% endif %}
+          </ul>
+        </details>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endif %}

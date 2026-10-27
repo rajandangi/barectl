@@ -163,7 +163,13 @@ decision, and the [Phase C qualification record](phase-c-qualification.md) the e
 
 ## Backups
 
-restic backups and restore are planned in the [Phase D specification](https://github.com/rajandangi/barectl/issues/358); see ADRs [0031](adr/0031-back-up-with-restic.md), [0037](adr/0037-capture-scheduled-backups-live.md) and [0022](adr/0022-review-destructive-restore-and-coordinated-capture.md).
+Restic 0.18.1 is supplied from the catalog lock, and each site can have an encrypted onsite
+repository with a random server key and the operator's recovery passphrase. **Enable
+backups**, **Back up now** for a database-only point, and **Check backups** are implemented;
+schedules, retention, restores, offsite storage and export remain planned in the [Phase D
+specification](https://github.com/rajandangi/barectl/issues/358) ([backups](backups.md)). See
+ADRs [0031](adr/0031-back-up-with-restic.md), [0037](adr/0037-capture-scheduled-backups-live.md)
+and [0022](adr/0022-review-destructive-restore-and-coordinated-capture.md).
 
 ## Logs
 

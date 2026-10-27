@@ -100,6 +100,8 @@ through `mariadb` or `psql -X` as that same principal. No separate dump user exi
 need read access across every site's database, broader than the site principal already holds.
 
 A fresh review reconstructs the binding from the server's catalog alone, so a second
-controller proposes no changes. Passive discovery keeps reading only the engine's package
-and units; the catalog read belongs to the change's preparation and verification.
+controller proposes no changes. Passive discovery keeps reading the engine's package
+and units; the catalog read belongs to the change's preparation and verification. Backups
+discovery makes one narrow exception: it reads whether each site's database exists so
+Database only can be offered honestly, and it never reads its contents ([backups](backups.md)).
 

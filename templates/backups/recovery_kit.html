@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Recovery kit · {{ identifier }} · {{ server.name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        <a href="{% url 'servers' %}">Servers</a> /
+        <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a> /
+        <a href="{% url 'site_backups' server.pk identifier %}">{{ identifier }}</a>
+      </p>
+      <h1>Recovery kit</h1>
+    </div>
+  </div>
+  <section class="barectl-card" aria-labelledby="kit-heading">
+    <h2 id="kit-heading">Keep this with the recovery passphrase</h2>
+    <p>
+      Store or print this page somewhere other than the server and Barectl. It names where
+      the copies live and how to open them with plain restic. It holds no secret.
+    </p>
+    <pre class="barectl-recovery-kit">{% for line in lines %}{{ line }}
+{% endfor %}
+</pre>
+    <div class="barectl-page-actions">
+      <a class="usa-button usa-button--outline"
+         href="{% url 'site_backups' server.pk identifier %}">Back to backups</a>
+    </div>
+  </section>
+{% endblock %}

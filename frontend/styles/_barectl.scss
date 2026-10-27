@@ -476,3 +476,15 @@ body {
 .barectl-steps .usa-hint {
   display: block;
 }
+
+// The printable recovery kit is monospaced, wraps, and keeps its indentation (#396).
+.barectl-recovery-kit {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: units(2);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background-color: color("base-lightest");
+  border-left: units(0.5) solid color("base-light");
+}

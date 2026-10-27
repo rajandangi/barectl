@@ -42,6 +42,8 @@
       <div class="barectl-layout__content">
         {% if section == "overview" %}
           {% include "sites/_site_overview.html" %}
+        {% elif section == "backups" %}
+          {% include "backups/_site_backups.html" %}
         {% elif section == "logs" %}
           {% include "sites/_site_logs.html" %}
         {% elif section == "deployments" %}

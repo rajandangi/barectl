@@ -3,11 +3,14 @@
 import hashlib
 import re
 import shlex
+from dataclasses import replace
 
 from automation import observation as automation_observation
 from automation import worker_observation
 from automation.observation import ObservedSchedule
 from automation.worker_observation import ObservedWorker
+from backups import observation as backup_observation
+from backups.observation import ObservedBackup
 from bootstrap.standing import HostJudgment, Standing
 from cache import instance as cache_instance
 from laravel import observation as laravel_observation
@@ -123,7 +126,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     certificate_email, certificate_email_state = "", ""
     if sites and standing.standing == Standing.TARGET_STACK:
         certificate_email_state, certificate_email = caddy_email.read(shell)
-    return CollectedSnapshot(
+    collected = CollectedSnapshot(
         os=os_release,
         architecture=architecture,
         cpu_count=cpu_count,
@@ -143,6 +146,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
     )
+    return replace(collected, backups=_hosting_backups(shell, collected, sites=sites))
 
 
 def _hosting_sites(
@@ -151,6 +155,28 @@ def _hosting_sites(
     if standing.standing == Standing.TARGET_STACK:
         return site_observation.observed_sites(shell)
     return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+
+
+def _hosting_backups(
+    shell: RemoteShell, collected: CollectedSnapshot, *, sites: bool
+) -> Observation[tuple[ObservedBackup, ...]]:
+    """Each site's backups, read only on a fully observed Target stack host."""
+    from databases import observation as database_observation
+
+    if not sites:
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+    if collected.standing is None or collected.standing.standing != Standing.TARGET_STACK:
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+    engines = database_observation.installed_engines(collected)
+    engine = engines[0].engine if len(engines) == 1 and engines[0].managed else ""
+    architecture = architecture_of(collected.architecture.value or "")
+    reading = backup_observation.reading(shell, collected.sites.value, engine, architecture)
+    return Observation(
+        ObservationOutcome(reading.outcome),
+        reading.source,
+        reading.warning,
+        reading.observations,
+    )
 
 
 def _hosting_inventories(

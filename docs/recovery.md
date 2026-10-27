@@ -15,8 +15,30 @@ A target-stack server stays manageable with ordinary Linux tools when Barectl is
 | Server default commands | links in `/usr/local/bin`; wrappers in `/usr/local/libexec/barectl/defaults/` | | |
 | Barectl's runs | | `barectl-apply-<32 hex>.service`, transient, unloaded when it ends | `journalctl -u barectl-apply-<32 hex>` |
 | Journal storage | `/etc/systemd/journald.conf.d/50-barectl.conf` | `systemd-journald.service` | |
+| A site's backups | `/var/lib/barectl-backups/<id>/onsite`; server key in `/etc/barectl/backups/<id>.key` | | `journalctl --grep '^barectl-result '` |
 
 `<runtime>` is `php84` or `php85`, and `<id>` is the site identifier. The [site convention](site-conventions.md) lists every path with its owner and mode.
+
+## Backups
+
+A site's encrypted restic repository is `/var/lib/barectl-backups/<id>/onsite`. Its server
+key is `/etc/barectl/backups/<id>.key`, both root-only. The pinned restic profile is
+`/nix/var/nix/profiles/barectl/restic`.
+
+The operator's recovery passphrase opens the repository alone, so an onsite copy is readable
+without Barectl. Set `RESTIC_REPOSITORY` and `RESTIC_PASSWORD_FILE` to a file holding the
+passphrase, then use ordinary restic commands:
+
+```sh
+RESTIC_REPOSITORY=/var/lib/barectl-backups/<id>/onsite \
+RESTIC_PASSWORD_FILE=/root/recovery-passphrase \
+/nix/var/nix/profiles/barectl/restic/bin/restic snapshots
+```
+
+Barectl holds no catalog of recovery points; restic's snapshot list is the record. Barectl's
+own workers open the repository with the server key, never the passphrase. The recovery kit
+in the site's **Backups** section names the same paths and commands and holds no secret.
+
 
 ## Inspecting
 

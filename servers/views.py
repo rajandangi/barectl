@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -155,6 +155,7 @@ _SECTIONS: dict[Section, str] = {
 
 SiteSection = Literal[
     "overview",
+    "backups",
     "activity",
     "logs",
     "deployments",
@@ -448,6 +449,7 @@ def _target_site_context(
         return
     if section not in {
         "overview",
+        "backups",
         "activity",
         "logs",
         "deployments",
@@ -509,6 +511,26 @@ def _site_activity_context(
     context.update(_activity_context(request, server, identifier, show_servers=False))
 
 
+def _site_backups_context(
+    server: Server,
+    identifier: str,
+    user: User | AnonymousUser,
+    context: dict[str, object],
+) -> None:
+    """The Backups section from stored rows only (#396)."""
+    from backups import convention as backup_convention
+    from backups.presentation import BackupsView
+    from backups.views import context_for_site as backups_context_for_site
+
+    context.update(backups_context_for_site(server, identifier, user))
+    backups = context.get("backups")
+    context["backups_repository"] = (
+        backup_convention.repository(identifier)
+        if isinstance(backups, BackupsView) and backups.enabled
+        else ""
+    )
+
+
 def _site_overview_context(
     request: HttpRequest,
     server: Server,
@@ -567,7 +589,7 @@ def _site_overview_context(
     context["blocking"] = blocking_operation(state.other_operation)
 
 
-def site_page_response(
+def site_page_response(  # noqa: C901 - one dispatcher for the site sections
     request: HttpRequest,
     pk: int,
     identifier: str,
@@ -634,6 +656,8 @@ def site_page_response(
         from databases.site_views import context_for_site as database_context_for_site
 
         context.update(database_context_for_site(server, identifier, request.user))
+    if target_site and section == "backups":
+        _site_backups_context(server, identifier, request.user, context)
     if target_site and section == "overview":
         _site_overview_context(request, server, state, page, identifier, context)
     if target_site and section == "deployments":
