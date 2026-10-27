@@ -18,6 +18,11 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 - Apply Barectl's color palette through the USWDS theme. Use the semantic colors recorded in `docs/design-palette.md`.
 - Use Inter for Barectl's English interface and Vite for the asset pipeline. Templates load assets with `{% vite_entry %}`; never link built files by hand. See `docs/frontend-assets.md` for typography and Django integration.
 
+## Required evidence
+
+- A required native test is never removed, skipped or weakened to fit an item limit or a time budget. Split the setup into a preparation scenario, or record the gap in the handoff and the qualification record; a missing test is not a pass.
+- Prove the seam the test claims to cover. A staged-source substring is not proof that a body reaches its fence or restore step; drive the body with the reviewed document, or assert the observable effect.
+
 ## Code comments
 
 Comment only business logic the code cannot make clear. Do not restate what code does, narrate steps or repeat names. Business rules belong in `docs/adr/` and the other Markdown docs; a necessary comment points to the owning document instead of explaining the rule again. See [code comments](docs/quality.md#code-comments).

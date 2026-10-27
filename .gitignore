@@ -11,6 +11,7 @@ staticfiles/
 .mypy_cache/
 node_modules/
 static/dist/
+.quiet-run/
 .DS_Store
 *.pem
 *.key

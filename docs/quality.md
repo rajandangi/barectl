@@ -86,7 +86,7 @@ It needs `.env` and `node_modules`. `git push --no-verify` skips it. The fronten
 
 The fast gate has a time target in the [test time budget](#test-time-budget).
 
-The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
+The browser tests need a production build and `npm ci` first. `scripts/worktree-setup.sh` builds `static/dist` when it is missing, so a linked worktree starts with the production assets the browser tests use. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 
 ## Test time budget
 
@@ -106,6 +106,8 @@ The baseline is the [Phase A qualification record](phase-a-qualification.md#buil
 
 The budget is a ratchet. A change may not raise the measured total, or any stage's time, beyond run-to-run noise. If it does, the same change speeds the suite back up before it merges: it consolidates tests, shares fixtures and prepared state, removes duplicate coverage or parallelizes. It never raises a target or a limit.
 
+`BARECTL_BUDGET_STRICT=1 docker/disposable-server/build.sh --env-file .env` exits nonzero when a target is missed, not only when a limit is. A measured target miss is a defect: record it in the qualification record and fix it before the next phase; the Phase C record names the current joint-fast and hosted-shard misses.
+
 How to keep it fast:
 
 - Measure before and after. Django's `test --durations N` lists the slowest tests, as [pytest's `--durations`](https://docs.pytest.org/en/stable/how-to/usage.html#profiling-test-execution-duration) does; start with the slowest.
@@ -124,6 +126,14 @@ The fast layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)
 Each transcript is one JSON file per server state in `discovery/transcripts/<state>.json`, with the pins its server was built from. `docker/disposable-server/pins.json` holds the current pin set, which is the digest of the Ubuntu base image today; the Nix release, nixpkgs revision and catalog lock join it as they arrive. A fast test fails when any transcript was recorded with other pins, so moving a pin means recording again in the same change. Another fast test reads every transcript and fails if one holds the secret every recording seeds on its server or a command naming a secret location.
 
 A staged body and a fixed read share their source: `sites/bodies/common.py` is part of the site read's program, and `laravel/bodies/common.py` part of the Laravel read's. Editing either changes the recorded command, so record every state whose read embeds it again in the same change rather than patching a transcript ([automation](automation.md#fencing-site-changes) did this for #395).
+
+When a shared read source changes on the integration branch, record every declared state in one pass:
+
+```bash
+scripts/record-all-transcripts.sh --env-file .env
+```
+
+`disposable/scenarios.py --list-records` prints the states. Record new states on the ticket branch; re-record shared states on the integration tip, so parallel branches do not produce conflicting JSON.
 
 A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
 

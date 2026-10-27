@@ -30,4 +30,7 @@ if [ -d node_modules ]; then
 else
     npm ci
 fi
+if [ ! -f static/dist/.vite/manifest.json ]; then
+    npm run build
+fi
 printf 'worktree-setup: ready.\n'
