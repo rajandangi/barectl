@@ -53,9 +53,11 @@ Complete the run only when every sub-issue's acceptance criteria are met and the
 A native suite run takes many minutes, and every check on it costs a turn at the agent's full context. Wait in as few turns as possible:
 
 ```bash
-docker/disposable-server/quiet-run.sh start "$NOTES/native.log" -- docker/disposable-server/run-scenarios.sh --env-file .env
+docker/disposable-server/quiet-run.sh start "$NOTES/native.log" -- uv run python scripts/native-run.py --env-file .env
 docker/disposable-server/quiet-run.sh wait "$NOTES/native.log"
 ```
+
+`scripts/native-run.py` takes a host-wide lock, so parallel agents wait instead of sharing lanes. `build.sh` does not use it because its validator and native stages run side by side by design.
 
 `wait` blocks for up to nine minutes, then prints only the failure lines and the tail, and exits with the command's status, or 124 while it is still running; give the call a ten-minute tool timeout and call `wait` again on 124. `quiet-run.sh run` starts and waits in one call. For CI, use one blocking `gh pr checks --watch` or `gh run watch --exit-status` call. Wait in one blocking call each time, not with short sleeps between log reads. The runner's own logs stay under `~/.cache/barectl/native/scenario-logs` ([native layer](../quality.md#native-layer)).
 

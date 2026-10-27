@@ -133,7 +133,7 @@ When a shared read source changes on the integration branch, record every declar
 scripts/record-all-transcripts.sh --env-file .env
 ```
 
-`disposable/scenarios.py --list-records` prints the states. Record new states on the ticket branch; re-record shared states on the integration tip, so parallel branches do not produce conflicting JSON.
+`disposable/scenarios.py --list-records` prints the states. Record new states on the ticket branch; re-record shared states on the integration tip, so parallel branches do not produce conflicting JSON. `discovery/source_manifest.py` keeps a digest manifest of the shared read and body sources; the fast suite names the stale paths and this command when one changes.
 
 A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
 

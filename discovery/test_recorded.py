@@ -11,7 +11,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
-from . import recorded, ssh
+from . import recorded, source_manifest, ssh
 from .fakes import FakeServer
 from .recorded import (
     Recorded,
@@ -153,6 +153,13 @@ def stale_states() -> list[str]:
 
 class StoredTranscriptTests(SimpleTestCase):
     """Every transcript in the repository, read as tests read it."""
+
+    def test_the_shared_source_manifest_is_current(self) -> None:
+        self.assertEqual(
+            source_manifest.stale(),
+            (),
+            "shared native sources changed; run scripts/record-all-transcripts.sh",
+        )
 
     def test_every_transcript_was_recorded_with_the_current_pins(self) -> None:
         self.assertEqual(stale_states(), [], "re-record these states: their pins changed")
