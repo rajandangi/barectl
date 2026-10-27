@@ -20,7 +20,7 @@ the full build. Later commits on the branch change tests, measurements and docum
 | --- | --- |
 | Local full build: fast suite, fast validators, browser and native lifecycle scenarios, arm64 | `439e1c1` |
 | Scheduled breadth job, arm64, all seven items in one run | `439e1c1` plus test-only breadth fixes; the workflow has no hosted run yet |
-| Hosted Checks and Native (8, 9, then 14 shards), amd64 | `bfe2339` (green), `bcaf565` (failed, fixed here), `98aee59` (green; three over target), `cff0ca1` (9 shards, green; two over) and the 14-shard rebalance, named under [Hosted runs](#hosted-runs) |
+| Hosted Checks and Native (8, 9, then a 14-shard trial), amd64 | `bfe2339` (green), `bcaf565` (failed, fixed here), `98aee59` (green; three over target), `cff0ca1` (9 shards, green; two over) and the 14-shard trial, named under [Hosted runs](#hosted-runs) |
 
 ## Environments
 
@@ -28,7 +28,7 @@ the full build. Later commits on the branch change tests, measurements and docum
 | --- | --- | --- | --- |
 | Local full build | arm64 | Apple M4 Pro, 14 CPUs, 16 GiB Docker VM; 8 lanes by the lane formula | Ubuntu 26.04.1 LTS by the digest in `docker/disposable-server/pins.json`; systemd 259.5; the kernel shared with the Docker VM |
 | Scheduled breadth job | arm64 local, amd64 in the workflow | The same host; one container per breadth item | The same image; the memory classes cap the container's cgroup at 1, 2 or 4 GiB |
-| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 14 shards of 2 lanes after the rebalance | The same image |
+| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 9 shards of 2 lanes after the rebalance trials | The same image |
 
 The controller runs Python 3.14 and Django 6.1.1. Every server is offline: the lane serves the
 pinned Ubuntu snapshot, the Nix binary cache, the WordPress core and plugin archives, the
@@ -256,9 +256,9 @@ before an interrupted change.
 - **Hosted shard target.** `98aee59` had three shards over the 300 s target (354, 384 and
   326 s). `shard_times.json` was refreshed from its artifacts and the matrix moved to nine
   shards; `cff0ca1` then ran every shard green, with shards 5 and 6 at 331 s and 356 s. The
-  target is still missed on two shards. `OVERHEAD` is calibrated from that run and the matrix
-  moved to fourteen shards; the predicted worst stop is 267.8 s. The 14-shard hosted run is
-  the next revision and is not claimed here.
+  target is still missed on two shards. A 14-shard trial was slower, not faster: its longest
+  native stage was 427 s, because each extra shard repeats layer and boot overhead. The matrix
+  returned to nine; the target remains an item-consolidation follow-up, not a shard-count one.
 - **The local browser suite on this host.** It fails at sign-in with a 500 (a missing or
   unusable Vite manifest in this worktree) before any journey runs, so its local 425 s is not
   a suite measurement. The two focused journeys the integration fixes target pass in CI and
@@ -270,9 +270,8 @@ before an interrupted change.
   and 6 took 331 s and 356 s against the 300 s target (shard 1's validator stage alone took
   129 s). The earlier 8-shard run `98aee59` had three shards over, and `bcaf565` timed out
   `LaravelDeployMariaDB` at 180 s before the scheduler split. The item limit is fixed; the
-  shard target is not. `OVERHEAD` is calibrated from the 9-shard run and the matrix moved to
-  fourteen shards (predicted 267.8 s); the 14-shard hosted run is the next revision and is
-  not claimed here.
+  shard target is not. A 14-shard trial was slower (longest native stage 427 s), so the matrix
+  returned to nine. The next action is splitting the heaviest native items, not adding shards.
 - **WordPress self-updates, the Generate password button, the database engine's site count and
   the WordPress interrupted install** remain as the Phase B record lists them; Phase C does
   not change those claims.
@@ -285,14 +284,14 @@ before an interrupted change.
 `98aee59`, amd64, eight shards of two lanes, passed every shard. Its heaviest shards missed
 the 300 s target: shard 3 354 s, shard 7 384 s and shard 8 326 s; shard 1 ran the 6-class
 validator stage in 132 s and its lifecycle in 103 s. The per-item times from this run are the
-new `disposable/shard_times.json`, and the matrix moved to nine shards, then fourteen after the calibration.
+new `disposable/shard_times.json`, and the matrix moved to nine shards.
 
 `Native` run [40212350965](https://github.com/rajandangi/barectl/actions/runs/40212350965) at
 `cff0ca1`, amd64, nine shards of two lanes, passed every shard. Native stages:
 shard 1 129 s validators + 7 s egress + 109 s lifecycle, shards 2/3/4 241/241/239 s, shard 5
 331 s, shard 6 356 s, shards 7/8/9 232/246/223 s. Shards 5 and 6 remain above the 300 s
-target. `OVERHEAD` was calibrated from this run to 120 s and the matrix moved to fourteen
-shards (predicted 267.8 s); that run is the next revision.
+target. A 14-shard trial was slower (longest native stage 427 s), so the matrix returned to
+nine; the target is an item-consolidation follow-up.
 
 `Native` run [40191609433](https://github.com/rajandangi/barectl/actions/runs/40191609433) at
 integration `bfe2339`, amd64, eight shards of two lanes, all passed:

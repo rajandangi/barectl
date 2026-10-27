@@ -1,5 +1,5 @@
 name: Native scenarios
-# docs/quality.md#native-layer: the native scenarios in 14 shards of 2 lanes, balanced by
+# docs/quality.md#native-layer: the native scenarios in 9 shards of 2 lanes, balanced by
 # their recorded item times, called by the required Native workflow on amd64 and by
 # Native weekly on arm64.
 on:
@@ -15,12 +15,12 @@ permissions:
   contents: read
 jobs:
   scenarios:
-    name: scenarios (${{ matrix.shard }}/14)
+    name: scenarios (${{ matrix.shard }}/9)
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
@@ -116,7 +116,7 @@ jobs:
             docker/disposable-server/run-scenarios.sh -- --check-egress --time-limit "$(remaining)"
           fi
           docker/disposable-server/run-scenarios.sh -- \
-            --shard ${{ matrix.shard }}/14 --time-limit "$(remaining)"
+            --shard ${{ matrix.shard }}/9 --time-limit "$(remaining)"
       - id: l1-archive
         if: always() && steps.l1.outputs.cache-hit != 'true'
         run: |
