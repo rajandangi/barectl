@@ -4,7 +4,7 @@ Reusable brief for an autonomous agent delivering a specification and its sub-is
 
 ## Setup
 
-Read the parent issue, every sub-issue and their comments, labels and native blocking relationships before planning. Work from the live tracker rather than remembered state. Then read `README.md`, `CONTRIBUTING.md`, `GLOSSARY.md`, the specification the parent names, and the ADRs and qualification records it links. `AGENTS.md` is already in context; do not read it again.
+Read the parent issue, every sub-issue and their comments, labels and native blocking relationships before planning. Add every blocking edge with GitHub's native dependency API and record the resulting graph in the parent; the frontier is read from the tracker, not inferred from issue numbers. Work from the live tracker rather than remembered state. Then read `README.md`, `CONTRIBUTING.md`, `GLOSSARY.md`, the specification the parent names, and the ADRs and qualification records it links. `AGENTS.md` is already in context; do not read it again.
 
 Follow the agreed phase order and the tracker's blocking edges, not issue-number order. Record consequential decisions, the alternatives checked and source links in the owning issue. Resolve routine product, architecture and implementation decisions yourself; do not interview the user or request repeated confirmation.
 
@@ -40,7 +40,7 @@ Every ticket passes through three phases, each run by a **fresh** subagent. A ph
 2. **Review and fix** (reviewers, then an implementer). Obtain independent Standards and Spec reviews of the pushed diff. A new implementer fixes the actionable findings from the handoff note and the review reports, reruns the affected checks, pushes, and updates the note.
 3. **Publish** (runner). Open one focused pull request with truthful validation evidence from the note, wait for the required checks on its exact head commit, and report the result. The orchestrator merges, updates the current-behavior documentation and records completion evidence in the ticket. Close the sub-issue only when delivered and verified.
 
-Briefs stay short: the ticket, the handoff note, the owning documents and the role. Name only the documents the ticket's area needs, found through the [module map](../architecture.md#module-map).
+Briefs stay short: the ticket, the handoff note, the owning documents and the role. Name only the documents the ticket's area needs, found through the [module map](../architecture.md#module-map). Start from the [implementer brief](implementer-brief.md) shape and return the handoff in the same note.
 
 ## Verification and completion
 
@@ -60,3 +60,5 @@ docker/disposable-server/quiet-run.sh wait "$NOTES/native.log"
 `wait` blocks for up to nine minutes, then prints only the failure lines and the tail, and exits with the command's status, or 124 while it is still running; give the call a ten-minute tool timeout and call `wait` again on 124. `quiet-run.sh run` starts and waits in one call. For CI, use one blocking `gh pr checks --watch` or `gh run watch --exit-status` call. Wait in one blocking call each time, not with short sleeps between log reads. The runner's own logs stay under `~/.cache/barectl/native/scenario-logs` ([native layer](../quality.md#native-layer)).
 
 Never report the task done while a command is still running. If a stored dependency genuinely blocks safe progress, document exactly what it blocks and continue every independent authorized step; do not stop the run. Do not stop half-way; finish the specification and its sub-issues end to end.
+
+Run one native suite per host at a time. Parallel implementers share Docker lanes and a package-manager, so a second full native run produces contended timings and false failures; the orchestrator serializes them, or the implementers wait for the lane owner.

@@ -672,11 +672,38 @@ class Runner:
         if server is None:
             raise ScenarioError("the lane has no server to run a scenario on.")
         outcome = self._execute(lane, server, scenario)
+        if not outcome.passed:
+            self._diagnose(server, scenario)
         residue_ok = True
         if not self.record and scenario.prefix:
             residue_ok = self._residue(server, scenario, outcome)
-        if not outcome.passed or not residue_ok:
+        if (not outcome.passed or not residue_ok) and not self.keep_failed:
             lane.discard_server()
+
+    def _diagnose(self, server: Machine, scenario: Scenario) -> None:
+        """Keep the native state a failed item leaves behind (docs/quality.md#native-layer)."""
+        name = scenario.label.rsplit(".", 1)[-1]
+        path = self.work / "logs" / f"{server.name}-{name}-diagnostics.txt"
+        command = """
+            echo '== units =='
+            systemctl show -p Id -p LoadState -p ActiveState -p SubState -p InvocationID \
+                -p MainPID -p ExecStart -p UnitFileState -p RefuseManualStart \
+                php-fpm@php84.service php-fpm@php85.service 2>&1 || true
+            echo '== automation units =='
+            systemctl list-units --all --no-legend 'barectl-site-*' 2>&1 || true
+            systemctl list-timers --all --no-legend 'barectl-site-*' 2>&1 || true
+            echo '== journals =='
+            journalctl --no-pager -n 80 2>&1 | grep -E 'barectl-site|php-fpm|haproxy' || true
+            echo '== directories =='
+            ls -ld /var/www /var/www/* /run/php-fpm/php84 /run/php-fpm/php85 2>&1 | head -60
+        """
+        try:
+            text = server.exec(command, timeout=60)
+        except DockerError as error:
+            text = f"The diagnostics could not be read: {type(error).__name__}: {error}\n"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        self.output.say(f"diagnostics: {path}")
 
     def _execute(self, lane: Lane, server: Machine, scenario: Scenario) -> Outcome:
         log = self.work / "logs" / f"{server.name}-{scenario.label.rsplit('.', 1)[-1]}.log"
@@ -838,6 +865,11 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--lanes", type=int, help="lane servers at once")
     parser.add_argument("--time-limit", type=float, default=BUILD_LIMIT, metavar="SECONDS")
     parser.add_argument("--record", metavar="STATE", help="record a scenario's transcript")
+    parser.add_argument(
+        "--list-records",
+        action="store_true",
+        help="print every transcript state a scenario records and stop",
+    )
     parser.add_argument("--keep-failed", action="store_true", help="keep failed servers")
     parser.add_argument("--list", action="store_true", help="print the plan and stop")
     parser.add_argument(
@@ -935,7 +967,7 @@ def _breadth_lanes(lanes: int, options: argparse.Namespace) -> int:
     return lanes
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901
     options = arguments(sys.argv[1:] if argv is None else argv)
     output = Output(sys.stdout)
     scenarios = discover(
@@ -945,6 +977,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         validators=options.validators,
         breadth=options.breadth,
     )
+    if options.list_records:
+        for state in sorted({state for scenario in scenarios for state in scenario.records}):
+            print(state)  # noqa: T201
+        return 0
     if options.record:
         scenarios = [scenario for scenario in scenarios if options.record in scenario.records]
         if not scenarios:

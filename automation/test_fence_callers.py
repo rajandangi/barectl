@@ -19,7 +19,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
-from automation import presentation
+from automation import fence, presentation
 from automation.status import STATUS_SENTENCE, ScheduleStatus
 from cache import instance as cache_instance
 from cache.bodies import instance as cache_body
@@ -29,6 +29,7 @@ from laravel import rollback as laravel_rollback
 from laravel import settings as laravel_settings
 from laravel.bodies import common as laravel_common
 from laravel.bodies import settings as laravel_settings_body
+from operations import engine
 from operations.engine import NativeBody
 from runtimes import update as catalog_update
 from runtimes.bodies import update as catalog_update_body
@@ -59,6 +60,12 @@ class FenceReached(Exception):
 
 
 class CallerTests(SimpleTestCase):
+    def test_the_source_map_covers_every_fenced_kind(self) -> None:
+        self.assertEqual(set(SOURCES), set(fence.FENCING))
+        for slug in fence.FENCING:
+            self.assertIsNotNone(engine.kind_of(slug), slug)
+        self.assertEqual({slug for slug, *_ in CALLERS} | {"remove_site"}, set(SOURCES))
+
     def test_every_fenced_change_stages_a_program_that_compiles(self) -> None:
         for slug, source in SOURCES.items():
             with self.subTest(slug=slug):

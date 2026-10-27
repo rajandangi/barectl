@@ -73,6 +73,48 @@ class JudgeTests(SimpleTestCase):
         self.assertEqual(self.outcome("Ran 1 test in 0.1s\n\nOK\n", 0).reason, "")
 
 
+class RecordListingTests(SimpleTestCase):
+    def test_every_stored_transcript_has_a_recording_scenario(self) -> None:
+        from discovery import recorded
+
+        declared = {state for scenario in scenarios.discover() for state in scenario.records}
+        self.assertEqual(set(recorded.stored()), declared)
+
+    def test_list_records_prints_each_state_once(self) -> None:
+        scenarios_list = [
+            scenarios.Scenario("a", ("a.test",), "L0", False, "s0", ("one", "two")),
+            scenarios.Scenario("b", ("b.test",), "L0", False, "s0", ("two",)),
+        ]
+        output = io.StringIO()
+        with (
+            patch.object(scenarios, "discover", return_value=scenarios_list),
+            patch("sys.stdout", output),
+        ):
+            self.assertEqual(scenarios.main(["--list-records"]), 0)
+        self.assertEqual(output.getvalue().splitlines(), ["one", "two"])
+
+
+class DiagnosticsTests(SimpleTestCase):
+    def test_a_failed_item_keeps_the_native_state(self) -> None:
+        class Server:
+            name = "server"
+
+            def exec(self, command: str, *, timeout: float) -> str:
+                return "ActiveState=failed\n"
+
+        with tempfile.TemporaryDirectory() as directory:
+            runner = scenarios.Runner(
+                scenarios.Output(io.StringIO()),
+                Path(directory),
+                record="",
+                keep_failed=True,
+                quarantined=False,
+            )
+            runner._diagnose(Server(), scenario("a"))  # type: ignore[arg-type]
+            text = (Path(directory) / "logs" / "server-a-diagnostics.txt").read_text()
+        self.assertIn("ActiveState=failed", text)
+
+
 class EgressTests(SimpleTestCase):
     def test_reports_names_no_mirror_serves(self) -> None:
         asked = ["cache.nixos.org", "example.com", "example.com", "evil.test"]

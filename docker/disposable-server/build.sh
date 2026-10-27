@@ -14,6 +14,7 @@ env_file=.env
 if [ "${1:-}" = --env-file ]; then
     env_file=$2
 fi
+strict=${BARECTL_BUDGET_STRICT:-0}
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -59,10 +60,24 @@ fast_wall=$controller_fast
 if [ "$validator_fast" -gt "$fast_wall" ]; then
     fast_wall=$validator_fast
 fi
-printf 'joint fast stage: %ss against the 60s target\n' "$fast_wall"
+if [ "$fast_wall" -gt 60 ]; then
+    printf 'joint fast stage: %ss against the 60s target (missed)\n' "$fast_wall"
+    if [ "$strict" = 1 ]; then
+        status=1
+    fi
+else
+    printf 'joint fast stage: %ss against the 60s target\n' "$fast_wall"
+fi
 
 wall=$(( $(date +%s) - started ))
-printf 'full build: %ss against the 300s target and 900s limit\n' "$wall"
+if [ "$wall" -gt 300 ]; then
+    printf 'full build: %ss against the 300s target and 900s limit (target missed)\n' "$wall"
+    if [ "$strict" = 1 ]; then
+        status=1
+    fi
+else
+    printf 'full build: %ss against the 300s target and 900s limit\n' "$wall"
+fi
 if [ "$status" != 0 ]; then
     echo "full build: FAILED" >&2
 fi
