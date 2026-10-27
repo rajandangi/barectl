@@ -122,6 +122,18 @@
             {% endif %}
           </p>
         {% endif %}
+        {% if review.kit_lines %}
+          <section class="barectl-card" aria-labelledby="recovery-kit-heading">
+            <h2 id="recovery-kit-heading">Recovery kit</h2>
+            <p>
+              Store or print this kit with the recovery passphrase, somewhere other than
+              this server and Barectl. It holds no secret.
+            </p>
+            <pre class="barectl-recovery-kit">{% for line in review.kit_lines %}{{ line }}
+{% endfor %}
+</pre>
+          </section>
+        {% endif %}
         {% if can_apply %}
           <form class="usa-form barectl-apply"
                 method="post"
@@ -194,7 +206,8 @@
                 <label class="usa-checkbox__label"
                        for="apply-affected-sites">{{ shared_form.affected_sites.label }}</label>
               </div>
-            {% elif review.requires_acknowledgement %}
+            {% endif %}
+            {% if review.requires_acknowledgement %}
               <div class="usa-checkbox">
                 <input class="usa-checkbox__input"
                        id="apply-acknowledgement"

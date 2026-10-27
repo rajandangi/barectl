@@ -358,8 +358,8 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:  # no
         if not acknowledged:
             messages.error(request, services.SHARED_ACKNOWLEDGEMENT)
             return redirect("change_detail", operation_id=operation_id)
-    elif review.acknowledgement:
-        acknowledged = ChangeApplyForm(request.POST).is_valid()
+    if review.acknowledgement:
+        acknowledged = ChangeApplyForm(request.POST).is_valid() and acknowledged
         if not acknowledged:
             messages.error(request, services.ACKNOWLEDGEMENT_REQUIRED)
             return redirect("change_detail", operation_id=operation_id)

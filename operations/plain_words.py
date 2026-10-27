@@ -18,6 +18,7 @@ class Home(StrEnum):
     SERVER_SETTINGS = "server_settings"
     SERVER_SITE_CREATE = "server_site_create"
     SITE = "site"
+    SITE_BACKUPS = "site_backups"
 
 
 @dataclass(frozen=True)
@@ -341,6 +342,52 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         home=Home.SITE,
         after="Back to the site",
         after_home=Home.SITE,
+    ),
+    "enable_backups": ChangeWords(
+        title="Enable backups for {site}",
+        summary=(
+            (
+                "Barectl installs its pinned backup tool and keeps an encrypted copy of this "
+                "site on the server."
+            ),
+            (
+                "You choose a recovery passphrase. Barectl adds it to the site's backups and "
+                "never stores it. Keep it with the printed recovery kit, somewhere other "
+                "than this server and Barectl."
+            ),
+            ("Barectl cannot take the first backup until you confirm you stored both."),
+        ),
+        action="Enable backups",
+        steps={
+            "preflight": "Checking the site",
+            "restic": "Installing the backup tool",
+            "repository": "Creating the encrypted copy",
+            "keys": "Adding your passphrase and the server's key",
+            "verify": "Checking it opens",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
+    "back_up_now": ChangeWords(
+        title="Back up the database of {site}",
+        summary=(
+            "Barectl copies this site's database into its encrypted backups on the server.",
+            (
+                "The copy is taken without pausing the site. A database dump that fails "
+                "creates no recovery point."
+            ),
+            "Barectl keeps some free space on the server and never deletes older copies.",
+        ),
+        action="Back up now",
+        steps={
+            "preflight": "Checking the site",
+            "backup": "Copying the database",
+            "verify": "Checking the recovery point",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
     ),
     "set_laravel_queue_workers": ChangeWords(
         title="Change queue workers for {site}",

@@ -1,0 +1,298 @@
+"""Check backups: an explicit read-only listing of one site's recovery points (#396).
+
+The read runs through the worker and ``RemoteShell`` as root with the site's server key and
+``--no-lock``, so it never changes the repository. The bounded result lives on the request
+row with the time it was read; opening the Backups section runs nothing.
+"""
+
+import json
+import shlex
+from datetime import timedelta
+from typing import Final
+
+from django.contrib.auth.models import User
+from django.db import transaction
+from django.utils import timezone
+
+from databases import observation as database_observation
+from discovery.presentation import VIEW_SITES
+from discovery.root_read import run_root
+from discovery.snapshot import current_snapshot
+from discovery.ssh import connect_operation
+from operations import lifecycle
+from operations.lifecycle import OperationRefused, recovers_first
+from operations.models import RemoteOperation
+from servers.models import Server
+from sites.names import valid_identifier
+
+from . import convention, observation
+from .models import BackupCheck
+
+READ_PERMISSIONS: Final = ("servers.view_server", VIEW_SITES)
+INTERRUPTED_FAILURE: Final = (
+    "The backup check worker stopped before finishing this request. Check backups again."
+)
+UNEXPECTED_FAILURE: Final = (
+    "The backup check stopped because of an unexpected error. Barectl did not record the "
+    "error details, which could include remote output. Check backups again."
+)
+STALE_AFTER: Final = timedelta(minutes=5)
+LISTING_FRESH: Final = timedelta(minutes=15)
+MAX_BYTES: Final = 262144
+MAX_POINTS: Final = 500
+POINT: Final = convention.POINT
+SCOPES: Final = convention.SCOPES
+ORIGINS: Final = convention.ORIGINS
+
+
+def listing_command(identifier: str) -> str:
+    argv = [
+        "/usr/bin/env",
+        f"RESTIC_REPOSITORY={convention.repository(identifier)}",
+        f"RESTIC_PASSWORD_FILE={convention.server_key(identifier)}",
+        f"RESTIC_CACHE_DIR={convention.CACHE_DIR}",
+        convention.RESTIC_BIN,
+        "snapshots",
+        "--json",
+        "--no-lock",
+        "--tag",
+        convention.MARKER,
+        "--tag",
+        f"site:{identifier}",
+    ]
+    return shlex.join(argv) + f" | /usr/bin/head -c {MAX_BYTES + 1}"
+
+
+def parse_listing(text: str) -> list[dict[str, object]] | None:
+    """The Barectl-tagged recovery points in restic's snapshots answer."""
+    try:
+        value: object = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(value, list) or len(value) > MAX_POINTS:
+        return None
+    return [row for row in value if _barectl_point(row)]
+
+
+def _barectl_point(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    tags = value.get("tags")
+    if (
+        not isinstance(tags, list)
+        or len(tags) > 16
+        or not all(isinstance(tag, str) and convention.TAG.fullmatch(tag) for tag in tags)
+    ):
+        return False
+    return convention.MARKER in tags
+
+
+def points(value: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows = []
+    for snapshot in value:
+        tags = snapshot.get("tags")
+        if not isinstance(tags, list):
+            continue
+        lookup = {tag: True for tag in tags if isinstance(tag, str)}
+        point = next(
+            (
+                tag.removeprefix(convention.POINT_TAG)
+                for tag in tags
+                if isinstance(tag, str) and tag.startswith(convention.POINT_TAG)
+            ),
+            "",
+        )
+        identifier = snapshot.get("id")
+        when = snapshot.get("time")
+        if (
+            not isinstance(identifier, str)
+            or len(identifier) != 64
+            or not isinstance(when, str)
+            or len(when) > 40
+            or (point and POINT.fullmatch(point) is None)
+        ):
+            continue
+        rows.append(
+            {
+                "id": identifier,
+                "short": identifier[:8],
+                "time": when,
+                "point": point,
+                "scope": _tag(tags, "scope:"),
+                "origin": _tag(tags, "origin:"),
+                "live": lookup.get("capture:live", False),
+                "keep": lookup.get("keep", False),
+                "complete": lookup.get("complete", False),
+            }
+        )
+    return sorted(rows, key=lambda row: str(row["time"]), reverse=True)
+
+
+def _tag(tags: list[object], prefix: str) -> str:
+    return next(
+        (
+            tag.removeprefix(prefix)
+            for tag in tags
+            if isinstance(tag, str) and tag.startswith(prefix)
+        ),
+        "",
+    )
+
+
+def _engine(server: Server) -> str:
+    snapshot = current_snapshot(server)
+    if snapshot is None:
+        return ""
+    engines = database_observation.installed_engines(snapshot.collected)
+    return engines[0].engine if len(engines) == 1 and engines[0].managed else ""
+
+
+def _authorized(check: BackupCheck) -> None:
+    user = User.objects.filter(pk=check.requested_by_id).first() if check.requested_by_id else None
+    if user is None or not user.is_active or not user.has_perms(READ_PERMISSIONS):
+        raise OperationRefused("Permission to check this site's backups is no longer available.")
+
+
+def _read(check: BackupCheck) -> None:
+    _authorized(check)
+    snapshot = current_snapshot(check.server)
+    if snapshot is None:
+        value: dict[str, object] = {
+            "version": 1,
+            "identifier": check.identifier,
+            "outcome": "unreadable",
+            "problem": "The site has not been observed yet.",
+            "points": [],
+        }
+    else:
+        from runtimes.catalog import architecture_of
+
+        architecture = (
+            architecture_of(snapshot.collected.architecture.value or "")
+            if snapshot.collected.architecture.value
+            else None
+        )
+        engine = _engine(check.server)
+        with connect_operation(check) as shell:
+            native = observation.read(shell, (check.identifier,), engine, architecture)
+            row = _row(native, check.identifier)
+            if row is None or not _enabled(row):
+                value = {
+                    "version": 1,
+                    "identifier": check.identifier,
+                    "outcome": "missing",
+                    "problem": "Backups are not enabled for this site.",
+                    "points": [],
+                }
+            else:
+                result = run_root(shell, listing_command(check.identifier))
+                text = result.stdout
+                parsed = (
+                    None
+                    if result.exit_status or result.truncated or len(text) > MAX_BYTES
+                    else parse_listing(text)
+                )
+                value = (
+                    {
+                        "version": 1,
+                        "identifier": check.identifier,
+                        "outcome": "unreadable",
+                        "problem": "The recovery points could not be read.",
+                        "points": [],
+                    }
+                    if parsed is None
+                    else {
+                        "version": 1,
+                        "identifier": check.identifier,
+                        "outcome": "observed",
+                        "problem": "",
+                        "points": points(parsed),
+                    }
+                )
+    now = timezone.now()
+    with transaction.atomic():
+        if not lifecycle.succeed(check.pk, now):
+            return
+        BackupCheck.objects.filter(pk=check.pk).update(listing=value, checked_at=now)
+
+
+def _enabled(row: dict[str, object]) -> bool:
+    problems = row.get("problems")
+    return (
+        bool(row.get("profile"))
+        and row.get("repository") is True
+        and row.get("key") is True
+        and not problems
+    )
+
+
+def _row(value: dict[str, object] | None, identifier: str) -> dict[str, object] | None:
+    if value is None:
+        return None
+    rows = value.get("sites")
+    if not isinstance(rows, list):
+        return None
+    item = next(
+        (row for row in rows if isinstance(row, dict) and row.get("identifier") == identifier),
+        None,
+    )
+    return item if isinstance(item, dict) else None
+
+
+lifecycle.register(
+    BackupCheck,
+    _read,
+    interrupted=INTERRUPTED_FAILURE,
+    unexpected=UNEXPECTED_FAILURE,
+    stale_after=STALE_AFTER,
+)
+
+
+def forget_checks(server: Server) -> None:
+    """Delete a removed server's finished checks; active checks protect it."""
+    lifecycle.forget(
+        RemoteOperation.objects.filter(server=server, kind=RemoteOperation.Kind.BACKUP_CHECK)
+    )
+
+
+def latest_check(server: Server, identifier: str) -> BackupCheck | None:
+    return (
+        BackupCheck.objects.filter(
+            server=server,
+            identifier=identifier,
+            status=RemoteOperation.Status.SUCCEEDED,
+        )
+        .exclude(listing={})
+        .order_by("-finished_at", "-pk")
+        .first()
+    )
+
+
+def active(server: Server, identifier: str) -> BackupCheck | None:
+    return (
+        BackupCheck.objects.filter(
+            server=server, identifier=identifier, status__in=RemoteOperation.ACTIVE
+        )
+        .order_by("-queued_at", "-pk")
+        .first()
+    )
+
+
+@recovers_first
+def request_check(server: Server, user: User, identifier: str) -> BackupCheck | None:
+    """Queue one explicit listing; ``None`` when another operation holds the server."""
+    if not valid_identifier(identifier):
+        raise ValueError("Not a supported site.")
+    if not user.has_perms(READ_PERMISSIONS):
+        raise OperationRefused("Your account may not check this site's backups.")
+    BackupCheck.objects.filter(server=server, identifier=identifier).exclude(
+        status__in=RemoteOperation.ACTIVE
+    ).delete()
+    try:
+        return lifecycle.queue(BackupCheck, server, identifier=identifier, requested_by=user)
+    except lifecycle.OperationBusy:
+        return None
+
+
+def stale(check: BackupCheck) -> bool:
+    return check.checked_at is None or timezone.now() - check.checked_at > LISTING_FRESH

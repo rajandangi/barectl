@@ -109,6 +109,12 @@ class DiscoverySnapshot(models.Model):
     )
     workers_source = models.TextField(blank=True, default="")
     workers_warning = models.TextField(blank=True, default="")
+    # Each site's backups from native evidence (Phase D #396).
+    backups_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    backups_source = models.TextField(blank=True, default="")
+    backups_warning = models.TextField(blank=True, default="")
     host_standing = models.CharField(max_length=32, blank=True)
     host_standing_reasons = models.TextField(blank=True)
     host_standing_warnings = models.TextField(blank=True)

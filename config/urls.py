@@ -4,6 +4,12 @@ from django.views.generic import RedirectView
 
 from automation.views import prepare_schedule
 from automation.worker_views import prepare_workers
+from backups.views import (
+    check_now,
+    prepare_backup,
+    prepare_enable,
+    recovery_kit,
+)
 from bootstrap.certificate_email_views import prepare_certificate_email
 from cache.views import object_cache_prepare, prepare_site_cache, read_site_cache
 from dashboard.forms import SignInForm
@@ -313,6 +319,32 @@ urlpatterns = [
         site_detail,
         {"section": "activity"},
         name="site_activity",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/",
+        site_detail,
+        {"section": "backups"},
+        name="site_backups",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/enable/prepare/",
+        prepare_enable,
+        name="site_backups_enable_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/back-up/prepare/",
+        prepare_backup,
+        name="site_backups_backup_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/check/",
+        check_now,
+        name="site_backups_check",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/kit/",
+        recovery_kit,
+        name="site_backups_kit",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/advanced/",

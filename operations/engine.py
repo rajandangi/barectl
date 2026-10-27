@@ -522,6 +522,42 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "again, so it stays paused and the change is partly applied. Check the run's journal, "
         "then prepare a new review."
     ),
+    "backup_site": (
+        "The site's Linux account could not be read, so the backup stopped before changing "
+        "anything. Run discovery and prepare a new review."
+    ),
+    "backup_repository": (
+        "The site's backup repository could not be read or created, so nothing was captured. "
+        "Read the run's journal on the server, then prepare a new review."
+    ),
+    "backup_password": (
+        "The recovery passphrase did not open the site's repository, so nothing was captured. "
+        "Prepare a new review and type the passphrase you stored."
+    ),
+    "backup_key": (
+        "The server key could not be added or did not open the repository, so units cannot "
+        "take backups yet. The passphrase still opens it. Prepare a new review to finish."
+    ),
+    "backup_dump": (
+        "The database dump failed, so restic saved no recovery point. Check the site's "
+        "database and prepare a new review."
+    ),
+    "backup_disk": (
+        "The server does not have the free space the review keeps in reserve, so nothing was "
+        "captured and no older backup was removed. Free space, then prepare a new review."
+    ),
+    "backup_lock": (
+        "The site was busy with another change, so the backup was skipped. Prepare a new "
+        "review after that change finishes."
+    ),
+    "backup_verify": (
+        "The capture finished but no complete recovery point could be verified in the "
+        "repository. Read the run's journal on the server and prepare a new review."
+    ),
+    "backup_unknown": (
+        "The backup tool reported an error Barectl does not recognize, so nothing is recorded "
+        "as saved. Read the run's journal on the server and prepare a new review."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -799,6 +835,16 @@ RESULT_REASONS: Final = frozenset(
         "automation_running",
         "automation_fence",
         "automation_restore",
+        "backup_site",
+        "backup_repository",
+        "backup_password",
+        "backup_key",
+        "backup_dump",
+        "backup_disk",
+        "backup_lock",
+        "backup_verify",
+        "backup_unknown",
+        "backup_partial",
         "logrotate_missing",
         "rotation_invalid",
     }

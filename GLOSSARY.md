@@ -4,6 +4,29 @@ Barectl lets an operator inspect and manage native Linux web servers from a loca
 
 ## Language
 
+### Backups
+
+**Recovery point**:
+One restic snapshot Barectl took for a site, tagged with its site, scope, origin and a point identifier. It is either **Database only** or, in a later Phase D slice, **Full site**.
+_Avoid_: Backup file, dump, snapshot
+
+**Recovery passphrase**:
+The secret the operator chooses once per server and keeps away from the server and Barectl. It opens every site's backups, alone or with the printed kit.
+_Avoid_: Backup password, storage key
+
+**Recovery kit**:
+A printable, non-secret page naming the server, the backup location and the plain restic commands. It never holds the recovery passphrase or a storage key.
+_Avoid_: Backup manifest, credentials sheet
+
+**Onsite repository**:
+A site's encrypted backup store on the server itself, outside every site's files.
+_Avoid_: Local backup folder
+
+**Server key**:
+A random root-only key Barectl's units use to open a site's onsite repository. The operator's recovery passphrase opens the same repository independently.
+_Avoid_: Repo password, master key
+
+
 ### People and installations
 
 **Operator**:

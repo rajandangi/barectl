@@ -21,6 +21,7 @@ from servers.models import Server
 from sites.bodies.pool import SitePool
 
 if TYPE_CHECKING:
+    from backups.observation import ObservedBackup
     from cache.models import CacheObservation
 
 from .models import (
@@ -233,6 +234,10 @@ class CollectedSnapshot:
     workers: Observation[tuple[ObservedWorker, ...]] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
     )
+    # Each site's backups and newest safe result, from native evidence (Phase D #396).
+    backups: Observation[tuple[ObservedBackup, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
     certificate_email: str = ""
     certificate_email_state: str = ""
@@ -306,6 +311,9 @@ def save_snapshot(
         workers_status=collected.workers.outcome,
         workers_source=_joined(collected.workers.source),
         workers_warning=collected.workers.warning,
+        backups_status=collected.backups.outcome,
+        backups_source=_joined(collected.backups.source),
+        backups_warning=collected.backups.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -393,6 +401,7 @@ def save_snapshot(
     _save_settings(snapshot, collected.settings.value)
     _save_automation(snapshot, collected.automation.value)
     _save_workers(snapshot, collected.workers.value)
+    _save_backups(snapshot, collected.backups.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -548,6 +557,33 @@ def _save_workers(snapshot: DiscoverySnapshot, workers: tuple[ObservedWorker, ..
     )
 
 
+def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ...]) -> None:
+    from backups.models import BackupObservation
+
+    BackupObservation.objects.bulk_create(
+        BackupObservation(
+            snapshot=snapshot,
+            identifier=backup.identifier,
+            enabled=backup.enabled,
+            profile=backup.profile,
+            repository=backup.repository,
+            server_key=backup.key,
+            database=backup.database,
+            database_problem=backup.database_problem,
+            problems="\n".join(backup.problems),
+            result_class=backup.last.result_class if backup.last else "",
+            result_reason=backup.last.reason if backup.last else "",
+            result_scope=backup.last.scope if backup.last else "",
+            result_origin=backup.last.origin if backup.last else "",
+            result_at=backup.last.at if backup.last else "",
+            result_point=backup.last.point if backup.last else "",
+            result_snapshots=backup.last.snapshots if backup.last else 0,
+            result_bytes=backup.last.size if backup.last else 0,
+        )
+        for backup in backups
+    )
+
+
 class AttemptSnapshot(NamedTuple):
     attempt: DiscoveryAttempt
     snapshot: Snapshot | None
@@ -563,6 +599,7 @@ _OBSERVATION_ROWS = (
     "settings",
     "automation",
     "workers",
+    "backups",
 )
 
 
@@ -693,6 +730,12 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             _reads(row.workers_source),
             row.workers_warning,
             tuple(_read_worker(worker) for worker in row.workers.all()),
+        ),
+        backups=Observation(
+            ObservationOutcome(row.backups_status),
+            _reads(row.backups_source),
+            row.backups_warning,
+            tuple(_read_backup(backup) for backup in row.backups.all()),
         ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
@@ -846,6 +889,39 @@ def _read_automation(row: object) -> ObservedSchedule:
         last_trigger_us=row.last_trigger_us,
         next_elapse_us=row.next_elapse_us,
         slice_populated=row.slice_populated,
+    )
+
+
+def _read_backup(row: object) -> ObservedBackup:
+    from backups.models import BackupObservation
+    from backups.observation import BackupResult
+    from backups.observation import ObservedBackup as Current
+
+    if not isinstance(row, BackupObservation):
+        raise TypeError("Not a backup observation.")
+    last = (
+        BackupResult(
+            row.result_class,
+            row.result_reason,
+            row.result_scope,
+            row.result_origin,
+            row.result_at,
+            row.result_point,
+            row.result_snapshots,
+            row.result_bytes,
+        )
+        if row.result_class
+        else None
+    )
+    return Current(
+        row.identifier,
+        row.profile,
+        row.repository,
+        row.server_key,
+        tuple(problem for problem in row.problems.splitlines() if problem),
+        row.database,
+        row.database_problem,
+        last,
     )
 
 

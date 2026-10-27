@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 
     from automation.apps import AutomationConfig
     from automation.presentation import ScheduleView
+    from backups.apps import BackupsConfig
+    from backups.presentation import LastBackupView, RecoveryPointView
     from bootstrap.apps import BootstrapConfig
     from bootstrap.certificate_email_views import CertificateEmailForm
     from cache.apps import CacheConfig
@@ -32,6 +34,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
+    from disposable.test_backups import BackupLifecycle
     from disposable.test_cache import LaravelObjectCache, SiteObjectCache, ValkeyInstall
     from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
     from disposable.test_confidential_channel import ConfidentialChannelLifecycle
@@ -581,3 +584,14 @@ if TYPE_CHECKING:
     )
     # The cache state choices are Django field choices, read through the field.
     _cache_states = (CacheState.OFF, CacheState.ON, CacheState.PARTIAL, CacheState.UNSUPPORTED)
+
+    # The Backups section is rendered by Django templates, which read these fields by name.
+    _backup_templates = (
+        BackupsConfig,
+        BackupLifecycle,
+        LastBackupView("", "", "", "").headline,
+        LastBackupView("", "", "", "").time_label,
+        RecoveryPointView("", "", "", False, False, "", "").time_label,
+        RecoveryPointView("", "", "", False, False, "", "").short_id,
+        RecoveryPointView("", "", "", False, False, "", "").restorable,
+    )

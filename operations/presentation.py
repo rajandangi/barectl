@@ -127,6 +127,12 @@ def _home_url(home: plain_words.Home, server_id: int | None, identifier: str) ->
             if identifier
             else reverse("server_sites", args=[server_id])
         )
+    if home is plain_words.Home.SITE_BACKUPS:
+        return (
+            reverse("site_backups", args=[server_id, identifier])
+            if identifier
+            else reverse("server_sites", args=[server_id])
+        )
     return reverse("server_detail", args=[server_id])
 
 
@@ -307,6 +313,8 @@ class ReviewView:
     secret_fields: list[dict[str, object]] = field(default_factory=list)
     # What this change pauses and starts again, or None for a change that never fences.
     fence: FenceSummary | None = None
+    # A printable recovery kit, when the review must show it before escrow (Phase D #396).
+    kit_lines: list[str] = field(default_factory=list)
 
     @property
     def eligible(self) -> bool:
@@ -407,6 +415,18 @@ def review_view(review: ChangeReview) -> ReviewView:
             else "Confidential value"
         ),
         fence=fence_summary(document),
+        kit_lines=[
+            str(line).replace(
+                "{server}",
+                review.preparation.server.name
+                if review.preparation is not None and review.preparation.server is not None
+                else "",
+            )
+            for line in (
+                document.get("kit_lines", []) if isinstance(document.get("kit_lines"), list) else []
+            )
+            if isinstance(line, str)
+        ],
         secret_generate=document.get("secret_generate") is True,
         secret_fields=[
             {
