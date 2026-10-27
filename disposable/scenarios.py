@@ -999,11 +999,14 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901
         if not scenarios:
             print("Native scenarios: no scenarios in this shard.")  # noqa: T201
             return 0
-    lanes = (
-        1
-        if (options.record or options.check_egress or options.validators)
-        else (options.lanes or default_lanes())
-    )
+    if options.validators:
+        # Two validator lanes keep the six classes under the joint-fast target; each lane
+        # owns its container, so a manager reload in one cannot break another.
+        lanes = 2
+    elif options.record or options.check_egress:
+        lanes = 1
+    else:
+        lanes = options.lanes or default_lanes()
     lanes = _breadth_lanes(lanes, options)
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)

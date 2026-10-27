@@ -14,7 +14,9 @@ RECORD = Path(__file__).with_name("shard_times.json")
 # The hosted workflow gives each shard two lanes: `.github/workflows/native-scenarios.yml`.
 LANES = 2
 # A lane's start, each item's server boot and residue check, and the scheduling tail,
-# measured by the hosted runs (docs/phase-b-qualification.md#the-balanced-run).
+# measured by the hosted runs (docs/phase-b-qualification.md#the-balanced-run). The Phase C
+# 14-shard trial was slower than nine, so the matrix returned to nine; the hosted target is
+# tracked as an item-consolidation follow-up in the qualification record.
 OVERHEAD = 90.0
 
 

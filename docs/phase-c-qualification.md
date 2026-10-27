@@ -20,7 +20,7 @@ the full build. Later commits on the branch change tests, measurements and docum
 | --- | --- |
 | Local full build: fast suite, fast validators, browser and native lifecycle scenarios, arm64 | `439e1c1` |
 | Scheduled breadth job, arm64, all seven items in one run | `439e1c1` plus test-only breadth fixes; the workflow has no hosted run yet |
-| Hosted Checks and Native (8 shards), amd64 | Integration `bfe2339` (green) and `bcaf565` (failed, fixed here), named under [Hosted runs](#hosted-runs) |
+| Hosted Checks and Native (8, 9, then a 14-shard trial), amd64 | `bfe2339` (green), `bcaf565` (failed, fixed here), `98aee59` (green; three over target), `cff0ca1` (9 shards, green; two over) and the 14-shard trial, named under [Hosted runs](#hosted-runs) |
 
 ## Environments
 
@@ -28,7 +28,7 @@ the full build. Later commits on the branch change tests, measurements and docum
 | --- | --- | --- | --- |
 | Local full build | arm64 | Apple M4 Pro, 14 CPUs, 16 GiB Docker VM; 8 lanes by the lane formula | Ubuntu 26.04.1 LTS by the digest in `docker/disposable-server/pins.json`; systemd 259.5; the kernel shared with the Docker VM |
 | Scheduled breadth job | arm64 local, amd64 in the workflow | The same host; one container per breadth item | The same image; the memory classes cap the container's cgroup at 1, 2 or 4 GiB |
-| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 9 shards of 2 lanes after the rebalance | The same image |
+| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 9 shards of 2 lanes after the rebalance trials | The same image |
 
 The controller runs Python 3.14 and Django 6.1.1. Every server is offline: the lane serves the
 pinned Ubuntu snapshot, the Nix binary cache, the WordPress core and plugin archives, the
@@ -42,20 +42,19 @@ fast-validator, browser and native stages run concurrently and each is timed.
 | Stage | Measured | Target | Limit | Result |
 | --- | --- | --- | --- | --- |
 | Controller fast tests, 1561 tests with `--parallel` | 42 s in the build | 90 s | | Meets the target |
-| Fast snapshot validators, 6 classes | 77 s | (the joint stage) | | The validators have no separate target |
-| Joint fast stage, as the build measures it | 77 s | 60 s | | **Missed by 17 s**; the next action is below |
-| Browser tests | 83 s | | | |
-| Native lifecycle scenarios, 72 of 72 passed, 8 lanes | 261 s | 300 s | 900 s | Meets the target |
+| Fast snapshot validators, 6 classes on two lanes | 41 s alone, 69 s in the build | (the joint stage) | | The validators have no separate target |
+| Joint fast stage, as the build measures it | 69 s | 60 s | | **Missed by 9 s**; the next action is below |
+| Browser tests | 85 s | | | |
+| Native lifecycle scenarios, 72 of 72 passed, 8 lanes | 278 s | 300 s | 900 s | Meets the target |
 | Longest native item | 94.0 s (`PHPFence`) | | 180 s | Within the item limit |
-| Full local build, wall time | 261 s | 300 s | 900 s | Meets the target |
+| Full local build, wall time | 278 s | 300 s | 900 s | Meets the target |
 
-The joint fast stage misses its 60 s target. In this build the validator stage took 77 s; run
-alone on a cold validator container on the same head it took **118 s** (`SiteNodeValidators`
-alone took 38 s), against the same 60 s target. The target is not raised: the next action is to
-consolidate the six validator classes onto one prepared server and one real rotation, as the
-Phase A record did for its three Node cases, and to bring the node validator's preparation back
-to a few seconds. The 90 s fast-gate target is met: 42 s in this build, 72 s standalone on a
-cold test database. The 261 s full-build wall time is inside its 300 s target.
+The joint fast stage still misses its 60 s target, now by 9 s. Two validator lanes cut the
+standalone stage from 118 s to **41 s** and the build's joint stage from 77 s to **69 s**;
+the remaining time is contention with the fast gate, browser and native stages. The target is
+not raised: the next action is to consolidate the node validator's preparation and the
+rotation validator on one prepared server. The 90 s fast-gate target is met at 42 s, and the
+**278 s** full-build wall time is inside its 300 s target.
 
 The breadth job is outside this budget. Its literal item times on this head are in
 [Breadth scenarios](#breadth-scenarios). It is never a required check and adds no time to a
@@ -124,7 +123,7 @@ local build stays within 15 minutes (target 10).
 | Failed, skipped and unknown outcomes are shown honestly | The one projection distinguishes Off, On and waiting, Running, Last run succeeded, Last run failed, Timed out, Skipped, Stopped after repeated crashes, Paused by an unfinished change, Off during maintenance and Could not confirm (`automation/test_status.py`, `automation/test_scheduler.py`, `automation/test_worker_status.py`). `LongSchedulerTick` proves natively that a run spanning a calendar elapse is followed by the next calendar elapse rather than an immediate second start. A worker crash loop reads `Stopped after repeated crashes` natively in `LaravelQueueWorkers`. The recorded transcripts prove a missing read never becomes a success. |
 | A fresh controller reconstructs all of it and repeated reviews propose nothing | The recorded states `automation-wordpress-26.04`, `automation-laravel-26.04`, `automation-laravel-workers-26.04`, `object-cache-26.04`, `object-cache-edited-26.04`, `object-cache-laravel-26.04` and `fence-wordpress-26.04` replay through `collect()` and each area's review proposes no effects (`automation/test_recorded.py`, `automation/test_worker_recorded.py`, `cache/test_recorded.py`, `sites/test_node_recorded.py`). Each native scenario's checkpoint also runs the same collect and review on the live server. |
 | Memory per cache instance and per worker on 1, 2 and 4 GiB hosts | [Memory](#memory): three memory-cgroup classes. **Not a whole-host measurement**; see [Not qualified](#not-qualified). |
-| The full local build stays within 15 minutes (target 10) | [Build budget](#build-budget): 261 s of wall time, inside the 300 s target and the 900 s limit. The joint fast stage misses its separate 60 s target at 77 s. |
+| The full local build stays within 15 minutes (target 10) | [Build budget](#build-budget): 278 s of wall time, inside the 300 s target and the 900 s limit. The joint fast stage misses its separate 60 s target at 69 s. |
 
 ## Fences and restores
 
@@ -257,8 +256,9 @@ before an interrupted change.
 - **Hosted shard target.** `98aee59` had three shards over the 300 s target (354, 384 and
   326 s). `shard_times.json` was refreshed from its artifacts and the matrix moved to nine
   shards; `cff0ca1` then ran every shard green, with shards 5 and 6 at 331 s and 356 s. The
-  target is still missed on two shards; twelve shards are predicted at 246.5 s but were not
-  run. This record does not claim the hosted target.
+  target is still missed on two shards. A 14-shard trial was slower, not faster: its longest
+  native stage was 427 s, because each extra shard repeats layer and boot overhead. The matrix
+  returned to nine; the target remains an item-consolidation follow-up, not a shard-count one.
 - **The local browser suite on this host.** It fails at sign-in with a 500 (a missing or
   unusable Vite manifest in this worktree) before any journey runs, so its local 425 s is not
   a suite measurement. The two focused journeys the integration fixes target pass in CI and
@@ -270,8 +270,8 @@ before an interrupted change.
   and 6 took 331 s and 356 s against the 300 s target (shard 1's validator stage alone took
   129 s). The earlier 8-shard run `98aee59` had three shards over, and `bcaf565` timed out
   `LaravelDeployMariaDB` at 180 s before the scheduler split. The item limit is fixed; the
-  shard target is not. The next action is a further rebalance/consolidation (twelve shards are
-  predicted at 246.5 s), tracked as a follow-up rather than claimed here.
+  shard target is not. A 14-shard trial was slower (longest native stage 427 s), so the matrix
+  returned to nine. The next action is splitting the heaviest native items, not adding shards.
 - **WordPress self-updates, the Generate password button, the database engine's site count and
   the WordPress interrupted install** remain as the Phase B record lists them; Phase C does
   not change those claims.
@@ -290,7 +290,8 @@ new `disposable/shard_times.json`, and the matrix moved to nine shards.
 `cff0ca1`, amd64, nine shards of two lanes, passed every shard. Native stages:
 shard 1 129 s validators + 7 s egress + 109 s lifecycle, shards 2/3/4 241/241/239 s, shard 5
 331 s, shard 6 356 s, shards 7/8/9 232/246/223 s. Shards 5 and 6 remain above the 300 s
-target; twelve shards are predicted at 246.5 s but were not run.
+target. A 14-shard trial was slower (longest native stage 427 s), so the matrix returned to
+nine; the target is an item-consolidation follow-up.
 
 `Native` run [40191609433](https://github.com/rajandangi/barectl/actions/runs/40191609433) at
 integration `bfe2339`, amd64, eight shards of two lanes, all passed:

@@ -21,3 +21,4 @@ for state in $states; do
     "$here/../docker/disposable-server/run-scenarios.sh" \
         --env-file "$env_file" -- --record "$state"
 done
+uv run --env-file "$env_file" python -m discovery.source_manifest write
