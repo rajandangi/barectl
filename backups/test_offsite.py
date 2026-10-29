@@ -1,6 +1,7 @@
 """Offsite storage on S3 or R2 and copying a point (#403)."""
 
 import importlib.resources
+import stat
 from datetime import timedelta
 from typing import TYPE_CHECKING, override
 
@@ -123,6 +124,43 @@ def backup_evidence(
         current_sites=(IDENTIFIER,),
         offsite=offsite_value,
     )
+
+
+class StorageMetadataTests(SimpleTestCase):
+    def lines(self) -> dict[str, str]:
+        return dict(
+            line.split("\t", 1) for line in fixture("offsite-stat.txt").splitlines() if "\t" in line
+        )
+
+    def test_a_root_directory_with_subdirectories_is_supported(self) -> None:
+        root = self.lines()["good-root"]
+        self.assertTrue(offsite.safe_storage_metadata(root, kind=stat.S_IFDIR, mode=0o700))
+        facts = offsite.storage_metadata(root)
+        if facts is None:
+            self.fail("The recorded root metadata was not parsed.")
+        self.assertEqual(facts[4], 2)
+
+    def test_a_good_config_is_supported(self) -> None:
+        config = self.lines()["good-config"]
+        self.assertTrue(
+            offsite.safe_storage_metadata(config, kind=stat.S_IFREG, mode=0o600, minimum_size=1)
+        )
+
+    def test_an_empty_config_is_not_supported(self) -> None:
+        empty = self.lines()["empty-config"]
+        self.assertFalse(
+            offsite.safe_storage_metadata(empty, kind=stat.S_IFREG, mode=0o600, minimum_size=1)
+        )
+
+    def test_wrong_owner_group_mode_or_type_is_refused(self) -> None:
+        lines = self.lines()
+        for name in ("wrong-owner", "wrong-group", "wrong-mode", "wrong-type"):
+            with self.subTest(name=name):
+                self.assertFalse(
+                    offsite.safe_storage_metadata(
+                        lines[name], kind=stat.S_IFREG, mode=0o600, minimum_size=1
+                    )
+                )
 
 
 class ConfigWriteTests(ChangeTestCase):

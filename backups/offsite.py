@@ -15,6 +15,7 @@ import json
 import re
 import secrets
 import shlex
+import stat
 from dataclasses import dataclass
 from typing import Final
 
@@ -66,18 +67,51 @@ PRECONDITION_COMMAND: Final = "; ".join(
         "printf 'boot\\t%s\\n' \"$(cat /proc/sys/kernel/random/boot_id)\"",
         "printf 'uptime\\t%s\\n' \"$(cut -d' ' -f1 /proc/uptime | tr -d .)\"",
         (
-            f"printf 'config\\t%s\\n' \"$(stat -c '%u %g %a %h %F' "
+            f"printf 'config\\t%s\\n' \"$(stat -c '%u %g %a %f %s' "
             f'{convention.OFFSITE_CONFIG} 2>/dev/null || true)"'
         ),
         (
-            f"printf 'root\\t%s\\n' \"$(stat -c '%u %g %a %h %F' "
+            f"printf 'root\\t%s\\n' \"$(stat -c '%u %g %a %f %s' "
             f'{convention.OFFSITE_ROOT} 2>/dev/null || true)"'
         ),
     ]
 )
 _BOOT = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 _UPTIME = re.compile(r"[0-9]{1,16}")
+_METADATA = re.compile(r"([0-9]+) ([0-9]+) ([0-7]{3,4}) ([0-9a-fA-F]+) ([0-9]+)")
 _POINT = convention.POINT
+STORAGE_UNSAFE = "The storage setting's files have unexpected ownership or permissions."
+STORAGE_EMPTY = "The storage setting is empty or incomplete."
+STORAGE_ROOT_UNSAFE = "The storage setting's directory has unexpected ownership or permissions."
+
+
+def storage_metadata(value: str) -> tuple[int, int, int, int, int] | None:
+    """Parse GNU stat's ``uid gid mode raw-mode size``: owner, group, mode, type, size."""
+    found = _METADATA.fullmatch(value)
+    if found is None:
+        return None
+    try:
+        return (
+            int(found[1]),
+            int(found[2]),
+            int(found[3], 8),
+            int(found[4], 16),
+            int(found[5]),
+        )
+    except ValueError:
+        return None
+
+
+def safe_storage_metadata(value: str, *, kind: int, mode: int, minimum_size: int = 0) -> bool:
+    facts = storage_metadata(value)
+    return bool(
+        facts is not None
+        and facts[0] == 0
+        and facts[1] == 0
+        and facts[2] == mode
+        and stat.S_IFMT(facts[3]) == kind
+        and facts[4] >= minimum_size
+    )
 
 
 def _packed(source: str) -> bytes:
@@ -180,10 +214,16 @@ def inspect_storage(shell: RemoteShell, inputs: PreparationInputs) -> StorageEvi
     elif sites_result.exit_status != 0 or sites_result.truncated:
         problem = "The server's sites could not be read."
     boot_id, uptime, config_metadata, root_metadata = _preconditions(shell)
-    if config_metadata and not re.fullmatch(r"0 0 600 1 regular file", config_metadata):
-        problem = "The offsite storage setting is outside supported settings."
-    if root_metadata and not re.fullmatch(r"0 0 700 1? ?directory", root_metadata):
-        problem = "The offsite storage setting is outside supported settings."
+    if config_metadata:
+        facts = storage_metadata(config_metadata)
+        if facts is None or not safe_storage_metadata(
+            config_metadata, kind=stat.S_IFREG, mode=0o600
+        ):
+            problem = STORAGE_UNSAFE
+        elif facts[4] == 0:
+            problem = STORAGE_EMPTY
+    if root_metadata and not safe_storage_metadata(root_metadata, kind=stat.S_IFDIR, mode=0o700):
+        problem = STORAGE_ROOT_UNSAFE
     return StorageEvidence(
         observed.standing.standing if observed.standing else None,
         architecture,
@@ -209,6 +249,8 @@ def _storage_refusals(evidence: StorageEvidence) -> list[str]:
         )
     if evidence.problem:
         refusals.append(evidence.problem)
+    if evidence.offsite is not None and evidence.offsite.problem:
+        refusals.append(evidence.offsite.problem)
     if not _BOOT.fullmatch(evidence.boot_id) or evidence.uptime_centiseconds is None:
         refusals.append("The server's clock could not be read.")
     if not evidence.enabled:
