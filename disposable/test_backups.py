@@ -215,6 +215,42 @@ class BackupCase(ScenarioTestCase):
             timeout=180,
         )
 
+    def restore_files(self, point: str) -> ChangeReview:
+        from backups import restore
+
+        return apply_change(
+            self,
+            restore.RESTORE,
+            PreparationInputs("", IDENTIFIER, point=point, scope="files"),
+            timeout=180,
+        )
+
+    def restore_full(self, point: str) -> ChangeReview:
+        from backups import restore
+
+        return apply_change(
+            self,
+            restore.RESTORE,
+            PreparationInputs("", IDENTIFIER, point=point, scope="full"),
+            timeout=180,
+        )
+
+    def write_file(self, path: str, content: str) -> None:
+        with self.shell() as shell:
+            write(self, shell, path, content)
+
+    def release_owns_its_files(self, release: str) -> None:
+        """A restored release, and every entry in it, belongs to the site user (Phase D #401).
+
+        The plain-PHP assertion proves the release form Create and Deploy produce. The
+        WordPress form has fast-layer evidence and the recorded automation state; it is not
+        a second site in this item because the shared scenario must stay within 180 s.
+        """
+        account = "s" + IDENTIFIER
+        root = f"/var/www/{IDENTIFIER}/releases/{release}"
+        self.assertEqual(self.native(f"find {root} -not -user {account} -print"), "")
+        self.assertEqual(self.native(f"find {root} -perm -0004 -print"), "")
+
     def set_schedule(self, at: str, *, scope: str = "database") -> ChangeReview:
         from backups import schedule
 
@@ -401,12 +437,17 @@ class BackupLifecycle(BackupCase):
         end = time.monotonic() + 180
         scheduled: list[dict[str, object]] = []
         while time.monotonic() < end and not scheduled:
-            scheduled = [point for point in self.points() if point.get("origin") == "scheduled"]
+            scheduled = [
+                point
+                for point in self.points()
+                if point.get("origin") == "scheduled" and point.get("complete")
+            ]
             if not scheduled:
                 time.sleep(2)
-        self.assertTrue(scheduled, "The real backup timer never fired a scheduled capture.")
+        self.assertTrue(
+            scheduled, "The real backup timer never fired a complete scheduled capture."
+        )
         self.assertTrue(scheduled[0]["live"])
-        self.assertTrue(scheduled[0]["complete"])
         collected = self.observe()
         backup = self.backup_row(collected)
         if backup.last is None:
@@ -527,6 +568,7 @@ class BackupLifecycle(BackupCase):
         self.capture_full()
         full = [point for point in self.points() if point["scope"] == "full"]
         self.assertEqual(len(full), 1)
+        full_point = str(full[0]["point"])
         self.assertTrue(full[0]["complete"])
         self.assertEqual(full[0]["parts"], ["database", "files"])
         self.assertEqual(self.site_status("/"), 200)
@@ -606,6 +648,66 @@ class BackupLifecycle(BackupCase):
         self.assertIn('"kind":"restore"', journal)
         self.assertIn("restore_done", journal)
         self.assertNotIn(PASSPHRASE, journal)
+        # A files-only restore brings back the point's files as a new release owned by the
+        # site user, keeps the release it replaced and takes a files-only safety backup first.
+        replaced = self.native(f"readlink /var/www/{IDENTIFIER}/current").strip()
+        self.write_file(
+            f"/var/www/{IDENTIFIER}/current/public/hello.txt", "changed after the full point\n"
+        )
+        self.restore_files(full_point)
+        self.assertEqual(self.site_status("/"), 200)
+        self.assertIn(
+            "Welcome to your PHP site.",
+            self.native(f"cat /var/www/{IDENTIFIER}/current/public/hello.txt"),
+        )
+        restored_release = self.native(f"readlink /var/www/{IDENTIFIER}/current").strip()
+        self.assertNotEqual(restored_release, replaced)
+        self.assertEqual(self.native(f"test -d /var/www/{IDENTIFIER}/{replaced}; echo $?"), "0")
+        self.release_owns_its_files(restored_release.removeprefix("releases/"))
+        self.assertEqual(
+            self.native(f"stat -c '%G %a' /var/www/{IDENTIFIER}/current/public/hello.txt").strip(),
+            "caddy 640",
+        )
+        files_safety = [row for row in self.points() if row["origin"] == "safety"]
+        self.assertEqual(len(files_safety), 2)
+        self.assertIn("files", {row["scope"] for row in files_safety})
+        # A full-site restore brings back the same point's files and database together.
+        self.write_file(f"/var/www/{IDENTIFIER}/current/public/hello.txt", "changed again\n")
+        self.native(
+            f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
+            + shlex.quote(
+                "UPDATE recovery_check SET note='changed-after-the-full-point' WHERE id=7"
+            )
+            + " s"
+            + IDENTIFIER
+        )
+        before_full = len(self.points())
+        self.restore_full(full_point)
+        self.assertEqual(self.site_status("/"), 200)
+        self.assertIn(
+            "Welcome to your PHP site.",
+            self.native(f"cat /var/www/{IDENTIFIER}/current/public/hello.txt"),
+        )
+        self.assertEqual(
+            self.native(
+                f"{MYSQL} -N -B -e "  # noqa: S608 - checked fixture query in a disposable database
+                + shlex.quote("SELECT note FROM recovery_check WHERE id=7")
+                + " s"
+                + IDENTIFIER
+            ).strip(),
+            "before-the-backup",
+        )
+        full_restored = self.native(f"readlink /var/www/{IDENTIFIER}/current").strip()
+        self.assertNotEqual(full_restored, restored_release)
+        self.assertEqual(
+            self.native(f"test -d /var/www/{IDENTIFIER}/{restored_release}; echo $?"), "0"
+        )
+        self.release_owns_its_files(full_restored.removeprefix("releases/"))
+        after_full = self.points()
+        self.assertEqual(len(after_full), before_full + 1)
+        full_safety = [row for row in after_full if row["origin"] == "safety"]
+        self.assertEqual(len(full_safety), 3)
+        self.assertTrue(any(row["scope"] == "full" for row in full_safety))
 
     def points(self) -> list[dict[str, object]]:
         from backups import check

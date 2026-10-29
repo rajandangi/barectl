@@ -27,6 +27,7 @@ from . import check, convention, presentation
 from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
 from .offsite import COPY_SLUG
 from .reopen import SLUG as REOPEN_SLUG
+from .restore import SCOPES
 from .restore import SLUG as RESTORE_SLUG
 
 if TYPE_CHECKING:
@@ -99,7 +100,6 @@ def context_for_site(
             can_prepare
             and managed
             and view.enabled
-            and view.database
             and user.has_perm("operations.change_destructive")
         ),
         "backups_can_check": bool(
@@ -199,9 +199,10 @@ def prepare_copy(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
 @permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
 def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     point = request.POST.get("point", "")
-    if convention.POINT.fullmatch(point) is None:
+    scope = request.POST.get("scope", "database")
+    if convention.POINT.fullmatch(point) is None or scope not in SCOPES:
         raise Http404
-    return _prepare(request, pk, identifier, RESTORE_SLUG, "site_backups", point=point)
+    return _prepare(request, pk, identifier, RESTORE_SLUG, "site_backups", point=point, scope=scope)
 
 
 def _prepare(  # noqa: C901 - one guarded preparation
@@ -212,6 +213,7 @@ def _prepare(  # noqa: C901 - one guarded preparation
     target: str,
     *,
     point: str = "",
+    scope: str = "database",
 ) -> HttpResponse:
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
@@ -247,13 +249,15 @@ def _prepare(  # noqa: C901 - one guarded preparation
     if slug == RESTORE_SLUG and not context["backups_can_restore"]:
         messages.error(
             request,
-            "Barectl cannot restore this site's database yet. Check backups and wait for the "
-            "current operation.",
+            "Barectl cannot restore this site yet. Check backups and wait for the current "
+            "operation.",
         )
         return redirect(target, pk=pk, identifier=identifier)
     inputs: dict[str, object] = {"version": 1, "identifier": identifier}
     if slug == RESTORE_SLUG:
         inputs["point"] = point
+        if scope != "database":
+            inputs["scope"] = scope
     try:
         queued = services.request_prepare(
             server,

@@ -1,12 +1,15 @@
-"""Restore one database recovery point into the site's own database (#400).
+"""Restore a recovery point into a site (#400, #401).
 
 The body re-lists the reviewed point under the site's deploy lock, refuses a missing,
-incomplete or different-engine-major copy, takes and verifies a database-only safety backup
-when the target holds data, then pauses and drains the site exactly as a full capture does.
-``restic dump`` is streamed into the site's own engine client as the site user over the
-local socket, as the ``s<id>`` principal, never a superuser. Import, data checks and the
-site's readiness answer are verified separately before the gate opens. A stop after the
-gate leaves the site gated for **Reopen site** (docs/adr/0022, docs/adr/0038).
+incomplete or different-engine-major copy, takes and verifies a safety backup in the restore's
+own scope, restores the files into private staging and admits them there before touching the
+site, then pauses and drains the site exactly as a full capture does. Files become a new
+site-owned release with the convention's permission classification and the native
+configuration is re-rendered from the convention, never from the archive. ``restic dump`` is
+streamed into the site's own engine client as the site user over the local socket, as the
+``s<id>`` principal, never a superuser. Import, data checks and the site's readiness answer
+are verified separately before the gate opens. A stop after the gate leaves the site gated
+for **Reopen site** (docs/adr/0022, docs/adr/0038, docs/adr/0040).
 """
 
 import base64
@@ -14,11 +17,15 @@ import gzip
 import http.client
 import json
 import os
+import pathlib
 import pwd
 import re
+import shutil
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 from typing import Final
@@ -53,12 +60,29 @@ from backups.bodies.paused import (
     publish_gate,
     site_settings,
 )
-from sites.bodies.common import stage
+from sites.bodies.admission import hap_validate
+from sites.bodies.common import (
+    known_redis,
+    reload_site_fpm,
+    site_client,
+    site_fpm_files,
+    stage,
+)
 from sites.names import readiness_ok
+from sites.serving import haproxy_config
 
 IDENTIFIER = re.compile(r"[a-z][a-z0-9]{2,23}")
 POINT = re.compile(r"[0-9a-f]{16}")
 SNAPSHOT = re.compile(r"[0-9a-f]{64}")
+RELEASE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+SCOPES = ("database", "files", "full")
+# The private state beside a release, replaced as a whole rather than overlaid (#358).
+SHARED = {
+    "laravel": ("private/laravel.env", "private/storage", "private/cache"),
+    "wordpress": ("private/wp-config.php",),
+    "plain": (),
+}
+STAGE_ROOT: Final = "/var/lib/barectl-restore"
 MARIADB_SOCKET: Final = "/run/mysqld/mysqld.sock"
 READY_SECONDS: Final = 30
 HEADER_BYTES: Final = 8192
@@ -66,6 +90,27 @@ MARIADB_VERSION = re.compile(r"-- Server version\s+([0-9]+(?:\.[0-9]+)+)")
 POSTGRESQL_VERSION = re.compile(r"-- Dumped from database version ([0-9]+(?:\.[0-9]+)+)")
 MARIADB_MAJOR = re.compile(r"(?:[0-9]+:)?([0-9]+)\.([0-9]+)")
 POSTGRESQL_MAJOR = re.compile(r"(?:[0-9]+:)?([0-9]+)")
+SETUID: Final = stat.S_ISUID | stat.S_ISGID
+# The fixed lines WordPress's private configuration carries before the operator's constants.
+WP_PREFIXES: Final = (
+    "<?php",
+    "if ( isset( $_SERVER['HTTP_X_FORWARDED_URI'] ) ) {",
+    "\t$_SERVER['REQUEST_URI'] = $_SERVER['HTTP_X_FORWARDED_URI'];",
+    "}",
+    "if ( ! defined( 'ABSPATH' ) ) {",
+    "\tdefine( 'ABSPATH', ",
+    "$table_prefix = ",
+    "define( ",
+)
+WP_DATABASE: Final = (
+    "ABSPATH",
+    "DB_NAME",
+    "DB_USER",
+    "DB_PASSWORD",
+    "DB_HOST",
+    "DB_CHARSET",
+    "DB_COLLATE",
+)
 
 
 def engine_major(engine: str, version: str) -> str:
@@ -330,52 +375,571 @@ def site_ready(settings: SimpleNamespace, application: str) -> bool:
         time.sleep(0.5)
 
 
-def safety_backup(document: dict[str, object], repository: str, key: str) -> bool:
-    stage("safety")
-    argv = [
-        "backup",
-        "--json",
-        "--stdin-from-command",
-        "--stdin-filename",
-        str(document.get("filename", "database.sql")),
-        "--time",
-        str(document.get("safety_restic_time", "")),
-    ]
+def expected_parts(document: dict[str, object]) -> list[str]:
+    parts: list[str] = []
+    if document.get("snapshot"):
+        parts.append("database")
+    if document.get("files_snapshot"):
+        parts.append("files")
+    return parts
+
+
+def reviewed_files(settings: SimpleNamespace, application: str) -> list[str]:
+    """The target's release and private state, exactly as the review bound them."""
+    directory = pathlib.Path(settings.directory)
+    current = directory / "current"
+    if not current.is_symlink():
+        raise ValueError("The site has no current release.")
+    target = pathlib.Path(os.path.realpath(current))
+    if target.parent != directory / "releases" or not target.is_dir():
+        raise ValueError("The site's current release is outside the convention.")
+    shared: list[str] = []
+    for relative in SHARED[application]:
+        path = directory / relative
+        if path.is_symlink() or not path.exists():
+            raise ValueError("The site's private files are incomplete.")
+        shared.append(str(path))
+    return [str(current), *shared]
+
+
+def _safety_backup(  # noqa: C901 - one reviewed safety capture
+    document: dict[str, object], repository: str, key: str, settings: SimpleNamespace
+) -> bool:
+    """Write and verify the reviewed safety point in the restore's own scope."""
     tags = document.get("safety_tags")
-    dump = document.get("dump")
-    if not isinstance(tags, list) or not isinstance(dump, list):
+    if not isinstance(tags, dict):
         return False
-    for tag in tags:
-        argv.extend(("--tag", str(tag)))
-    argv.append("--")
-    argv.extend(str(item) for item in dump)
-    status, _output = restic(argv, repository=repository, password=key)
-    if status != 0:
-        return False
+    at = str(document.get("safety_restic_time", ""))
+    for part in sorted(tags):
+        argv = ["backup", "--json", "--time", at]
+        for tag in tags[part]:
+            argv.extend(("--tag", str(tag)))
+        if part == "database":
+            argv.extend(
+                (
+                    "--stdin-from-command",
+                    "--stdin-filename",
+                    str(document.get("filename", "database.sql")),
+                    "--",
+                )
+            )
+            dump = document.get("dump")
+            if not isinstance(dump, list):
+                return False
+            argv.extend(str(item) for item in dump)
+        else:
+            files = document.get("files")
+            if not isinstance(files, list):
+                return False
+            argv.extend(str(item) for item in files)
+        status, _output = restic(argv, repository=repository, password=key)
+        if status != 0:
+            return False
     point = str(document.get("safety_point", ""))
+    found: set[str] = set()
     for row in snapshots(repository, key, point):
-        tags = row.get("tags")
-        if isinstance(tags, list) and "complete" in tags and "point:" + point in tags:
-            return True
-    return False
+        row_tags = row.get("tags")
+        if not isinstance(row_tags, list) or "complete" not in row_tags:
+            continue
+        part = next(
+            (
+                tag.removeprefix("part:")
+                for tag in row_tags
+                if isinstance(tag, str) and tag.startswith("part:")
+            ),
+            "",
+        )
+        if part in tags:
+            found.add(part)
+    return found == set(tags)
 
 
 def reviewed_point(document: dict[str, object], repository: str, key: str) -> bool:
-    """Re-list under the lock: the exact reviewed database snapshot must be complete."""
+    """Re-list under the lock: each reviewed snapshot must still be complete and exact."""
     point = str(document.get("point", ""))
-    snapshot = str(document.get("snapshot", ""))
+    parts = expected_parts(document)
     rows = snapshots(repository, key, point)
-    found = 0
+    found: dict[str, str] = {}
     for row in rows:
         tags = row.get("tags")
-        if not isinstance(tags, list):
+        identifier = row.get("id")
+        if not isinstance(tags, list) or not isinstance(identifier, str):
             continue
-        if "part:database" not in tags or "complete" not in tags:
+        if "complete" not in tags:
             continue
-        found += 1
-        if row.get("id") != snapshot:
+        part = next(
+            (
+                tag.removeprefix("part:")
+                for tag in tags
+                if isinstance(tag, str) and tag.startswith("part:")
+            ),
+            "",
+        )
+        if part not in parts or part in found:
+            continue
+        found[part] = identifier
+    if set(found) != set(parts):
+        return False
+    return all(found[part] == str(document.get(part + "_snapshot", "")) for part in parts)
+
+
+def _link_target_problem(
+    path: pathlib.Path, target: str, base: pathlib.Path, identifier: str
+) -> bool:
+    """Whether one staged link stays inside the convention's own paths."""
+    if not target or "\x00" in target:
+        return True
+    relative = path.relative_to(base)
+    if target.startswith("/"):
+        private = f"/var/www/{identifier}/private"
+        allowed = {
+            (".env",): f"{private}/laravel.env",
+            ("storage",): f"{private}/storage",
+            ("bootstrap", "cache"): f"{private}/cache",
+        }
+        if len(relative.parts) < 2 or relative.parts[0] != "releases":
+            return True
+        return allowed.get(tuple(relative.parts[2:])) != target
+    try:
+        resolved = pathlib.Path(os.path.realpath(path.parent / target))
+    except OSError, RuntimeError:
+        return True
+    return resolved != base and base not in resolved.parents
+
+
+def _admitted_tree(base: pathlib.Path) -> None:
+    """Refuse traversal, foreign links, devices, FIFOs, sockets, setuid and setgid."""
+    for root, directories, files in os.walk(base, followlinks=False):
+        here = pathlib.Path(root)
+        for name in (*directories, *files):
+            path = here / name
+            relative = path.relative_to(base)
+            if any(part in ("", ".", "..") or "/" in part for part in relative.parts):
+                raise ValueError("The recovery point holds an unsupported path.")
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                if _link_target_problem(path, os.readlink(path), base, base.name):
+                    raise ValueError("The recovery point holds a link outside the convention.")
+                continue
+            if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                raise ValueError("The recovery point holds a device, FIFO or socket.")
+            if info.st_mode & SETUID:
+                raise ValueError("The recovery point holds a setuid or setgid file.")
+
+
+def admitted(  # noqa: C901 - one closed admission
+    stage_directory: pathlib.Path, identifier: str, application: str
+) -> dict[str, object]:
+    """Admit one staged file point, returning its release and private state."""
+    if application not in APPLICATIONS:
+        raise ValueError("The site's application is not supported.")
+    base = stage_directory / "var" / "www" / identifier
+    if base.is_symlink() or not base.is_dir():
+        raise ValueError("The recovery point has no site directory.")
+    _admitted_tree(base)
+    entries = {entry.name for entry in base.iterdir()}
+    allowed = {"releases", "private"} if SHARED[application] else {"releases"}
+    if entries != allowed:
+        raise ValueError("The recovery point holds files outside the site convention.")
+    releases = base / "releases"
+    if releases.is_symlink() or not releases.is_dir():
+        raise ValueError("The recovery point has no release directory.")
+    names = [entry.name for entry in releases.iterdir()]
+    if len(names) != 1 or RELEASE.fullmatch(names[0]) is None:
+        raise ValueError("The recovery point does not hold exactly one release.")
+    release = releases / names[0]
+    if release.is_symlink() or not release.is_dir():
+        raise ValueError("The recovery point's release is not a directory.")
+    if not (release / "public").is_dir() or (release / "public").is_symlink():
+        raise ValueError("The recovery point's release has no public directory.")
+    shared: dict[str, pathlib.Path] = {}
+    if SHARED[application]:
+        private = base / "private"
+        if private.is_symlink() or not private.is_dir():
+            raise ValueError("The recovery point has no private directory.")
+        relative = {path.split("/", 1)[1]: path for path in SHARED[application]}
+        if {entry.name for entry in private.iterdir()} != set(relative):
+            raise ValueError("The recovery point's private files are incomplete.")
+        for name, path in relative.items():
+            staged = private / name
+            expected = private / path.split("/")[-1]
+            if staged != expected or staged.is_symlink():
+                raise ValueError("The recovery point's private files are outside the convention.")
+            if path.endswith(("laravel.env", "wp-config.php")):
+                if not staged.is_file():
+                    raise ValueError("The recovery point's private configuration is missing.")
+            elif not staged.is_dir():
+                raise ValueError("The recovery point's private directory is missing.")
+            shared[path] = staged
+    if application == "laravel" and not (release / "artisan").is_file():
+        raise ValueError("The recovery point is not a supported Laravel release.")
+    return {"release": release, "shared": shared, "base": base}
+
+
+def _private(settings: SimpleNamespace) -> pathlib.Path:
+    return pathlib.Path(settings.directory) / "private"
+
+
+def _place_private(path: pathlib.Path, owner: int, group: int) -> None:
+    for root, directories, files in os.walk(path, followlinks=False):
+        here = pathlib.Path(root)
+        for name in directories:
+            entry = here / name
+            if entry.is_symlink():
+                os.lchown(entry, owner, group)
+                continue
+            os.chown(entry, owner, group)
+            os.chmod(entry, 0o700)
+        for name in files:
+            entry = here / name
+            if entry.is_symlink():
+                os.lchown(entry, owner, group)
+                continue
+            os.chown(entry, owner, group)
+            os.chmod(entry, 0o600)
+    os.chown(path, owner, group)
+    os.chmod(path, 0o700)
+
+
+def classify_release(
+    release: pathlib.Path, application: str, owner: int, group: int, caddy: int
+) -> None:
+    """Re-apply the convention's classification, never the archive's modes (#380, #421)."""
+    public = release / "public"
+    wordpress = application == "wordpress"
+    for root, directories, files in os.walk(release, followlinks=False):
+        here = pathlib.Path(root)
+        public_below = here == public or public in here.parents
+        for name in directories:
+            path = here / name
+            if path.is_symlink():
+                os.lchown(path, owner, group)
+                continue
+            if path == public or public_below or wordpress:
+                os.chown(path, owner, caddy)
+                os.chmod(path, 0o2750)  # noqa: S103 - the root Caddy serves from
+            else:
+                os.chown(path, owner, group)
+                os.chmod(path, 0o711)  # noqa: S103 - traversal only
+        for name in files:
+            path = here / name
+            if path.is_symlink():
+                os.lchown(path, owner, group)
+                continue
+            if wordpress or (public_below and path.suffix != ".php"):
+                os.chown(path, owner, caddy)
+                os.chmod(path, 0o640)
+            else:
+                os.chown(path, owner, group)
+                os.chmod(path, 0o600)
+    os.chown(release, owner, group)
+    os.chmod(release, 0o711)  # noqa: S103 - the site user's release, traversal only
+
+
+def _merged_wordpress_configuration(text: str, target: str) -> str:
+    """The point's private configuration, with the target's own database settings kept."""
+    kept: dict[str, str] = {}
+    for line in target.splitlines():
+        parsed = _wp_constant(line)
+        if parsed is not None and parsed[0] in WP_DATABASE and parsed[0] not in kept:
+            kept[parsed[0]] = line
+    if set(kept) != set(WP_DATABASE):
+        raise ValueError("The site's private configuration is outside the supported grammar.")
+    output: list[str] = []
+    written: set[str] = set()
+    for line in text.splitlines():
+        if not line.startswith(WP_PREFIXES):
+            raise ValueError("The recovery point's private configuration is not supported.")
+        parsed = _wp_constant(line)
+        if parsed is not None and parsed[0] in WP_DATABASE:
+            if parsed[0] in written:
+                raise ValueError("The recovery point's private configuration is not supported.")
+            written.add(parsed[0])
+            output.append(kept[parsed[0]])
+            continue
+        output.append(line)
+    missing = set(WP_DATABASE) - written
+    if missing:
+        raise ValueError("The recovery point's private configuration is not supported.")
+    return "\n".join(output) + "\n"
+
+
+def _wp_constant(line: str) -> tuple[str, str] | None:
+    match = re.fullmatch(r"define\( '([A-Z][A-Z0-9_]{0,63})', '(.*)' \);", line)
+    return (match[1], match[2]) if match is not None else None
+
+
+def _replace_tree(target: pathlib.Path, staged: pathlib.Path, owner: int, group: int) -> None:
+    """Replace one private directory or file as a whole, never overlaid."""
+    temporary = target.parent / (".restore-" + target.name)
+    previous = target.parent / (".replaced-" + target.name)
+    for leftover in (temporary, previous):
+        if leftover.is_symlink() or leftover.is_file():
+            leftover.unlink()
+        elif leftover.exists():
+            shutil.rmtree(leftover)
+    if staged.is_dir():
+        shutil.copytree(staged, temporary, symlinks=True)
+        _place_private(temporary, owner, group)
+    else:
+        shutil.copyfile(staged, temporary, follow_symlinks=False)
+        os.chown(temporary, owner, group)
+        os.chmod(temporary, 0o600)
+    if target.is_symlink() or target.exists():
+        os.replace(target, previous)
+    try:
+        os.replace(temporary, target)
+    except OSError:
+        if previous.exists() or previous.is_symlink():
+            os.replace(previous, target)
+        raise
+    if previous.is_symlink() or previous.is_file():
+        previous.unlink()
+    elif previous.exists():
+        shutil.rmtree(previous)
+
+
+def _replace_shared(
+    staged: dict[str, pathlib.Path],
+    settings: SimpleNamespace,
+    application: str,
+    owner: int,
+    group: int,
+) -> None:
+    private = _private(settings)
+    for relative in SHARED[application]:
+        target = pathlib.Path(settings.directory) / relative
+        source = staged.get(relative)
+        if source is None:
+            raise ValueError("The recovery point's private files are incomplete.")
+        if application == "wordpress" and relative.endswith("wp-config.php"):
+            target_text = target.read_text(encoding="utf-8") if target.is_file() else ""
+            merged = _merged_wordpress_configuration(
+                source.read_text(encoding="utf-8"), target_text
+            )
+            temporary = target.parent / (".restore-" + target.name)
+            descriptor = os.open(
+                temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
+            )
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                    output.write(merged)
+                    output.flush()
+                    os.fsync(output.fileno())
+                    os.fchown(output.fileno(), owner, group)
+                    os.fchmod(output.fileno(), 0o600)
+                os.replace(temporary, target)
+            finally:
+                pathlib.Path(temporary).unlink(missing_ok=True)
+            continue
+        _replace_tree(target, source, owner, group)
+    if private.is_dir() and application == "laravel":
+        for name in ("laravel.env", "storage", "cache"):
+            if not (private / name).exists():
+                raise ValueError("The site's private files are incomplete.")
+
+
+def _link_shared(release: pathlib.Path, settings: SimpleNamespace) -> None:
+    private = _private(settings)
+    for source, name in (
+        (".env", "laravel.env"),
+        ("storage", "storage"),
+        ("bootstrap/cache", "cache"),
+    ):
+        destination = release / source
+        if destination.is_symlink():
+            if os.readlink(destination) == str(private / name):
+                continue
+            raise ValueError("A release shared-state link is outside the convention.")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.symlink_to(private / name)
+
+
+def _switch_current(settings: SimpleNamespace, release: str) -> None:
+    current = pathlib.Path(settings.directory) / "current"
+    temporary = current.parent / (".current-" + release)
+    if temporary.exists() or temporary.is_symlink():
+        temporary.unlink()
+    temporary.symlink_to("releases/" + release)
+    os.replace(temporary, current)
+
+
+def place(
+    staged: dict[str, object],
+    settings: SimpleNamespace,
+    application: str,
+    release_name: str,
+    owner: int,
+    group: int,
+    caddy: int,
+) -> pathlib.Path:
+    """Publish the admitted files as a new site-owned release and switch ``current``."""
+    directory = pathlib.Path(settings.directory)
+    target = directory / "releases" / release_name
+    if target.exists() or target.is_symlink():
+        raise ValueError("The reviewed release already exists.")
+    target.mkdir(mode=0o700)
+    staged_release = staged.get("release")
+    if not isinstance(staged_release, pathlib.Path):
+        raise ValueError("The recovery point has no release.")
+    shutil.copytree(staged_release, target, symlinks=True, dirs_exist_ok=True)
+    if application == "laravel":
+        _link_shared(target, settings)
+    classify_release(target, application, owner, group, caddy)
+    staged_shared = staged.get("shared")
+    if not isinstance(staged_shared, dict):
+        raise ValueError("The recovery point's private files are incomplete.")
+    _replace_shared(staged_shared, settings, application, owner, group)
+    _switch_current(settings, release_name)
+    return target
+
+
+def _same(path: pathlib.Path, value: str) -> bool:
+    try:
+        if path.is_symlink():
             return False
-    return found == 1
+        return path.read_text(encoding="utf-8") == value
+    except OSError:
+        return False
+
+
+def _write_root_file(path: pathlib.Path, value: str, mode: int) -> None:
+    if path.is_symlink() or not path.parent.is_dir():
+        raise ValueError("A native configuration path is outside the convention.")
+    descriptor, temporary = tempfile.mkstemp(prefix=".barectl-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(value)
+            output.flush()
+            os.fsync(output.fileno())
+            os.fchown(output.fileno(), 0, 0)
+            os.fchmod(output.fileno(), mode)
+        os.replace(temporary, path)
+    finally:
+        pathlib.Path(temporary).unlink(missing_ok=True)
+
+
+def render_native(settings: SimpleNamespace) -> None:
+    """Re-render HAProxy and PHP-FPM from the convention, never from the archive."""
+    extension = known_redis(settings.runtime) if site_client(settings) else ""
+    changed = False
+    for path, value in site_fpm_files(settings, extension).items():
+        location = pathlib.Path(path)
+        if _same(location, value):
+            continue
+        _write_root_file(location, value, 0o644)
+        changed = True
+    haproxy = pathlib.Path(f"/etc/haproxy/sites/{settings.identifier}.cfg")
+    value = haproxy_config(settings)
+    if not _same(haproxy, value):
+        _write_root_file(haproxy, value, 0o600)
+        hap_validate(settings.identifier)
+    if changed:
+        reload_site_fpm(settings)
+
+
+def files_problem(settings: SimpleNamespace, application: str, release_name: str) -> str:
+    """The files finding: the site serves the admitted release and keeps the old one."""
+    directory = pathlib.Path(settings.directory)
+    current = directory / "current"
+    try:
+        if current.is_symlink() is False or os.readlink(current) != "releases/" + release_name:
+            return "The restored release is not the site's current release."
+    except OSError:
+        return "The site's current release could not be read."
+    release = directory / "releases" / release_name
+    if release.is_symlink() or not release.is_dir() or not (release / "public").is_dir():
+        return "The restored release is incomplete."
+    if application == "laravel":
+        for name in (".env", "storage", "bootstrap/cache"):
+            link = release / name
+            if not link.is_symlink() or not link.resolve().exists():
+                return "The restored release's private state is incomplete."
+    if application == "wordpress":
+        private = directory / "private" / "wp-config.php"
+        info = private.lstat() if private.exists() else None
+        if (
+            info is None
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != release.stat().st_uid
+        ):
+            return "The restored private configuration is not site-only."
+    return ""
+
+
+def _stage(identifier: str, point: str) -> pathlib.Path:
+    root = pathlib.Path(STAGE_ROOT)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
+    directory = root / identifier / point
+    if directory.is_symlink() or directory.is_file():
+        directory.unlink()
+    elif directory.exists():
+        shutil.rmtree(directory)
+    directory.mkdir(mode=0o700, parents=True)
+    os.chmod(directory, 0o700)
+    return directory
+
+
+def _restore_files(
+    document: dict[str, object], repository: str, key: str, target: pathlib.Path
+) -> bool:
+    snapshot = str(document.get("files_snapshot", ""))
+    status, _output = restic(
+        ["restore", "--no-lock", snapshot, "--target", str(target)],
+        repository=repository,
+        password=key,
+    )
+    return status == 0
+
+
+def begin_pause(
+    document: dict[str, object],
+    settings: SimpleNamespace,
+    identifier: str,
+    point: str,
+) -> tuple[str, str] | None:
+    """Fence, publish the gate and drain. Returns a failure result, or None when paused."""
+    if not fence(document, identifier, gate=True):
+        return ("refused", "automation_fence")
+    stage("gate")
+    try:
+        gate_up = publish_gate(settings, document)
+    except OSError, ValueError:
+        gate_up = False
+    if not gate_up:
+        if not restore(document, identifier):
+            return ("partial", "automation_restore")
+        return ("refused", "restore_gate")
+    emit_result(
+        document_result(
+            document,
+            "partial",
+            "restore_paused",
+            point=point,
+            snapshots=0,
+            size=0,
+            kind="restore",
+        )
+    )
+    stage("drain")
+    try:
+        drained = drain(settings)
+    except OSError, ValueError:
+        drained = False
+    if not drained:
+        return ("partial", "restore_idle")
+    return None
+
+
+def resume(document: dict[str, object], settings: SimpleNamespace, identifier: str) -> bool:
+    try:
+        opened = open_site(settings, document)
+    except OSError, ValueError:
+        opened = False
+    if not opened:
+        return False
+    return restore(document, identifier)
 
 
 def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed restore
@@ -385,26 +949,41 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
     repository = str(document.get("repository", ""))
     key = str(document.get("server_key", ""))
     point = str(document.get("point", ""))
+    scope = str(document.get("scope", ""))
+    application = str(document.get("application", ""))
+    release = str(document.get("release", ""))
     snapshot = str(document.get("snapshot", ""))
-    filename = str(document.get("filename", ""))
+    files_snapshot = str(document.get("files_snapshot", ""))
     engine = str(document.get("engine", ""))
     major = str(document.get("engine_major", ""))
-    application = str(document.get("application", ""))
-    scope = str(document.get("scope", ""))
     at = str(document.get("at", ""))
+    tags = document.get("safety_tags")
+    safety_scope = str(document.get("safety_scope", ""))
+    parts = expected_parts(document)
     if (
         IDENTIFIER.fullmatch(identifier) is None
         or repository != f"{REPOSITORY_ROOT}/{identifier}/onsite"
         or not key.startswith("/etc/barectl/backups/")
         or POINT.fullmatch(point) is None
-        or SNAPSHOT.fullmatch(snapshot) is None
-        or engine not in ("mariadb", "postgresql")
-        or not major
+        or scope not in SCOPES
         or application not in APPLICATIONS
-        or scope != "database"
+        or RELEASE.fullmatch(release) is None
+        or (snapshot and SNAPSHOT.fullmatch(snapshot) is None)
+        or (files_snapshot and SNAPSHOT.fullmatch(files_snapshot) is None)
+        or (scope == "database" and "database" not in parts)
+        or (scope in ("files", "full") and "files" not in parts)
+        or (scope == "files" and "database" in parts)
         or RESTIC_TIME.fullmatch(str(document.get("restic_time", ""))) is None
         or not at
         or type(document.get("point_size")) is not int
+        or not isinstance(tags, dict)
+        or safety_scope not in SCOPES
+        or (safety_scope == "full" and set(parts) != {"database", "files"})
+        or (safety_scope == "files" and "files" not in parts)
+        or (safety_scope == "database" and ("database" not in parts or scope != "database"))
+        or type(document.get("target_empty")) is not bool
+        or ("database" in parts and engine not in ("mariadb", "postgresql"))
+        or ("database" in parts and not major)
     ):
         emit_result({"class": "failed"})
         raise SystemExit(FAILED)
@@ -462,6 +1041,8 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
             raise ValueError("The site's open configuration changed.")
         if not isinstance(document.get("gate"), str) or not document["gate"]:
             raise ValueError("The restore has no maintenance page.")
+        if document.get("files") != reviewed_files(settings, application):
+            raise ValueError("The restore file scope changed.")
     except ValueError:
         emit_result(
             document_result(
@@ -503,6 +1084,7 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
             )
         )
         raise SystemExit(LOCK_BUSY)
+    staging: pathlib.Path | None = None
     try:
         if free_bytes() < HEADROOM_BYTES + int(str(document.get("point_size", 0))):
             emit_result(
@@ -531,142 +1113,215 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                 )
             )
             raise SystemExit(REFUSED)
-        header = header_bytes(repository, key, snapshot, filename)
-        if (
-            header is None
-            or engine_major(engine, dump_version(engine, header.decode("utf-8", "replace")))
-            != major
-        ):
-            emit_result(
-                document_result(
-                    document,
-                    "refused",
-                    "restore_engine",
-                    point=point,
-                    snapshots=0,
-                    size=0,
-                    kind="restore",
-                )
-            )
-            raise SystemExit(REFUSED)
-        empty = count_tables(engine, identifier)
-        if empty is None or (empty == 0) != bool(document.get("target_empty")):
-            emit_result(
-                document_result(
-                    document,
-                    "refused",
-                    "restore_target",
-                    point=point,
-                    snapshots=0,
-                    size=0,
-                    kind="restore",
-                )
-            )
-            raise SystemExit(REFUSED)
-        if not bool(document.get("target_empty")) and not safety_backup(document, repository, key):
-            emit_result(
-                document_result(
-                    document,
-                    "refused",
-                    "restore_safety",
-                    point=point,
-                    snapshots=0,
-                    size=0,
-                    kind="restore",
-                )
-            )
-            raise SystemExit(REFUSED)
-        if not fence(document, identifier, gate=True):
-            emit_result(
-                document_result(
-                    document,
-                    "refused",
-                    "automation_fence",
-                    point=point,
-                    snapshots=0,
-                    size=0,
-                    kind="restore",
-                )
-            )
-            raise SystemExit(REFUSED)
-        stage("gate")
-        try:
-            gate_up = publish_gate(settings, document)
-        except OSError, ValueError:
-            gate_up = False
-        if not gate_up:
-            if not restore(document, identifier):
+        if "database" in parts:
+            header = header_bytes(repository, key, snapshot, str(document.get("filename", "")))
+            if (
+                header is None
+                or engine_major(engine, dump_version(engine, header.decode("utf-8", "replace")))
+                != major
+            ):
                 emit_result(
                     document_result(
                         document,
-                        "partial",
-                        "automation_restore",
+                        "refused",
+                        "restore_engine",
                         point=point,
                         snapshots=0,
                         size=0,
                         kind="restore",
                     )
                 )
+                raise SystemExit(REFUSED)
+            empty = count_tables(engine, identifier)
+            if empty is None or (empty == 0) != bool(document.get("target_empty")):
+                emit_result(
+                    document_result(
+                        document,
+                        "refused",
+                        "restore_target",
+                        point=point,
+                        snapshots=0,
+                        size=0,
+                        kind="restore",
+                    )
+                )
+                raise SystemExit(REFUSED)
+        # The safety backup matches the restore's scope. A database-only restore takes it
+        # live; a files or full restore pauses the site briefly for an exact point.
+        if tags:
+            if safety_scope == "database":
+                stage("safety")
+                if not _safety_backup(document, repository, key, settings):
+                    emit_result(
+                        document_result(
+                            document,
+                            "refused",
+                            "restore_safety",
+                            point=point,
+                            snapshots=0,
+                            size=0,
+                            kind="restore",
+                        )
+                    )
+                    raise SystemExit(REFUSED)
+            else:
+                failure = begin_pause(document, settings, identifier, point)
+                if failure is not None:
+                    emit_result(
+                        document_result(
+                            document,
+                            failure[0],
+                            failure[1],
+                            point=point,
+                            snapshots=0,
+                            size=0,
+                            kind="restore",
+                        )
+                    )
+                    raise SystemExit(PARTIAL if failure[0] == "partial" else REFUSED)
+                stage("safety")
+                backed_up = _safety_backup(document, repository, key, settings)
+                if not resume(document, settings, identifier):
+                    emit_result(
+                        document_result(
+                            document,
+                            "partial",
+                            "restore_open",
+                            point=point,
+                            snapshots=0,
+                            size=0,
+                            kind="restore",
+                        )
+                    )
+                    raise SystemExit(PARTIAL)
+                if not backed_up:
+                    emit_result(
+                        document_result(
+                            document,
+                            "refused",
+                            "restore_safety",
+                            point=point,
+                            snapshots=0,
+                            size=0,
+                            kind="restore",
+                        )
+                    )
+                    raise SystemExit(REFUSED)
+        if "files" in parts:
+            stage("stage")
+            staging = _stage(identifier, point)
+            if not _restore_files(document, repository, key, staging):
+                emit_result(
+                    document_result(
+                        document,
+                        "refused",
+                        "restore_files",
+                        point=point,
+                        snapshots=0,
+                        size=0,
+                        kind="restore",
+                    )
+                )
+                raise SystemExit(REFUSED)
+            try:
+                staged = admitted(staging, identifier, application)
+            except ValueError:
+                emit_result(
+                    document_result(
+                        document,
+                        "refused",
+                        "restore_files",
+                        point=point,
+                        snapshots=0,
+                        size=0,
+                        kind="restore",
+                    )
+                )
+                raise SystemExit(REFUSED) from None
+        failure = begin_pause(document, settings, identifier, point)
+        if failure is not None:
+            emit_result(
+                document_result(
+                    document,
+                    failure[0],
+                    failure[1],
+                    point=point,
+                    snapshots=0,
+                    size=0,
+                    kind="restore",
+                )
+            )
+            raise SystemExit(PARTIAL if failure[0] == "partial" else REFUSED)
+        imported = 0
+        if "database" in parts:
+            stage("import")
+            ok, imported = import_stream(
+                repository, key, snapshot, str(document.get("filename", "")), engine, identifier
+            )
+            if not ok:
+                emit_result(
+                    document_result(
+                        document,
+                        "partial",
+                        "restore_import",
+                        point=point,
+                        snapshots=1,
+                        size=0,
+                        kind="restore",
+                    )
+                )
                 raise SystemExit(PARTIAL)
-            emit_result(
-                document_result(
-                    document,
-                    "refused",
-                    "restore_gate",
-                    point=point,
-                    snapshots=0,
-                    size=0,
-                    kind="restore",
+        if "files" in parts:
+            stage("files")
+            try:
+                caddy = pwd.getpwnam("caddy").pw_gid
+                place(staged, settings, application, release, account.pw_uid, account.pw_gid, caddy)
+            except OSError, ValueError, shutil.Error:
+                emit_result(
+                    document_result(
+                        document,
+                        "partial",
+                        "restore_files",
+                        point=point,
+                        snapshots=1,
+                        size=0,
+                        kind="restore",
+                    )
                 )
-            )
-            raise SystemExit(REFUSED)
-        emit_result(
-            document_result(
-                document,
-                "partial",
-                "restore_paused",
-                point=point,
-                snapshots=0,
-                size=0,
-                kind="restore",
-            )
-        )
-        stage("drain")
-        try:
-            drained = drain(settings)
-        except OSError, ValueError:
-            drained = False
-        if not drained:
-            emit_result(
-                document_result(
-                    document,
-                    "partial",
-                    "restore_idle",
-                    point=point,
-                    snapshots=0,
-                    size=0,
-                    kind="restore",
+                raise SystemExit(PARTIAL) from None
+            stage("config")
+            try:
+                render_native(settings)
+            except OSError, ValueError, subprocess.TimeoutExpired:
+                emit_result(
+                    document_result(
+                        document,
+                        "partial",
+                        "restore_config",
+                        point=point,
+                        snapshots=1,
+                        size=0,
+                        kind="restore",
+                    )
                 )
-            )
-            raise SystemExit(PARTIAL)
-        stage("import")
-        imported, expected = import_stream(repository, key, snapshot, filename, engine, identifier)
-        if not imported:
-            emit_result(
-                document_result(
-                    document,
-                    "partial",
-                    "restore_import",
-                    point=point,
-                    snapshots=1,
-                    size=0,
-                    kind="restore",
-                )
-            )
-            raise SystemExit(PARTIAL)
+                raise SystemExit(PARTIAL) from None
         stage("checks")
-        actual = count_tables(engine, identifier)
-        if actual is None or actual != expected:
+        if "database" in parts:
+            actual = count_tables(engine, identifier)
+            if actual is None or actual != imported:
+                emit_result(
+                    document_result(
+                        document,
+                        "partial",
+                        "restore_data",
+                        point=point,
+                        snapshots=1,
+                        size=0,
+                        kind="restore",
+                    )
+                )
+                raise SystemExit(PARTIAL)
+        if "files" in parts and files_problem(settings, application, release):
             emit_result(
                 document_result(
                     document,
@@ -694,29 +1349,12 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
             )
             raise SystemExit(PARTIAL)
         stage("open")
-        try:
-            opened = open_site(settings, document)
-        except OSError, ValueError:
-            opened = False
-        if not opened:
+        if not resume(document, settings, identifier):
             emit_result(
                 document_result(
                     document,
                     "partial",
                     "restore_open",
-                    point=point,
-                    snapshots=1,
-                    size=0,
-                    kind="restore",
-                )
-            )
-            raise SystemExit(PARTIAL)
-        if not restore(document, identifier):
-            emit_result(
-                document_result(
-                    document,
-                    "partial",
-                    "automation_restore",
                     point=point,
                     snapshots=1,
                     size=0,
@@ -730,13 +1368,15 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                 "succeeded",
                 "restore_done",
                 point=point,
-                snapshots=1,
+                snapshots=len(parts),
                 size=int(str(document.get("point_size", 0))),
                 kind="restore",
             )
         )
         raise SystemExit(SUCCESS)
     finally:
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
         os.close(lock)
 
 
