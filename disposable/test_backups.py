@@ -429,16 +429,12 @@ class BackupCase(ScenarioTestCase):
             return bundle.getnames()
 
 
-@tag(SCENARIO_TAG)
-class DisasterRecovery(BackupCase):
-    """A second server connects to offsite storage, restores, then plain restic recovers (#408).
+class DisasterRecoveryCase(BackupCase):
+    """Shared preparation for the two disaster-recovery proofs (#408).
 
-    The source server keeps its site, offsite copy and recovery kit. A second server boots
-    from the same prepared layer with no controller history, creates a matching plain PHP
-    site under a different identifier and domain, connects the same local S3-compatible
-    storage with the kit facts, passphrase and keys, and restores the source point. A plain
-    ``restic`` run with the kit's onsite path and the passphrase alone then recovers the
-    source database without Barectl.
+    The prepared Laravel layer supplies the foundation and the managed MariaDB engine, so
+    each item only creates the plain-PHP site it proves. The source point is captured
+    through the product's own changes, never synthesised from the harness.
     """
 
     identifier = "bkdr"
@@ -490,6 +486,35 @@ class DisasterRecovery(BackupCase):
         with self.shell() as shell:
             listing = run_root(shell, check.listing_command(identifier))
         return check.points(check.parse_listing(listing.stdout) or [])
+
+    def seed_source(self) -> None:
+        self.native(
+            f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
+            + shlex.quote(
+                "CREATE TABLE recovery_check (id INT PRIMARY KEY, note VARCHAR(40)); "
+                "INSERT INTO recovery_check VALUES (408, 'survived-the-loss')"
+            )
+            + f" s{self.identifier}"
+        )
+        self.write_file(
+            f"/var/www/{self.identifier}/current/public/offline.txt",
+            "recovered-by-plain-restic\n",
+        )
+
+    def prepare_source(self, *, offsite: bool) -> tuple[str, str, ChangeReview]:
+        """The source site and one complete point, with the kit facts when asked."""
+        self.create_plain(self.identifier, self.domain)
+        self.seed_source()
+        enabled = self.enable_site(self.identifier)
+        prefix = ""
+        if offsite:
+            self.start_s3()
+            self.offsite_setup()
+            prefix = self.offsite_prefix()
+        self.capture_site(self.identifier)
+        points = [row for row in self.site_points(self.identifier) if row["scope"] == "full"]
+        self.assertEqual(len(points), 1)
+        return str(points[0]["point"]), prefix, enabled
 
     @contextmanager
     def on(self, environment: dict[str, str]) -> Iterator[None]:
@@ -547,61 +572,22 @@ class DisasterRecovery(BackupCase):
             "BARECTL_SSH_TEST_CONTAINER": second.name,
         }
 
-    def test_a_second_server_restores_from_connected_storage_and_plain_restic(self) -> None:
-        from backups import connect, convention, kit, restore
+
+@tag(SCENARIO_TAG)
+class DisasterRecovery(DisasterRecoveryCase):
+    """A second server connects to shared offsite storage and restores a matching site (#408).
+
+    The source server keeps its site, offsite copy and recovery kit facts. A second server
+    boots from the same prepared layer with no controller history, creates a matching plain
+    PHP site under a different identifier and domain, connects the same local S3-compatible
+    storage with the kit facts, passphrase and keys, and restores the source point into it.
+    """
+
+    def test_a_second_server_restores_from_connected_storage(self) -> None:
+        from backups import connect, observation, restore
 
         source = self.identifier
-        self.create_plain(source, self.domain)
-        self.native(
-            f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
-            + shlex.quote(
-                "CREATE TABLE recovery_check (id INT PRIMARY KEY, note VARCHAR(40)); "
-                "INSERT INTO recovery_check VALUES (408, 'survived-the-loss')"
-            )
-            + f" s{source}"
-        )
-        self.write_file(
-            f"/var/www/{source}/current/public/offline.txt", "recovered-by-plain-restic\n"
-        )
-        self.enable_site(source)
-        self.start_s3()
-        self.offsite_setup()
-        self.capture_site(source)
-        points = [row for row in self.site_points(source) if row["scope"] == "full"]
-        self.assertEqual(len(points), 1)
-        point = str(points[0]["point"])
-        prefix = self.offsite_prefix()
-        # Plain restic with the kit's onsite path and the passphrase alone.
-        self.native(
-            "install -m 600 /dev/stdin /root/recovery-passphrase <<'EOF'\n" + PASSPHRASE + "\nEOF"
-        )
-        recovery = self.native(
-            f"RESTIC_REPOSITORY={convention.repository(source)} "
-            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
-            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
-            f"{convention.RESTIC_BIN} snapshots --json --no-lock"
-        )
-        self.assertIn(point, recovery)
-        dumped = self.native(
-            f"RESTIC_REPOSITORY={convention.repository(source)} "
-            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
-            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
-            f"{convention.RESTIC_BIN} dump latest /{convention.dump_filename(source)} "
-            "| grep -c survived-the-loss"
-        )
-        self.assertEqual(dumped.strip(), "1")
-        kit_lines = kit.lines(
-            server_name="lost",
-            identifier=source,
-            restic_version="0.18.1",
-            provider="Amazon S3",
-            endpoint="https://s3.us-east-1.amazonaws.com",
-            bucket=self.S3_BUCKET,
-            prefix=prefix,
-        )
-        self.assertTrue(any(convention.repository(source) in line for line in kit_lines))
-        self.assertFalse(any(PASSPHRASE in line for line in kit_lines))
-
+        point, prefix, _enabled = self.prepare_source(offsite=True)
         second = self.boot_second()
         with self.on(second):
             self.create_plain(self.target_identifier, self.target_domain)
@@ -629,8 +615,6 @@ class DisasterRecovery(BackupCase):
                 secret=secret,
             )
             with self.shell() as shell:
-                from backups import observation
-
                 value = observation.read(
                     shell, (self.target_identifier,), "mariadb", Architecture.X86_64
                 )
@@ -667,6 +651,57 @@ class DisasterRecovery(BackupCase):
                 + f" s{self.target_identifier}"
             ).strip()
             self.assertEqual(row, "survived-the-loss")
+
+
+@tag(SCENARIO_TAG)
+class OfflineRecovery(DisasterRecoveryCase):
+    """Plain restic recovers a source point from the printed kit and passphrase alone (#408).
+
+    No controller and no Barectl change is involved: the site's onsite repository opens
+    with the passphrase the operator kept away from the server, and the database dump is
+    read by restic itself.
+    """
+
+    identifier = "bkoff"
+    domain = "bkoff.example.com"
+    prefix = "bkoff"
+
+    def test_plain_restic_recovers_from_the_kit_and_passphrase_alone(self) -> None:
+        from backups import convention
+
+        source = self.identifier
+        point, _prefix, enabled = self.prepare_source(offsite=False)
+        # Plain restic with the kit's onsite path and the passphrase alone.
+        self.native(
+            "install -m 600 /dev/stdin /root/recovery-passphrase <<'EOF'\n" + PASSPHRASE + "\nEOF"
+        )
+        recovery = self.native(
+            f"RESTIC_REPOSITORY={convention.repository(source)} "
+            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+            f"{convention.RESTIC_BIN} snapshots --json --no-lock"
+        )
+        self.assertIn(point, recovery)
+        rows = json.loads(recovery)
+        database = next(
+            row["id"]
+            for row in rows
+            if isinstance(row.get("tags"), list) and "part:database" in row["tags"]
+        )
+        dumped = self.native(
+            f"RESTIC_REPOSITORY={convention.repository(source)} "
+            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+            f"{convention.RESTIC_BIN} dump {database} /{convention.dump_filename(source)} "
+            "| grep -c survived-the-loss"
+        )
+        self.assertEqual(dumped.strip(), "1")
+        kit_lines = [
+            str(line).replace("{server}", "lost")
+            for line in cast(list[object], enabled.document["kit_lines"])
+        ]
+        self.assertTrue(any(convention.repository(source) in line for line in kit_lines))
+        self.assertFalse(any(PASSPHRASE in line for line in kit_lines))
 
 
 @tag(SCENARIO_TAG)

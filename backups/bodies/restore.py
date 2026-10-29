@@ -136,8 +136,11 @@ def dump_version(engine: str, text: str) -> str:
     return match[1] if match is not None else ""
 
 
-def dump_argv(snapshot: str, filename: str) -> list[str]:
-    return [RESTIC_BIN, "dump", "--no-lock", snapshot, "/" + filename.lstrip("/")]
+def dump_argv(snapshot: str, filename: str, repository: str = "") -> list[str]:
+    # restic selects virtual-hosted URLs for Amazon endpoints; Barectl's templates and the
+    # connected source repositories are path-style, the same option every other call uses.
+    options = ["-o", "s3.bucket-lookup=path"] if repository.startswith("s3:") else []
+    return [RESTIC_BIN, *options, "dump", "--no-lock", snapshot, "/" + filename.lstrip("/")]
 
 
 def count_sql(engine: str) -> str:
@@ -274,7 +277,7 @@ def header_bytes(
     extra: dict[str, str] | None = None,
 ) -> bytes | None:
     process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
-        dump_argv(snapshot, filename),
+        dump_argv(snapshot, filename, repository),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -309,7 +312,7 @@ def import_stream(
         start_new_session=True,
     )
     source = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
-        dump_argv(snapshot, filename),
+        dump_argv(snapshot, filename, repository),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -1243,20 +1246,23 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                     )
                 )
                 raise SystemExit(REFUSED)
-            empty = count_tables(engine, identifier)
-            if empty is None or (empty == 0) != bool(document.get("target_empty")):
-                emit_result(
-                    document_result(
-                        document,
-                        "refused",
-                        "restore_target",
-                        point=point,
-                        snapshots=0,
-                        size=0,
-                        kind="restore",
+            # Only a database restore may skip its safety copy, so only it depends on the
+            # target already being empty; a full restore always takes the reviewed one.
+            if scope == "database":
+                empty = count_tables(engine, identifier)
+                if empty is None or (empty == 0) != bool(document.get("target_empty")):
+                    emit_result(
+                        document_result(
+                            document,
+                            "refused",
+                            "restore_target",
+                            point=point,
+                            snapshots=0,
+                            size=0,
+                            kind="restore",
+                        )
                     )
-                )
-                raise SystemExit(REFUSED)
+                    raise SystemExit(REFUSED)
         # The safety backup matches the restore's scope. A database-only restore takes it
         # live; a files or full restore pauses the site briefly for an exact point.
         if tags:

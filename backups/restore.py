@@ -908,9 +908,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             "files": files_snapshot,
         },
         "secret_label": "Recovery passphrase for the connected source repository",
-        "filename": convention.dump_filename(
-            inputs.identifier if evidence.source_storage else (evidence.source or inputs.identifier)
-        ),
+        "filename": convention.dump_filename(evidence.source or inputs.identifier),
         "point_time": str(point.get("time", "")),
         "point_live": point.get("live") is True,
         "point_size": size,
@@ -1105,7 +1103,8 @@ def _restore_document(document: dict[str, object]) -> None:  # noqa: C901 - one 
         != convention.repository(identifier)
         or (document.get("safety_key") or convention.server_key(identifier))
         != convention.server_key(identifier)
-        or document.get("filename") != convention.dump_filename(expected)
+        or document.get("filename")
+        != convention.dump_filename(str(source) if connected else expected)
         or type(target_empty) is not bool
         or type(document.get("point_size")) is not int
         or not isinstance(release, str)
