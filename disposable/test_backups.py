@@ -437,12 +437,17 @@ class BackupLifecycle(BackupCase):
         end = time.monotonic() + 180
         scheduled: list[dict[str, object]] = []
         while time.monotonic() < end and not scheduled:
-            scheduled = [point for point in self.points() if point.get("origin") == "scheduled"]
+            scheduled = [
+                point
+                for point in self.points()
+                if point.get("origin") == "scheduled" and point.get("complete")
+            ]
             if not scheduled:
                 time.sleep(2)
-        self.assertTrue(scheduled, "The real backup timer never fired a scheduled capture.")
+        self.assertTrue(
+            scheduled, "The real backup timer never fired a complete scheduled capture."
+        )
         self.assertTrue(scheduled[0]["live"])
-        self.assertTrue(scheduled[0]["complete"])
         collected = self.observe()
         backup = self.backup_row(collected)
         if backup.last is None:
