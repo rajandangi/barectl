@@ -294,6 +294,27 @@ class BackupCase(ScenarioTestCase):
         moment = now + timedelta(minutes=2 if now.second >= 50 else 1)
         return moment.strftime("%H:%M")
 
+    def hold_repository_lock(self, seconds: int = 45) -> None:
+        """Hold a site's repository lock from a transient unit, independent of this shell."""
+        lock = f"/run/lock/barectl/backup-{self.identifier}.lock"
+        self.native("systemctl stop barectl-test-repository-lock 2>/dev/null || true")
+        self.native("systemctl reset-failed barectl-test-repository-lock 2>/dev/null || true")
+        self.native(f"install -m 0600 /dev/null {lock}")
+        self.native(
+            "systemd-run --unit=barectl-test-repository-lock --collect --quiet "
+            f"/usr/bin/flock -x {lock} /bin/sh -c 'sleep {seconds}'"
+        )
+        self.native("sleep 1")
+        self.assertEqual(
+            self.native("systemctl is-active barectl-test-repository-lock").strip(),
+            "active",
+            "The repository lock holder did not start.",
+        )
+
+    def release_repository_lock(self) -> None:
+        self.native("systemctl stop barectl-test-repository-lock 2>/dev/null || true")
+        self.native("systemctl reset-failed barectl-test-repository-lock 2>/dev/null || true")
+
     def site_status(self, path: str = "/") -> int:
         return int(
             self.native(
@@ -829,10 +850,7 @@ class BackupLifecycle(BackupCase):
         self.assertTrue(any(str(point["point"]) == failed.point for point in self.offsite_points()))
         # Removing offsite storage waits for the site's repository lock: a held lock skips it
         # rather than pulling the keys out from under a copy (#410).
-        lock = f"/run/lock/barectl/backup-{self.identifier}.lock"
-        self.native(f"install -m 0600 /dev/null {lock}")
-        self.native(f"flock -x {lock} -c 'sleep 8' >/dev/null 2>&1 &")
-        self.native("sleep 1")
+        self.hold_repository_lock()
         apply_change(
             self,
             offsite.REMOVE,
@@ -842,7 +860,7 @@ class BackupLifecycle(BackupCase):
             expected="lock_busy",
             reason="backup_lock",
         )
-        self.native("sleep 8")
+        self.release_repository_lock()
         # Removing offsite storage leaves every copy in the bucket.
         before_files = self.offsite_files()
         apply_change(
@@ -1138,10 +1156,7 @@ class FullSiteRestore(BackupCase):
         )
 
         # -- A held repository lock makes the restore wait, then skip; it never races (#410)
-        lock = f"/run/lock/barectl/backup-{self.identifier}.lock"
-        self.native(f"install -m 0600 /dev/null {lock}")
-        self.native(f"flock -x {lock} -c 'sleep 8' >/dev/null 2>&1 &")
-        self.native("sleep 1")
+        self.hold_repository_lock()
         apply_change(
             self,
             backup_restore.RESTORE,
@@ -1151,7 +1166,7 @@ class FullSiteRestore(BackupCase):
             reason="restore_lock",
         )
         self.assertEqual(self.site_status("/"), 200)
-        self.native("sleep 8")
+        self.release_repository_lock()
 
 
 @tag(SCENARIO_TAG)

@@ -512,8 +512,10 @@ captures a point whose dump has a valid header but no completion marker and expe
 storage** runs and expects a skip; `LaravelFullRestore` deletes the removed site's kept
 repository through **Delete removed-site backups** and proves the repository, key and removed
 listing are gone; `Retention` runs the weekly offsite check before offsite cleanup so cleanup
-consumes its recorded read-back. These assertions are unrun at the time of this page: the
-orchestrator runs the native scenarios once on the integration tip.
+consumes its recorded read-back. The full integration run at `601a738` proved the offsite
+lock, removed-repository deletion and offsite-cleanup assertions; the held-lock restore and
+truncated-dump assertions were corrected and rerun together on the review branch, where both
+items passed in 83 s (`LaravelFullRestore` 52.8 s, `FullSiteRestore` 76.6 s).
 
 The local full build at the #410 head measured 360 s against the 300 s target and 900 s limit
 (controller-fast 40 s, fast validators 68 s, browser 93 s, native 360 s). The joint fast stage

@@ -17,9 +17,11 @@ The scenario times on the left of [Scenarios](#scenarios), the module time and t
 build in [Build budget](#build-budget) belong to the `feat/410-qualification` head that
 merged that tip and added #410's test and documentation changes; [Handoff](#handoff) names
 the final head. No hosted run of the #410 head exists. The review pass that follows #410 adds
-assertions to the existing `disposable/test_backups.py` items and no new scenario class; those
-assertions are **unrun** in this record because the orchestrator runs the native scenarios once
-on the integration tip.
+assertions to the existing `disposable/test_backups.py` items and no new scenario class. The
+full integration run at `601a738` proved the offsite-lock, removed-repository deletion and
+offsite-cleanup assertions; after two review defects were fixed, the held-lock restore and
+truncated-dump items passed together in 83 s (`LaravelFullRestore` 52.8 s,
+`FullSiteRestore` 76.6 s).
 
 | Evidence | Where |
 | --- | --- |
@@ -128,10 +130,11 @@ What the items prove:
 - **`FullSiteRestore`** restores Files only from a full point with the warning that files and
   database then come from different points, and then restores the whole site; both restored
   releases are site-owned, keep the convention's permissions, and leave the previous release
-  retained. The #410 review pass adds two assertions to this item, **unrun here**: a held
-  repository lock makes the restore skip with `restore_lock` rather than race, and a point
-  whose dump has a valid header but no completion marker is refused with `restore_dump` while
-  the site answers 200 and no plain-text `.sql` remains in the private stage.
+  retained. The #410 review pass adds two assertions to this item: a held repository lock
+  makes the restore skip with `restore_lock` rather than race, and a point whose dump has a
+  valid header but no completion marker is refused with `restore_dump` while the site answers
+  200 and no plain-text `.sql` remains in the private stage. Both passed in the focused
+  rerun (76.6 s for the item).
 - **`WordPressFullRestore`** restores uploads, the private configuration and the database of a
   real WordPress site, keeps the target's own database settings, re-applies the WordPress
   permissions and reads both HTTPS readiness answers.
@@ -306,10 +309,11 @@ results and integrity findings from native evidence. A repository listing is onl
 - **Replace recovery passphrase, schedule-overlap warnings and the Export transfer.** These
   are fast-layer and browser evidence; no native item exercises them. Export's native
   assertions remain the gap #409 recorded.
-- **The review pass's new native assertions.** The held-lock restore, truncated-dump refusal,
-  held-lock offsite removal, removed-repository deletion and offsite-cleanup read-back
-  assertions were added after the measured #410 build and are unrun here. Their fast and
-  request evidence is in `backups/test_restore.py`, `backups/test_removed.py`,
+- **A full rerun of the review pass's native assertions.** The held-lock offsite removal,
+  removed-repository deletion and offsite-cleanup read-back assertions passed in the full
+  integration run at `601a738`; the corrected held-lock restore and truncated-dump assertions
+  passed in a focused two-item rerun. No single full run contains every review assertion. Their
+  fast and request evidence is in `backups/test_restore.py`, `backups/test_removed.py`,
   `backups/test_offsite.py`, `backups/test_retention.py` and `backups/test_schedule.py`.
 - **The build target and the joint fast stage.** 360 s against 300 s and 68 s against 60 s at
   this head; the next actions are item consolidation and the validator consolidation the
