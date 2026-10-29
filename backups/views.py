@@ -120,6 +120,9 @@ def context_for_site(
         "backups_can_export": (
             can_prepare and managed and view.enabled and user.has_perm("operations.change_shared")
         ),
+        "backups_can_download": user.has_perms(
+            ("servers.view_server", VIEW_SITES, "operations.change_shared")
+        ),
         "backups_can_check": bool(
             managed and user.has_perms((*check.READ_PERMISSIONS, VIEW_SITES))
         ),
