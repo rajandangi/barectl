@@ -62,7 +62,8 @@ RESTIC_TIME: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[
 BUILD: Final = re.compile(r"/nix/store/[0-9a-z]{32}-restic-[0-9.]+")
 
 
-def _packed(source: str) -> bytes:
+def _packed(source: str, *, script_path: bool = False) -> bytes:
+    arguments = '"$0" "$@"' if script_path else '"$@"'
     return (
         (
             "#!/bin/sh\nexec python3 -c "
@@ -71,7 +72,7 @@ def _packed(source: str) -> bytes:
                 + repr(base64.b64encode(gzip.compress(source.encode(), mtime=0)).decode())
                 + ")))"
             )
-            + ' "$@"\n'
+            + f" {arguments}\n"
         )
         .encode()
         .rstrip(b"\n")

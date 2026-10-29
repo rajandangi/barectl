@@ -39,6 +39,8 @@ SCOPES: Final = ("database", "files", "full")
 PARTS: Final = ("database", "files")
 ORIGINS: Final = ("manual", "scheduled", "safety")
 POINT_TAG: Final = "point:"
+# One policy per site: 1 week, 2 weeks, 3 weeks, 1 month or 6 months (#404).
+RETENTION_DAYS: Final = (7, 14, 21, 30, 182)
 
 RESULT_PREFIX: Final = "barectl-result "
 # One schedule per site is a fixed timer in the site's own backup slice, separate from the

@@ -94,6 +94,45 @@
           Offsite storage is not set up for this server. <a href="{% url 'server_settings' server.pk %}">Set it up in Server Settings</a> to keep copies after the server is lost.
         </p>
       {% endif %}
+      <div class="barectl-card__summary">
+        <h3>Keep backups for</h3>
+        <p>{{ backups_retention_label }}</p>
+        {% if backups_retention_problem %}
+          <p class="usa-alert usa-alert--warning">{{ backups_retention_problem }}</p>
+        {% endif %}
+        {% if backups_can_set_retention %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_retention_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <label class="usa-label" for="retention-days">How long to keep recovery points</label>
+            <select class="usa-select" id="retention-days" name="days">
+              <option value="7"
+                      {% if backups_retention_days == 7 or not backups_retention_days %}selected{% endif %}>1 week</option>
+              <option value="14"
+                      {% if backups_retention_days == 14 %}selected{% endif %}>2 weeks</option>
+              <option value="21"
+                      {% if backups_retention_days == 21 %}selected{% endif %}>3 weeks</option>
+              <option value="30"
+                      {% if backups_retention_days == 30 %}selected{% endif %}>1 month</option>
+              <option value="182"
+                      {% if backups_retention_days == 182 %}selected{% endif %}>6 months</option>
+            </select>
+            <button type="submit" class="usa-button usa-button--outline">Set retention</button>
+          </form>
+        {% endif %}
+        {% if backups_can_disable_retention %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_retention_disable_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <button type="submit" class="usa-button usa-button--outline">Turn retention off</button>
+          </form>
+        {% endif %}
+        <p class="usa-hint">
+          Cleanup deletes older copies only after it checks the newest one still restores.
+        </p>
+      </div>
       <div class="barectl-page-actions">
         {% if backups_can_back_up_full %}
           <form class="usa-form"
@@ -259,7 +298,18 @@
                   {% endif %}
                 </td>
                 <td>
-                  {% if backups_can_restore and point.restorable %}
+                  {% if backups_can_keep and point.restorable %}
+                    <form class="usa-form"
+                          method="post"
+                          action="{% url 'site_backups_keep_prepare' server.pk identifier %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="point" value="{{ point.point }}">
+                      <button type="submit" class="usa-button usa-button--outline">
+                        {% if point.keep %}Stop keeping{% else %}Keep{% endif %}
+                      </button>
+                    </form>
+                  {% endif %}
+                  {% if backups_can_restore and point.restorable and point.has_files or backups_can_restore and point.restorable and backups.database and point.has_database %}
                     <form class="usa-form"
                           method="post"
                           action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
