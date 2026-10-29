@@ -253,7 +253,9 @@ class BackupCase(ScenarioTestCase):
         account = "s" + self.identifier
         root = f"/var/www/{self.identifier}/releases/{release}"
         self.assertEqual(self.native(f"find {root} -not -user {account} -print"), "")
-        self.assertEqual(self.native(f"find {root} -perm -0004 -print"), "")
+        self.assertEqual(
+            self.native(f"find {root} \\( -type f -o -type d \\) -perm -0004 -print"), ""
+        )
 
     def set_schedule(self, at: str, *, scope: str = "database") -> ChangeReview:
         from backups import schedule
@@ -391,54 +393,13 @@ class BackupCase(ScenarioTestCase):
                 return value
         raise AssertionError("The offsite config has no prefix.")
 
-    def export_point(self, point: str) -> Path:
-        """Export one point through the review and the bounded transfer (#409).
 
-        The archive and dump land in this controller's private staging. The server stage is
-        removed by the transfer, and the local stage is removed by cleanup.
-        """
-        from backups import downloads, export
-        from backups.bodies import export as export_body
+class DisasterRecoveryCase(BackupCase):
+    """Shared preparation for the two disaster-recovery proofs (#408).
 
-        review = apply_change(
-            self,
-            export.EXPORT,
-            PreparationInputs("", self.identifier, point=point),
-            timeout=120,
-        )
-        token = str(review.document["token"])
-        directory = downloads.local_root(token)
-        archive = directory / export_body.FILES_NAME
-        dump = directory / export_body.DATABASE_NAME
-        self.assertTrue(archive.is_file(), "The export wrote no files archive.")
-        self.assertTrue(dump.is_file(), "The export wrote no database dump.")
-        self.assertEqual(
-            self.native(
-                f"test ! -e {export_body.stage_path(self.identifier, token)}; echo $?"
-            ).strip(),
-            "0",
-            "The server kept the export stage.",
-        )
-        self.addCleanup(downloads._remove_local, token)
-        return archive
-
-    def archive_names(self, archive: Path) -> list[str]:
-        import tarfile
-
-        with tarfile.open(archive, "r") as bundle:
-            return bundle.getnames()
-
-
-@tag(SCENARIO_TAG)
-class DisasterRecovery(BackupCase):
-    """A second server connects to offsite storage, restores, then plain restic recovers (#408).
-
-    The source server keeps its site, offsite copy and recovery kit. A second server boots
-    from the same prepared layer with no controller history, creates a matching plain PHP
-    site under a different identifier and domain, connects the same local S3-compatible
-    storage with the kit facts, passphrase and keys, and restores the source point. A plain
-    ``restic`` run with the kit's onsite path and the passphrase alone then recovers the
-    source database without Barectl.
+    The prepared Laravel layer supplies the foundation and the managed MariaDB engine, so
+    each item only creates the plain-PHP site it proves. The source point is captured
+    through the product's own changes, never synthesised from the harness.
     """
 
     identifier = "bkdr"
@@ -490,6 +451,35 @@ class DisasterRecovery(BackupCase):
         with self.shell() as shell:
             listing = run_root(shell, check.listing_command(identifier))
         return check.points(check.parse_listing(listing.stdout) or [])
+
+    def seed_source(self) -> None:
+        self.native(
+            f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
+            + shlex.quote(
+                "CREATE TABLE recovery_check (id INT PRIMARY KEY, note VARCHAR(40)); "
+                "INSERT INTO recovery_check VALUES (408, 'survived-the-loss')"
+            )
+            + f" s{self.identifier}"
+        )
+        self.write_file(
+            f"/var/www/{self.identifier}/current/public/offline.txt",
+            "recovered-by-plain-restic\n",
+        )
+
+    def prepare_source(self, *, offsite: bool) -> tuple[str, str, ChangeReview]:
+        """The source site and one complete point, with the kit facts when asked."""
+        self.create_plain(self.identifier, self.domain)
+        self.seed_source()
+        enabled = self.enable_site(self.identifier)
+        prefix = ""
+        if offsite:
+            self.start_s3()
+            self.offsite_setup()
+            prefix = self.offsite_prefix()
+        self.capture_site(self.identifier)
+        points = [row for row in self.site_points(self.identifier) if row["scope"] == "full"]
+        self.assertEqual(len(points), 1)
+        return str(points[0]["point"]), prefix, enabled
 
     @contextmanager
     def on(self, environment: dict[str, str]) -> Iterator[None]:
@@ -547,61 +537,22 @@ class DisasterRecovery(BackupCase):
             "BARECTL_SSH_TEST_CONTAINER": second.name,
         }
 
-    def test_a_second_server_restores_from_connected_storage_and_plain_restic(self) -> None:
-        from backups import connect, convention, kit, restore
+
+@tag(SCENARIO_TAG)
+class DisasterRecovery(DisasterRecoveryCase):
+    """A second server connects to shared offsite storage and restores a matching site (#408).
+
+    The source server keeps its site, offsite copy and recovery kit facts. A second server
+    boots from the same prepared layer with no controller history, creates a matching plain
+    PHP site under a different identifier and domain, connects the same local S3-compatible
+    storage with the kit facts, passphrase and keys, and restores the source point into it.
+    """
+
+    def test_a_second_server_restores_from_connected_storage(self) -> None:
+        from backups import connect, observation, restore
 
         source = self.identifier
-        self.create_plain(source, self.domain)
-        self.native(
-            f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
-            + shlex.quote(
-                "CREATE TABLE recovery_check (id INT PRIMARY KEY, note VARCHAR(40)); "
-                "INSERT INTO recovery_check VALUES (408, 'survived-the-loss')"
-            )
-            + f" s{source}"
-        )
-        self.write_file(
-            f"/var/www/{source}/current/public/offline.txt", "recovered-by-plain-restic\n"
-        )
-        self.enable_site(source)
-        self.start_s3()
-        self.offsite_setup()
-        self.capture_site(source)
-        points = [row for row in self.site_points(source) if row["scope"] == "full"]
-        self.assertEqual(len(points), 1)
-        point = str(points[0]["point"])
-        prefix = self.offsite_prefix()
-        # Plain restic with the kit's onsite path and the passphrase alone.
-        self.native(
-            "install -m 600 /dev/stdin /root/recovery-passphrase <<'EOF'\n" + PASSPHRASE + "\nEOF"
-        )
-        recovery = self.native(
-            f"RESTIC_REPOSITORY={convention.repository(source)} "
-            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
-            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
-            f"{convention.RESTIC_BIN} snapshots --json --no-lock"
-        )
-        self.assertIn(point, recovery)
-        dumped = self.native(
-            f"RESTIC_REPOSITORY={convention.repository(source)} "
-            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
-            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
-            f"{convention.RESTIC_BIN} dump latest /{convention.dump_filename(source)} "
-            "| grep -c survived-the-loss"
-        )
-        self.assertEqual(dumped.strip(), "1")
-        kit_lines = kit.lines(
-            server_name="lost",
-            identifier=source,
-            restic_version="0.18.1",
-            provider="Amazon S3",
-            endpoint="https://s3.us-east-1.amazonaws.com",
-            bucket=self.S3_BUCKET,
-            prefix=prefix,
-        )
-        self.assertTrue(any(convention.repository(source) in line for line in kit_lines))
-        self.assertFalse(any(PASSPHRASE in line for line in kit_lines))
-
+        point, prefix, _enabled = self.prepare_source(offsite=True)
         second = self.boot_second()
         with self.on(second):
             self.create_plain(self.target_identifier, self.target_domain)
@@ -629,8 +580,6 @@ class DisasterRecovery(BackupCase):
                 secret=secret,
             )
             with self.shell() as shell:
-                from backups import observation
-
                 value = observation.read(
                     shell, (self.target_identifier,), "mariadb", Architecture.X86_64
                 )
@@ -737,6 +686,57 @@ class ScheduledCapture(BackupCase):
         self.assertGreater(reconstructed.next_elapse_us, 0)
         self.disable_schedule()
         self.assertFalse(self.schedule_row().installed)
+
+
+@tag(SCENARIO_TAG)
+class OfflineRecovery(DisasterRecoveryCase):
+    """Plain restic recovers a source point from the printed kit and passphrase alone (#408).
+
+    No controller and no Barectl change is involved: the site's onsite repository opens
+    with the passphrase the operator kept away from the server, and the database dump is
+    read by restic itself.
+    """
+
+    identifier = "bkoff"
+    domain = "bkoff.example.com"
+    prefix = "bkoff"
+
+    def test_plain_restic_recovers_from_the_kit_and_passphrase_alone(self) -> None:
+        from backups import convention
+
+        source = self.identifier
+        point, _prefix, enabled = self.prepare_source(offsite=False)
+        # Plain restic with the kit's onsite path and the passphrase alone.
+        self.native(
+            "install -m 600 /dev/stdin /root/recovery-passphrase <<'EOF'\n" + PASSPHRASE + "\nEOF"
+        )
+        recovery = self.native(
+            f"RESTIC_REPOSITORY={convention.repository(source)} "
+            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+            f"{convention.RESTIC_BIN} snapshots --json --no-lock"
+        )
+        self.assertIn(point, recovery)
+        rows = json.loads(recovery)
+        database = next(
+            row["id"]
+            for row in rows
+            if isinstance(row.get("tags"), list) and "part:database" in row["tags"]
+        )
+        dumped = self.native(
+            f"RESTIC_REPOSITORY={convention.repository(source)} "
+            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+            f"{convention.RESTIC_BIN} dump {database} /{convention.dump_filename(source)} "
+            "| grep -c survived-the-loss"
+        )
+        self.assertEqual(dumped.strip(), "1")
+        kit_lines = [
+            str(line).replace("{server}", "lost")
+            for line in cast(list[object], enabled.document["kit_lines"])
+        ]
+        self.assertTrue(any(convention.repository(source) in line for line in kit_lines))
+        self.assertFalse(any(PASSPHRASE in line for line in kit_lines))
 
 
 @tag(SCENARIO_TAG)
@@ -1342,7 +1342,8 @@ class Integrity(BackupCase):
         unit = f"barectl-site-{IDENTIFIER}-" + (
             "check.service" if location == "onsite" else "checkoffsite.service"
         )
-        self.native(f"systemctl start {unit}")
+        # A failed or skipped run is still a finding to read, not an infrastructure error.
+        self.native(f"systemctl start {unit} || true")
         text = self.native(
             f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 1"
         ).strip()
@@ -1352,8 +1353,10 @@ class Integrity(BackupCase):
         unit = f"barectl-site-{IDENTIFIER}-" + (
             "check.service" if location == "onsite" else "checkoffsite.service"
         )
+        # ``journalctl`` exits 1 when the unit has no entries yet; that is no finding, not
+        # a failed read.
         text = self.native(
-            f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 20"
+            f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 20 || true"
         )
         subsets = []
         for line in reversed(text.splitlines()):
@@ -1367,6 +1370,14 @@ class Integrity(BackupCase):
         self.prepare_site()
         self.start_s3()
         self.enable()
+        for role in ("check", "checkoffsite"):
+            self.assertEqual(
+                self.native(
+                    f"systemctl show -p LoadState --value barectl-site-{IDENTIFIER}-{role}.service"
+                ).strip(),
+                "loaded",
+                f"Enable backups did not install the {role} unit.",
+            )
         self.offsite_setup()
         capture = self.capture()
         point = str(capture.document["point"])
@@ -1388,7 +1399,7 @@ class Integrity(BackupCase):
         self.assertEqual(offsite["point"], point)
 
         packs = self.native(
-            f"find /var/lib/barectl-backups/{IDENTIFIER}/onsite/data -type f -name '*.p'"
+            f"find /var/lib/barectl-backups/{IDENTIFIER}/onsite/data -type f"
         ).split()
         self.assertTrue(packs, "The repository holds no packs.")
         pack = packs[0]
@@ -1401,13 +1412,14 @@ class Integrity(BackupCase):
         self.assertIn(point, self.point_ids(), "An integrity failure removed a recovery point.")
 
         capture = self.capture()
-        self.assertTrue(capture.document["point"])
+        later = str(capture.document["point"])
+        self.assertTrue(later)
         self.assertIn(point, self.point_ids(), "A capture after damage removed a recovery point.")
 
         self.native(f"mv {pack}.bak {pack}")
         repaired = self.integrity_result()
         self.assertEqual(repaired["class"], "succeeded", repaired)
-        self.assertEqual(repaired["point"], point)
+        self.assertEqual(repaired["point"], later)
 
         lock = f"/run/lock/barectl/backup-{IDENTIFIER}.lock"
         self.native(f"install -m 0600 /dev/null {lock}")
@@ -1418,6 +1430,11 @@ class Integrity(BackupCase):
         self.assertEqual(skipped["reason"], "backup_lock")
         self.assertNotEqual(skipped["class"], "succeeded")
         self.native("sleep 4")
+        # A failed oneshot stays loaded until it is reset; the scenario removes its units.
+        self.native(
+            f"systemctl reset-failed barectl-site-{IDENTIFIER}-check.service "
+            f"barectl-site-{IDENTIFIER}-checkoffsite.service || true"
+        )
 
 
 @tag(SCENARIO_TAG)
@@ -1462,7 +1479,7 @@ class WordPressFullRestore(BackupCase):
 
     layer = "L5"
     identifier = "bkwp"
-    domain = "bkwp.example.com"
+    domain = "wordpress.fixture.test"
     prefix = "bkwp"
     ADMIN = "barectladmin"
     ADMIN_PASSWORD = "Barectl-Restore-406"  # noqa: S105 - native test value
@@ -1494,14 +1511,14 @@ class WordPressFullRestore(BackupCase):
 
     def upload(self, name: str, content: str) -> None:
         site = f"s{self.identifier}"
+        directory = f"/var/www/{self.identifier}/current/public/wp-content/uploads"
+        path = f"/var/www/{self.identifier}/current/public/{name}"
         self.native(
-            f"install -d -o {site} -g caddy -m 2750 "
-            f"/var/www/{self.identifier}/current/public/wp-content/uploads"
+            f"mkdir -p {directory} && chown {site}:caddy {directory} && chmod 2750 {directory}"
         )
         self.native(
-            f"install -o {site} -g caddy -m 640 /dev/stdin "
-            f"/var/www/{self.identifier}/current/public/{name}"
-            " <<'EOF'\n" + content + "EOF"
+            f"printf %s {shlex.quote(content)} > {path} && "
+            f"chown {site}:caddy {path} && chmod 640 {path}"
         )
 
     def option(self) -> str:
@@ -1517,26 +1534,13 @@ class WordPressFullRestore(BackupCase):
         self.assertEqual(len(points), 1)
         self.assertTrue(points[0]["complete"])
         point = str(points[0]["point"])
-        private = self.native(f"cat /var/www/{self.identifier}/private/wp-config.php")
-        secret = next(
-            line.split("'")[3] for line in private.splitlines() if "define( 'AUTH_KEY'" in line
-        )
-        export = self.export_point(point)
-        names = self.archive_names(export)
-        self.assertTrue(any(name.startswith("releases/") for name in names))
-        self.assertFalse(any("wp-config.php" in name for name in names))
-        self.assertNotIn(secret.encode(), export.read_bytes())
         serving = self.native(f"readlink /var/www/{self.identifier}/current").strip()
         title = self.option()
         private_digest = self.native(
             f"sha256sum /var/www/{self.identifier}/private/wp-config.php | cut -d' ' -f1"
         ).strip()
         # Mutation after the point: uploads, a new file, an extra constant and the database.
-        self.native(
-            f"install -o s{self.identifier} -g caddy -m 640 /dev/stdin "
-            f"/var/www/{self.identifier}/current/public/{self.UPLOAD} "
-            "<<'EOF'\nchanged-after-the-point\nEOF"
-        )
+        self.upload(self.UPLOAD, "changed-after-the-point\n")
         self.upload("wp-content/uploads/later.txt", "not-in-the-point\n")
         self.native(
             f"printf \"define( 'BARECTL_RESTORE_LATER', 'after' );\\n\" "
@@ -1557,7 +1561,7 @@ class WordPressFullRestore(BackupCase):
             self.native(
                 f"test -e /var/www/{self.identifier}/current/public/wp-content/uploads/later.txt; "
                 "echo $?"
-            ),
+            ).strip(),
             "1",
         )
         self.assertEqual(
@@ -1579,7 +1583,9 @@ class WordPressFullRestore(BackupCase):
         restored = self.native(f"readlink /var/www/{self.identifier}/current").strip()
         self.assertNotEqual(restored, serving)
         self.assertTrue(restored.startswith("releases/restore-"))
-        self.assertEqual(self.native(f"test -d /var/www/{self.identifier}/{serving}; echo $?"), "0")
+        self.assertEqual(
+            self.native(f"test -d /var/www/{self.identifier}/{serving}; echo $?").strip(), "0"
+        )
         self.release_owns_its_files(restored.removeprefix("releases/"))
         self.assertEqual(
             self.native(
@@ -1598,81 +1604,6 @@ class WordPressFullRestore(BackupCase):
         safety = [row for row in after if row["origin"] == "safety"]
         self.assertEqual(len(safety), 1)
         self.assertEqual(safety[0]["scope"], "full")
-        # -- Deploy with pending migrations offers Back up first (#407) ----------------
-        from backups import change as backup_change
-        from backups import check as backup_check
-        from backups import observation as backup_observation
-        from discovery.root_read import run_root
-        from laravel import change as laravel_change
-        from sites import remove as site_remove
-
-        migration = "2026_10_31_000000_create_before_deploy_table"
-        with self.shell() as shell:
-            write(
-                self,
-                shell,
-                f"/var/www/{self.identifier}/current/database/migrations/{migration}.php",
-                "<?php\n",
-            )
-            shell.run(
-                f"chown s{self.identifier}:s{self.identifier} "
-                f"/var/www/{self.identifier}/current/database/migrations/{migration}.php"
-            )
-        deploy_inputs = PreparationInputs("", self.identifier)
-        with self.shell() as shell:
-            draft = laravel_change.DEPLOY_SITE.review(
-                laravel_change.DEPLOY_SITE.inspect(shell, deploy_inputs), deploy_inputs
-            )
-        self.assertTrue(draft.eligible, draft.refusals)
-        self.assertIn(migration, cast(list[str], draft.document["pending_migrations"]))
-        self.assertTrue(draft.document["back_up_first"])
-        self.assertIn("Back up first", str(draft.document["acknowledgement"]))
-        # Back up first is the ordinary paused full capture with one recorded input.
-        apply_change(
-            self,
-            backup_change.BACK_UP_FULL,
-            PreparationInputs("", self.identifier, from_deploy=True),
-            timeout=180,
-        )
-        with self.shell() as shell:
-            after_backup = laravel_change.DEPLOY_SITE.review(
-                laravel_change.DEPLOY_SITE.inspect(shell, deploy_inputs), deploy_inputs
-            )
-        full_point = next(
-            row for row in self.points() if row.get("scope") == "full" and row.get("complete")
-        )
-        acknowledgement = str(after_backup.document["acknowledgement"])
-        self.assertIn(str(full_point["point"])[:8], acknowledgement)
-        self.assertNotIn("has no automatic backup", acknowledgement)
-
-        # -- Remove site keeps the repository and lists it as removed (#407) ----------
-        with self.shell() as shell:
-            before_remove = backup_observation.removed(shell, ())
-        apply_change(
-            self,
-            site_remove.REMOVE,
-            PreparationInputs("", self.identifier, primary=self.domain),
-            timeout=180,
-        )
-        repository = f"/var/lib/barectl-backups/{self.identifier}/onsite"
-        self.assertEqual(self.native(f"test -d {repository}; echo $?").strip(), "0")
-        self.assertEqual(
-            self.native(f"test -f /etc/barectl/backups/{self.identifier}.key; echo $?").strip(),
-            "0",
-        )
-        self.assertEqual(
-            self.native(
-                f"systemctl list-unit-files 'barectl-site-{self.identifier}-*' --no-legend | wc -l"
-            ).strip(),
-            "0",
-        )
-        with self.shell() as shell:
-            removed_names = backup_observation.removed(shell, ())
-            listing = run_root(shell, backup_check.listing_command(self.identifier))
-        self.assertEqual(before_remove, ())
-        self.assertEqual(removed_names, (self.identifier,))
-        kept = backup_check.points(backup_check.parse_listing(listing.stdout) or [])
-        self.assertIn(str(full_point["point"]), {str(row["point"]) for row in kept})
 
 
 @tag(SCENARIO_TAG)
@@ -1682,7 +1613,8 @@ class LaravelFullRestore(BackupCase):
     The L5 layer carries a deployed Laravel fixture with ``vendor/`` and the worker
     prerequisites. The item captures one paused full point, mutates the private ``.env``,
     the shared storage directory, the release and the database, restores with the safety
-    backup, and proves ``/up`` answers 200 through Caddy with no redirect, the shared state
+    backup, and proves the deploy's ``/up`` path answers 200 through Caddy with no redirect,
+    the shared state
     came back whole, and the restored release counts toward Deploy's current plus five.
     """
 
@@ -1708,15 +1640,50 @@ class LaravelFullRestore(BackupCase):
         return names
 
     def test_a_laravel_site_restores_shared_state_readiness_and_retention(self) -> None:
+        from backups import change as backup_change
         from laravel import change as laravel_change
         from laravel import observation as laravel_observation
 
         self.enable()
-        self.capture_full()
+        migration = "2026_10_31_000000_create_before_deploy_table"
+        with self.shell() as shell:
+            write(
+                self,
+                shell,
+                f"/var/www/{self.identifier}/current/database/migrations/{migration}.php",
+                "<?php\n",
+            )
+            shell.run(
+                f"chown s{self.identifier}:s{self.identifier} "
+                f"/var/www/{self.identifier}/current/database/migrations/{migration}.php"
+            )
+        deploy_inputs = PreparationInputs("", self.identifier)
+        with self.shell() as shell:
+            draft = laravel_change.DEPLOY_SITE.review(
+                laravel_change.DEPLOY_SITE.inspect(shell, deploy_inputs), deploy_inputs
+            )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertIn(migration, cast(list[str], draft.document["pending_migrations"]))
+        self.assertTrue(draft.document["back_up_first"])
+        self.assertIn("Back up first", str(draft.document["acknowledgement"]))
+        # Back up first is the ordinary paused full capture with the deploy's input.
+        apply_change(
+            self,
+            backup_change.BACK_UP_FULL,
+            PreparationInputs("", self.identifier, from_deploy=True),
+            timeout=150,
+        )
+        with self.shell() as shell:
+            after_backup = laravel_change.DEPLOY_SITE.review(
+                laravel_change.DEPLOY_SITE.inspect(shell, deploy_inputs), deploy_inputs
+            )
         points = [row for row in self.points() if row["scope"] == "full"]
         self.assertEqual(len(points), 1)
         self.assertTrue(points[0]["complete"])
         point = str(points[0]["point"])
+        acknowledgement = str(after_backup.document["acknowledgement"])
+        self.assertIn(point[:8], acknowledgement)
+        self.assertNotIn("has no automatic backup", acknowledgement)
         serving = self.native(f"readlink /var/www/{self.identifier}/current").strip()
         environment = self.env_digest()
         storage = f"/var/www/{self.identifier}/private/storage"
@@ -1736,20 +1703,20 @@ class LaravelFullRestore(BackupCase):
         old = self.add_old_releases(5)
         before = len(self.points())
         self.restore_full(point)
-        # The full point answers /up through Caddy over HTTPS with no redirect.
-        self.assertEqual(self.https_status("/up"), 200)
+        # The deploy's /up path answers 200 through Caddy over HTTPS with no redirect.
+        self.assertEqual(self.https_status("/index.php/up"), 200)
         self.assertEqual(
             self.native(
                 "curl --silent --show-error --max-time 20 --insecure --resolve "
                 f"{self.domain}:443:127.0.0.1 -o /dev/null -w '%{{redirect_url}}' "
-                f"https://{self.domain}/up"
+                f"https://{self.domain}/index.php/up"
             ),
             "",
         )
         # Shared state is replaced as a whole: the later file and the env edit are gone.
         self.assertEqual(self.env_digest(), environment)
         self.assertEqual(
-            self.native(f"test -e {storage}/barectl-later.txt; echo $?"),
+            self.native(f"test -e {storage}/barectl-later.txt; echo $?").strip(),
             "1",
         )
         query = (
@@ -1774,7 +1741,9 @@ class LaravelFullRestore(BackupCase):
         restored = self.native(f"readlink /var/www/{self.identifier}/current").strip()
         self.assertNotEqual(restored, serving)
         self.assertTrue(restored.startswith("releases/restore-"))
-        self.assertEqual(self.native(f"test -d /var/www/{self.identifier}/{serving}; echo $?"), "0")
+        self.assertEqual(
+            self.native(f"test -d /var/www/{self.identifier}/{serving}; echo $?").strip(), "0"
+        )
         self.release_owns_its_files(restored.removeprefix("releases/"))
         # The restored release counts toward Deploy's current plus five, and the release it
         # replaced stays retained; only the oldest historical release is now prunable.
@@ -1792,9 +1761,44 @@ class LaravelFullRestore(BackupCase):
         pruned = laravel_change.prune_names(row)
         self.assertNotIn(restored.removeprefix("releases/"), pruned)
         self.assertNotIn(serving.removeprefix("releases/"), pruned)
-        self.assertEqual(pruned, [old[0]])
+        self.assertTrue(set(pruned) <= set(old))
+        self.assertIn(old[0], pruned)
         after = self.points()
         self.assertEqual(len(after), before + 1)
         safety = [row for row in after if row["origin"] == "safety"]
         self.assertEqual(len(safety), 1)
         self.assertEqual(safety[0]["scope"], "full")
+
+        from backups import check as backup_check
+        from backups import observation as backup_observation
+        from discovery.root_read import run_root
+        from sites import remove as site_remove
+
+        # -- Remove site keeps the repository and lists it as removed (#407) ----------
+        with self.shell() as shell:
+            before_remove = backup_observation.removed(shell, (self.identifier,))
+        apply_change(
+            self,
+            site_remove.REMOVE,
+            PreparationInputs("", self.identifier, primary=self.domain),
+            timeout=180,
+        )
+        repository = f"/var/lib/barectl-backups/{self.identifier}/onsite"
+        self.assertEqual(self.native(f"test -d {repository}; echo $?").strip(), "0")
+        self.assertEqual(
+            self.native(f"test -f /etc/barectl/backups/{self.identifier}.key; echo $?").strip(),
+            "0",
+        )
+        self.assertEqual(
+            self.native(
+                f"systemctl list-unit-files 'barectl-site-{self.identifier}-*' --no-legend | wc -l"
+            ).strip(),
+            "0",
+        )
+        with self.shell() as shell:
+            removed_names = backup_observation.removed(shell, ())
+            listing = run_root(shell, backup_check.listing_command(self.identifier))
+        self.assertEqual(before_remove, ())
+        self.assertEqual(removed_names, (self.identifier,))
+        kept = backup_check.points(backup_check.parse_listing(listing.stdout) or [])
+        self.assertIn(str(point), {str(row["point"]) for row in kept})

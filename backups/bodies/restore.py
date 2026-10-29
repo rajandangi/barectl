@@ -136,8 +136,11 @@ def dump_version(engine: str, text: str) -> str:
     return match[1] if match is not None else ""
 
 
-def dump_argv(snapshot: str, filename: str) -> list[str]:
-    return [RESTIC_BIN, "dump", "--no-lock", snapshot, "/" + filename.lstrip("/")]
+def dump_argv(snapshot: str, filename: str, repository: str = "") -> list[str]:
+    # restic selects virtual-hosted URLs for Amazon endpoints; Barectl's templates and the
+    # connected source repositories are path-style, the same option every other call uses.
+    options = ["-o", "s3.bucket-lookup=path"] if repository.startswith("s3:") else []
+    return [RESTIC_BIN, *options, "dump", "--no-lock", snapshot, "/" + filename.lstrip("/")]
 
 
 def count_sql(engine: str) -> str:
@@ -274,7 +277,7 @@ def header_bytes(
     extra: dict[str, str] | None = None,
 ) -> bytes | None:
     process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
-        dump_argv(snapshot, filename),
+        dump_argv(snapshot, filename, repository),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -309,7 +312,7 @@ def import_stream(
         start_new_session=True,
     )
     source = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
-        dump_argv(snapshot, filename),
+        dump_argv(snapshot, filename, repository),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -722,8 +725,15 @@ def _wp_constant(line: str) -> tuple[str, str] | None:
     return (match[1], match[2]) if match is not None else None
 
 
-def _replace_tree(target: pathlib.Path, staged: pathlib.Path, owner: int, group: int) -> None:
-    """Replace one private directory or file as a whole, never overlaid."""
+def _replace_tree(  # noqa: C901 - one whole replacement with its rollback
+    target: pathlib.Path, staged: pathlib.Path, owner: int, group: int
+) -> None:
+    """Replace one private directory or file as a whole, never overlaid.
+
+    A directory on an overlayfs lower layer cannot be renamed within its parent (EXDEV),
+    so a directory is copied aside and removed before the new tree is renamed into place.
+    The copy is the rollback for a failed rename; a file keeps the atomic rename.
+    """
     temporary = target.parent / (".restore-" + target.name)
     previous = target.parent / (".replaced-" + target.name)
     for leftover in (temporary, previous):
@@ -731,25 +741,36 @@ def _replace_tree(target: pathlib.Path, staged: pathlib.Path, owner: int, group:
             leftover.unlink()
         elif leftover.exists():
             shutil.rmtree(leftover)
-    if staged.is_dir():
+    directory = staged.is_dir()
+    if directory:
         shutil.copytree(staged, temporary, symlinks=True)
         _place_private(temporary, owner, group)
     else:
         shutil.copyfile(staged, temporary, follow_symlinks=False)
         os.chown(temporary, owner, group)
         os.chmod(temporary, 0o600)
-    if target.is_symlink() or target.exists():
+    aside: pathlib.Path | None = None
+    if target.is_dir() and not target.is_symlink():
+        aside = previous
+        shutil.copytree(target, aside, symlinks=True)
+        shutil.rmtree(target)
+    elif target.is_symlink() or target.exists():
         os.replace(target, previous)
+        aside = previous
     try:
         os.replace(temporary, target)
     except OSError:
-        if previous.exists() or previous.is_symlink():
-            os.replace(previous, target)
+        if aside is not None:
+            if aside.is_dir():
+                shutil.copytree(aside, target, symlinks=True)
+            else:
+                os.replace(aside, target)
         raise
-    if previous.is_symlink() or previous.is_file():
-        previous.unlink()
-    elif previous.exists():
-        shutil.rmtree(previous)
+    if aside is not None:
+        if aside.is_symlink() or aside.is_file():
+            aside.unlink()
+        elif aside.exists():
+            shutil.rmtree(aside)
 
 
 def _replace_shared(
@@ -1243,20 +1264,23 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                     )
                 )
                 raise SystemExit(REFUSED)
-            empty = count_tables(engine, identifier)
-            if empty is None or (empty == 0) != bool(document.get("target_empty")):
-                emit_result(
-                    document_result(
-                        document,
-                        "refused",
-                        "restore_target",
-                        point=point,
-                        snapshots=0,
-                        size=0,
-                        kind="restore",
+            # Only a database restore may skip its safety copy, so only it depends on the
+            # target already being empty; a full restore always takes the reviewed one.
+            if scope == "database":
+                empty = count_tables(engine, identifier)
+                if empty is None or (empty == 0) != bool(document.get("target_empty")):
+                    emit_result(
+                        document_result(
+                            document,
+                            "refused",
+                            "restore_target",
+                            point=point,
+                            snapshots=0,
+                            size=0,
+                            kind="restore",
+                        )
                     )
-                )
-                raise SystemExit(REFUSED)
+                    raise SystemExit(REFUSED)
         # The safety backup matches the restore's scope. A database-only restore takes it
         # live; a files or full restore pauses the site briefly for an exact point.
         if tags:

@@ -459,11 +459,26 @@ FULL_EXCLUDED: Final = (
 )
 
 
+def site_application(site: dict[str, object]) -> str:
+    """The convention form a site serves, including the Laravel form discovery records.
+
+    Site discovery names WordPress in ``application`` and keeps Laravel in
+    ``serving_form``; backup scope follows the serving form first.
+    """
+    application = str(site.get("application", "plain"))
+    if application in ("wordpress", "laravel"):
+        return application
+    form = str(site.get("serving_form", ""))
+    if form in ("plain", "wordpress", "laravel"):
+        return form
+    return application
+
+
 def _full_site(evidence: BackupEvidence) -> tuple[SiteSettings | None, str, str]:
     site = evidence.site
     if site is None:
         return None, "", ""
-    application = str(site.get("application", "plain"))
+    application = site_application(site)
     if application not in ("plain", "wordpress", "laravel"):
         return None, application, ""
     names = site.get("names")

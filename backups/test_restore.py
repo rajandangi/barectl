@@ -210,6 +210,17 @@ class RestorePointTests(SimpleTestCase):
             self.fail("The engine ignored the final restore result.")
         self.assertEqual(parsed.result_class, "succeeded")
         self.assertEqual(parsed.reason, "restore_done")
+        for reason in ("restore_files", "restore_config"):
+            self.assertEqual(
+                parse_result_line(
+                    'barectl-result {"class":"partial","reason":"'
+                    + reason
+                    + '","kind":"restore","site":"alpha","scope":"files","origin":"",'
+                    '"at":"2026-10-30T01:00:00+00:00","point":"0123456789abcdef",'
+                    '"snapshots":1,"bytes":4096}'
+                ),
+                type(parsed)(result_class="partial", reason=reason),
+            )
 
     def test_the_import_replaces_only_the_sites_own_database(self) -> None:
         preamble = restore_body.import_preamble("mariadb", IDENTIFIER).decode()
@@ -403,6 +414,22 @@ class RestoreReviewTests(ChangeTestCase):
         self.assertIn("WordPress", values)
         self.assertIn("private configuration is replaced", values)
         self.assertIn("database settings are kept", values)
+
+    def test_a_laravel_serving_form_with_a_plain_application_restores_laravel_scope(self) -> None:
+        selected = evidence(parts=("database", "files"), point_data=point(scope="full"))
+        selected = replace(
+            selected,
+            site={**(selected.site or {}), "application": "plain", "serving_form": "laravel"},
+        )
+        draft = restore.review(
+            selected, PreparationInputs("", IDENTIFIER, point=POINT, scope="full")
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["application"], "laravel")
+        self.assertEqual(
+            draft.document["shared"],
+            ["private/laravel.env", "private/storage", "private/cache"],
+        )
 
     def test_a_laravel_restore_replaces_its_shared_state_as_a_whole(self) -> None:
         draft = restore.review(
@@ -1026,6 +1053,8 @@ class ConnectedRestoreTests(SimpleTestCase):
             draft.document["source_repository"],
             convention.offsite_repository(self.CONFIG, self.SOURCE),
         )
+        # The dump inside the source repository is named for the source site, not the target.
+        self.assertEqual(draft.document["filename"], convention.dump_filename(self.SOURCE))
         values = "\n".join(
             row["value"] for row in cast("list[dict[str, str]]", draft.document["details"])
         )
@@ -1037,6 +1066,14 @@ class ConnectedRestoreTests(SimpleTestCase):
             draft.document,
             BodyContext("unit", BOOT, 0, "/run/barectl/secrets/" + "a" * 32),
         )
+
+    def test_a_connected_dump_reads_path_style_from_s3(self) -> None:
+        argv = restore_body.dump_argv(
+            SNAPSHOT, "salpha.sql", convention.offsite_repository(self.CONFIG, self.SOURCE)
+        )
+        self.assertEqual(argv[1:4], ["-o", "s3.bucket-lookup=path", "dump"])
+        onsite = restore_body.dump_argv(SNAPSHOT, "salpha.sql", convention.repository(IDENTIFIER))
+        self.assertNotIn("-o", onsite)
 
     def test_a_connected_restore_refuses_a_different_site_kind(self) -> None:
         draft = restore.review(
