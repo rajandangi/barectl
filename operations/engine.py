@@ -950,6 +950,7 @@ RESULT_REASONS: Final = frozenset(
         "restore_data",
         "restore_readiness",
         "restore_open",
+        "restore_done",
         "logrotate_missing",
         "rotation_invalid",
     }
@@ -985,9 +986,9 @@ def parse_result_line(text: str) -> ResultLine | None:
         reason = value.get("reason", "")
         if not isinstance(reason, str) or reason not in RESULT_REASONS:
             raise native.Unreadable("The result line is not in the engine's form.")
-        # A full capture records the pause before it starts copying so discovery can name an
-        # interrupted capture. It is not the run's outcome: the final result follows.
-        if reason == "backup_paused":
+        # A full capture or restore records the pause before it starts copying so discovery
+        # can name an interrupted run. It is not the run's outcome: the final result follows.
+        if reason in ("backup_paused", "restore_paused"):
             continue
         return ResultLine(result_class, reason)
     return None

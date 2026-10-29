@@ -64,16 +64,21 @@ READY_SECONDS: Final = 30
 HEADER_BYTES: Final = 8192
 MARIADB_VERSION = re.compile(r"-- Server version\s+([0-9]+(?:\.[0-9]+)+)")
 POSTGRESQL_VERSION = re.compile(r"-- Dumped from database version ([0-9]+(?:\.[0-9]+)+)")
+MARIADB_MAJOR = re.compile(r"(?:[0-9]+:)?([0-9]+)\.([0-9]+)")
+POSTGRESQL_MAJOR = re.compile(r"(?:[0-9]+:)?([0-9]+)")
 
 
 def engine_major(engine: str, version: str) -> str:
-    """The engine family's major line: MariaDB keeps two components, PostgreSQL one."""
-    parts = version.split(".")
+    """The engine family's major line: MariaDB keeps two components, PostgreSQL one.
+
+    The package version may carry a Debian epoch (``1:11.8.6-5ubuntu0.1``); the dump's
+    server line does not. Both name the same major.
+    """
     if engine == "postgresql":
-        return parts[0] if parts and parts[0].isdigit() else ""
-    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
-        return ""
-    return parts[0] + "." + parts[1]
+        match = POSTGRESQL_MAJOR.match(version)
+        return match[1] if match is not None else ""
+    match = MARIADB_MAJOR.match(version)
+    return match[1] + "." + match[2] if match is not None else ""
 
 
 def dump_version(engine: str, text: str) -> str:
