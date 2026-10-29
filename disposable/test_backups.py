@@ -1329,7 +1329,8 @@ class Integrity(BackupCase):
         unit = f"barectl-site-{IDENTIFIER}-" + (
             "check.service" if location == "onsite" else "checkoffsite.service"
         )
-        self.native(f"systemctl start {unit}")
+        # A failed or skipped run is still a finding to read, not an infrastructure error.
+        self.native(f"systemctl start {unit} || true")
         text = self.native(
             f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 1"
         ).strip()
@@ -1339,8 +1340,10 @@ class Integrity(BackupCase):
         unit = f"barectl-site-{IDENTIFIER}-" + (
             "check.service" if location == "onsite" else "checkoffsite.service"
         )
+        # ``journalctl`` exits 1 when the unit has no entries yet; that is no finding, not
+        # a failed read.
         text = self.native(
-            f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 20"
+            f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 20 || true"
         )
         subsets = []
         for line in reversed(text.splitlines()):
@@ -1354,6 +1357,14 @@ class Integrity(BackupCase):
         self.prepare_site()
         self.start_s3()
         self.enable()
+        for role in ("check", "checkoffsite"):
+            self.assertEqual(
+                self.native(
+                    f"systemctl show -p LoadState --value barectl-site-{IDENTIFIER}-{role}.service"
+                ).strip(),
+                "loaded",
+                f"Enable backups did not install the {role} unit.",
+            )
         self.offsite_setup()
         capture = self.capture()
         point = str(capture.document["point"])
@@ -1375,7 +1386,7 @@ class Integrity(BackupCase):
         self.assertEqual(offsite["point"], point)
 
         packs = self.native(
-            f"find /var/lib/barectl-backups/{IDENTIFIER}/onsite/data -type f -name '*.p'"
+            f"find /var/lib/barectl-backups/{IDENTIFIER}/onsite/data -type f"
         ).split()
         self.assertTrue(packs, "The repository holds no packs.")
         pack = packs[0]
@@ -1388,13 +1399,14 @@ class Integrity(BackupCase):
         self.assertIn(point, self.point_ids(), "An integrity failure removed a recovery point.")
 
         capture = self.capture()
-        self.assertTrue(capture.document["point"])
+        later = str(capture.document["point"])
+        self.assertTrue(later)
         self.assertIn(point, self.point_ids(), "A capture after damage removed a recovery point.")
 
         self.native(f"mv {pack}.bak {pack}")
         repaired = self.integrity_result()
         self.assertEqual(repaired["class"], "succeeded", repaired)
-        self.assertEqual(repaired["point"], point)
+        self.assertEqual(repaired["point"], later)
 
         lock = f"/run/lock/barectl/backup-{IDENTIFIER}.lock"
         self.native(f"install -m 0600 /dev/null {lock}")
@@ -1405,6 +1417,11 @@ class Integrity(BackupCase):
         self.assertEqual(skipped["reason"], "backup_lock")
         self.assertNotEqual(skipped["class"], "succeeded")
         self.native("sleep 4")
+        # A failed oneshot stays loaded until it is reset; the scenario removes its units.
+        self.native(
+            f"systemctl reset-failed barectl-site-{IDENTIFIER}-check.service "
+            f"barectl-site-{IDENTIFIER}-checkoffsite.service || true"
+        )
 
 
 @tag(SCENARIO_TAG)
