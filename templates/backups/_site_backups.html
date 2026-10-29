@@ -393,19 +393,19 @@
               {% csrf_token %}
               <input type="hidden" name="point" value="{{ point.point }}">
               <input type="hidden" name="source" value="{{ repository.identifier }}">
-              <label class="usa-label" for="removed-restore-scope-{{ repository.identifier }}-{{ point.point }}">What to restore</label>
+              <label class="usa-label"
+                     for="removed-restore-scope-{{ repository.identifier }}-{{ point.point }}">What to restore</label>
               <select class="usa-select"
                       id="removed-restore-scope-{{ repository.identifier }}-{{ point.point }}"
                       name="scope">
                 <option value="files">Files only (the database stays as it is now)</option>
                 <option value="full">Full site (pauses the site briefly)</option>
               </select>
-              <button type="submit" class="usa-button usa-button--outline">Restore into this site</button>
+              <button type="submit"
+                      class="usa-button usa-button--outline">Restore into this site</button>
             </form>
           {% elif not point.has_files %}
-            <p class="usa-hint">
-              Database only, so Barectl cannot confirm which kind of site it came from.
-            </p>
+            <p class="usa-hint">Database only, so Barectl cannot confirm which kind of site it came from.</p>
           {% endif %}
         {% empty %}
           <p>No recovery points were listed in this repository.</p>

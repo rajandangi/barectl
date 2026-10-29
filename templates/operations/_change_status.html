@@ -234,7 +234,8 @@
                   method="post"
                   action="{{ review.extra_action.url }}">
               {% csrf_token %}
-              <button type="submit" class="usa-button usa-button--outline">{{ review.extra_action.label }}</button>
+              <button type="submit"
+                      class="usa-button usa-button--outline">{{ review.extra_action.label }}</button>
             </form>
             <p class="usa-hint">
               Take one full recovery point first. The deploy is its own step, and Barectl
