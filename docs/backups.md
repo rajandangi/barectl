@@ -36,7 +36,9 @@ already in the bucket stays there, and the review says so.
 
 A capture whose site has offsite storage copies its onsite point after the site has reopened
 (or, for Database only, after the onsite point is verified). The copy holds a per-repository
-native lock, so a slow upload never lengthens downtime and never races another copy. A failed
+native lock and releases the shared mutation and site locks once the onsite point is safe, so
+a slow upload never lengthens downtime, never races another copy and never blocks hosting
+changes. A failed
 copy keeps the onsite point unchanged and the Backups section says **Saved here, offsite copy
 failed.** Onsite and offsite results are shown separately.
 

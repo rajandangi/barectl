@@ -4,6 +4,7 @@ The database-only and full-site bodies are staged as one standalone Python progr
 helpers they share arrive as source text rather than an import (Phase D #396/#399).
 """
 
+import contextlib
 import json
 import os
 import pathlib
@@ -158,6 +159,16 @@ def repository_lock(identifier: str) -> int | None:
         raise
 
 
+def release_mutation_lock() -> None:
+    """Release the engine's shared mutation lock before a slow copy continues.
+
+    The capture's exact point is already safe and the site is serving again; a copy then
+    holds only its per-repository lock, so hosting changes are not blocked by an upload.
+    """
+    with contextlib.suppress(OSError):
+        os.close(9)
+
+
 def environment_file(path: str) -> dict[str, str]:
     """Read a root-owned 0600 environment file without putting a value in argv."""
     if not locked_file(path, mode=0o600):
@@ -258,6 +269,7 @@ def copy_point(  # noqa: C901 - one reviewed copy
         or capture != "/etc/barectl/backups/offsite/capture.env"
     ):
         return "failed", "offsite_copy"
+    release_mutation_lock()
     try:
         extra = environment_file(str(capture))
     except OSError, ValueError:

@@ -133,6 +133,8 @@ def main() -> None:  # noqa: C901 - one reviewed capture
         if result_class in ("succeeded", "partial"):
             plan = document.get("offsite")
             if isinstance(plan, dict):
+                os.close(lock)
+                lock = -1
                 copy_class, copy_reason = copy_point(identifier, point, repository, key, plan)
                 offsite = "copied" if copy_class == "succeeded" else "failed"
                 if copy_class != "succeeded" and result_class == "succeeded":
@@ -150,7 +152,8 @@ def main() -> None:  # noqa: C901 - one reviewed capture
         )
         raise SystemExit(code)
     finally:
-        os.close(lock)
+        if lock != -1:
+            os.close(lock)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from backups.bodies.native import (
     emit_result,
     environment_file,
     locked_file,
+    release_mutation_lock,
     repository_lock,
     restic,
     safe_config,
@@ -107,6 +108,7 @@ def copy(document: dict[str, object]) -> tuple[int, str]:  # noqa: C901 - one re
         refused("offsite_key")
     if not extra.get("AWS_ACCESS_KEY_ID") or not extra.get("AWS_SECRET_ACCESS_KEY"):
         refused("offsite_key")
+    release_mutation_lock()
     try:
         lock = repository_lock(identifier)
     except OSError, ValueError:
