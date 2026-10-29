@@ -558,6 +558,26 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The backup tool reported an error Barectl does not recognize, so nothing is recorded "
         "as saved. Read the run's journal on the server and prepare a new review."
     ),
+    "backup_files": (
+        "The site's files could not be copied, so the point is incomplete and the site stays "
+        "paused. Read the run's journal, then reopen the site and prepare a new review."
+    ),
+    "backup_idle": (
+        "The site's running work did not finish within the reviewed wait, so the files were "
+        "not copied and the site stays paused. Read the run's journal, then reopen the site."
+    ),
+    "backup_paused": (
+        "The full backup stopped after pausing the site. Nothing after that ran. Reopen the "
+        "site, then prepare a new review."
+    ),
+    "backup_gate": (
+        "Barectl could not publish or remove the maintenance page, so the site stays paused. "
+        "Read the run's journal, then reopen the site."
+    ),
+    "site_reopen": (
+        "Barectl could not prove that the site serves its files again, so it may still show "
+        "the maintenance page. Read the run's journal and prepare a new review."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -845,6 +865,11 @@ RESULT_REASONS: Final = frozenset(
         "backup_verify",
         "backup_unknown",
         "backup_partial",
+        "backup_files",
+        "backup_idle",
+        "backup_paused",
+        "backup_gate",
+        "site_reopen",
         "logrotate_missing",
         "rotation_invalid",
     }
@@ -880,6 +905,10 @@ def parse_result_line(text: str) -> ResultLine | None:
         reason = value.get("reason", "")
         if not isinstance(reason, str) or reason not in RESULT_REASONS:
             raise native.Unreadable("The result line is not in the engine's form.")
+        # A full capture records the pause before it starts copying so discovery can name an
+        # interrupted capture. It is not the run's outcome: the final result follows.
+        if reason == "backup_paused":
+            continue
         return ResultLine(result_class, reason)
     return None
 

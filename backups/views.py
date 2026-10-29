@@ -20,10 +20,12 @@ from operations.lifecycle import OperationRefused
 from operations.models import MANAGE_SECRETS
 from servers.discovery_state import server_state
 from servers.models import Server
+from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 
 from . import check, presentation
-from .change import BACKUP_SLUG, ENABLE_SLUG
+from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
+from .reopen import SLUG as REOPEN_SLUG
 
 if TYPE_CHECKING:
     from discovery.snapshot import ObservedSite
@@ -61,20 +63,24 @@ def context_for_site(
     collected = snapshot.collected if snapshot is not None else None
     latest = check.latest_check(server, identifier)
     active = check.active(server, identifier)
-    view = presentation.view(site, collected, identifier, latest, checking=active is not None)
+    gated = site is not None and SITE_GATED in site.missing
+    view = presentation.view(
+        site, collected, identifier, latest, checking=active is not None, gated=gated
+    )
     target = _target(snapshot, site)
-    managed = (
+    ready = (
         target
         and snapshot is not None
         and snapshot.collected.standing is not None
         and snapshot.collected.standing.standing == Standing.TARGET_STACK
         and site is not None
         and site.outcome == ObservationOutcome.OBSERVED
-        and site.state == "managed"
+        and (site.state == "managed" or gated)
     )
+    managed = ready and site is not None and site.state == "managed"
     polling = services.read_changes(server).polling
     can_prepare = bool(
-        managed
+        ready
         and state.can_prepare_changes
         and not polling
         and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
@@ -82,8 +88,10 @@ def context_for_site(
     return {
         "backups": view,
         "backups_target": target,
-        "backups_can_enable": can_prepare and user.has_perm(MANAGE_SECRETS),
-        "backups_can_back_up": can_prepare and view.enabled and view.database,
+        "backups_can_enable": can_prepare and managed and user.has_perm(MANAGE_SECRETS),
+        "backups_can_back_up": can_prepare and managed and view.enabled and view.database,
+        "backups_can_back_up_full": can_prepare and managed and view.enabled,
+        "backups_can_reopen": can_prepare and view.reopen,
         "backups_can_check": bool(
             managed and user.has_perms((*check.READ_PERMISSIONS, VIEW_SITES))
         ),
@@ -124,7 +132,19 @@ def prepare_enable(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
 @login_required
 @permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
 def prepare_backup(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    scope = request.POST.get("scope", "database")
+    if scope == "full":
+        return _prepare(request, pk, identifier, FULL_SLUG, "site_backups")
+    if scope != "database":
+        raise Http404
     return _prepare(request, pk, identifier, BACKUP_SLUG, "site_backups")
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_reopen(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    return _prepare(request, pk, identifier, REOPEN_SLUG, "site_backups")
 
 
 def _prepare(
@@ -146,6 +166,19 @@ def _prepare(
             request,
             "Barectl cannot take this backup yet. Enable backups and add the site's "
             "database first, or wait for the current operation.",
+        )
+        return redirect(target, pk=pk, identifier=identifier)
+    if slug == FULL_SLUG and not context["backups_can_back_up_full"]:
+        messages.error(
+            request,
+            "Barectl cannot take a full backup yet. Enable backups and wait for the current "
+            "operation.",
+        )
+        return redirect(target, pk=pk, identifier=identifier)
+    if slug == REOPEN_SLUG and not context["backups_can_reopen"]:
+        messages.error(
+            request,
+            "This site is not paused by a full backup, so there is nothing to reopen.",
         )
         return redirect(target, pk=pk, identifier=identifier)
     try:

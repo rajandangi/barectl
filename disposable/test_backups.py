@@ -19,7 +19,7 @@ from operations.models import ChangeReview
 from runtimes.catalog import Architecture
 
 from . import mirror
-from .change_testing import apply_change
+from .change_testing import apply_change, submit_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 IDENTIFIER = "bkalpha"
@@ -101,6 +101,41 @@ class BackupCase(ScenarioTestCase):
             self, change.BACK_UP_NOW, PreparationInputs("", IDENTIFIER), timeout=150
         )
 
+    def capture_full(self) -> ChangeReview:
+        from backups import change
+
+        return apply_change(
+            self, change.BACK_UP_FULL, PreparationInputs("", IDENTIFIER), timeout=150
+        )
+
+    def site_status(self, path: str = "/") -> int:
+        return int(
+            self.native(
+                "curl --silent --show-error --max-time 20 --resolve "
+                f"{DOMAIN}:80:127.0.0.1 -o /dev/null -w '%{{http_code}}' "
+                f"http://{DOMAIN}{path}"
+            ).strip()
+        )
+
+    def large_file(self) -> None:
+        path = f"/var/www/{IDENTIFIER}/current/public/large.bin"
+        self.native(f"head -c 268435456 /dev/urandom > {path}")
+        self.native(f"chown s{IDENTIFIER}:s{IDENTIFIER} {path}")
+
+    def wait_stage(self, unit: str, stage: str, timeout: float = 30) -> None:
+        import time
+
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            found = self.native(
+                f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-stage {stage}$' "
+                "| head -n 1"
+            ).strip()
+            if found:
+                return
+            time.sleep(0.1)
+        self.fail(f"The run never reached {stage}: " + self.native(f"journalctl -u {unit} -n 40"))
+
     def observe(self) -> CollectedSnapshot:
         from discovery.observations import collect
 
@@ -153,6 +188,8 @@ class BackupLifecycle(BackupCase):
             self.assertEqual(listing.exit_status, 0, listing.stdout)
             self.assertEqual(json.loads(listing.stdout or "[]"), [])
         self.capture()
+        self.assertEqual(self.site_status("/"), 200)
+        self.assertNotIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))
         collected = self.observe()
         backup = self.backup_row(collected)
         self.assertTrue(backup.enabled)
@@ -199,6 +236,50 @@ class BackupLifecycle(BackupCase):
         finally:
             self.native("mv /usr/bin/mariadb-dump.barectl-test /usr/bin/mariadb-dump")
         self.assertEqual(self.points(), before)
+        # A full capture writes both parts under one point and reopens the site only after
+        # both are verified present.
+        self.capture_full()
+        full = [point for point in self.points() if point["scope"] == "full"]
+        self.assertEqual(len(full), 1)
+        self.assertTrue(full[0]["complete"])
+        self.assertEqual(full[0]["parts"], ["database", "files"])
+        self.assertEqual(self.site_status("/"), 200)
+        collected = self.observe()
+        backup = self.backup_row(collected)
+        if backup.last is None:
+            self.fail("No full backup result was reconstructed.")
+        self.assertEqual(backup.last.scope, "full")
+        self.assertEqual(backup.last.result_class, "succeeded")
+        with self.shell() as shell:
+            environment = (
+                f"RESTIC_REPOSITORY={convention.repository(IDENTIFIER)} "
+                f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
+                f"RESTIC_CACHE_DIR={convention.CACHE_DIR} {convention.RESTIC_BIN}"
+            )
+            listing = run_root(
+                shell,
+                f"{environment} snapshots --json --no-lock --tag point:{backup.last.point}",
+            )
+            rows = json.loads(listing.stdout or "[]")
+            files_id = next(
+                row["id"]
+                for row in rows
+                if isinstance(row.get("tags"), list) and "part:files" in row["tags"]
+            )
+            files = run_root(shell, f"{environment} ls --json --no-lock {files_id}")
+            self.assertIn(f"/var/www/{IDENTIFIER}/releases/initial", files.stdout)
+            self.assertNotIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))
+        # A capture killed while it copies files stays gated, and one reviewed action reopens it.
+        from backups import reopen
+
+        self.large_file()
+        submitted = submit_change(self, change.BACK_UP_FULL, PreparationInputs("", IDENTIFIER))
+        self.wait_stage(submitted.unit, "backup-files")
+        self.native(f"systemctl kill --signal=KILL {submitted.unit}")
+        self.assertEqual(self.site_status("/"), 503)
+        self.assertIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))
+        apply_change(self, reopen.REOPEN_SITE, PreparationInputs("", IDENTIFIER), timeout=60)
+        self.assertEqual(self.site_status("/"), 200)
 
     def points(self) -> list[dict[str, object]]:
         from backups import check
@@ -207,3 +288,33 @@ class BackupLifecycle(BackupCase):
         with self.shell() as shell:
             listing = run_root(shell, check.listing_command(IDENTIFIER))
         return check.points(check.parse_listing(listing.stdout) or [])
+
+
+@tag(SCENARIO_TAG)
+@tag("breadth")
+class RebootedFullBackup(BackupCase):
+    breadth = True
+
+    def test_a_reboot_during_a_full_capture_keeps_the_gate(self) -> None:
+        from backups import change, reopen
+
+        self.prepare_site()
+        self.enable()
+        self.large_file()
+        submitted = submit_change(
+            self,
+            change.BACK_UP_FULL,
+            PreparationInputs("", IDENTIFIER),
+        )
+        self.wait_stage(submitted.unit, "backup-files")
+        self.stop_for(20)
+        self.assertEqual(self.site_status("/"), 503)
+        site_file = self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy")
+        self.assertIn("respond 503", site_file)
+        apply_change(
+            self,
+            reopen.REOPEN_SITE,
+            PreparationInputs("", IDENTIFIER),
+            timeout=60,
+        )
+        self.assertEqual(self.site_status("/"), 200)

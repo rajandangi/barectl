@@ -86,3 +86,41 @@ class BackupsBrowserTests(BrowserTestCase):
         ).to_be_visible()
         self.assertIsNotNone(check.active(server, "shop"))
         self.assertIsNone(check.latest_check(server, "shop"))
+
+    def test_full_site_is_chosen_and_its_review_names_the_pause(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        self.page.get_by_label("What to copy").select_option("full")
+        self.page.get_by_role("button", name="Back up now").click()
+        expect(self.page.get_by_role("heading", name="Back up all of shop")).to_be_visible()
+        capture = ChangePreparation.objects.get(server=server)
+        self.assertEqual(capture.kind_slug, "back_up_full_site")
+        self.assert_no_native_terms()
+
+    def test_a_gated_site_offers_one_reopen_action(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(
+            server,
+            enabled=True,
+            gated=True,
+            last=result(result_class="partial", scope="full", reason="backup_paused"),
+        )
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(
+            self.page.get_by_text(
+                "This stopped after pausing the site for a full backup. Nothing after it ran."
+            )
+        ).to_be_visible()
+        self.page.get_by_role("button", name="Reopen site").click()
+        expect(self.page.get_by_role("heading", name="Reopen shop")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "reopen_site")
+        self.assert_no_native_terms()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        expect(self.page.get_by_role("heading", name="Reopen shop")).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )

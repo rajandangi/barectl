@@ -10,6 +10,7 @@ from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import Observation, ObservedSite, SiteAccount, save_snapshot
 from servers.models import Server
+from sites.bodies.common import SITE_GATED
 
 from .observation import BackupResult, ObservedBackup
 
@@ -22,6 +23,7 @@ def record_backups(
     database: bool = True,
     last: BackupResult | None = None,
     checked_at: datetime | None = None,
+    gated: bool = False,
 ) -> None:
     """A target site whose stored snapshot carries the backup observation."""
     site = ObservedSite(
@@ -29,9 +31,10 @@ def record_backups(
         (f"{identifier}.example.com",),
         "php84",
         SiteAccount(1001, 1001, f"/var/www/{identifier}", "/usr/sbin/nologin"),
-        SiteState.MANAGED,
+        SiteState.PARTLY_APPLIED if gated else SiteState.MANAGED,
         ObservationOutcome.OBSERVED,
         file=f"/etc/caddy/sites/{identifier}.caddy",
+        missing=(SITE_GATED,) if gated else (),
         https=True,
     )
     backup = ObservedBackup(
@@ -64,11 +67,15 @@ def record_backups(
 
 
 def result(
-    *, result_class: str = "succeeded", scope: str = "database", point: str = "0123456789abcdef"
+    *,
+    result_class: str = "succeeded",
+    scope: str = "database",
+    point: str = "0123456789abcdef",
+    reason: str = "",
 ) -> BackupResult:
     return BackupResult(
         result_class,
-        "",
+        reason,
         scope,
         "manual",
         timezone.now().replace(microsecond=0).isoformat(),

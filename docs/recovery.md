@@ -17,6 +17,11 @@ A target-stack server stays manageable with ordinary Linux tools when Barectl is
 | Journal storage | `/etc/systemd/journald.conf.d/50-barectl.conf` | `systemd-journald.service` | |
 | A site's backups | `/var/lib/barectl-backups/<id>/onsite`; server key in `/etc/barectl/backups/<id>.key` | | `journalctl --grep '^barectl-result '` |
 
+A paused full capture is visible as the site's maintenance Caddy file. Reopen it through the
+reviewed **Reopen site** action in the site's **Backups** section, or restore the site's open
+Caddy file with ordinary administration and run discovery. Background work stays off either
+way ([automation](automation.md#status)).
+
 `<runtime>` is `php84` or `php85`, and `<id>` is the site identifier. The [site convention](site-conventions.md) lists every path with its owner and mode.
 
 ## Backups
@@ -108,6 +113,7 @@ No output means no process holds it. Barectl's read-only commands take the lock 
 | Site Node selection, server defaults | A mixed set of links. The page reports it as interrupted, and a new review repairs it. Barectl never overwrites a link or wrapper it does not recognize. |
 | Any change that pauses background work | The site's scheduled tasks stay stopped. Discovery reads the runtime mask and the site's Overview says **Paused by an unfinished change**, with the newest change to the site that did not finish when this device recorded it; a fresh controller shows only that sentence. Lifting it is the ordinary **Scheduled tasks** change, which asks what state the work should have and preselects nothing. A run that reports **partial** with the site's work stopped is the same case. |
 | A change inside the maintenance page (Deploy, Roll back) | Visitors keep the maintenance page and the site's background work stays masked with boot activation off for its timers and its worker services, so a reboot cannot restart it. Read the run's journal, then prepare a new Deploy or Roll back: it starts the work again only after `/up` answers on the switched release. Turning the work back on before the site serves again would run scheduled work against a half-migrated release. |
+| A full backup stopped after pausing the site | The maintenance page stays up and the site's background work stays masked with boot activation off, so a reboot cannot reopen it. The site's **Backups** section and Overview say so and offer **Reopen site**, which removes the page through one reviewed change. It leaves background work off; choose what should run again in **Scheduled tasks** or **Queue workers**. The incomplete point stays listed as **Incomplete** and is never restored. |
 
 ## Unknown outcomes and reboots
 

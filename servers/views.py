@@ -552,6 +552,14 @@ def _site_overview_context(
     context["site_upload_path"] = f"/var/www/{site.identifier}/current/public"
     context["site_user"] = f"s{site.identifier}"
     context["site_checked_at"] = state.snapshot.collected_at if state.snapshot else None
+    from backups.views import context_for_site as backups_context_for_site
+
+    backup_context = backups_context_for_site(server, identifier, request.user)
+    context["site_reopen"] = bool(
+        backup_context.get("backups") is not None
+        and getattr(backup_context["backups"], "reopen", False)
+    )
+    context["site_reopen_can_prepare"] = backup_context.get("backups_can_reopen", False)
     if state.snapshot is not None and any(
         row.identifier == site.identifier for row in state.snapshot.collected.automation.value
     ):

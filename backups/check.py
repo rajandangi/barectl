@@ -88,44 +88,75 @@ def _barectl_point(value: object) -> bool:
 
 
 def points(value: list[dict[str, object]]) -> list[dict[str, object]]:
-    rows = []
+    groups: dict[str, list[dict[str, object]]] = {}
     for snapshot in value:
         tags = snapshot.get("tags")
         if not isinstance(tags, list):
             continue
-        lookup = {tag: True for tag in tags if isinstance(tag, str)}
-        point = next(
-            (
-                tag.removeprefix(convention.POINT_TAG)
-                for tag in tags
-                if isinstance(tag, str) and tag.startswith(convention.POINT_TAG)
-            ),
-            "",
-        )
-        identifier = snapshot.get("id")
-        when = snapshot.get("time")
-        if (
-            not isinstance(identifier, str)
-            or len(identifier) != 64
-            or not isinstance(when, str)
-            or len(when) > 40
-            or (point and POINT.fullmatch(point) is None)
-        ):
-            continue
-        rows.append(
-            {
-                "id": identifier,
-                "short": identifier[:8],
-                "time": when,
-                "point": point,
-                "scope": _tag(tags, "scope:"),
-                "origin": _tag(tags, "origin:"),
-                "live": lookup.get("capture:live", False),
-                "keep": lookup.get("keep", False),
-                "complete": lookup.get("complete", False),
-            }
-        )
+        row = _point_row(snapshot, tags)
+        if row is not None:
+            groups.setdefault(str(row["point"]), []).append(row)
+    rows = [_combined(group) for group in groups.values()]
     return sorted(rows, key=lambda row: str(row["time"]), reverse=True)
+
+
+def _point_row(snapshot: dict[str, object], tags: list[object]) -> dict[str, object] | None:
+    lookup = {tag: True for tag in tags if isinstance(tag, str)}
+    point = _tag(tags, convention.POINT_TAG)
+    identifier = snapshot.get("id")
+    when = snapshot.get("time")
+    if (
+        not isinstance(identifier, str)
+        or len(identifier) != 64
+        or not isinstance(when, str)
+        or len(when) > 40
+        or (point and POINT.fullmatch(point) is None)
+    ):
+        return None
+    scope = _tag(tags, "scope:")
+    part = _tag(tags, "part:") or (scope if scope in convention.PARTS else "")
+    return {
+        "id": identifier,
+        "short": identifier[:8],
+        "time": when,
+        "point": point or identifier,
+        "scope": scope,
+        "part": part,
+        "origin": _tag(tags, "origin:"),
+        "live": lookup.get("capture:live", False),
+        "keep": lookup.get("keep", False),
+        "complete_part": lookup.get("complete", False),
+    }
+
+
+def _combined(parts: list[dict[str, object]]) -> dict[str, object]:
+    """One recovery point from its snapshots, restorable only when every part is complete."""
+    scopes = {str(part["scope"]) for part in parts}
+    scope = scopes.pop() if len(scopes) == 1 else ""
+    present = {str(part["part"]) for part in parts if str(part["part"])}
+    expected = set(convention.expected_parts(scope)) if scope else present
+    missing = sorted(expected - present)
+    incomplete = sorted(
+        part
+        for part in expected
+        if not any(str(item["part"]) == part and item["complete_part"] is True for item in parts)
+    )
+    restorable = bool(expected) and not missing and not incomplete
+    first = parts[0]
+    return {
+        "id": str(first["id"]),
+        "short": str(first["short"]),
+        "time": min(str(part["time"]) for part in parts),
+        "point": str(first["point"]),
+        "scope": scope,
+        "parts": sorted(present),
+        "missing": missing,
+        "incomplete": incomplete,
+        "origin": str(first["origin"]),
+        "live": all(part["live"] is True for part in parts),
+        "keep": any(part["keep"] is True for part in parts),
+        "complete": restorable,
+    }
 
 
 def _tag(tags: list[object], prefix: str) -> str:

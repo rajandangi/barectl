@@ -389,6 +389,60 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to backups",
         after_home=Home.SITE_BACKUPS,
     ),
+    "back_up_full_site": ChangeWords(
+        title="Back up all of {site}",
+        summary=(
+            (
+                "Barectl copies this site's database and files into one encrypted recovery "
+                "point on the server."
+            ),
+            (
+                "Visitors see a short maintenance page while the copy is taken. The site's "
+                "scheduled tasks and queue workers are stopped first and started again when "
+                "the copy finishes."
+            ),
+            (
+                "Logs, caches, sessions, temporary files, other releases and server settings "
+                "are left out."
+            ),
+            (
+                "If the copy stops partway, the site stays paused until you reopen it. "
+                "Barectl never deletes older copies to make room."
+            ),
+        ),
+        action="Back up now",
+        steps={
+            "preflight": "Checking the site",
+            "gate": "Pausing the site",
+            "drain": "Finishing requests already running",
+            "backup-database": "Copying the database",
+            "backup-files": "Copying the files",
+            "verify": "Checking the recovery point",
+            "open": "Reopening the site",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
+    "reopen_site": ChangeWords(
+        title="Reopen {site}",
+        summary=(
+            "Barectl removes the maintenance page so visitors reach the site again.",
+            (
+                "The site's background work stays off. Open Scheduled tasks or Queue workers "
+                "to choose what runs again."
+            ),
+        ),
+        action="Reopen site",
+        steps={
+            "preflight": "Checking the site",
+            "publish": "Reopening the site",
+            "verify": "Verifying",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
     "set_laravel_queue_workers": ChangeWords(
         title="Change queue workers for {site}",
         summary=(

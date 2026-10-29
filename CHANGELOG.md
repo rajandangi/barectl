@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Protection (Phase D)
+
+- **Back up now** offers **Full site**: one reviewed change pauses the site behind its maintenance page, fences its background work, drains its private admission and FPM workers, copies the database stream and the site's files as two snapshots under one point and time, tags them complete only after both are verified present, then reopens the site. The review names what is paused and excluded, and its consent follows the Caddy reload (Site for the only site, Shared otherwise). A site without a database copies files only. A half point is reported as incomplete and is never restorable. A shortage of free space refuses the capture without deleting anything. A capture killed after the pause, or interrupted by a reboot, stays paused with one sentence and one **Reopen site** action that removes the page but leaves background work for the operator's own Scheduled tasks or Queue workers review ([backups](docs/backups.md), [native recovery](docs/recovery.md#after-a-change-stopped-partway), [#399](https://github.com/rajandangi/barectl/issues/399)).
+
 ### Target stack (Phase A)
 
 - Add a server from the dashboard with a saved connection: address, SSH user, port and this computer's SSH agent or an approved key file. An unknown host key is trusted only when it matches the fingerprint the operator pastes from the provider ([saved server connections](docs/saved-server-connections.md)).

@@ -23,7 +23,10 @@ CACHE_DIR: Final = "/var/cache/barectl/restic"
 # Every capture keeps this much of the repository filesystem free. The review states it.
 HEADROOM_BYTES: Final = 1024 * 1024 * 1024
 
-SCOPES: Final = ("database", "files")
+# A recovery point's scope is what it restores: its database, its files, or both. A full
+# point without a site database has no database part, so it is a files-scope point.
+SCOPES: Final = ("database", "files", "full")
+PARTS: Final = ("database", "files")
 ORIGINS: Final = ("manual", "scheduled", "safety")
 POINT_TAG: Final = "point:"
 
@@ -89,17 +92,40 @@ def dump_filename(identifier: str) -> str:
 
 
 def tags(
-    identifier: str, scope: str, *, origin: str, live: bool, point: str, complete: bool = True
+    identifier: str,
+    scope: str,
+    *,
+    part: str | None = None,
+    origin: str,
+    live: bool,
+    point: str,
+    complete: bool = True,
 ) -> tuple[str, ...]:
     if scope not in SCOPES or origin not in ORIGINS or POINT.fullmatch(point) is None:
+        raise ValueError("Not a reviewed capture.")
+    selected = scope if part is None else part
+    if (
+        selected not in PARTS
+        or (scope == "full" and part is None)
+        or (scope in ("database", "files") and part is not None and part != scope)
+    ):
         raise ValueError("Not a reviewed capture.")
     values = (
         MARKER,
         f"site:{identifier}",
         f"scope:{scope}",
-        f"part:{scope}",
+        f"part:{selected}",
         f"origin:{origin}",
         "capture:live" if live else "capture:paused",
         POINT_TAG + point,
     )
     return (*values, "complete") if complete else values
+
+
+def expected_parts(scope: str) -> tuple[str, ...]:
+    """The parts a restorable point of this scope must carry."""
+    if scope == "full":
+        return ("database", "files")
+    if scope == "files":
+        return ("files",)
+    return ("database",)

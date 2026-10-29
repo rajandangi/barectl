@@ -7,8 +7,12 @@ Barectl lets an operator inspect and manage native Linux web servers from a loca
 ### Backups
 
 **Recovery point**:
-One restic snapshot Barectl took for a site, tagged with its site, scope, origin and a point identifier. It is either **Database only** or, in a later Phase D slice, **Full site**.
+The snapshots Barectl took for one site under one point identifier, each tagged with its site, scope, part, origin and time. It is either **Database only**, one snapshot, or **Full site**, a database part and a files part captured together while the site was paused. A full point is restorable only when both parts are complete.
 _Avoid_: Backup file, dump, snapshot
+
+**Paused full capture**:
+A Full site recovery point taken while the site's maintenance page, stopped background work and drained requests gave an exact point. It stays paused if it stops partway, with **Reopen site** as the one action.
+_Avoid_: Downtime backup, offline copy
 
 **Recovery passphrase**:
 The secret the operator chooses once per server and keeps away from the server and Barectl. It opens every site's backups, alone or with the printed kit.

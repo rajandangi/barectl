@@ -209,6 +209,7 @@ class FenceSetTests(SimpleTestCase):
                 "remove_site",
                 "update_catalog",
                 "set_site_object_cache",
+                "back_up_full_site",
             },
         )
 

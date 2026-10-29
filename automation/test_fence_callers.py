@@ -21,6 +21,8 @@ from django.test import SimpleTestCase
 
 from automation import fence, presentation
 from automation.status import STATUS_SENTENCE, ScheduleStatus
+from backups import change as backups_change
+from backups.bodies import full as full_body
 from cache import instance as cache_instance
 from cache.bodies import instance as cache_body
 from laravel import change as laravel_change
@@ -52,6 +54,7 @@ SOURCES = {
     "remove_site": remove.BODY_SOURCE,
     "update_catalog": catalog_update.BODY_SOURCE,
     "set_site_object_cache": cache_instance.BODY_SOURCE,
+    "back_up_full_site": backups_change.FULL_SOURCE,
 }
 
 
@@ -324,6 +327,52 @@ def _cache_patches() -> dict[str, object]:
     }
 
 
+def _full_args() -> tuple[object, ...]:
+    document = {
+        "identifier": "shop",
+        "repository": "/var/lib/barectl-backups/shop/onsite",
+        "server_key": "/etc/barectl/backups/shop.key",
+        "point": "0123456789abcdef",
+        "at": "2026-10-29T04:00:00+00:00",
+        "restic_time": "2026-10-29 04:00:00",
+        "scope": "files",
+        "application": "plain",
+        "names": ["shop.example.com"],
+        "runtime": "php84",
+        "https": True,
+        "readiness": "/",
+        "caddy": "open",
+        "gate": "gate",
+        "files": [],
+        "dump": [],
+        "filename": "sshop.sql",
+        "tags": {},
+        "automation_fence": {"version": 1, "sites": []},
+    }
+    encoded = base64.b64encode(gzip.compress(json.dumps(document).encode(), mtime=0)).decode()
+    return (encoded,)
+
+
+def _full_patches() -> dict[str, object]:
+    return {
+        "site_settings": lambda document: SimpleNamespace(identifier="shop"),
+        "reviewed_files": lambda settings, application: [],
+        "open_file": lambda settings, application: "open",
+        "maintenance_file": lambda settings: "gate",
+        "site_lock": lambda identifier, gid: os.open(os.devnull, os.O_RDONLY),
+        "free_bytes": lambda: 4 * 1024 * 1024 * 1024,
+        "os": SimpleNamespace(
+            path=SimpleNamespace(isfile=lambda path: True, join=os.path.join),
+            open=os.open,
+            close=os.close,
+        ),
+        "safe_config": lambda path: True,
+        "locked_file": lambda path, mode: True,
+        "controlled": lambda path: True,
+        "pwd": SimpleNamespace(getpwnam=lambda account: SimpleNamespace(pw_uid=1001, pw_gid=1001)),
+    }
+
+
 CALLERS: tuple[
     tuple[
         str,
@@ -361,6 +410,7 @@ CALLERS: tuple[
     ),
     ("update_catalog", catalog_update_body, "move_site", _update_args, _update_patches),
     ("set_site_object_cache", cache_body, "_apply_laravel", _cache_args, _cache_patches),
+    ("back_up_full_site", full_body, "main", _full_args, _full_patches),
 )
 
 

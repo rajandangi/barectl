@@ -34,7 +34,10 @@ if TYPE_CHECKING:
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
-    from disposable.test_backups import BackupLifecycle
+    from disposable.test_backups import (
+        BackupLifecycle,
+        RebootedFullBackup,
+    )
     from disposable.test_cache import LaravelObjectCache, SiteObjectCache, ValkeyInstall
     from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
     from disposable.test_confidential_channel import ConfidentialChannelLifecycle
@@ -589,6 +592,7 @@ if TYPE_CHECKING:
     _backup_templates = (
         BackupsConfig,
         BackupLifecycle,
+        RebootedFullBackup,
         LastBackupView("", "", "", "").headline,
         LastBackupView("", "", "", "").time_label,
         RecoveryPointView("", "", "", False, False, "", "").time_label,

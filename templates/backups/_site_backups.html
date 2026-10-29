@@ -6,6 +6,25 @@
 {% else %}
   <section class="barectl-card" aria-labelledby="backups-heading">
     <h2 id="backups-heading">Backups</h2>
+    {% if backups.reopen %}
+      <div class="usa-alert usa-alert--warning">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            This stopped after pausing the site for a full backup. Nothing after it ran.
+          </p>
+          {% if backups_can_reopen %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_reopen_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <button type="submit" class="usa-button">Reopen site</button>
+            </form>
+          {% else %}
+            <p class="barectl-note">Wait for the current operation before reopening the site.</p>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
     {% if backups.problems %}
       <div class="usa-alert usa-alert--warning">
         <div class="usa-alert__body">
@@ -49,18 +68,26 @@
         <p>{{ backups.note }}</p>
       {% endif %}
       <div class="barectl-page-actions">
-        {% if backups.database %}
-          {% if backups_can_back_up %}
-            <form class="usa-form"
-                  method="post"
-                  action="{% url 'site_backups_backup_prepare' server.pk identifier %}">
-              {% csrf_token %}
-              <button type="submit" class="usa-button">Back up now</button>
-            </form>
-          {% else %}
-            <p class="barectl-note">Barectl cannot take a backup while another operation runs.</p>
-          {% endif %}
+        {% if backups_can_back_up_full %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_backup_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            {% if backups.database %}
+              <label class="usa-label" for="backup-scope">What to copy</label>
+              <select class="usa-select" id="backup-scope" name="scope">
+                <option value="database">Database only (the site stays online)</option>
+                <option value="full">Full site (pauses the site briefly)</option>
+              </select>
+            {% else %}
+              <input type="hidden" name="scope" value="full">
+            {% endif %}
+            <button type="submit" class="usa-button">Back up now</button>
+          </form>
         {% else %}
+          <p class="barectl-note">Barectl cannot take a backup while another operation runs.</p>
+        {% endif %}
+        {% if not backups.database %}
           <p class="barectl-note">
             <strong>Database only is unavailable.</strong> {{ backups_database_reason }}
           </p>
@@ -117,7 +144,7 @@
                 <td>
                   {% if point.live %}Captured while the site ran.{% endif %}
                   {% if point.keep %}Kept.{% endif %}
-                  {% if not point.restorable %}This point is not complete.{% endif %}
+                  {% if point.problem %}{{ point.problem }}{% endif %}
                 </td>
               </tr>
             {% endfor %}

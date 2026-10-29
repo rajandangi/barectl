@@ -21,6 +21,7 @@ from typing import Final
 
 from django.utils import timezone as django_timezone
 
+from automation.bodies.source import AUTOMATION_SOURCE, without_imports
 from bootstrap.standing import Standing
 from databases import observation as database_observation
 from discovery.observations import collect
@@ -33,6 +34,13 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of, load
 from sites import observation as site_observation
+from sites.configuration import (
+    SiteSettings,
+    render_caddy,
+    render_laravel_caddy,
+    render_maintenance,
+    render_wordpress_caddy,
+)
 from sites.names import valid_identifier
 
 from . import convention, kit, observation
@@ -41,6 +49,8 @@ ENABLE_SLUG: Final = "enable_backups"
 ENABLE_LABEL: Final = "Enable backups"
 BACKUP_SLUG: Final = "back_up_now"
 BACKUP_LABEL: Final = "Back up now"
+FULL_SLUG: Final = "back_up_full_site"
+FULL_LABEL: Final = "Back up full site"
 ESCROW: Final = (
     "I stored the recovery passphrase and the printed recovery kit somewhere other than "
     "this server and Barectl."
@@ -70,11 +80,49 @@ def _packed(source: str) -> bytes:
 ENABLE_SOURCE: Final = importlib.resources.files("backups.bodies").joinpath("enable.py").read_text()
 ENABLE_BYTES: Final = _packed(ENABLE_SOURCE)
 ENABLE_SHA256: Final = hashlib.sha256(ENABLE_BYTES).hexdigest()
-BACKUP_SOURCE: Final = importlib.resources.files("backups.bodies").joinpath("backup.py").read_text()
+NATIVE_SOURCE: Final = importlib.resources.files("backups.bodies").joinpath("native.py").read_text()
+BACKUP_SOURCE: Final = (
+    NATIVE_SOURCE
+    + "\n"
+    + without_imports(
+        importlib.resources.files("backups.bodies").joinpath("backup.py").read_text(),
+        ("backups.bodies.native",),
+    )
+)
 BACKUP_BYTES: Final = _packed(BACKUP_SOURCE)
 BACKUP_SHA256: Final = hashlib.sha256(BACKUP_BYTES).hexdigest()
+FULL_CORE: Final = without_imports(
+    importlib.resources.files("backups.bodies").joinpath("full.py").read_text(),
+    (
+        "automation.bodies.units",
+        "sites.bodies.admission",
+        "sites.bodies.common",
+        "sites.bodies.site_fpm",
+        "backups.bodies.native",
+    ),
+)
+FULL_SOURCE: Final = (
+    AUTOMATION_SOURCE
+    + "\n"
+    + site_observation.COMMON_SOURCE
+    + "\n"
+    + NATIVE_SOURCE
+    + "\n"
+    + FULL_CORE
+)
+FULL_BYTES: Final = _packed(FULL_SOURCE)
+FULL_SHA256: Final = hashlib.sha256(FULL_BYTES).hexdigest()
 ENABLE_STAGES: Final = ("preflight", "restic", "repository", "keys", "verify")
 BACKUP_STAGES: Final = ("preflight", "backup", "verify")
+FULL_STAGES: Final = (
+    "preflight",
+    "gate",
+    "drain",
+    "backup-database",
+    "backup-files",
+    "verify",
+    "open",
+)
 
 
 @dataclass(frozen=True)
@@ -91,21 +139,24 @@ class BackupEvidence:
     uptime_centiseconds: int | None
     restic_path: str
     restic_version: str
+    disk_available: int = 0
+    current_sites: tuple[str, ...] = ()
 
 
 def _site_record(
     shell: RemoteShell, identifier: str
-) -> tuple[dict[str, object] | None, str, int | None]:
+) -> tuple[dict[str, object] | None, tuple[str, ...], str, int | None]:
     listing = site_observation.read(shell, "observed", "", protections=False)
     if listing is None:
-        return None, "", None
+        return None, (), "", None
     record = next(
         (site for site in listing["sites"] if site["identifier"] == identifier),
         None,
     )
+    current = tuple(sorted(str(site) for site in listing["current_sites"]))
     if record is None:
-        return None, str(listing["boot"]), int(str(listing["uptime"]))
-    return dict(record), str(listing["boot"]), int(str(listing["uptime"]))
+        return None, current, str(listing["boot"]), int(str(listing["uptime"]))
+    return dict(record), current, str(listing["boot"]), int(str(listing["uptime"]))
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> BackupEvidence:
@@ -113,7 +164,10 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> BackupEvidence:
     architecture = architecture_of(observed.architecture.value or "")
     engines = database_observation.installed_engines(observed)
     engine = engines[0].engine if len(engines) == 1 and engines[0].managed else ""
-    record, boot_id, uptime = _site_record(shell, inputs.identifier)
+    record, current_sites, boot_id, uptime = _site_record(shell, inputs.identifier)
+    listing = shell.run(ALL_SITES_READ)
+    if listing.exit_status == 0 and not listing.truncated:
+        current_sites = tuple(listing.stdout.splitlines())
     restic_path, restic_version = observation.offered_restic(architecture)
     problem = ""
     backup: observation.ObservedBackup | None = None
@@ -122,6 +176,7 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> BackupEvidence:
         problem = "Backups could not be read from the server."
     else:
         backup = _observed(value, inputs.identifier)
+    disk = observed.filesystem.value.avail_bytes if observed.filesystem.value else 0
     return BackupEvidence(
         architecture,
         observed.standing.standing if observed.standing else None,
@@ -135,6 +190,8 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> BackupEvidence:
         uptime,
         restic_path,
         restic_version,
+        disk,
+        current_sites,
     )
 
 
@@ -197,11 +254,6 @@ def review_enable(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     if not isinstance(evidence, BackupEvidence):
         raise ValueError("Enabling backups needs native evidence.")
     refusals = [*_platform_refusals(evidence), *_profile_refusals(evidence)]
-    if evidence.backup is not None and not evidence.backup.database:
-        refusals.append(
-            evidence.database_problem
-            or "This site has no site database, so there is nothing to back up yet."
-        )
     document: dict[str, object] = {
         "version": 1,
         "body_sha256": ENABLE_SHA256,
@@ -342,6 +394,372 @@ def review_backup(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         current_sites=(inputs.identifier,) if effects else None,
         document=document,
     )
+
+
+ALL_SITES_READ: Final = (
+    "find /etc/caddy/sites -maxdepth 1 -type f -name '*.caddy' "
+    "-printf '%f\\n' | sed 's/\\.caddy$//' | LC_ALL=C sort"
+)
+FULL_EXCLUDED: Final = (
+    "The object cache's data, logs, sessions, temporary files, other retained releases, "
+    "runtime builds, the deploy key and known-hosts, and web server, proxy and TLS settings."
+)
+
+
+def _full_site(evidence: BackupEvidence) -> tuple[SiteSettings | None, str, str]:
+    site = evidence.site
+    if site is None:
+        return None, "", ""
+    application = str(site.get("application", "plain"))
+    if application not in ("plain", "wordpress", "laravel"):
+        return None, application, ""
+    names = site.get("names")
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        return None, application, ""
+    try:
+        settings = SiteSettings(
+            str(site["identifier"]),
+            tuple(names),
+            str(site.get("runtime", "")),
+            https=bool(site.get("https", True)),
+            readiness=str(site.get("readiness", "/")),
+        )
+    except ValueError:
+        return None, application, ""
+    return settings, application, str(site.get("state", ""))
+
+
+def _full_open_file(settings: SiteSettings, application: str) -> str:
+    if application == "wordpress":
+        return render_wordpress_caddy(settings)
+    if application == "laravel":
+        return render_laravel_caddy(settings)
+    return render_caddy(settings)
+
+
+def _full_files(identifier: str, application: str) -> list[str]:
+    directory = f"/var/www/{identifier}"
+    shared = {
+        "laravel": ["private/laravel.env", "private/storage", "private/cache"],
+        "wordpress": ["private/wp-config.php"],
+        "plain": [],
+    }[application]
+    return [f"{directory}/current", *(f"{directory}/{path}" for path in shared)]
+
+
+def _full_refusals(
+    evidence: BackupEvidence, settings: SiteSettings | None, application: str, state: str
+) -> list[str]:
+    refusals = [*_platform_refusals(evidence), *_profile_refusals(evidence)]
+    if settings is None or state != "complete":
+        refusals.append("The site is not complete, so Barectl will not pause it.")
+    if application == "wordpress_partial" or application not in (
+        "plain",
+        "wordpress",
+        "laravel",
+    ):
+        refusals.append("The site's application is incomplete, so its files cannot be copied.")
+    if evidence.backup is None or not evidence.backup.enabled:
+        refusals.append("Enable backups for this site first.")
+    if evidence.database and not evidence.engine:
+        refusals.append("This server has no managed database engine to dump.")
+    if evidence.disk_available and evidence.disk_available < convention.HEADROOM_BYTES:
+        refusals.append("The server lacks the free space this full backup keeps in reserve.")
+    return refusals
+
+
+def review_full(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
+    if not isinstance(evidence, BackupEvidence):
+        raise ValueError("A full backup needs native evidence.")
+    settings, application, state = _full_site(evidence)
+    refusals = _full_refusals(evidence, settings, application, state)
+    scope = "full" if evidence.database and evidence.engine else "files"
+    point = secrets.token_hex(8)
+    at = schedule_time()
+    files = _full_files(inputs.identifier, application) if settings is not None else []
+    dump = (
+        convention.dump_argv(inputs.identifier, evidence.engine)
+        if evidence.database and evidence.engine
+        else []
+    )
+    tags: dict[str, list[str]] = {
+        "files": list(
+            convention.tags(
+                inputs.identifier,
+                scope,
+                part="files",
+                origin="manual",
+                live=False,
+                point=point,
+                complete=False,
+            )
+        )
+    }
+    if dump:
+        tags["database"] = list(
+            convention.tags(
+                inputs.identifier,
+                scope,
+                part="database",
+                origin="manual",
+                live=False,
+                point=point,
+                complete=False,
+            )
+        )
+    caddy = _full_open_file(settings, application) if settings is not None else ""
+    gate = render_maintenance(settings) if settings is not None else ""
+    other = tuple(site for site in evidence.current_sites if site != inputs.identifier)
+    paused = (
+        "Visitors see a maintenance page, their in-flight requests finish, and the site's "
+        "background work is stopped while the copy is taken."
+    )
+    details = [
+        {"label": "Scope", "value": "Full site" if scope == "full" else "Full site (files only)"},
+        {"label": "Site is paused", "value": "Yes. " + paused},
+        {
+            "label": "Copied",
+            "value": (
+                "The database and the site's files."
+                if scope == "full"
+                else "The site's files. It has no site database."
+            ),
+        },
+        {"label": "Excluded", "value": FULL_EXCLUDED},
+        {
+            "label": "Free space kept",
+            "value": f"At least {convention.HEADROOM_BYTES // (1024 * 1024)} MiB before it starts",
+        },
+    ]
+    document: dict[str, object] = {
+        "version": 1,
+        "body_sha256": FULL_SHA256,
+        "identifier": inputs.identifier,
+        "application": application,
+        "scope": scope,
+        "engine": evidence.engine if dump else "",
+        "names": list(settings.names) if settings is not None else [],
+        "runtime": settings.runtime if settings is not None else "",
+        "https": bool(settings.https) if settings is not None else True,
+        "readiness": settings.readiness if settings is not None else "/",
+        "repository": convention.repository(inputs.identifier),
+        "server_key": convention.server_key(inputs.identifier),
+        "point": point,
+        "at": at,
+        "restic_time": restic_time(at),
+        "caddy": caddy,
+        "gate": gate,
+        "files": files,
+        "dump": dump,
+        "filename": convention.dump_filename(inputs.identifier),
+        "tags": tags,
+        "stages": list(FULL_STAGES),
+        "details": details,
+        "note": (
+            "A full copy pauses the site briefly. If it stops partway, the site stays paused "
+            "until you reopen it."
+        ),
+    }
+    postconditions = (
+        "One complete Barectl-tagged full recovery point exists in the repository.",
+        "The site serves visitors again.",
+        "The site's background work is exactly as it was before the copy.",
+    )
+    effects: tuple[DeclaredEffect, ...] = ()
+    if not refusals:
+        effects = (
+            DeclaredEffect(
+                Scope.SITE,
+                (
+                    f"Pause {inputs.identifier}, copy its "
+                    + ("database and files" if scope == "full" else "files")
+                    + " into one recovery point, and reopen it."
+                ),
+                (inputs.identifier,),
+            ),
+            *(
+                (
+                    DeclaredEffect(
+                        Scope.SHARED,
+                        (
+                            "Reload Caddy for every site when the maintenance page goes up and "
+                            "comes down; other sites keep serving."
+                        ),
+                        evidence.current_sites,
+                    ),
+                )
+                if other
+                else ()
+            ),
+        )
+    return ReviewDraft(
+        kind=FULL_SLUG,
+        intent=f"Back up site {inputs.identifier} completely.",
+        effects=effects,
+        stages=FULL_STAGES if effects else (),
+        postconditions=postconditions if effects else (),
+        refusals=tuple(refusals),
+        boot_id=evidence.boot_id,
+        uptime_centiseconds=evidence.uptime_centiseconds,
+        sites_read=ALL_SITES_READ if effects else "",
+        current_sites=evidence.current_sites if effects else None,
+        document=document,
+    )
+
+
+def _full_document(document: dict[str, object]) -> None:
+    _document(document, FULL_SHA256)
+    identifier = document.get("identifier")
+    settings_values = document.get("names")
+    application = document.get("application")
+    scope = document.get("scope")
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or application not in ("plain", "wordpress", "laravel")
+        or scope not in ("full", "files")
+        or not isinstance(settings_values, list)
+        or not all(isinstance(name, str) for name in settings_values)
+    ):
+        raise ValueError("The full backup review is not a supported capture.")
+    settings = SiteSettings(
+        identifier,
+        tuple(str(name) for name in settings_values),
+        str(document.get("runtime", "")),
+        https=document.get("https", True) is not False,
+        readiness=str(document.get("readiness", "/")),
+    )
+    if _full_open_file(settings, str(application)) != document.get("caddy"):
+        raise ValueError("The full backup site configuration is not the reviewed one.")
+    if render_maintenance(settings) != document.get("gate"):
+        raise ValueError("The full backup gate is not the reviewed one.")
+    if document.get("files") != _full_files(identifier, str(application)):
+        raise ValueError("The full backup file set is not the reviewed one.")
+    tags = document.get("tags")
+    point = str(document.get("point", ""))
+    at = str(document.get("at", ""))
+    if (
+        not isinstance(tags, dict)
+        or not isinstance(document.get("restic_time"), str)
+        or RESTIC_TIME.fullmatch(str(document["restic_time"])) is None
+        or document.get("restic_time") != restic_time(at)
+        or AT.fullmatch(at) is None
+        or convention.POINT.fullmatch(point) is None
+        or document.get("repository") != convention.repository(identifier)
+        or document.get("server_key") != convention.server_key(identifier)
+        or document.get("filename") != convention.dump_filename(identifier)
+    ):
+        raise ValueError("The full backup review is not a supported capture.")
+    expected = {
+        "files": list(
+            convention.tags(
+                identifier,
+                str(scope),
+                part="files",
+                origin="manual",
+                live=False,
+                point=point,
+                complete=False,
+            )
+        )
+    }
+    dump = document.get("dump")
+    if isinstance(dump, list) and dump:
+        if not isinstance(document.get("engine"), str) or document.get("engine") not in (
+            "mariadb",
+            "postgresql",
+        ):
+            raise ValueError("The full backup review has no supported engine.")
+        if dump != convention.dump_argv(identifier, str(document["engine"])):
+            raise ValueError("The full backup dump is not the reviewed one.")
+        expected["database"] = list(
+            convention.tags(
+                identifier,
+                str(scope),
+                part="database",
+                origin="manual",
+                live=False,
+                point=point,
+                complete=False,
+            )
+        )
+    if tags != expected or (scope == "files") != (not dump):
+        raise ValueError("The full backup review is not a supported capture.")
+
+
+def body_full(document: dict[str, object], context: BodyContext) -> NativeBody:
+    _full_document(document)
+    value = {
+        key: document[key]
+        for key in (
+            "identifier",
+            "application",
+            "scope",
+            "engine",
+            "names",
+            "runtime",
+            "https",
+            "readiness",
+            "repository",
+            "server_key",
+            "point",
+            "at",
+            "restic_time",
+            "caddy",
+            "gate",
+            "files",
+            "dump",
+            "filename",
+            "tags",
+        )
+    }
+    from automation import fence as automation_fence
+
+    value["automation_fence"] = automation_fence.checked(document)
+    encoded = base64.b64encode(gzip.compress(json.dumps(value).encode(), mtime=0)).decode()
+    return NativeBody(FULL_BYTES, (encoded,))
+
+
+def verify_full(shell: RemoteShell, review: ChangeReview) -> bool | None:
+    body_full(review.document, BodyContext("", "", 0))
+    point = str(review.document["point"])
+    identifier = str(review.document["identifier"])
+    command = shlex.join(
+        [
+            "/usr/bin/env",
+            f"RESTIC_REPOSITORY={convention.repository(identifier)}",
+            f"RESTIC_PASSWORD_FILE={convention.server_key(identifier)}",
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR}",
+            convention.RESTIC_BIN,
+            "snapshots",
+            "--json",
+            "--no-lock",
+            "--tag",
+            "point:" + point,
+        ]
+    )
+    result = run_root(shell, command)
+    if result.exit_status or result.truncated:
+        return None
+    try:
+        value: object = json.loads(result.stdout)
+    except ValueError:
+        return None
+    if not isinstance(value, list):
+        return None
+    parts: dict[str, bool] = {}
+    for row in value:
+        if not isinstance(row, dict) or not isinstance(row.get("tags"), list):
+            continue
+        tags = [tag for tag in row["tags"] if isinstance(tag, str)]
+        part = next(
+            (tag.removeprefix("part:") for tag in tags if tag.startswith("part:")),
+            "",
+        )
+        if part in convention.PARTS and part not in parts:
+            parts[part] = "complete" in tags
+    expected = convention.expected_parts(str(review.document.get("scope", "full")))
+    return all(parts.get(part) is True for part in expected) and set(parts) == set(expected)
 
 
 def sites_read(identifier: str) -> str:
@@ -564,6 +982,17 @@ BACK_UP_NOW: Final = ChangeKind(
     review=review_backup,
     body=body_backup,
     verify=verify_backup,
+    refresh_discovery=True,
+    input_shape=InputShape.SITE,
+)
+
+BACK_UP_FULL: Final = ChangeKind(
+    slug=FULL_SLUG,
+    label=FULL_LABEL,
+    inspect=inspect,
+    review=review_full,
+    body=body_full,
+    verify=verify_full,
     refresh_discovery=True,
     input_shape=InputShape.SITE,
 )
