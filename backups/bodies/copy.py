@@ -108,6 +108,8 @@ def copy(document: dict[str, object]) -> tuple[int, str]:  # noqa: C901 - one re
         refused("offsite_key")
     if not extra.get("AWS_ACCESS_KEY_ID") or not extra.get("AWS_SECRET_ACCESS_KEY"):
         refused("offsite_key")
+    if isinstance(storage.get("region"), str):
+        extra["AWS_DEFAULT_REGION"] = storage["region"]
     release_mutation_lock()
     try:
         lock = repository_lock(identifier)

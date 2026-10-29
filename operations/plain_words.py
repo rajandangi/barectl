@@ -491,6 +491,32 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to backups",
         after_home=Home.SITE_BACKUPS,
     ),
+    "set_backup_schedule": ChangeWords(
+        title="Change the backup schedule of {site}",
+        summary=(
+            (
+                "Barectl runs one backup on the server at the time you choose, in UTC, even "
+                "while this computer is closed."
+            ),
+            (
+                "The backup is taken while the site keeps serving: the database first, then "
+                "the files. A missed run is skipped, never caught up later."
+            ),
+            (
+                "A window that overlaps another site's backup is refused, and Barectl names "
+                "the next free hour."
+            ),
+        ),
+        action="Change schedule",
+        steps={
+            "preflight": "Checking the site",
+            "install": "Installing the schedule",
+            "verify": "Reading the next run",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
     "restore_database": ChangeWords(
         title="Restore the database of {site}",
         summary=(

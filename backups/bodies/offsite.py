@@ -250,6 +250,8 @@ def setup(document: dict[str, object], secret_path: str) -> None:  # noqa: C901 
     if not controlled(KEY_ROOT):
         refused("offsite_key")
     extra = environment(access, secret)
+    if isinstance(config.get("region"), str):
+        extra["AWS_DEFAULT_REGION"] = str(config["region"])
     stage("credentials")
     if not healthy(config, health_key, extra):
         refused("offsite_bucket")

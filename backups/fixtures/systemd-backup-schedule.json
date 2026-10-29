@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "sites": [
+    {
+      "identifier": "alpha",
+      "units": {
+        "slice": "[Unit]\nDescription=Barectl backups for alpha\n\n[Slice]\n",
+        "service": "[Unit]\nDescription=Barectl backup capture for alpha\nConditionPathIsDirectory=/var/www/alpha\n\n[Service]\nType=oneshot\nTimeoutStartSec=2h\nKillMode=control-group\nSlice=barectl-site-alpha-backup.slice\nExecStart=/bin/sh /etc/barectl/backups/schedule/alpha.sh /etc/barectl/backups/schedule/alpha.json\n",
+        "timer": "[Unit]\nDescription=Barectl backup schedule for alpha\n\n[Timer]\nOnCalendar=*-*-* 03:00:00 UTC\nAccuracySec=1s\nRandomizedDelaySec=0\nPersistent=false\nDeferReactivation=yes\nUnit=barectl-site-alpha-backup.service\nSlice=barectl-site-alpha-backup.slice\n\n[Install]\nWantedBy=timers.target\n"
+      },
+      "payload": "{\"version\":1,\"identifier\":\"alpha\",\"frequency\":\"daily\",\"at\":\"03:00\",\"scope\":\"database\",\"offsite\":false,\"engine\":\"mariadb\",\"repository\":\"/var/lib/barectl-backups/alpha/onsite\",\"server_key\":\"/etc/barectl/backups/alpha.key\",\"files\":[],\"dump\":[\"/usr/sbin/runuser\",\"-u\",\"salpha\",\"--\",\"/usr/bin/mariadb-dump\",\"--single-transaction\",\"--quick\",\"--no-tablespaces\",\"--routines\",\"--events\",\"--triggers\",\"salpha\"],\"filename\":\"salpha.sql\",\"origin\":\"scheduled\",\"lock_wait_seconds\":30,\"offsite_plan\":{}}",
+      "script": "",
+      "show": {
+        "slice": {
+          "Id": "barectl-site-alpha-backup.slice",
+          "LoadState": "loaded",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "UnitFileState": "static",
+          "Result": "",
+          "ExecMainStatus": "",
+          "ExecMainStartTimestamp": "",
+          "ExecMainExitTimestamp": "",
+          "LastTriggerUSec": "",
+          "NextElapseUSecRealtime": "",
+          "ControlGroup": "",
+          "RefuseManualStart": "no"
+        },
+        "service": {
+          "Id": "barectl-site-alpha-backup.service",
+          "LoadState": "loaded",
+          "ActiveState": "inactive",
+          "SubState": "dead",
+          "UnitFileState": "static",
+          "Result": "success",
+          "ExecMainStatus": "0",
+          "ExecMainStartTimestamp": "",
+          "ExecMainExitTimestamp": "",
+          "LastTriggerUSec": "",
+          "NextElapseUSecRealtime": "",
+          "ControlGroup": "",
+          "RefuseManualStart": "no"
+        },
+        "timer": {
+          "Id": "barectl-site-alpha-backup.timer",
+          "LoadState": "loaded",
+          "ActiveState": "active",
+          "SubState": "waiting",
+          "UnitFileState": "enabled",
+          "Result": "success",
+          "ExecMainStatus": "",
+          "ExecMainStartTimestamp": "",
+          "ExecMainExitTimestamp": "",
+          "LastTriggerUSec": "",
+          "NextElapseUSecRealtime": "@1793329200",
+          "ControlGroup": "",
+          "RefuseManualStart": "no"
+        }
+      },
+      "slice_populated": false,
+      "timers": [
+        {
+          "next": 1793329200000000,
+          "left": 1793329200000000,
+          "last": 0,
+          "passed": 0,
+          "unit": "barectl-site-alpha-backup.timer",
+          "activates": "barectl-site-alpha-backup.service"
+        }
+      ]
+    }
+  ]
+}
