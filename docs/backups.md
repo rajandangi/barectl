@@ -467,11 +467,12 @@ captured full and copied offsite; a second server boots from the same layer, cre
 matching site under another identifier and domain, connects the same local S3-compatible
 storage with the kit facts, passphrase and keys, and restores the point; a plain `restic`
 read of the kit's onsite path with the passphrase alone then recovers the source database.
-The #405, #407 and #408 items' hosted times are not yet measured: the shard record carries
-placeholders until the orchestrator runs them on the integration tip. On the local
-ubuntu-26.04 lane the two #406 items measured 52 s each; the shard record carries 52 s for
-each until the hosted run replaces it. On the local ubuntu-26.04 lane the #401 scenario
-measured 62 to 65 s for the
+The #405 and #408 items' hosted times are not yet measured: the shard record carries their
+local measurements until the orchestrator runs them on the integration tip. On the local
+ubuntu-26.04 lane `Integrity` measured 81.2 s, `DisasterRecovery` 83.5 s and
+`OfflineRecovery` 33.4 s; the two #406 items measured 52 s each, and the #407 assertions run
+inside `LaravelFullRestore`. On the local ubuntu-26.04 lane the #401 scenario measured
+62 to 65 s for the
 `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured

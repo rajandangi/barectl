@@ -1053,6 +1053,8 @@ class ConnectedRestoreTests(SimpleTestCase):
             draft.document["source_repository"],
             convention.offsite_repository(self.CONFIG, self.SOURCE),
         )
+        # The dump inside the source repository is named for the source site, not the target.
+        self.assertEqual(draft.document["filename"], convention.dump_filename(self.SOURCE))
         values = "\n".join(
             row["value"] for row in cast("list[dict[str, str]]", draft.document["details"])
         )
@@ -1064,6 +1066,14 @@ class ConnectedRestoreTests(SimpleTestCase):
             draft.document,
             BodyContext("unit", BOOT, 0, "/run/barectl/secrets/" + "a" * 32),
         )
+
+    def test_a_connected_dump_reads_path_style_from_s3(self) -> None:
+        argv = restore_body.dump_argv(
+            SNAPSHOT, "salpha.sql", convention.offsite_repository(self.CONFIG, self.SOURCE)
+        )
+        self.assertEqual(argv[1:4], ["-o", "s3.bucket-lookup=path", "dump"])
+        onsite = restore_body.dump_argv(SNAPSHOT, "salpha.sql", convention.repository(IDENTIFIER))
+        self.assertNotIn("-o", onsite)
 
     def test_a_connected_restore_refuses_a_different_site_kind(self) -> None:
         draft = restore.review(
