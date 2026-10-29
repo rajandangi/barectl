@@ -1,9 +1,8 @@
-# Backups (implemented, #396, #399, #400, #401 and #403)
+# Backups (implemented, #396, #399, #400, #401, #402 and #403)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
-points. The planned Phase D behaviour, including schedules, retention, restoring files and
-export, is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358);
+points. The planned Phase D behaviour, including retention, restoring files and export, is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358);
 this page describes only what is built.
 
 ## Offsite storage
@@ -135,6 +134,42 @@ Caddy file. It never starts background work: Scheduled tasks or Queue workers as
 run again, so a half-migrated or half-copied site is never served with its work resumed
 unreviewed.
 
+## Schedule
+
+Each site has at most one **schedule**, created and turned off only through a reviewed
+Site change. It chooses **daily** or **weekly** (Monday) at an explicit `HH:MM` in UTC, a
+scope (**Database only** or **Full site**) and whether to copy the point offsite. An offsite
+schedule is refused until offsite storage is set up; the copy then runs after the onsite
+point is complete and holds only the repository lock. New sites start with no schedule;
+enabling backups does not create one.
+
+The schedule is a fixed native timer in the site's own backup slice, separate from its
+automation slice:
+
+- `barectl-site-<id>-backup.slice`, `.service` and `.timer`;
+- the service is a oneshot with a finite two-hour run window and no restart;
+- the timer sets `Persistent=false` (no catch-up), `AccuracySec=1s`,
+  `RandomizedDelaySec=0` and `DeferReactivation=yes`, and names its UTC calendar explicitly.
+
+A tick runs a fixed rendered body, not a change-engine run. It takes the global native lock
+with a bounded wait, then the site's `.deploy.lock`; when either is held it records a
+**skipped** run and exits, and a skip is never shown as a saved point. The capture is
+**live**: the database first, then the files, tagged `capture:live` and `origin:scheduled`,
+and never pauses the site. A full point is tagged complete only after both parts are
+verified present. The same body does not catch up: a missed window is missed.
+
+The review refuses a window that overlaps another site's window on the same server (a
+window is the hour the run starts in) and names the next free hour. The next run is shown
+only when systemd reports it; the page never invents a schedule. A fresh controller
+reconstructs the schedule and its next run from the units, the runtime payload and systemd
+during **Check backups** and every schedule review. An installed unit whose settings differ
+from the fixed template is **Outside supported settings**, is reported once, and blocks only
+that site's backup changes.
+
+Every change that names a site treats that site's running backup unit as busy, so a Deploy,
+PHP switch or restore never races a capture. Turning the schedule off stops and disables the
+timer, stops the service and slice, and removes the unit files and runtime payload.
+
 ## Restore
 
 Each listed recovery point offers **Restore** with the scopes its point supports: **Database
@@ -224,24 +259,22 @@ reconstructs that backups are enabled and the last result from this native evide
 | Server key | `/etc/barectl/backups/<id>.key` | root `0600` |
 | restic profile | `/nix/var/nix/profiles/barectl/restic` | root, the pinned catalog build |
 | restic cache | `/var/cache/barectl/restic` | root `0700` |
-| Restore staging | `/var/lib/barectl-restore/<id>/<point>` | root `0700`, removed when the run ends |
 
 ## Native evidence
 
 The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
 a database-only capture, `backups/bodies/full.py` for a paused full capture,
-`backups/bodies/restore.py` for Database only, Files only and Full site restores,
-`backups/bodies/offsite.py` for offsite
-storage and `backups/bodies/copy.py` for Copy offsite again, and `backups/bodies/reopen.py`
-for reopening a paused site; each prints its stages and a result line. The pause helpers shared by
+`backups/bodies/restore.py` for Database only, Files only and Full site restores, `backups/bodies/offsite.py` for offsite
+storage, `backups/bodies/copy.py` for Copy offsite again, `backups/bodies/reopen.py` for
+reopening a paused site and `backups/bodies/schedule.py` for the schedule install and its
+live tick; each prints its stages and a result line. The schedule read is
+`backups/bodies/observe_schedule.py`. The pause helpers shared by
 the full capture and the restore are `backups/bodies/paused.py`. The read is
 `backups/bodies/observe.py`, shared with the database binding's pure catalog reader. The first
 shared Phase D native scenario is `disposable/test_backups.py`; its offsite checks use a
-local S3-compatible fixture (`disposable/native_mirror/s3.py`) on the lane and never the
-internet.
-The #401 files-only and full-site restore assertions extend the same scenario; the
-integration run records their measured addition. On the local ubuntu-26.04 lane it measured
-62 to 65 s for the `BackupLifecycle` test
+local S3-compatible fixture (`disposable/native_mirror/s3.py`) in its own lane container and
+never the internet. The #401 files-only and full-site restore assertions extend the same
+scenario; the integration run records their measured addition. On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured
 65.3 s for the test and 70 s for its scenario. The local full build measured 294 s against the 300 s target and

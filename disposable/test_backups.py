@@ -7,11 +7,14 @@ Ubuntu 26.04 host.
 
 import json
 import shlex
+import tempfile
+from pathlib import Path
 from typing import cast
 
 from django.test import tag
 
 from backups.observation import ObservedBackup
+from backups.schedule import ObservedBackupSchedule
 from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
 from operations.inputs import PreparationInputs
@@ -38,56 +41,76 @@ class BackupCase(ScenarioTestCase):
     layer = "L1"
     exclusive = True
     prefix = "bk"
-    S3_HOST = "s3.local.amazonaws.com"
+    S3_HOST = "s3.us-east-1.amazonaws.com"
+    S3_DUALSTACK_HOST = "s3.dualstack.us-east-1.amazonaws.com"
     S3_BUCKET = "barectl-test"
-    S3_REGION = "local"
-    S3_ROOT = "/srv/barectl-test-s3"
-    S3_UNIT = "barectl-test-s3"
+    S3_REGION = "us-east-1"
 
     def start_s3(self) -> None:
-        """A local S3-compatible server on the lane, signed by the fixture CA."""
-        from pathlib import Path
+        """A local S3-compatible server on the lane, signed by the fixture CA.
 
+        It runs in its own container on the lane network, not on the server: a listener on
+        the server's 443 would make host standing Not manageable, and the endpoint template
+        has no port. The server resolves the container's network alias and trusts the
+        fixture CA.
+        """
         from . import mirror
+        from .docker import docker, quietly
 
-        certificate, key = mirror.mirror_certificate([self.S3_HOST])
-        source = Path(__file__).resolve().parent.joinpath("native_mirror/s3.py").read_text()
+        certificate, key = mirror.mirror_certificate([self.S3_HOST, self.S3_DUALSTACK_HOST])
+        fixture = Path(__file__).resolve().parent / "native_mirror" / "s3.py"
+        root = tempfile.TemporaryDirectory()
+        self.s3_root = Path(root.name)
+        self.addCleanup(root.cleanup)
+        server = self._server_container()
+        network = docker(
+            "inspect", "-f", "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}", server
+        ).strip()
+        image = docker("inspect", "-f", "{{.Config.Image}}", server).strip()
+        self.s3_container = f"{server}-s3"
+        self.addCleanup(quietly, "rm", "-f", self.s3_container)
+        docker(
+            "run", "-d", "--name", self.s3_container, "--pull=never",
+            "--network", network, "--network-alias", self.S3_HOST,
+            "--network-alias", self.S3_DUALSTACK_HOST,
+            "-v", f"{fixture}:/s3fixture.py:ro",
+            "-v", f"{certificate}:/tls/cert.pem:ro",
+            "-v", f"{key}:/tls/key.pem:ro",
+            "-v", f"{self.s3_root}:/srv/s3",
+            "--entrypoint", "python3", image,
+            "/s3fixture.py", "--root", "/srv/s3", "--address", "0.0.0.0:443",
+            "--certificate", "/tls/cert.pem", "--key", "/tls/key.pem",
+        )  # fmt: skip
+        self._wait_for_s3()
+
+    def _server_container(self) -> str:
+        import os
+
+        return os.environ["BARECTL_SSH_TEST_CONTAINER"]
+
+    def _wait_for_s3(self) -> None:
         with self.shell() as shell:
-            write(self, shell, "/usr/local/lib/barectl-test-s3.py", source)
-            self.assertEqual(
-                shell.run("chmod 0755 /usr/local/lib/barectl-test-s3.py").exit_status, 0
-            )
-            write(self, shell, "/etc/barectl-test-tls/cert.pem", certificate.read_text())
-            write(self, shell, "/etc/barectl-test-tls/key.pem", key.read_text())
-            self.native("install -d -m 700 " + self.S3_ROOT)
-            self.native(
-                f"grep -qx '{self.S3_HOST}' /etc/hosts || "
-                f"printf '127.0.0.1 {self.S3_HOST}\\n' >>/etc/hosts"
-            )
-            self.native("systemctl reset-failed " + self.S3_UNIT + " 2>/dev/null || true")
-            result = self.native(
-                "systemd-run --unit="
-                + self.S3_UNIT
-                + " --property=Type=simple --property=Restart=no "
-                + "python3 /usr/local/lib/barectl-test-s3.py "
-                + f"--root {self.S3_ROOT} --address 0.0.0.0:443 "
-                + "--certificate /etc/barectl-test-tls/cert.pem "
-                + "--key /etc/barectl-test-tls/key.pem"
-            )
-            self.assertIn("Running as unit", result)
-            self.native(
+            result = shell.run(
                 "timeout 30 sh -c 'until curl --silent --show-error "
-                f"--cacert /usr/local/share/ca-certificates/barectl-fixture-ca.crt "
+                "--cacert /usr/local/share/ca-certificates/barectl-fixture-ca.crt "
                 f"https://{self.S3_HOST}/ -o /dev/null; do sleep 0.2; done'"
             )
-        self.addCleanup(self.native, f"systemctl stop {self.S3_UNIT} 2>/dev/null || true")
+        if result.exit_status:
+            from .docker import docker
+
+            self.fail(
+                "The local S3 server did not answer: "
+                + result.stdout
+                + docker("logs", self.s3_container)
+            )
 
     def s3_files(self) -> list[str]:
-        return [
-            line
-            for line in self.native(f"find {self.S3_ROOT} -type f -printf '%P\\n'").splitlines()
-            if line and not line.startswith(".uploads/")
-        ]
+        return sorted(
+            path.relative_to(self.s3_root).as_posix()
+            for path in self.s3_root.rglob("*")
+            if path.is_file()
+            and not path.relative_to(self.s3_root).as_posix().startswith(".uploads/")
+        )
 
     def offsite_files(self) -> list[str]:
         return [line for line in self.s3_files() if line.startswith(f"{self.S3_BUCKET}/")]
@@ -104,11 +127,12 @@ class BackupCase(ScenarioTestCase):
                 }
             }
         ).encode()
+        inputs = PreparationInputs(provider="s3", bucket=self.S3_BUCKET, region=self.S3_REGION)
         return apply_change(
             self,
             offsite.SET_UP,
-            PreparationInputs(provider="s3", bucket=self.S3_BUCKET, region=self.S3_REGION),
-            timeout=180,
+            inputs,
+            timeout=60,
             secret=secret,
         )
 
@@ -227,6 +251,55 @@ class BackupCase(ScenarioTestCase):
         self.assertEqual(self.native(f"find {root} -not -user {account} -print"), "")
         self.assertEqual(self.native(f"find {root} -perm -0004 -print"), "")
 
+    def set_schedule(self, at: str, *, scope: str = "database") -> ChangeReview:
+        from backups import schedule
+
+        return apply_change(
+            self,
+            schedule.SET_BACKUP_SCHEDULE,
+            PreparationInputs(
+                "",
+                IDENTIFIER,
+                schedule_state="on",
+                backup_schedule=True,
+                frequency="daily",
+                at=at,
+                scope=scope,
+            ),
+            timeout=120,
+        )
+
+    def disable_schedule(self) -> ChangeReview:
+        from backups import schedule
+
+        return apply_change(
+            self,
+            schedule.SET_BACKUP_SCHEDULE,
+            PreparationInputs(
+                "",
+                IDENTIFIER,
+                schedule_state="off",
+                backup_schedule=True,
+            ),
+            timeout=120,
+        )
+
+    def schedule_row(self) -> ObservedBackupSchedule:
+        from backups import schedule
+
+        with self.shell() as shell:
+            rows = schedule.read(shell, (IDENTIFIER,))
+        if rows is None:
+            self.fail("The backup schedule could not be read.")
+        return rows[0]
+
+    def next_schedule_time(self) -> str:
+        from datetime import UTC, datetime, timedelta
+
+        now = datetime.now(UTC)
+        moment = now + timedelta(minutes=3 if now.second >= 45 else 2)
+        return moment.strftime("%H:%M")
+
     def site_status(self, path: str = "/") -> int:
         return int(
             self.native(
@@ -280,7 +353,8 @@ class BackupCase(ScenarioTestCase):
                     f"RESTIC_REPOSITORY={repository} "
                     f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
                     f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
-                    f"{convention.RESTIC_BIN} snapshots --json --no-lock"
+                    f"AWS_DEFAULT_REGION={self.S3_REGION} "
+                    f"{convention.RESTIC_BIN} -o s3.bucket-lookup=path snapshots --json --no-lock"
                 ),
             )
         return check.points(check.parse_listing(listing.stdout) or [])
@@ -308,7 +382,7 @@ class BackupLifecycle(BackupCase):
         self.start_s3()
         self.offsite_setup()
         self.assertEqual(
-            self.native("stat -c '%u %a' /etc/barectl/backups/offsite/capture.env"),
+            self.native("stat -c '%u %a' /etc/barectl/backups/offsite/capture.env").strip(),
             "0 600",
         )
         self.assertNotIn(
@@ -342,12 +416,51 @@ class BackupLifecycle(BackupCase):
                     f"RESTIC_REPOSITORY={convention.repository(IDENTIFIER)} "
                     f"RESTIC_PASSWORD_FILE={staged} "
                     f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
-                    f"{convention.RESTIC_BIN} snapshots --json --no-lock"
+                    f"AWS_DEFAULT_REGION={self.S3_REGION} "
+                    f"{convention.RESTIC_BIN} -o s3.bucket-lookup=path snapshots --json --no-lock"
                 ),
             )
             shell.run(f"rm -f {staged}")
             self.assertEqual(listing.exit_status, 0, listing.stdout)
             self.assertEqual(json.loads(listing.stdout or "[]"), [])
+        # One reviewed schedule installs a fixed UTC timer. It fires a live capture with no
+        # controller connected, and a fresh controller reads the same schedule back.
+        at = self.next_schedule_time()
+        self.set_schedule(at)
+        installed = self.schedule_row()
+        self.assertTrue(installed.installed)
+        self.assertTrue(installed.timer_active)
+        self.assertTrue(installed.timer_enabled)
+        self.assertGreater(installed.next_elapse_us, 0)
+        import time
+
+        end = time.monotonic() + 180
+        scheduled: list[dict[str, object]] = []
+        while time.monotonic() < end and not scheduled:
+            scheduled = [point for point in self.points() if point.get("origin") == "scheduled"]
+            if not scheduled:
+                time.sleep(2)
+        self.assertTrue(scheduled, "The real backup timer never fired a scheduled capture.")
+        self.assertTrue(scheduled[0]["live"])
+        self.assertTrue(scheduled[0]["complete"])
+        collected = self.observe()
+        backup = self.backup_row(collected)
+        if backup.last is None:
+            self.fail("No scheduled result was reconstructed.")
+        self.assertEqual(backup.last.origin, "scheduled")
+        self.assertIn(backup.last.result_class, ("succeeded", "partial"))
+        from operations.models import ChangeReview as Review
+        from operations.models import ChangeRun
+
+        ChangeRun.objects.all().delete()
+        Review.objects.all().delete()
+        reconstructed = self.schedule_row()
+        self.assertTrue(reconstructed.installed)
+        self.assertEqual(reconstructed.frequency, "daily")
+        self.assertEqual(reconstructed.at, at)
+        self.assertGreater(reconstructed.next_elapse_us, 0)
+        self.disable_schedule()
+        self.assertFalse(self.schedule_row().installed)
         self.capture()
         self.assertEqual(self.site_status("/"), 200)
         self.assertNotIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))
@@ -363,8 +476,15 @@ class BackupLifecycle(BackupCase):
         self.assertEqual(len(offsite_points), 1)
         self.assertTrue(offsite_points[0]["complete"])
         self.assertEqual(offsite_points[0]["point"], backup.last.point)
-        # A capture whose offsite copy fails keeps the onsite point and says so.
-        self.native("mv /etc/barectl/backups/offsite/capture.env /root/capture.env.saved")
+        # A capture whose offsite copy fails keeps the onsite point and says so. The local S3
+        # server rejects this marker credential, so the failure is immediate and offline.
+        self.native(
+            "mv /etc/barectl/backups/offsite/capture.env /root/capture.env.saved && "
+            "printf 'AWS_ACCESS_KEY_ID=denied\nAWS_SECRET_ACCESS_KEY=denied\n' "
+            "> /etc/barectl/backups/offsite/capture.env && "
+            "chown root:root /etc/barectl/backups/offsite/capture.env && "
+            "chmod 600 /etc/barectl/backups/offsite/capture.env"
+        )
         try:
             self.capture()
         finally:
@@ -394,14 +514,16 @@ class BackupLifecycle(BackupCase):
             timeout=60,
             secret=json.dumps({"values": {"bucket": self.S3_BUCKET}}).encode(),
         )
-        self.assertEqual(self.native("test ! -e /etc/barectl/backups/offsite/config; echo $?"), "0")
+        self.assertEqual(
+            self.native("test ! -e /etc/barectl/backups/offsite/config; echo $?").strip(), "0"
+        )
         self.assertEqual(self.offsite_files(), before_files)
         with self.shell() as shell:
             listing = run_root(shell, check.listing_command(IDENTIFIER))
         parsed = check.parse_listing(listing.stdout)
         self.assertIsNotNone(parsed, listing.stdout)
         points = check.points(parsed or [])
-        self.assertEqual(len(points), 1)
+        self.assertGreaterEqual(len(points), 1)
         self.assertTrue(points[0]["complete"])
         database_point = points[0]["point"]
         # A fresh controller keeps no local change history and still sees the same state.

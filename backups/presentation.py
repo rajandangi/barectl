@@ -232,6 +232,12 @@ def _result_reason(reason: str) -> str:
         "backup_repository": "The backup store could not be read, so nothing was saved.",
         "backup_verify": "Barectl could not confirm the recovery point afterwards.",
         "backup_partial": "Some data could not be read; the point may be incomplete.",
+        "backup_offsite": (
+            "The onsite recovery point is saved, but the offsite copy did not finish."
+        ),
+        "schedule_timer": "Systemd did not report the new backup timer as active.",
+        "schedule_units": "The backup schedule's units are not in the reviewed state.",
+        "schedule_install": "The backup schedule could not be installed on the server.",
         "restore_site": "The site's account could not be read, so nothing was restored.",
         "restore_repository": "The backup store could not be read, so nothing was restored.",
         "restore_evidence": "The site changed before the restore, so nothing was restored.",

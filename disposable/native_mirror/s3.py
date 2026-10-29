@@ -137,6 +137,13 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, status: int, code: str, message: str) -> None:
         self._send(status, error_body(code, message))
 
+    def _denied(self) -> bool:
+        """A marker credential lets a scenario prove a failed copy without the internet."""
+        if "Credential=denied/" in self.headers.get("Authorization", ""):
+            self._error(403, "AccessDenied", "The access key is not allowed to do this.")
+            return True
+        return False
+
     def _body(self) -> bytes:
         length = self.headers.get("Content-Length")
         data = b""
@@ -194,6 +201,8 @@ class Handler(BaseHTTPRequestHandler):
         return '"' + digest.hexdigest() + '"'
 
     def do_HEAD(self) -> None:
+        if self._denied():
+            return
         bucket, key, _query = self._split()
         if not self.store.bucket(bucket).is_dir():
             self._error(404, "NoSuchBucket", "The bucket does not exist.")
@@ -216,6 +225,8 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def do_DELETE(self) -> None:
+        if self._denied():
+            return
         bucket, key, query = self._split()
         if "uploadId" in query:
             with self.store.lock:
@@ -233,6 +244,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(204)
 
     def do_PUT(self) -> None:
+        if self._denied():
+            return
         bucket, key, query = self._split()
         if not key:
             with self.store.lock:
@@ -264,6 +277,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, headers={"ETag": '"' + digest + '"'})
 
     def do_GET(self) -> None:
+        if self._denied():
+            return
         bucket, key, query = self._split()
         if not bucket:
             self._error(400, "InvalidRequest", "A bucket is required.")
@@ -326,6 +341,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, _xml(root))
 
     def do_POST(self) -> None:
+        if self._denied():
+            return
         bucket, key, query = self._split()
         if "uploads" in query:
             upload_id = uuid.uuid4().hex

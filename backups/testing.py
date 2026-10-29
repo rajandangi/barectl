@@ -12,7 +12,7 @@ from discovery.snapshot import Observation, ObservedSite, SiteAccount, save_snap
 from servers.models import Server
 from sites.bodies.common import SITE_GATED
 
-from .models import BackupCheck
+from .models import BackupCheck, BackupSchedule
 from .observation import BackupResult, ObservedBackup, OffsiteCopy, OffsiteStorage
 
 
@@ -145,3 +145,35 @@ def record_points(
             "points": list(points),
         },
     )
+
+
+def record_schedule(
+    server: Server,
+    *,
+    identifier: str = "shop",
+    frequency: str = "daily",
+    at: str = "03:00",
+    scope: str = "full",
+    offsite: bool = False,
+    next_elapse_us: int = 1_793_329_200_000_000,
+    problem: str = "",
+    installed: bool = True,
+) -> BackupSchedule:
+    """One site's last verified backup schedule, as the Backups section reads it (#402)."""
+    return BackupSchedule.objects.update_or_create(
+        server=server,
+        identifier=identifier,
+        defaults={
+            "frequency": frequency,
+            "at": at,
+            "scope": scope,
+            "offsite": offsite,
+            "installed": installed,
+            "timer_active": installed,
+            "timer_enabled": installed,
+            "service_active": False,
+            "next_elapse_us": next_elapse_us if installed else 0,
+            "problem": problem,
+            "checked_at": timezone.now(),
+        },
+    )[0]

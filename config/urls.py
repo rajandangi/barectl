@@ -4,6 +4,7 @@ from django.views.generic import RedirectView
 
 from automation.views import prepare_schedule
 from automation.worker_views import prepare_workers
+from backups.schedule import prepare_schedule as prepare_backup_schedule
 from backups.views import (
     check_now,
     prepare_backup,
@@ -359,6 +360,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/backups/restore/prepare/",
         prepare_restore,
         name="site_backups_restore_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/schedule/prepare/",
+        prepare_backup_schedule,
+        name="site_backups_schedule_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/backups/check/",

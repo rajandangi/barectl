@@ -205,7 +205,12 @@ def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str,
     if request.user.has_perm(VIEW_SITES):
         context["show_sites"] = True
         if state.snapshot is not None:
-            context["sites"] = present_sites(state.snapshot.collected.sites)
+            from backups.schedule import recent_missing
+
+            context["sites"] = present_sites(
+                state.snapshot.collected.sites,
+                recent_missing(state.snapshot.collected),
+            )
     return context
 
 
@@ -526,6 +531,9 @@ def _site_backups_context(
     from backups.views import context_for_site as backups_context_for_site
 
     context.update(backups_context_for_site(server, identifier, user))
+    from backups import schedule as backup_schedule
+
+    backup_schedule.context_for_site(server, identifier, context)
     backups = context.get("backups")
     context["backups_repository"] = (
         backup_convention.repository(identifier)
