@@ -304,7 +304,10 @@ def _project(row: dict[str, object]) -> ObservedBackupSchedule:
     units_value = row["units"]
     units_raw = units_value if isinstance(units_value, dict) else {}
     units = {kind: str(units_raw[kind]) for kind in KINDS if isinstance(units_raw.get(kind), str)}
-    installed = bool(units)
+    # The slice is shared with the integrity units Enable backups installs (#405), so a
+    # slice on its own is not a schedule. Only the payload or the schedule's own service
+    # and timer mean a schedule exists.
+    installed = bool(units_raw.get("service") or units_raw.get("timer"))
     payload = _runtime(row["payload"])
     problem = ""
     frequency = at = scope = ""
@@ -317,7 +320,8 @@ def _project(row: dict[str, object]) -> ObservedBackupSchedule:
         at = str(payload["at"])
         scope = str(payload["scope"])
         offsite = payload["offsite"] is True
-        if not installed or set(units) != set(KINDS):
+        installed = True
+        if set(units) != set(KINDS):
             problem = "The backup schedule is outside supported settings."
         else:
             for kind in KINDS:
@@ -770,7 +774,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "filename": convention.dump_filename(str(inputs.identifier)),
         "offsite": offsite,
         "offsite_plan": plan,
-        "units": current.units or dict.fromkeys(KINDS, "absent"),
+        "units": {kind: current.units.get(kind, "absent") for kind in KINDS},
         "details": _details(evidence, inputs, current, frequency, at, scope, offsite),
     }
     effects: tuple[DeclaredEffect, ...] = ()
