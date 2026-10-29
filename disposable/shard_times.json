@@ -8,7 +8,9 @@
     "disposable.test_automation.LaravelQueueWorkers": 118.5,
     "disposable.test_automation.WordPressServerCron": 109.7,
     "disposable.test_backups.BackupLifecycle": 65.2,
+    "disposable.test_backups.LaravelFullRestore": 3.0,
     "disposable.test_backups.Retention": 20.0,
+    "disposable.test_backups.WordPressFullRestore": 3.0,
     "disposable.test_cache.LaravelObjectCache": 47.0,
     "disposable.test_cache.SiteObjectCache": 135.4,
     "disposable.test_cache.ValkeyInstall": 59.7,
@@ -79,6 +81,6 @@
     "disposable.test_target_reconstruction.FreshControllerReconstruction": 107.8,
     "disposable.test_target_shape.JudgeByShape": 47.4,
     "disposable.test_wordpress_create.WordPressCreateMariaDB": 128.5,
-    "disposable.test_backups.Integrity": 5.0
+    "disposable.test_backups.Integrity": 3.0
   }
 }

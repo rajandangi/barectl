@@ -91,17 +91,6 @@ POSTGRESQL_VERSION = re.compile(r"-- Dumped from database version ([0-9]+(?:\.[0
 MARIADB_MAJOR = re.compile(r"(?:[0-9]+:)?([0-9]+)\.([0-9]+)")
 POSTGRESQL_MAJOR = re.compile(r"(?:[0-9]+:)?([0-9]+)")
 SETUID: Final = stat.S_ISUID | stat.S_ISGID
-# The fixed lines WordPress's private configuration carries before the operator's constants.
-WP_PREFIXES: Final = (
-    "<?php",
-    "if ( isset( $_SERVER['HTTP_X_FORWARDED_URI'] ) ) {",
-    "\t$_SERVER['REQUEST_URI'] = $_SERVER['HTTP_X_FORWARDED_URI'];",
-    "}",
-    "if ( ! defined( 'ABSPATH' ) ) {",
-    "\tdefine( 'ABSPATH', ",
-    "$table_prefix = ",
-    "define( ",
-)
 WP_DATABASE: Final = (
     "ABSPATH",
     "DB_NAME",
@@ -111,6 +100,17 @@ WP_DATABASE: Final = (
     "DB_CHARSET",
     "DB_COLLATE",
 )
+WP_SALTS: Final = (
+    "AUTH_KEY",
+    "SECURE_AUTH_KEY",
+    "LOGGED_IN_KEY",
+    "NONCE_KEY",
+    "AUTH_SALT",
+    "SECURE_AUTH_SALT",
+    "LOGGED_IN_SALT",
+    "NONCE_SALT",
+)
+WP_TABLE_PREFIX: Final = re.compile(r"\$table_prefix = '[A-Za-z0-9_]{1,64}';")
 
 
 def engine_major(engine: str, version: str) -> str:
@@ -361,7 +361,9 @@ def site_ready(settings: SimpleNamespace, application: str) -> bool:
     deadline = time.monotonic() + READY_SECONDS
     while True:
         if application == "laravel":
-            ok = readiness_request(settings, "/index.php", "/up") == 200
+            # The same /up path Deploy verifies: the front controller receives PATH_INFO and
+            # the original path, and a redirect or any non-200 answer fails the check.
+            ok = readiness_request(settings, "/index.php/up", "/up") == 200
         elif application == "wordpress":
             ok = (
                 readiness_request(settings, "/index.php", "/") == 200
@@ -640,36 +642,55 @@ def classify_release(
     os.chmod(release, 0o711)  # noqa: S103 - the site user's release, traversal only
 
 
-def _merged_wordpress_configuration(text: str, target: str) -> str:
-    """The point's private configuration, with the target's own database settings kept."""
-    kept: dict[str, str] = {}
-    for line in target.splitlines():
-        parsed = _wp_constant(line)
-        if parsed is not None and parsed[0] in WP_DATABASE and parsed[0] not in kept:
-            kept[parsed[0]] = line
-    if set(kept) != set(WP_DATABASE):
-        raise ValueError("The site's private configuration is outside the supported grammar.")
-    output: list[str] = []
+def merge_private_configuration(text: str, target: str, identifier: str) -> str:
+    """The point's application state, with the target's own paths and database kept.
+
+    The site database is always ``s<identifier>`` and the public root is the target's, so
+    the target's fixed Barectl block comes from the live file. The point supplies only the
+    salts, table prefix and operator constants that follow it. Every line from the point
+    must belong to that grammar, so a backup cannot plant arbitrary PHP in the file
+    WordPress executes next.
+    """
+    point_lines = text.splitlines()
+    target_lines = target.splitlines()
+    point_salt = _salt_start(point_lines, "The recovery point's private configuration")
+    target_salt = _salt_start(target_lines, "The site's private configuration")
     written: set[str] = set()
-    for line in text.splitlines():
-        if not line.startswith(WP_PREFIXES):
-            raise ValueError("The recovery point's private configuration is not supported.")
+    prefix = False
+    for line in point_lines[point_salt:]:
         parsed = _wp_constant(line)
-        if parsed is not None and parsed[0] in WP_DATABASE:
-            if parsed[0] in written:
+        if parsed is not None:
+            key = parsed[0]
+            if key in WP_DATABASE or key in written:
                 raise ValueError("The recovery point's private configuration is not supported.")
-            written.add(parsed[0])
-            output.append(kept[parsed[0]])
+            written.add(key)
             continue
-        output.append(line)
-    missing = set(WP_DATABASE) - written
-    if missing:
+        if WP_TABLE_PREFIX.fullmatch(line) is not None and not prefix:
+            prefix = True
+            continue
         raise ValueError("The recovery point's private configuration is not supported.")
-    return "\n".join(output) + "\n"
+    if not prefix or not set(WP_SALTS) <= written:
+        raise ValueError("The recovery point's private configuration is not supported.")
+    names = [
+        parsed
+        for line in target_lines[:target_salt]
+        if (parsed := _wp_constant(line)) is not None and parsed[0] == "DB_NAME"
+    ]
+    if names != [("DB_NAME", "s" + identifier)]:
+        raise ValueError("The site's private configuration is outside the supported grammar.")
+    return "\n".join([*target_lines[:target_salt], *point_lines[point_salt:]]) + "\n"
+
+
+def _salt_start(lines: list[str], subject: str) -> int:
+    for index, line in enumerate(lines):
+        parsed = _wp_constant(line)
+        if parsed is not None and parsed[0] == WP_SALTS[0]:
+            return index
+    raise ValueError(f"{subject} has no fixed Barectl block.")
 
 
 def _wp_constant(line: str) -> tuple[str, str] | None:
-    match = re.fullmatch(r"define\( '([A-Z][A-Z0-9_]{0,63})', '(.*)' \);", line)
+    match = re.fullmatch(r"define\( '([A-Z][A-Z0-9_]{0,63})', '(.*)' \);", line.lstrip("\t"))
     return (match[1], match[2]) if match is not None else None
 
 
@@ -718,8 +739,8 @@ def _replace_shared(
             raise ValueError("The recovery point's private files are incomplete.")
         if application == "wordpress" and relative.endswith("wp-config.php"):
             target_text = target.read_text(encoding="utf-8") if target.is_file() else ""
-            merged = _merged_wordpress_configuration(
-                source.read_text(encoding="utf-8"), target_text
+            merged = merge_private_configuration(
+                source.read_text(encoding="utf-8"), target_text, settings.identifier
             )
             temporary = target.parent / (".restore-" + target.name)
             descriptor = os.open(

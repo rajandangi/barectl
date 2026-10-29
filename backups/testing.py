@@ -28,6 +28,7 @@ def record_backups(
     offsite: OffsiteStorage | None = None,
     copy: OffsiteCopy | None = None,
     integrity: tuple[IntegrityFinding, ...] = (),
+    application: str = "plain",
 ) -> None:
     """A target site whose stored snapshot carries the backup observation."""
     site = ObservedSite(
@@ -40,6 +41,7 @@ def record_backups(
         file=f"/etc/caddy/sites/{identifier}.caddy",
         missing=(SITE_GATED,) if gated else (),
         https=True,
+        application=application,
     )
     backup = ObservedBackup(
         identifier,

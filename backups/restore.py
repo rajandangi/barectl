@@ -562,6 +562,29 @@ def _details(
                 ),
             },
         )
+    if application == "wordpress":
+        rows.insert(
+            3,
+            {
+                "label": "Private configuration",
+                "value": (
+                    "The site's private configuration is replaced from the recovery point, and "
+                    "the target's database settings are kept because this site's database is "
+                    f"always {convention.database_name(str(inputs.identifier))}."
+                ),
+            },
+        )
+    if application == "laravel":
+        rows.insert(
+            3,
+            {
+                "label": "Shared state",
+                "value": (
+                    "Laravel's .env, storage and bootstrap cache are replaced as a whole from "
+                    "the recovery point, never overlaid on what the site holds now."
+                ),
+            },
+        )
     if point.get("live") is True:
         rows.insert(
             3,

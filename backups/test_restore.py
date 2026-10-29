@@ -7,6 +7,7 @@ import stat
 import tempfile
 from dataclasses import replace
 from datetime import timedelta
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest import mock
 
@@ -70,6 +71,7 @@ def evidence(
     current_sites: tuple[str, ...] = (IDENTIFIER,),
     disk_available: int = 2 * 1024 * 1024 * 1024,
     parts: tuple[str, ...] = ("database",),
+    application: str = "plain",
 ) -> restore.RestoreEvidence:
     backup = observation.ObservedBackup(
         IDENTIFIER,
@@ -88,7 +90,7 @@ def evidence(
         "mariadb",
         "MariaDB",
         current_version,
-        site_record(),
+        site_record(application=application),
         backup,
         selected,
         str(selected["id"]) if "database" in parts else "",
@@ -220,6 +222,77 @@ class RestorePointTests(SimpleTestCase):
         )
 
 
+class RestoreRecordedTests(SimpleTestCase):
+    """The recorded real restic output binds a WordPress and a Laravel full restore (#406)."""
+
+    POINT = "e1fa817d57ef0663"
+    DATABASE = "cc8dd12b140a7a7fa17b97fa5b7a16007eea2feda5d6bca3045923b71f6285a0"
+    FILES = "66ac9af32880e79c2f714f1ef737031ee7ea3e408947b2ca9201c1cfbcd59615"
+
+    def replay(self) -> ReplayShell:
+        return ReplayShell(
+            Transcript(
+                "restore",
+                {},
+                "26.04",
+                "x86_64",
+                "ssh-ed25519 SHA256:x",
+                (
+                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
+                    (
+                        restore.point_listing_command(IDENTIFIER),
+                        Recorded(
+                            ssh.CommandResult(0, fixture("restic-full-snapshots.txt")),
+                        ),
+                    ),
+                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
+                    (
+                        restore.header_command(IDENTIFIER, self.DATABASE, "salpha.sql"),
+                        Recorded(ssh.CommandResult(0, fixture("restic-dump-mariadb.txt"))),
+                    ),
+                ),
+            )
+        )
+
+    def test_a_recorded_full_point_binds_a_wordpress_and_a_laravel_restore(self) -> None:
+        shell = self.replay()
+        found, snapshots, size = restore._read_point(shell, IDENTIFIER, self.POINT)
+        if found is None:
+            self.fail("The recorded full point was not bound.")
+        self.assertEqual(snapshots, {"database": self.DATABASE, "files": self.FILES})
+        version = restore._point_version(
+            shell, IDENTIFIER, self.DATABASE, convention.dump_filename(IDENTIFIER), "mariadb"
+        )
+        self.assertEqual(version, "11.8.2")
+        for application, shared in (
+            ("wordpress", ["private/wp-config.php"]),
+            ("laravel", ["private/laravel.env", "private/storage", "private/cache"]),
+        ):
+            with self.subTest(application=application):
+                selected = replace(
+                    evidence(
+                        application=application,
+                        parts=("database", "files"),
+                        point_data={**found, "size": size},
+                    ),
+                    point={**found, "size": size},
+                    snapshot=self.DATABASE,
+                    files_snapshot=self.FILES,
+                    point_parts=("database", "files"),
+                    point_version=version,
+                )
+                draft = restore.review(
+                    selected,
+                    PreparationInputs("", IDENTIFIER, point=self.POINT, scope="full"),
+                )
+                self.assertTrue(draft.eligible, draft.refusals)
+                self.assertEqual(draft.document["shared"], shared)
+                self.assertEqual(draft.document["application"], application)
+                self.assertEqual(draft.document["snapshot"], self.DATABASE)
+                self.assertEqual(draft.document["files_snapshot"], self.FILES)
+                restore.body(draft.document, BodyContext("unit", BOOT, 0))
+
+
 class RestoreReviewTests(ChangeTestCase):
     def test_a_database_restore_is_destructive_and_binds_its_point(self) -> None:
         draft = restore.review(evidence(), PreparationInputs("", IDENTIFIER, point=POINT))
@@ -309,6 +382,47 @@ class RestoreReviewTests(ChangeTestCase):
         rows = cast(list[dict[str, str]], draft.document["details"])
         values = "\n".join(row["value"] for row in rows)
         self.assertIn("may differ by the capture window", values)
+
+    def test_a_wordpress_restore_names_the_private_file_and_its_database(self) -> None:
+        draft = restore.review(
+            evidence(
+                application="wordpress",
+                parts=("database", "files"),
+                point_data=point(scope="full", parts=("database", "files")),
+            ),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="full"),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["shared"], ["private/wp-config.php"])
+        self.assertEqual(
+            draft.document["files"],
+            [f"/var/www/{IDENTIFIER}/current", f"/var/www/{IDENTIFIER}/private/wp-config.php"],
+        )
+        rows = cast(list[dict[str, str]], draft.document["details"])
+        values = "\n".join(row["value"] for row in rows)
+        self.assertIn("WordPress", values)
+        self.assertIn("private configuration is replaced", values)
+        self.assertIn("database settings are kept", values)
+
+    def test_a_laravel_restore_replaces_its_shared_state_as_a_whole(self) -> None:
+        draft = restore.review(
+            evidence(
+                application="laravel",
+                parts=("database", "files"),
+                point_data=point(scope="full", parts=("database", "files")),
+            ),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="full"),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(
+            draft.document["shared"],
+            ["private/laravel.env", "private/storage", "private/cache"],
+        )
+        rows = cast(list[dict[str, str]], draft.document["details"])
+        values = "\n".join(row["value"] for row in rows)
+        self.assertIn("Laravel", values)
+        self.assertIn(".env, storage and bootstrap cache are replaced as a whole", values)
+        restore.body(draft.document, BodyContext("unit", BOOT, 0))
 
     def test_a_full_restore_of_a_point_without_a_database_leaves_it_alone(self) -> None:
         draft = restore.review(
@@ -528,30 +642,124 @@ class RestoreFilesTests(SimpleTestCase):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode) & 0o006, 0)
 
     def test_wordpress_private_configuration_keeps_the_target_database(self) -> None:
-        target = "\n".join(
-            (
-                "<?php",
-                "define( 'ABSPATH', '/var/www/alpha/current/public/' );",
-                "define( 'DB_NAME', 'salpha' );",
-                "define( 'DB_USER', 'salpha' );",
-                "define( 'DB_PASSWORD', '' );",
-                "define( 'DB_HOST', 'localhost:/run/mysqld/mysqld.sock' );",
-                "define( 'DB_CHARSET', 'utf8mb4' );",
-                "define( 'DB_COLLATE', '' );",
-            )
+        from wordpress import convention as wordpress
+
+        target = wordpress.render_private_configuration(
+            IDENTIFIER,
+            tuple(f"target{salt:02d}" * 5 for salt in range(8)),
+            (("TARGET_CONSTANT", "from-target"),),
         )
-        point = target.replace("'salpha'", "'sother'").replace(
-            "define( 'DB_COLLATE', '' );",
-            "define( 'DB_COLLATE', '' );\ndefine( 'AUTH_KEY', 'point-salt' );\n"
-            "define( 'MY_CONSTANT', 'from-point' );",
+        point = wordpress.render_private_configuration(
+            "other",
+            tuple(f"point{salt:02d}-" * 5 for salt in range(8)),
+            (("POINT_CONSTANT", "from-point"),),
         )
-        merged = restore_body._merged_wordpress_configuration(point, target)
+        merged = restore_body.merge_private_configuration(point, target, IDENTIFIER)
+        self.assertEqual(wordpress.private_configuration_problem(merged, IDENTIFIER), "")
         self.assertIn("define( 'DB_NAME', 'salpha' );", merged)
         self.assertNotIn("sother", merged)
-        self.assertIn("define( 'AUTH_KEY', 'point-salt' );", merged)
-        self.assertIn("define( 'MY_CONSTANT', 'from-point' );", merged)
+        self.assertIn("define( 'AUTH_KEY', 'point00-", merged)
+        self.assertIn("define( 'POINT_CONSTANT', 'from-point' );", merged)
+        self.assertNotIn("TARGET_CONSTANT", merged)
+        self.assertIn("define( 'ABSPATH', '/var/www/alpha/current/public/' );", merged)
         with self.assertRaises(ValueError):
-            restore_body._merged_wordpress_configuration("<?php\nsystem('x');\n", target)
+            restore_body.merge_private_configuration("<?php\nsystem('x');\n", target, IDENTIFIER)
+        with self.assertRaises(ValueError):
+            restore_body.merge_private_configuration(point, "not a configuration", IDENTIFIER)
+        injected = point.replace("$table_prefix = ", "system('x');\n$table_prefix = ")
+        with self.assertRaises(ValueError):
+            restore_body.merge_private_configuration(injected, target, IDENTIFIER)
+
+    def test_laravel_shared_state_is_replaced_as_a_whole(self) -> None:
+        staged_temporary, staged_base = self.stage("laravel")
+        target_temporary = tempfile.TemporaryDirectory()
+        with staged_temporary, target_temporary:
+            staged = restore_body.admitted(staged_base.parent.parent.parent, IDENTIFIER, "laravel")
+            shared = cast(dict[str, pathlib.Path], staged["shared"])
+            (shared["private/storage"] / "from-point.txt").write_text("in the point\n")
+            site = pathlib.Path(target_temporary.name) / "var" / "www" / IDENTIFIER
+            for name in ("laravel.env", "storage", "cache"):
+                path = site / "private" / name
+                if name == "laravel.env":
+                    path.parent.mkdir(parents=True)
+                    path.write_text("APP_ENV=after\n")
+                else:
+                    path.mkdir(parents=True)
+            (site / "private" / "storage" / "later.txt").write_text("after the point\n")
+            settings = SimpleNamespace(identifier=IDENTIFIER, directory=str(site))
+            owner, group = os.getuid(), os.getgid()
+            restore_body._replace_shared(shared, settings, "laravel", owner, group)
+            self.assertFalse((site / "private" / "storage" / "later.txt").exists())
+            self.assertEqual(
+                (site / "private" / "storage" / "from-point.txt").read_text(), "in the point\n"
+            )
+            self.assertEqual((site / "private" / "laravel.env").read_text(), "APP_ENV=production\n")
+            self.assertEqual(stat.S_IMODE((site / "private" / "storage").stat().st_mode), 0o700)
+            self.assertEqual(
+                stat.S_IMODE((site / "private" / "storage" / "from-point.txt").stat().st_mode),
+                0o600,
+            )
+
+    def test_publishing_a_restored_release_runs_no_application_code(self) -> None:
+        staged_temporary, staged_base = self.stage("laravel")
+        with staged_temporary:
+            staged = restore_body.admitted(staged_base.parent.parent.parent, IDENTIFIER, "laravel")
+            staged_release = cast(pathlib.Path, staged["release"])
+            private = staged_base / "private"
+            for source, name in (
+                (".env", "laravel.env"),
+                ("storage", "storage"),
+                ("bootstrap/cache", "cache"),
+            ):
+                link = staged_release / source
+                link.unlink()
+                link.symlink_to(private / name)
+            settings = SimpleNamespace(identifier=IDENTIFIER, directory=str(staged_base))
+            with (
+                mock.patch("backups.bodies.restore.subprocess.run") as run,
+                mock.patch("backups.bodies.restore.subprocess.Popen") as popen,
+            ):
+                release = restore_body.place(
+                    staged,
+                    settings,
+                    "laravel",
+                    "restore-0123456789abcdef-a1b2c3d4",
+                    os.getuid(),
+                    os.getgid(),
+                    os.getgid(),
+                )
+            run.assert_not_called()
+            popen.assert_not_called()
+            self.assertEqual(
+                os.readlink(staged_base / "current"),
+                "releases/restore-0123456789abcdef-a1b2c3d4",
+            )
+            self.assertTrue((release / "artisan").is_file())
+
+
+class RestoreReadinessTests(SimpleTestCase):
+    def test_laravel_readiness_uses_deploys_up_path_and_refuses_a_redirect(self) -> None:
+        settings = SimpleNamespace(identifier=IDENTIFIER, names=[f"{IDENTIFIER}.test"])
+        with (
+            mock.patch.object(restore_body, "readiness_request", return_value=200) as request,
+            mock.patch.object(restore_body, "READY_SECONDS", 30),
+        ):
+            self.assertTrue(restore_body.site_ready(settings, "laravel"))
+            request.assert_any_call(settings, "/index.php/up", "/up")
+        with (
+            mock.patch.object(restore_body, "readiness_request", return_value=302),
+            mock.patch.object(restore_body, "READY_SECONDS", 0),
+        ):
+            self.assertFalse(restore_body.site_ready(settings, "laravel"))
+
+    def test_wordpress_readiness_asks_for_the_home_and_login_pages(self) -> None:
+        settings = SimpleNamespace(identifier=IDENTIFIER, names=[f"{IDENTIFIER}.test"])
+        with mock.patch.object(restore_body, "readiness_request", return_value=200) as request:
+            self.assertTrue(restore_body.site_ready(settings, "wordpress"))
+        self.assertEqual(
+            [call.args[1:] for call in request.call_args_list],
+            [("/index.php", "/"), ("/wp-login.php", "/wp-login.php")],
+        )
 
 
 class RestoreApplyTests(ChangeTestCase):

@@ -38,6 +38,8 @@ def write(test: ScenarioTestCase, shell: RemoteShell, path: str, content: str) -
 
 
 class BackupCase(ScenarioTestCase):
+    identifier = IDENTIFIER
+    domain = DOMAIN
     layer = "L1"
     exclusive = True
     prefix = "bk"
@@ -160,13 +162,13 @@ class BackupCase(ScenarioTestCase):
         apply_change(
             self,
             sites_change.CREATE_SITE,
-            PreparationInputs("php84", IDENTIFIER, (DOMAIN,)),
+            PreparationInputs("php84", self.identifier, (self.domain,)),
             timeout=120,
         )
         review = apply_change(
             self,
             database_site.ADD_SITE_DATABASE,
-            PreparationInputs("", IDENTIFIER),
+            PreparationInputs("", self.identifier),
             timeout=120,
         )
         self.native(
@@ -176,7 +178,7 @@ class BackupCase(ScenarioTestCase):
                 "INSERT INTO recovery_check VALUES (7, 'before-the-backup')"
             )
             + " s"
-            + IDENTIFIER
+            + self.identifier
         )
         return review
 
@@ -186,7 +188,7 @@ class BackupCase(ScenarioTestCase):
         return apply_change(
             self,
             change.ENABLE,
-            PreparationInputs("", IDENTIFIER),
+            PreparationInputs("", self.identifier),
             timeout=150,
             secret=PASSPHRASE.encode(),
         )
@@ -195,14 +197,14 @@ class BackupCase(ScenarioTestCase):
         from backups import change
 
         return apply_change(
-            self, change.BACK_UP_NOW, PreparationInputs("", IDENTIFIER), timeout=150
+            self, change.BACK_UP_NOW, PreparationInputs("", self.identifier), timeout=150
         )
 
     def capture_full(self) -> ChangeReview:
         from backups import change
 
         return apply_change(
-            self, change.BACK_UP_FULL, PreparationInputs("", IDENTIFIER), timeout=150
+            self, change.BACK_UP_FULL, PreparationInputs("", self.identifier), timeout=150
         )
 
     def restore_database(self, point: str) -> ChangeReview:
@@ -211,7 +213,7 @@ class BackupCase(ScenarioTestCase):
         return apply_change(
             self,
             restore.RESTORE,
-            PreparationInputs("", IDENTIFIER, point=point),
+            PreparationInputs("", self.identifier, point=point),
             timeout=180,
         )
 
@@ -221,7 +223,7 @@ class BackupCase(ScenarioTestCase):
         return apply_change(
             self,
             restore.RESTORE,
-            PreparationInputs("", IDENTIFIER, point=point, scope="files"),
+            PreparationInputs("", self.identifier, point=point, scope="files"),
             timeout=180,
         )
 
@@ -231,7 +233,7 @@ class BackupCase(ScenarioTestCase):
         return apply_change(
             self,
             restore.RESTORE,
-            PreparationInputs("", IDENTIFIER, point=point, scope="full"),
+            PreparationInputs("", self.identifier, point=point, scope="full"),
             timeout=180,
         )
 
@@ -246,8 +248,8 @@ class BackupCase(ScenarioTestCase):
         WordPress form has fast-layer evidence and the recorded automation state; it is not
         a second site in this item because the shared scenario must stay within 180 s.
         """
-        account = "s" + IDENTIFIER
-        root = f"/var/www/{IDENTIFIER}/releases/{release}"
+        account = "s" + self.identifier
+        root = f"/var/www/{self.identifier}/releases/{release}"
         self.assertEqual(self.native(f"find {root} -not -user {account} -print"), "")
         self.assertEqual(self.native(f"find {root} -perm -0004 -print"), "")
 
@@ -259,7 +261,7 @@ class BackupCase(ScenarioTestCase):
             schedule.SET_BACKUP_SCHEDULE,
             PreparationInputs(
                 "",
-                IDENTIFIER,
+                self.identifier,
                 schedule_state="on",
                 backup_schedule=True,
                 frequency="daily",
@@ -277,7 +279,7 @@ class BackupCase(ScenarioTestCase):
             schedule.SET_BACKUP_SCHEDULE,
             PreparationInputs(
                 "",
-                IDENTIFIER,
+                self.identifier,
                 schedule_state="off",
                 backup_schedule=True,
             ),
@@ -288,7 +290,7 @@ class BackupCase(ScenarioTestCase):
         from backups import schedule
 
         with self.shell() as shell:
-            rows = schedule.read(shell, (IDENTIFIER,))
+            rows = schedule.read(shell, (self.identifier,))
         if rows is None:
             self.fail("The backup schedule could not be read.")
         return rows[0]
@@ -304,15 +306,25 @@ class BackupCase(ScenarioTestCase):
         return int(
             self.native(
                 "curl --silent --show-error --max-time 20 --resolve "
-                f"{DOMAIN}:80:127.0.0.1 -o /dev/null -w '%{{http_code}}' "
-                f"http://{DOMAIN}{path}"
+                f"{self.domain}:80:127.0.0.1 -o /dev/null -w '%{{http_code}}' "
+                f"http://{self.domain}{path}"
+            ).strip()
+        )
+
+    def https_status(self, path: str = "/") -> int:
+        """The site's HTTPS answer through Caddy, including any redirect it would send."""
+        return int(
+            self.native(
+                "curl --silent --show-error --max-time 20 --insecure --resolve "
+                f"{self.domain}:443:127.0.0.1 -o /dev/null -w '%{{http_code}}' "
+                f"https://{self.domain}{path}"
             ).strip()
         )
 
     def large_file(self) -> None:
-        path = f"/var/www/{IDENTIFIER}/current/public/large.bin"
+        path = f"/var/www/{self.identifier}/current/public/large.bin"
         self.native(f"head -c 268435456 /dev/urandom > {path}")
-        self.native(f"chown s{IDENTIFIER}:s{IDENTIFIER} {path}")
+        self.native(f"chown s{self.identifier}:s{self.identifier} {path}")
 
     def wait_stage(self, unit: str, stage: str, timeout: float = 30) -> None:
         import time
@@ -335,14 +347,22 @@ class BackupCase(ScenarioTestCase):
             return collect(shell)
 
     def backup_row(self, collected: CollectedSnapshot) -> ObservedBackup:
-        return next(row for row in collected.backups.value if row.identifier == IDENTIFIER)
+        return next(row for row in collected.backups.value if row.identifier == self.identifier)
+
+    def points(self) -> list[dict[str, object]]:
+        from backups import check
+        from discovery.root_read import run_root
+
+        with self.shell() as shell:
+            listing = run_root(shell, check.listing_command(self.identifier))
+        return check.points(check.parse_listing(listing.stdout) or [])
 
     def offsite_points(self) -> list[dict[str, object]]:
         from backups import check, convention
         from discovery.root_read import run_root
 
         repository = (
-            f"s3:https://{self.S3_HOST}/{self.S3_BUCKET}/{self.offsite_prefix()}/{IDENTIFIER}"
+            f"s3:https://{self.S3_HOST}/{self.S3_BUCKET}/{self.offsite_prefix()}/{self.identifier}"
         )
         with self.shell() as shell:
             listing = run_root(
@@ -351,7 +371,7 @@ class BackupCase(ScenarioTestCase):
                 + shlex.quote(
                     "set -a; . /etc/barectl/backups/offsite/capture.env; set +a; "
                     f"RESTIC_REPOSITORY={repository} "
-                    f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
+                    f"RESTIC_PASSWORD_FILE={convention.server_key(self.identifier)} "
                     f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
                     f"AWS_DEFAULT_REGION={self.S3_REGION} "
                     f"{convention.RESTIC_BIN} -o s3.bucket-lookup=path snapshots --json --no-lock"
@@ -392,7 +412,7 @@ class BackupLifecycle(BackupCase):
         with self.shell() as shell:
             row = observation.read(
                 shell,
-                (IDENTIFIER,),
+                (self.identifier,),
                 "mariadb",
                 Architecture.X86_64,
             )
@@ -413,7 +433,7 @@ class BackupLifecycle(BackupCase):
                 shell,
                 "sh -c "
                 + shlex.quote(
-                    f"RESTIC_REPOSITORY={convention.repository(IDENTIFIER)} "
+                    f"RESTIC_REPOSITORY={convention.repository(self.identifier)} "
                     f"RESTIC_PASSWORD_FILE={staged} "
                     f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
                     f"AWS_DEFAULT_REGION={self.S3_REGION} "
@@ -470,7 +490,9 @@ class BackupLifecycle(BackupCase):
 
         self.capture()
         self.assertEqual(self.site_status("/"), 200)
-        self.assertNotIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))
+        self.assertNotIn(
+            "respond 503", self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy")
+        )
         collected = self.observe()
         backup = self.backup_row(collected)
         self.assertTrue(backup.enabled)
@@ -508,7 +530,7 @@ class BackupLifecycle(BackupCase):
         apply_change(
             self,
             offsite.COPY,
-            PreparationInputs("", IDENTIFIER, point=failed.point),
+            PreparationInputs("", self.identifier, point=failed.point),
             timeout=120,
         )
         self.assertTrue(any(str(point["point"]) == failed.point for point in self.offsite_points()))
@@ -526,7 +548,7 @@ class BackupLifecycle(BackupCase):
         )
         self.assertEqual(self.offsite_files(), before_files)
         with self.shell() as shell:
-            listing = run_root(shell, check.listing_command(IDENTIFIER))
+            listing = run_root(shell, check.listing_command(self.identifier))
         parsed = check.parse_listing(listing.stdout)
         self.assertIsNotNone(parsed, listing.stdout)
         points = check.points(parsed or [])
@@ -557,7 +579,7 @@ class BackupLifecycle(BackupCase):
             apply_change(
                 self,
                 change.BACK_UP_NOW,
-                PreparationInputs("", IDENTIFIER),
+                PreparationInputs("", self.identifier),
                 timeout=60,
                 expected="refused",
                 reason="backup_dump",
@@ -582,8 +604,8 @@ class BackupLifecycle(BackupCase):
         self.assertEqual(backup.last.result_class, "succeeded")
         with self.shell() as shell:
             environment = (
-                f"RESTIC_REPOSITORY={convention.repository(IDENTIFIER)} "
-                f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
+                f"RESTIC_REPOSITORY={convention.repository(self.identifier)} "
+                f"RESTIC_PASSWORD_FILE={convention.server_key(self.identifier)} "
                 f"RESTIC_CACHE_DIR={convention.CACHE_DIR} {convention.RESTIC_BIN}"
             )
             listing = run_root(
@@ -597,18 +619,20 @@ class BackupLifecycle(BackupCase):
                 if isinstance(row.get("tags"), list) and "part:files" in row["tags"]
             )
             files = run_root(shell, f"{environment} ls --json --no-lock {files_id}")
-            self.assertIn(f"/var/www/{IDENTIFIER}/releases/initial", files.stdout)
-            self.assertNotIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))
+            self.assertIn(f"/var/www/{self.identifier}/releases/initial", files.stdout)
+            self.assertNotIn(
+                "respond 503", self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy")
+            )
         # A capture killed while it copies files stays gated, and one reviewed action reopens it.
         from backups import reopen
 
         self.large_file()
-        submitted = submit_change(self, change.BACK_UP_FULL, PreparationInputs("", IDENTIFIER))
+        submitted = submit_change(self, change.BACK_UP_FULL, PreparationInputs("", self.identifier))
         self.wait_stage(submitted.unit, "backup-files")
         self.native(f"systemctl kill --signal=KILL {submitted.unit}")
         self.assertEqual(self.site_status("/"), 503)
-        self.assertIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))
-        apply_change(self, reopen.REOPEN_SITE, PreparationInputs("", IDENTIFIER), timeout=60)
+        self.assertIn("respond 503", self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy"))
+        apply_change(self, reopen.REOPEN_SITE, PreparationInputs("", self.identifier), timeout=60)
         self.assertEqual(self.site_status("/"), 200)
         # A database-only restore replaces the point's data, takes a safety copy first and
         # leaves the site serving. The import runs as the site principal, not a superuser.
@@ -619,7 +643,7 @@ class BackupLifecycle(BackupCase):
                 "CREATE TABLE after_the_point (id INT PRIMARY KEY)"
             )
             + " s"
-            + IDENTIFIER
+            + self.identifier
         )
         before_restore = len(self.points())
         self.restore_database(str(database_point))
@@ -629,13 +653,13 @@ class BackupLifecycle(BackupCase):
                 f"{MYSQL} -N -B -e "  # noqa: S608 - checked fixture query in a disposable database
                 + shlex.quote("SELECT note FROM recovery_check WHERE id=7")
                 + " s"
-                + IDENTIFIER
+                + self.identifier
             ).strip(),
             "before-the-backup",
         )
         query = (
-            f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='s{IDENTIFIER}' "  # noqa: S608
-            "AND TABLE_NAME='after_the_point'"
+            "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='s"  # noqa: S608
+            f"{self.identifier}' AND TABLE_NAME='after_the_point'"
         )
         self.assertEqual(
             self.native(f"{MYSQL} -N -B -e " + shlex.quote(query)).strip(),
@@ -652,57 +676,61 @@ class BackupLifecycle(BackupCase):
         self.assertNotIn(PASSPHRASE, journal)
         # A files-only restore brings back the point's files as a new release owned by the
         # site user, keeps the release it replaced and takes a files-only safety backup first.
-        replaced = self.native(f"readlink /var/www/{IDENTIFIER}/current").strip()
+        replaced = self.native(f"readlink /var/www/{self.identifier}/current").strip()
         self.write_file(
-            f"/var/www/{IDENTIFIER}/current/public/hello.txt", "changed after the full point\n"
+            f"/var/www/{self.identifier}/current/public/hello.txt", "changed after the full point\n"
         )
         self.restore_files(full_point)
         self.assertEqual(self.site_status("/"), 200)
         self.assertIn(
             "Welcome to your PHP site.",
-            self.native(f"cat /var/www/{IDENTIFIER}/current/public/hello.txt"),
+            self.native(f"cat /var/www/{self.identifier}/current/public/hello.txt"),
         )
-        restored_release = self.native(f"readlink /var/www/{IDENTIFIER}/current").strip()
+        restored_release = self.native(f"readlink /var/www/{self.identifier}/current").strip()
         self.assertNotEqual(restored_release, replaced)
-        self.assertEqual(self.native(f"test -d /var/www/{IDENTIFIER}/{replaced}; echo $?"), "0")
+        self.assertEqual(
+            self.native(f"test -d /var/www/{self.identifier}/{replaced}; echo $?"), "0"
+        )
         self.release_owns_its_files(restored_release.removeprefix("releases/"))
         self.assertEqual(
-            self.native(f"stat -c '%G %a' /var/www/{IDENTIFIER}/current/public/hello.txt").strip(),
+            self.native(
+                f"stat -c '%G %a' /var/www/{self.identifier}/current/public/hello.txt"
+            ).strip(),
             "caddy 640",
         )
         files_safety = [row for row in self.points() if row["origin"] == "safety"]
         self.assertEqual(len(files_safety), 2)
         self.assertIn("files", {row["scope"] for row in files_safety})
         # A full-site restore brings back the same point's files and database together.
-        self.write_file(f"/var/www/{IDENTIFIER}/current/public/hello.txt", "changed again\n")
+        self.write_file(f"/var/www/{self.identifier}/current/public/hello.txt", "changed again\n")
         self.native(
             f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
             + shlex.quote(
                 "UPDATE recovery_check SET note='changed-after-the-full-point' WHERE id=7"
             )
             + " s"
-            + IDENTIFIER
+            + self.identifier
         )
         before_full = len(self.points())
         self.restore_full(full_point)
         self.assertEqual(self.site_status("/"), 200)
         self.assertIn(
             "Welcome to your PHP site.",
-            self.native(f"cat /var/www/{IDENTIFIER}/current/public/hello.txt"),
+            self.native(f"cat /var/www/{self.identifier}/current/public/hello.txt"),
         )
         self.assertEqual(
             self.native(
                 f"{MYSQL} -N -B -e "  # noqa: S608 - checked fixture query in a disposable database
                 + shlex.quote("SELECT note FROM recovery_check WHERE id=7")
                 + " s"
-                + IDENTIFIER
+                + self.identifier
             ).strip(),
             "before-the-backup",
         )
-        full_restored = self.native(f"readlink /var/www/{IDENTIFIER}/current").strip()
+        full_restored = self.native(f"readlink /var/www/{self.identifier}/current").strip()
         self.assertNotEqual(full_restored, restored_release)
         self.assertEqual(
-            self.native(f"test -d /var/www/{IDENTIFIER}/{restored_release}; echo $?"), "0"
+            self.native(f"test -d /var/www/{self.identifier}/{restored_release}; echo $?"), "0"
         )
         self.release_owns_its_files(full_restored.removeprefix("releases/"))
         after_full = self.points()
@@ -710,14 +738,6 @@ class BackupLifecycle(BackupCase):
         full_safety = [row for row in after_full if row["origin"] == "safety"]
         self.assertEqual(len(full_safety), 3)
         self.assertTrue(any(row["scope"] == "full" for row in full_safety))
-
-    def points(self) -> list[dict[str, object]]:
-        from backups import check
-        from discovery.root_read import run_root
-
-        with self.shell() as shell:
-            listing = run_root(shell, check.listing_command(IDENTIFIER))
-        return check.points(check.parse_listing(listing.stdout) or [])
 
 
 @tag(SCENARIO_TAG)
@@ -733,22 +753,22 @@ class Retention(BackupCase):
         from backups import convention
 
         if not offsite:
-            return convention.repository(IDENTIFIER)
-        return convention.offsite_repository(self.offsite_config(), IDENTIFIER)
+            return convention.repository(self.identifier)
+        return convention.offsite_repository(self.offsite_config(), self.identifier)
 
     def restic_shell(self, *arguments: str, offsite: bool = False) -> str:
         from backups import convention
 
         if offsite:
             return convention.offsite_restic_command(
-                IDENTIFIER,
+                self.identifier,
                 self.offsite_config(),
                 *arguments,
                 env_paths=(convention.OFFSITE_PRUNE, convention.OFFSITE_CAPTURE),
             )
         return (
             f"RESTIC_REPOSITORY={self.restic_repository()} "
-            f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
+            f"RESTIC_PASSWORD_FILE={convention.server_key(self.identifier)} "
             f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
             + shlex.join([convention.RESTIC_BIN, *arguments])
         )
@@ -768,7 +788,7 @@ class Retention(BackupCase):
 
         tags = [
             "barectl",
-            f"site:{IDENTIFIER}",
+            f"site:{self.identifier}",
             f"scope:{scope}",
             f"part:{part}",
             "origin:manual",
@@ -780,7 +800,7 @@ class Retention(BackupCase):
             tags.append("keep")
         tag_arguments = [item for tag in tags for item in ("--tag", tag)]
         if part == "database":
-            name = filename or convention.dump_filename(IDENTIFIER)
+            name = filename or convention.dump_filename(self.identifier)
             command = "printf 'fixture dump' | " + self.restic_shell(
                 "backup",
                 "--stdin",
@@ -804,7 +824,7 @@ class Retention(BackupCase):
         start = text.index("[")
         return [row for row in json_module.loads(text[start:]) if isinstance(row, dict)]
 
-    def points(self, offsite: bool = False) -> set[str]:
+    def retained_points(self, offsite: bool = False) -> set[str]:
         found: set[str] = set()
         for row in self.snapshot_rows(offsite):
             tags = row.get("tags")
@@ -848,7 +868,7 @@ class Retention(BackupCase):
     def cleanup_result(self, location: str = "onsite") -> dict[str, object]:
         import json as json_module
 
-        unit = f"barectl-site-{IDENTIFIER}-" + (
+        unit = f"barectl-site-{self.identifier}-" + (
             "cleanup.service" if location == "onsite" else "cleanupoffsite.service"
         )
         self.native(f"systemctl start {unit} || true")
@@ -884,27 +904,27 @@ class Retention(BackupCase):
             apply_change(
                 self,
                 offsite.COPY,
-                PreparationInputs("", IDENTIFIER, point=copied),
+                PreparationInputs("", self.identifier, point=copied),
                 timeout=120,
             )
         self.native(self.restic_shell("backup", "--tag", "hand-made", "/etc/hostname"))
-        before = self.points()
-        offsite_before = self.points(offsite=True)
+        before = self.retained_points()
+        offsite_before = self.retained_points(offsite=True)
 
         review = apply_change(
             self,
             retention.SET,
-            PreparationInputs("", IDENTIFIER, days=7),
+            PreparationInputs("", self.identifier, days=7),
             timeout=180,
         )
         self.assertIn(old, {str(row["point"]) for row in review.document["deletions"]})
-        self.assertEqual(self.points(), before, "Applying retention deleted a point.")
-        self.assertEqual(self.points(offsite=True), offsite_before)
+        self.assertEqual(self.retained_points(), before, "Applying retention deleted a point.")
+        self.assertEqual(self.retained_points(offsite=True), offsite_before)
 
         refused = self.cleanup_result()
         self.assertIn(refused["class"], ("partial", "failed"))
-        self.assertIn(corrupt, self.points(), "A failed read-back did not keep the group.")
-        self.assertIn(old, self.points())
+        self.assertIn(corrupt, self.retained_points(), "A failed read-back did not keep the group.")
+        self.assertIn(old, self.retained_points())
 
         ids = self.snapshot_ids(corrupt)
         self.assertTrue(ids)
@@ -914,26 +934,26 @@ class Retention(BackupCase):
         apply_change(
             self,
             offsite.COPY,
-            PreparationInputs("", IDENTIFIER, point=newest),
+            PreparationInputs("", self.identifier, point=newest),
             timeout=120,
         )
 
         result = self.cleanup_result()
         self.assertEqual(result["class"], "succeeded")
         self.assertIn("onsite", result)
-        self.assertNotIn(old, self.points())
-        self.assertNotIn(old_full, self.points())
-        self.assertIn(new_full, self.points())
-        self.assertIn(newest, self.points())
-        self.assertIn(kept, self.points())
+        self.assertNotIn(old, self.retained_points())
+        self.assertNotIn(old_full, self.retained_points())
+        self.assertIn(new_full, self.retained_points())
+        self.assertIn(newest, self.retained_points())
+        self.assertIn(kept, self.retained_points())
         self.assertTrue(self.foreign_present())
-        self.assertIn(old, self.points(offsite=True), "Onsite cleanup changed offsite.")
+        self.assertIn(old, self.retained_points(offsite=True), "Onsite cleanup changed offsite.")
 
         offsite_result = self.cleanup_result("offsite")
         self.assertEqual(offsite_result["class"], "succeeded")
-        self.assertNotIn(old, self.points(offsite=True))
-        self.assertIn(kept, self.points(offsite=True))
-        self.assertIn(newest, self.points(offsite=True))
+        self.assertNotIn(old, self.retained_points(offsite=True))
+        self.assertIn(kept, self.retained_points(offsite=True))
+        self.assertIn(newest, self.retained_points(offsite=True))
 
         self.unsynchronize_clock()
         skipped = self.cleanup_result()
@@ -1071,17 +1091,283 @@ class RebootedFullBackup(BackupCase):
         submitted = submit_change(
             self,
             change.BACK_UP_FULL,
-            PreparationInputs("", IDENTIFIER),
+            PreparationInputs("", self.identifier),
         )
         self.wait_stage(submitted.unit, "backup-files")
         self.stop_for(20)
         self.assertEqual(self.site_status("/"), 503)
-        site_file = self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy")
+        site_file = self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy")
         self.assertIn("respond 503", site_file)
         apply_change(
             self,
             reopen.REOPEN_SITE,
-            PreparationInputs("", IDENTIFIER),
+            PreparationInputs("", self.identifier),
             timeout=60,
         )
         self.assertEqual(self.site_status("/"), 200)
+
+
+@tag(SCENARIO_TAG)
+class WordPressFullRestore(BackupCase):
+    """A WordPress site's paused full point comes back as files and database (#406).
+
+    The L5 layer carries MariaDB, the runtimes and the ACME fixture; this item creates the
+    WordPress site on it, captures one paused full point, mutates the uploads, the private
+    configuration and the database, restores with the safety backup and proves the data,
+    ownership, permissions and both HTTPS readiness answers.
+    """
+
+    layer = "L5"
+    identifier = "bkwp"
+    domain = "bkwp.example.com"
+    prefix = "bkwp"
+    ADMIN = "barectladmin"
+    ADMIN_PASSWORD = "Barectl-Restore-406"  # noqa: S105 - native test value
+    TITLE = "Barectl restore fixture"
+    UPLOAD = "wp-content/uploads/barectl.txt"
+
+    def create_site(self) -> None:
+        from wordpress import create
+
+        apply_change(
+            self,
+            create.CREATE_WORDPRESS,
+            PreparationInputs(
+                "php84",
+                self.identifier,
+                (self.domain,),
+                https=True,
+                title=self.TITLE,
+                admin_username=self.ADMIN,
+                admin_email="admin@example.com",
+            ),
+            timeout=180,
+            secret=self.ADMIN_PASSWORD.encode(),
+        )
+        self.assertIn(
+            f"s{self.identifier}",
+            self.native(f"cat /var/www/{self.identifier}/private/wp-config.php"),
+        )
+
+    def upload(self, name: str, content: str) -> None:
+        site = f"s{self.identifier}"
+        self.native(
+            f"install -d -o {site} -g caddy -m 2750 "
+            f"/var/www/{self.identifier}/current/public/wp-content/uploads"
+        )
+        self.native(
+            f"install -o {site} -g caddy -m 640 /dev/stdin "
+            f"/var/www/{self.identifier}/current/public/{name}"
+            " <<'EOF'\n" + content + "EOF"
+        )
+
+    def option(self) -> str:
+        query = "SELECT option_value FROM wp_options WHERE option_name='blogname'"
+        return self.native(f"{MYSQL} -e {shlex.quote(query)} s{self.identifier}").strip()
+
+    def test_a_wordpress_site_restores_files_database_and_readiness(self) -> None:
+        self.create_site()
+        self.upload(self.UPLOAD, "before-the-point\n")
+        self.enable()
+        self.capture_full()
+        points = [row for row in self.points() if row["scope"] == "full"]
+        self.assertEqual(len(points), 1)
+        self.assertTrue(points[0]["complete"])
+        point = str(points[0]["point"])
+        serving = self.native(f"readlink /var/www/{self.identifier}/current").strip()
+        title = self.option()
+        private_digest = self.native(
+            f"sha256sum /var/www/{self.identifier}/private/wp-config.php | cut -d' ' -f1"
+        ).strip()
+        # Mutation after the point: uploads, a new file, an extra constant and the database.
+        self.native(
+            f"install -o s{self.identifier} -g caddy -m 640 /dev/stdin "
+            f"/var/www/{self.identifier}/current/public/{self.UPLOAD} "
+            "<<'EOF'\nchanged-after-the-point\nEOF"
+        )
+        self.upload("wp-content/uploads/later.txt", "not-in-the-point\n")
+        self.native(
+            f"printf \"define( 'BARECTL_RESTORE_LATER', 'after' );\\n\" "
+            f">>/var/www/{self.identifier}/private/wp-config.php"
+        )
+        statement = shlex.quote(
+            "UPDATE wp_options SET option_value='changed' WHERE option_name='blogname'"
+        )
+        self.native(f"{MYSQL} -e {statement} s{self.identifier}")
+        before = len(self.points())
+        self.restore_full(point)
+        # The files, the private configuration and the database all come from the point.
+        self.assertEqual(
+            self.native(f"cat /var/www/{self.identifier}/current/public/{self.UPLOAD}"),
+            "before-the-point\n",
+        )
+        self.assertEqual(
+            self.native(
+                f"test -e /var/www/{self.identifier}/current/public/wp-content/uploads/later.txt; "
+                "echo $?"
+            ),
+            "1",
+        )
+        self.assertEqual(
+            self.native(
+                f"sha256sum /var/www/{self.identifier}/private/wp-config.php | cut -d' ' -f1"
+            ).strip(),
+            private_digest,
+        )
+        self.assertEqual(self.option(), title)
+        # The target's own database settings survive the private configuration's replacement.
+        private = self.native(f"cat /var/www/{self.identifier}/private/wp-config.php")
+        self.assertIn(f"define( 'DB_NAME', 's{self.identifier}' );", private)
+        self.assertIn(f"define( 'DB_USER', 's{self.identifier}' );", private)
+        self.assertNotIn("BARECTL_RESTORE_LATER", private)
+        # Both answers the readiness check requires are 200 through Caddy over HTTPS.
+        self.assertEqual(self.https_status("/"), 200)
+        self.assertEqual(self.https_status("/wp-login.php"), 200)
+        # A new site-owned release replaced the serving one, and the old one stayed retained.
+        restored = self.native(f"readlink /var/www/{self.identifier}/current").strip()
+        self.assertNotEqual(restored, serving)
+        self.assertTrue(restored.startswith("releases/restore-"))
+        self.assertEqual(self.native(f"test -d /var/www/{self.identifier}/{serving}; echo $?"), "0")
+        self.release_owns_its_files(restored.removeprefix("releases/"))
+        self.assertEqual(
+            self.native(
+                f"stat -c '%U %G %a' /var/www/{self.identifier}/private/wp-config.php"
+            ).strip(),
+            f"s{self.identifier} s{self.identifier} 600",
+        )
+        self.assertEqual(
+            self.native(
+                f"stat -c '%U %G %a' /var/www/{self.identifier}/current/public/{self.UPLOAD}"
+            ).strip(),
+            f"s{self.identifier} caddy 640",
+        )
+        after = self.points()
+        self.assertEqual(len(after), before + 1)
+        safety = [row for row in after if row["origin"] == "safety"]
+        self.assertEqual(len(safety), 1)
+        self.assertEqual(safety[0]["scope"], "full")
+
+
+@tag(SCENARIO_TAG)
+class LaravelFullRestore(BackupCase):
+    """A Laravel site's paused full point replaces its shared state as a whole (#406).
+
+    The L5 layer carries a deployed Laravel fixture with ``vendor/`` and the worker
+    prerequisites. The item captures one paused full point, mutates the private ``.env``,
+    the shared storage directory, the release and the database, restores with the safety
+    backup, and proves ``/up`` answers 200 through Caddy with no redirect, the shared state
+    came back whole, and the restored release counts toward Deploy's current plus five.
+    """
+
+    layer = "L5"
+    identifier = "sqwalpha"
+    domain = "site.fixture.test"
+    prefix = "bklv"
+
+    def env_digest(self) -> str:
+        return self.native(
+            f"sha256sum /var/www/{self.identifier}/private/laravel.env | cut -d' ' -f1"
+        ).strip()
+
+    def add_old_releases(self, count: int) -> list[str]:
+        """Release directories older than the restore, as a Deploy's retained history."""
+        names = [f"{index + 1:040x}-{'a' * 16}" for index in range(count)]
+        account = f"s{self.identifier}"
+        for index, name in enumerate(names, 1):
+            release = f"/var/www/{self.identifier}/releases/{name}"
+            self.native(f"install -d -o {account} -g {account} -m 711 {release}")
+            self.native(f"install -o {account} -g {account} -m 600 /dev/null {release}/artisan")
+            self.native(f"touch -d '2020-01-{index:02d} 00:00:00' {release}")
+        return names
+
+    def test_a_laravel_site_restores_shared_state_readiness_and_retention(self) -> None:
+        from laravel import change as laravel_change
+        from laravel import observation as laravel_observation
+
+        self.enable()
+        self.capture_full()
+        points = [row for row in self.points() if row["scope"] == "full"]
+        self.assertEqual(len(points), 1)
+        self.assertTrue(points[0]["complete"])
+        point = str(points[0]["point"])
+        serving = self.native(f"readlink /var/www/{self.identifier}/current").strip()
+        environment = self.env_digest()
+        storage = f"/var/www/{self.identifier}/private/storage"
+        self.native(
+            f"install -o s{self.identifier} -g s{self.identifier} -m 600 /dev/stdin "
+            f"{storage}/barectl-later.txt <<'EOF'\nnot-in-the-point\nEOF"
+        )
+        self.native(
+            f"printf 'BARECTL_RESTORE_LATER=after\\n' >>"
+            f"/var/www/{self.identifier}/private/laravel.env"
+        )
+        self.native(
+            f"{MYSQL} -e "
+            + shlex.quote("CREATE TABLE restore_later (id INT PRIMARY KEY)")
+            + f" s{self.identifier}"
+        )
+        old = self.add_old_releases(5)
+        before = len(self.points())
+        self.restore_full(point)
+        # The full point answers /up through Caddy over HTTPS with no redirect.
+        self.assertEqual(self.https_status("/up"), 200)
+        self.assertEqual(
+            self.native(
+                "curl --silent --show-error --max-time 20 --insecure --resolve "
+                f"{self.domain}:443:127.0.0.1 -o /dev/null -w '%{{redirect_url}}' "
+                f"https://{self.domain}/up"
+            ),
+            "",
+        )
+        # Shared state is replaced as a whole: the later file and the env edit are gone.
+        self.assertEqual(self.env_digest(), environment)
+        self.assertEqual(
+            self.native(f"test -e {storage}/barectl-later.txt; echo $?"),
+            "1",
+        )
+        query = (
+            "SELECT COUNT(*) FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='restore_later'"
+        )
+        self.assertEqual(
+            self.native(f"{MYSQL} -N -B -e {shlex.quote(query)}").strip(),
+            "0",
+        )
+        # Shared state and the release keep the convention's classification.
+        self.assertEqual(
+            self.native(
+                f"stat -c '%U %G %a' /var/www/{self.identifier}/private/laravel.env"
+            ).strip(),
+            f"s{self.identifier} s{self.identifier} 600",
+        )
+        self.assertEqual(
+            self.native(f"stat -c '%U %G %a' /var/www/{self.identifier}/private/storage").strip(),
+            f"s{self.identifier} s{self.identifier} 700",
+        )
+        restored = self.native(f"readlink /var/www/{self.identifier}/current").strip()
+        self.assertNotEqual(restored, serving)
+        self.assertTrue(restored.startswith("releases/restore-"))
+        self.assertEqual(self.native(f"test -d /var/www/{self.identifier}/{serving}; echo $?"), "0")
+        self.release_owns_its_files(restored.removeprefix("releases/"))
+        # The restored release counts toward Deploy's current plus five, and the release it
+        # replaced stays retained; only the oldest historical release is now prunable.
+        with self.shell() as shell:
+            value = laravel_observation.read(shell)
+        if value is None:
+            self.fail("Laravel observation did not answer after the restore.")
+        row = laravel_observation.site(value, self.identifier)
+        if row is None:
+            self.fail("The restored Laravel site was not observed.")
+        self.assertIn(
+            restored.removeprefix("releases/"),
+            [str(release["name"]) for release in laravel_change.releases_of(row)],
+        )
+        pruned = laravel_change.prune_names(row)
+        self.assertNotIn(restored.removeprefix("releases/"), pruned)
+        self.assertNotIn(serving.removeprefix("releases/"), pruned)
+        self.assertEqual(pruned, [old[0]])
+        after = self.points()
+        self.assertEqual(len(after), before + 1)
+        safety = [row for row in after if row["origin"] == "safety"]
+        self.assertEqual(len(safety), 1)
+        self.assertEqual(safety[0]["scope"], "full")

@@ -1,4 +1,4 @@
-# Backups (implemented, #396, #399, #400, #401, #402, #403, #404 and #405)
+# Backups (implemented, #396, #399, #400, #401, #402, #403, #404, #405 and #406)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
@@ -107,9 +107,12 @@ HAProxy admission and waits for every FPM worker to be Idle, then writes two sna
 share one `--time` and point identifier:
 
 - the database stream, when the site has a site database;
-- the site's current release and its private state: Laravel's `.env`, `storage/` and
-  `bootstrap/cache`, WordPress's private configuration, and the current release for plain
-  PHP.
+- the site's current release and its private state, exactly per the site convention:
+  - **WordPress:** the release `current` points to, including uploads, and the private
+    configuration file outside the public root;
+  - **Laravel:** the release `current` points to, including its installed `vendor/`, and the
+    shared `.env`, `storage/` and private `bootstrap/cache` outside every release;
+  - **Plain PHP:** the release `current` points to.
 
 Both parts are tagged `complete` only after both are verified present. The gate opens only
 then, and the site's background work starts again only after the reviewed open site
@@ -197,7 +200,7 @@ while the site still runs. The site is then paused and drained exactly as a full
   retained, and the restored release counts toward Deploy's retention of `current` plus five. Laravel's shared `.env`, `storage/` and
   `bootstrap/cache` are replaced as a whole, not overlaid. WordPress's private configuration
   file is replaced but the target's own database settings in it are kept, because the site
-  database is always `s<id>`.
+  database is always `s<id>`. The review names each site kind's own replacement.
 - **Permissions** are re-applied from the convention, never taken from the archive. For
   Laravel and plain PHP only `current/public` is readable by `caddy`, and PHP source stays the
   site user's. For WordPress the files are group-readable by `caddy` and never world-readable,
@@ -214,7 +217,9 @@ Verification keeps three findings apart:
 - the restore finished (the files are the current release and the import completed);
 - the data checks passed (the database holds the tables the point contained and the restored
   release is complete);
-- the site answered its readiness check through its private admission path.
+- the site answered its readiness check through its private admission path: for WordPress
+  the HTTPS home page and login page, and for Laravel `/up` through Caddy answering 200
+  with no redirect, using the same path Deploy verifies before it removes the gate.
 
 Only after all three does the gate open and the site's background work resume. A restore that
 stops partway stays gated with one sentence and **Reopen site**, exactly like an interrupted
@@ -340,7 +345,14 @@ the full capture and the restore are `backups/bodies/paused.py`. The read is
 shared Phase D native scenario is `disposable/test_backups.py`; its offsite checks use a
 local S3-compatible fixture (`disposable/native_mirror/s3.py`) in its own lane container and
 never the internet. The #401 files-only and full-site restore assertions and the #405 integrity
-assertions extend the same scenario; the integration run records their measured addition. On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
+assertions extend the same scenario, and #406 adds `WordPressFullRestore` and
+`LaravelFullRestore` there: one WordPress site created on the prepared L5 layer and the
+prepared Laravel site, each with a paused full capture, a full restore with its safety backup,
+and data, ownership, permission and readiness checks; the Laravel item also proves a restored
+release counts toward Deploy's retention. The #405 and #406 items' hosted times are not yet
+measured: the shard record carries a 5 s placeholder until the orchestrator runs them on the
+integration tip. On the local ubuntu-26.04 lane the #401 scenario measured 62 to 65 s for the
+`BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured
 65.3 s for the test and 70 s for its scenario. The local full build measured 294 s against the 300 s target and
