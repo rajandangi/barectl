@@ -175,9 +175,7 @@ class BackupsBrowserTests(BrowserTestCase):
         expect(self.page.get_by_text("Saved here")).to_be_visible()
         self.assert_no_native_terms()
         self.page.get_by_role("button", name="Restore", exact=True).click()
-        expect(
-            self.page.get_by_role("heading", name="Restore the database of shop")
-        ).to_be_visible()
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "restore_database")
         self.assertEqual(
@@ -186,9 +184,48 @@ class BackupsBrowserTests(BrowserTestCase):
         )
         self.assert_no_native_terms()
         self.page.set_viewport_size({"width": 320, "height": 800})
-        expect(
-            self.page.get_by_role("heading", name="Restore the database of shop")
-        ).to_be_visible()
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+    def test_files_only_is_chosen_and_warns_about_the_database(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result(scope="full"))
+        record_points(server, (point(scope="full", parts=("database", "files")),))
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        self.page.get_by_label("What to restore").select_option("files")
+        self.page.get_by_role("button", name="Restore", exact=True).click()
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "restore_database")
+        self.assertEqual(
+            preparation.inputs,
+            {
+                "version": 1,
+                "identifier": "shop",
+                "point": "0123456789abcdef",
+                "scope": "files",
+            },
+        )
+        self.assert_no_native_terms()
+
+    def test_full_site_is_chosen_and_restores_files_and_database(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result(scope="full"))
+        record_points(server, (point(scope="full", parts=("database", "files")),))
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        self.page.get_by_label("What to restore").select_option("full")
+        self.page.get_by_role("button", name="Restore", exact=True).click()
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "restore_database")
+        self.assertEqual(preparation.inputs["scope"], "full")
+        self.assert_no_native_terms()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
@@ -205,7 +242,7 @@ class BackupsBrowserTests(BrowserTestCase):
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
         expect(
             self.page.get_by_text(
-                "This stopped after pausing the site to restore its database. Nothing after it ran."
+                "This stopped after pausing the site to restore it. Nothing after it ran."
             )
         ).to_be_visible()
         self.page.get_by_role("button", name="Reopen site").click()

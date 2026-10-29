@@ -70,6 +70,10 @@ class RecoveryPointView:
         return "database" in self.parts
 
     @property
+    def has_files(self) -> bool:
+        return "files" in self.parts
+
+    @property
     def problem(self) -> str:
         if self.missing:
             return (
@@ -237,8 +241,14 @@ def _result_reason(reason: str) -> str:
         "restore_engine": (
             "The recovery point was made by a different database version, so nothing was restored."
         ),
-        "restore_target": "The site's database changed, so nothing was restored.",
+        "restore_target": "The site changed, so nothing was restored.",
         "restore_safety": "The safety backup failed, so nothing was overwritten.",
+        "restore_files": (
+            "The recovery point's files could not be staged safely, so nothing was replaced."
+        ),
+        "restore_config": (
+            "The server configuration could not be re-created, so the site stays paused."
+        ),
         "restore_gate": "The maintenance page could not be published, so the data was not changed.",
         "restore_idle": "The site was still busy, so the data was not changed.",
         "restore_import": "The import did not finish, so the data may be partly replaced.",

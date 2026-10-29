@@ -599,4 +599,5 @@ if TYPE_CHECKING:
         RecoveryPointView("", "", "", False, False, "", "").short_id,
         RecoveryPointView("", "", "", False, False, "", "").restorable,
         RecoveryPointView("", "", "", False, False, "", "").has_database,
+        RecoveryPointView("", "", "", False, False, "", "").has_files,
     )

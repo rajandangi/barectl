@@ -1,4 +1,4 @@
-# Backups (implemented, #396, #399, #400 and #403)
+# Backups (implemented, #396, #399, #400, #401 and #403)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
@@ -135,32 +135,57 @@ Caddy file. It never starts background work: Scheduled tasks or Queue workers as
 run again, so a half-migrated or half-copied site is never served with its work resumed
 unreviewed.
 
-## Restore database only
+## Restore
 
-Each listed **database-only** or **full site** recovery point offers **Restore** for its
-database. It is one reviewed **Destructive** change with a typed confirmation of the
-site's primary domain. The review names the exact recovery point and target site, what is
-replaced (the site's own database; other sites' databases are not touched), the matching
-site kind and database engine major, the free disk it keeps, and the expected downtime. It
-says whether a safety backup will be taken: an empty target skips it and the review says so.
+Each listed recovery point offers **Restore** with the scopes its point supports: **Database
+only**, **Files only** (from a full point) and **Full site**. It is one reviewed
+**Destructive** change with a typed confirmation of the site's primary domain. The review
+names the exact recovery point and target site, what is replaced, the matching site kind and
+database engine major, the free disk it keeps, and the expected downtime. A live recovery
+point's review says its files and database may differ by the capture window. **Files only**
+warns that the database is left as it is now, so files and database then come from different
+points.
 
-Applying re-lists the point under the site's `.deploy.lock` and refuses a missing,
-incomplete or different-engine-major copy before the site is touched. When the target holds
-data it takes and verifies a database-only safety backup first. It then pauses and drains
-the site exactly as a full capture does, replaces the site's own database with the point's
-data and verifies three findings separately:
+The safety backup matches the restore's scope: Database only, Files only or Full site. An
+empty target database skips it for a Database only restore and the review says so; a files or
+full restore always takes a paused safety point first.
 
-- the import finished;
-- the data checks passed (the database holds the tables the point contained);
+Applying re-lists the point under the site's `.deploy.lock` and refuses a missing, incomplete
+or different-engine-major copy before the site is touched. Files are downloaded into a private
+root-only staging directory and admitted there: absolute or traversing paths, links outside
+the convention's own, device files, FIFOs, sockets, setuid and setgid files are all refused
+while the site still runs. The site is then paused and drained exactly as a full capture does.
+
+- **Files** become a new release directory in the site's release layout. Its files belong to
+  the target site user whatever the archive recorded; a Laravel release is site-owned, while
+  a plain or WordPress release directory keeps the root-owned entry discovery recognizes.
+  Root performs only the `current` switch, as Deploy does. The release that was serving stays
+  retained, and the restored release counts toward Deploy's retention of `current` plus five. Laravel's shared `.env`, `storage/` and
+  `bootstrap/cache` are replaced as a whole, not overlaid. WordPress's private configuration
+  file is replaced but the target's own database settings in it are kept, because the site
+  database is always `s<id>`.
+- **Permissions** are re-applied from the convention, never taken from the archive. For
+  Laravel and plain PHP only `current/public` is readable by `caddy`, and PHP source stays the
+  site user's. For WordPress the files are group-readable by `caddy` and never world-readable,
+  and the private configuration file is 0600.
+- **The database** is imported by streaming `restic dump` into the site's own engine client as
+  the site's Linux user over the local socket, as the `s<id>` principal, never a superuser.
+- **Native configuration** (the Caddy site file, HAProxy and PHP-FPM) is re-rendered from the
+  convention, never from the archive. Restore never runs application code, Artisan, WP-CLI,
+  migrations, key generation or dependency downloads, and needs no network when the point is
+  onsite.
+
+Verification keeps three findings apart:
+
+- the restore finished (the files are the current release and the import completed);
+- the data checks passed (the database holds the tables the point contained and the restored
+  release is complete);
 - the site answered its readiness check through its private admission path.
 
-The database import streams `restic dump` into the site's own engine client as the site's
-Linux user over the local socket, as the `s<id>` principal, never a superuser, and needs no
-network when the point is onsite. Only after all three findings does the gate open and the
-site's background work resume. A restore that stops partway stays gated with one sentence
-and **Reopen site**, exactly like an interrupted full capture; **Check what happened**
-inspects the original run and never submits it again. Restoring files only, full-site
-restores, cross-server restores and exporting a point remain planned.
+Only after all three does the gate open and the site's background work resume. A restore that
+stops partway stays gated with one sentence and **Reopen site**, exactly like an interrupted
+full capture; **Check what happened** inspects the original run and never submits it again.
+Cross-server restores and exporting a point remain planned.
 
 ## Restic results
 
@@ -200,12 +225,14 @@ reconstructs that backups are enabled and the last result from this native evide
 | Server key | `/etc/barectl/backups/<id>.key` | root `0600` |
 | restic profile | `/nix/var/nix/profiles/barectl/restic` | root, the pinned catalog build |
 | restic cache | `/var/cache/barectl/restic` | root `0700` |
+| Restore staging | `/var/lib/barectl-restore/<id>/<point>` | root `0700`, removed when the run ends |
 
 ## Native evidence
 
 The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
 a database-only capture, `backups/bodies/full.py` for a paused full capture,
-`backups/bodies/restore.py` for a database restore, `backups/bodies/offsite.py` for offsite
+`backups/bodies/restore.py` for Database only, Files only and Full site restores,
+`backups/bodies/offsite.py` for offsite
 storage and `backups/bodies/copy.py` for Copy offsite again, and `backups/bodies/reopen.py`
 for reopening a paused site; each prints its stages and a result line. The pause helpers shared by
 the full capture and the restore are `backups/bodies/paused.py`. The read is
@@ -213,7 +240,9 @@ the full capture and the restore are `backups/bodies/paused.py`. The read is
 shared Phase D native scenario is `disposable/test_backups.py`; its offsite checks use a
 local S3-compatible fixture (`disposable/native_mirror/s3.py`) on the lane and never the
 internet.
-On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
+The #401 files-only and full-site restore assertions extend the same scenario; the
+integration run records their measured addition. On the local ubuntu-26.04 lane it measured
+62 to 65 s for the `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured
 65.3 s for the test and 70 s for its scenario. The local full build measured 294 s against the 300 s target and

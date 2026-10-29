@@ -19,8 +19,8 @@ The site identifier is 3 to 24 lowercase ASCII letters and digits, starting with
 | Path | Owner, group and mode | Purpose |
 | --- | --- | --- |
 | `/var/www/<identifier>` | root:root 0755 | Site boundary and the site user's home |
-| `releases/`, `releases/initial/` | root:root 0755 | Root-controlled release directories |
-| `releases/<commit>-<token>` | site user:site group 0711 | A classified Laravel release: directory traversal only, PHP source 0600, and `public/` at site user:caddy 2750 with static files 0640 |
+| `releases/`, `releases/initial/` | root:root 0755 | Root-controlled release directories; a restored plain or WordPress release keeps this form, with its files owned by the site user (Phase D #401) |
+| `releases/<commit>-<token>` | site user:site group 0711 | A classified Laravel release: directory traversal only, PHP source 0600, and `public/` at site user:caddy 2750 with static files 0640. A Laravel release restored from a recovery point is site-owned the same way (Phase D #401) |
 | `current` | root-owned relative link to a release under `releases/` | Caddy and HAProxy serve only `current/public` |
 | `current/public` | site user:caddy 2750 | Document root. PHP source is site user only (0600); intended static files are 0640 so Caddy can read them |
 | `private/`, `private/sessions/`, `private/tmp/` | site user:site group 0700 | PHP sessions, uploads and temporary files, unreadable by other sites |

@@ -1,6 +1,10 @@
 """Restore database only: its review, destructive consent, bodies and pages (#400)."""
 
 import importlib.resources
+import os
+import pathlib
+import stat
+import tempfile
 from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
@@ -54,6 +58,9 @@ def site_record(**values: object) -> dict[str, object]:
     }
 
 
+FILES_SNAPSHOT = "b" * 64
+
+
 def evidence(
     *,
     target_empty: bool = False,
@@ -62,6 +69,7 @@ def evidence(
     point_data: dict[str, object] | None = None,
     current_sites: tuple[str, ...] = (IDENTIFIER,),
     disk_available: int = 2 * 1024 * 1024 * 1024,
+    parts: tuple[str, ...] = ("database",),
 ) -> restore.RestoreEvidence:
     backup = observation.ObservedBackup(
         IDENTIFIER,
@@ -83,7 +91,9 @@ def evidence(
         site_record(),
         backup,
         selected,
-        str(selected["id"]),
+        str(selected["id"]) if "database" in parts else "",
+        FILES_SNAPSHOT if "files" in parts else "",
+        parts,
         point_version,
         target_empty,
         "",
@@ -104,6 +114,19 @@ class RestorePointTests(SimpleTestCase):
             "cc8dd12b140a7a7fa17b97fa5b7a16007eea2feda5d6bca3045923b71f6285a0",
         )
         self.assertEqual(restore._point_snapshot(parsed, "missing"), "")
+
+    def test_the_recorded_full_listing_binds_both_parts(self) -> None:
+        parsed = check.parse_listing(fixture("restic-full-snapshots.txt"))
+        if parsed is None:
+            self.fail("The recorded listing was refused.")
+        snapshots = restore._point_snapshots(parsed, "e1fa817d57ef0663")
+        self.assertEqual(
+            snapshots,
+            {
+                "database": "cc8dd12b140a7a7fa17b97fa5b7a16007eea2feda5d6bca3045923b71f6285a0",
+                "files": "66ac9af32880e79c2f714f1ef737031ee7ea3e408947b2ca9201c1cfbcd59615",
+            },
+        )
 
     def test_the_recorded_dump_headers_name_their_engine_major(self) -> None:
         mariadb = fixture("restic-dump-mariadb.txt")
@@ -231,8 +254,82 @@ class RestoreReviewTests(ChangeTestCase):
         values = "\n".join(row["value"] for row in rows)
         self.assertIn("no safety backup is taken", values)
         self.assertTrue(draft.document["target_empty"])
-        self.assertEqual(draft.document["safety_tags"], [])
+        self.assertEqual(draft.document["safety_tags"], {})
         restore.body(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_a_files_restore_warns_that_files_and_database_differ(self) -> None:
+        draft = restore.review(
+            evidence(
+                parts=("database", "files"),
+                point_data=point(scope="full", parts=("database", "files")),
+            ),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="files"),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(consent_of(draft.effects), Consent.DESTRUCTIVE)
+        self.assertEqual(draft.document["scope"], "files")
+        self.assertEqual(draft.document["snapshot"], "")
+        self.assertEqual(draft.document["files_snapshot"], FILES_SNAPSHOT)
+        self.assertEqual(draft.document["safety_scope"], "files")
+        self.assertEqual(list(cast(dict[str, list[str]], draft.document["safety_tags"])), ["files"])
+        rows = cast(list[dict[str, str]], draft.document["details"])
+        values = "\n".join(row["value"] for row in rows)
+        self.assertIn("files and the database may come from different points", values)
+        self.assertIn("Files only", values)
+        self.assertIn("files-only safety backup", values)
+        restore.body(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_a_full_restore_binds_both_parts_and_a_full_safety_backup(self) -> None:
+        draft = restore.review(
+            evidence(
+                parts=("database", "files"),
+                point_data=point(scope="full", parts=("database", "files")),
+            ),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="full"),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["scope"], "full")
+        self.assertEqual(draft.document["snapshot"], SNAPSHOT)
+        self.assertEqual(draft.document["files_snapshot"], FILES_SNAPSHOT)
+        self.assertEqual(draft.document["safety_scope"], "full")
+        self.assertEqual(
+            set(cast(dict[str, list[str]], draft.document["safety_tags"])), {"database", "files"}
+        )
+        rows = cast(list[dict[str, str]], draft.document["details"])
+        values = "\n".join(row["value"] for row in rows)
+        self.assertIn("full site safety backup", values)
+        self.assertIn("application files and its database", values)
+        restore.body(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_a_live_point_review_names_the_capture_window(self) -> None:
+        draft = restore.review(
+            evidence(parts=("database", "files"), point_data=point(scope="full")),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="files"),
+        )
+        rows = cast(list[dict[str, str]], draft.document["details"])
+        values = "\n".join(row["value"] for row in rows)
+        self.assertIn("may differ by the capture window", values)
+
+    def test_a_full_restore_of_a_point_without_a_database_leaves_it_alone(self) -> None:
+        draft = restore.review(
+            evidence(parts=("files",), point_data=point(scope="files", parts=("files",))),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="full"),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["snapshot"], "")
+        self.assertEqual(draft.document["dump"], [])
+        self.assertEqual(draft.document["safety_scope"], "files")
+        rows = cast(list[dict[str, str]], draft.document["details"])
+        values = "\n".join(row["value"] for row in rows)
+        self.assertIn("the database stays as it is now", values)
+
+    def test_a_database_restore_of_a_files_point_is_refused(self) -> None:
+        draft = restore.review(
+            evidence(parts=("files",), point_data=point(scope="files", parts=("files",))),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="database"),
+        )
+        self.assertFalse(draft.eligible)
+        self.assertIn("no complete database copy", " ".join(draft.refusals))
 
     def test_other_sites_make_the_caddy_step_shared(self) -> None:
         draft = restore.review(
@@ -303,17 +400,152 @@ class RestoreReviewTests(ChangeTestCase):
             )
 
 
-class RestoreApplyTests(ChangeTestCase):
-    def restore_review(self) -> ChangeReview:
-        draft: ReviewDraft = restore.review(
-            evidence(), PreparationInputs("", IDENTIFIER, point=POINT)
+class RestoreFilesTests(SimpleTestCase):
+    """Private staging admission and the convention's file classification (#401)."""
+
+    def stage(
+        self, application: str = "plain"
+    ) -> tuple[tempfile.TemporaryDirectory[str], pathlib.Path]:
+        temporary = tempfile.TemporaryDirectory()
+        base = pathlib.Path(temporary.name) / "var" / "www" / IDENTIFIER
+        release = base / "releases" / "initial"
+        (release / "public").mkdir(parents=True)
+        (release / "public" / "index.php").write_text("<?php\n")
+        if application != "plain":
+            (base / "private").mkdir()
+        if application == "laravel":
+            (release / "artisan").write_text("<?php\n")
+            (base / "private" / "laravel.env").write_text("APP_ENV=production\n")
+            (base / "private" / "storage").mkdir()
+            (base / "private" / "cache").mkdir()
+            (release / ".env").symlink_to(f"/var/www/{IDENTIFIER}/private/laravel.env")
+            (release / "storage").symlink_to(f"/var/www/{IDENTIFIER}/private/storage")
+            (release / "bootstrap").mkdir()
+            (release / "bootstrap" / "cache").symlink_to(f"/var/www/{IDENTIFIER}/private/cache")
+        if application == "wordpress":
+            (base / "private" / "wp-config.php").write_text("<?php\n")
+        return temporary, base
+
+    def test_a_staged_plain_release_is_admitted(self) -> None:
+        temporary, base = self.stage()
+        with temporary:
+            admitted = restore_body.admitted(base.parent.parent.parent, IDENTIFIER, "plain")
+            self.assertEqual(admitted["release"], base / "releases" / "initial")
+
+    def test_a_staged_laravel_release_is_admitted_with_its_private_state(self) -> None:
+        temporary, base = self.stage("laravel")
+        with temporary:
+            admitted = restore_body.admitted(base.parent.parent.parent, IDENTIFIER, "laravel")
+            self.assertEqual(
+                set(cast(dict[str, object], admitted["shared"])),
+                {"private/laravel.env", "private/storage", "private/cache"},
+            )
+
+    def test_a_link_outside_the_convention_is_refused(self) -> None:
+        temporary, base = self.stage()
+        with temporary:
+            link = base / "releases" / "initial" / "public" / "escape"
+            link.symlink_to("/etc/passwd")
+            with self.assertRaises(ValueError):
+                restore_body.admitted(base.parent.parent.parent, IDENTIFIER, "plain")
+            link.unlink()
+            link.symlink_to("../../../../../etc/passwd")
+            with self.assertRaises(ValueError):
+                restore_body.admitted(base.parent.parent.parent, IDENTIFIER, "plain")
+
+    def test_a_device_fifo_socket_setuid_or_setgid_file_is_refused(self) -> None:
+        temporary, base = self.stage()
+        with temporary:
+            fifo = base / "releases" / "initial" / "public" / "pipe"
+            os.mkfifo(fifo)
+            with self.assertRaises(ValueError):
+                restore_body.admitted(base.parent.parent.parent, IDENTIFIER, "plain")
+            fifo.unlink()
+            executable = base / "releases" / "initial" / "public" / "index.php"
+            executable.chmod(0o4755)
+            with self.assertRaises(ValueError):
+                restore_body.admitted(base.parent.parent.parent, IDENTIFIER, "plain")
+            executable.chmod(0o2755)
+            with self.assertRaises(ValueError):
+                restore_body.admitted(base.parent.parent.parent, IDENTIFIER, "plain")
+
+    def test_a_laravel_release_is_classified_from_the_convention(self) -> None:
+        temporary, base = self.stage("laravel")
+        with temporary:
+            release = base / "releases" / "initial"
+            (release / "public" / "app.css").write_text("body{}")
+            (release / "src").mkdir()
+            (release / "src" / "app.php").write_text("<?php")
+            owner = os.getuid()
+            group = os.getgid()
+            restore_body.classify_release(release, "laravel", owner, group, group)
+            self.assertIn(stat.S_IMODE(release.stat().st_mode), (0o711,))
+            self.assertIn((release / "public").stat().st_mode & 0o7777, (0o2750, 0o750))
+            self.assertEqual(stat.S_IMODE((release / "public" / "index.php").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((release / "public" / "app.css").stat().st_mode), 0o640)
+            self.assertEqual(stat.S_IMODE((release / "src" / "app.php").stat().st_mode), 0o600)
+
+    def test_a_wordpress_release_is_group_readable_by_caddy_and_never_world_readable(self) -> None:
+        temporary, base = self.stage("wordpress")
+        with temporary:
+            release = base / "releases" / "initial"
+            (release / "public" / "wp-load.php").write_text("<?php")
+            owner = os.getuid()
+            group = os.getgid()
+            restore_body.classify_release(release, "wordpress", owner, group, group)
+            for path in (
+                release,
+                release / "public",
+                release / "public" / "index.php",
+                release / "public" / "wp-load.php",
+            ):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode) & 0o006, 0)
+
+    def test_wordpress_private_configuration_keeps_the_target_database(self) -> None:
+        target = "\n".join(
+            (
+                "<?php",
+                "define( 'ABSPATH', '/var/www/alpha/current/public/' );",
+                "define( 'DB_NAME', 'salpha' );",
+                "define( 'DB_USER', 'salpha' );",
+                "define( 'DB_PASSWORD', '' );",
+                "define( 'DB_HOST', 'localhost:/run/mysqld/mysqld.sock' );",
+                "define( 'DB_CHARSET', 'utf8mb4' );",
+                "define( 'DB_COLLATE', '' );",
+            )
         )
+        point = target.replace("'salpha'", "'sother'").replace(
+            "define( 'DB_COLLATE', '' );",
+            "define( 'DB_COLLATE', '' );\ndefine( 'AUTH_KEY', 'point-salt' );\n"
+            "define( 'MY_CONSTANT', 'from-point' );",
+        )
+        merged = restore_body._merged_wordpress_configuration(point, target)
+        self.assertIn("define( 'DB_NAME', 'salpha' );", merged)
+        self.assertNotIn("sother", merged)
+        self.assertIn("define( 'AUTH_KEY', 'point-salt' );", merged)
+        self.assertIn("define( 'MY_CONSTANT', 'from-point' );", merged)
+        with self.assertRaises(ValueError):
+            restore_body._merged_wordpress_configuration("<?php\nsystem('x');\n", target)
+
+
+class RestoreApplyTests(ChangeTestCase):
+    def restore_review(self, draft: ReviewDraft | None = None) -> ChangeReview:
+        draft = draft or restore.review(evidence(), PreparationInputs("", IDENTIFIER, point=POINT))
         preparation = ChangePreparation.objects.create(
             server=self.server,
             kind_slug=restore.SLUG,
             requested_by=self.user,
             ssh_alias=self.server.ssh_alias,
-            inputs={"version": 1, "identifier": IDENTIFIER, "point": POINT},
+            inputs={
+                "version": 1,
+                "identifier": IDENTIFIER,
+                "point": POINT,
+                **(
+                    {"scope": draft.document["scope"]}
+                    if draft.document.get("scope") != "database"
+                    else {}
+                ),
+            },
             status="succeeded",
         )
         now = timezone.now()
@@ -344,6 +576,21 @@ class RestoreApplyTests(ChangeTestCase):
 
     def test_site_consent_cannot_apply_a_restore(self) -> None:
         review = self.restore_review()
+        self.sign_in_with("view_changes", "change_site")
+        response = self.apply_review(review, {"confirmation": "alpha.test"})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ChangeRun.objects.exists())
+
+    def test_site_consent_cannot_apply_a_files_restore(self) -> None:
+        draft = restore.review(
+            evidence(
+                parts=("database", "files"),
+                point_data=point(scope="full", parts=("database", "files")),
+            ),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="files"),
+        )
+        review = self.restore_review(draft)
+        self.assertEqual(review.consent, Consent.DESTRUCTIVE)
         self.sign_in_with("view_changes", "change_site")
         response = self.apply_review(review, {"confirmation": "alpha.test"})
         self.assertEqual(response.status_code, 403)
@@ -425,6 +672,34 @@ class RestorePageTests(ChangeTestCase):
         self.assertEqual(response.status_code, 404)
         self.assertFalse(ChangePreparation.objects.exists())
 
+    def test_files_only_and_full_site_choose_their_own_scope(self) -> None:
+        server = self.store()
+        record_points(
+            server,
+            (point(scope="full", parts=("database", "files")),),
+            identifier="shop",
+        )
+        for scope in ("files", "full"):
+            with self.subTest(scope=scope):
+                ChangePreparation.objects.filter(server=server).delete()
+                response = self.client.post(
+                    f"/servers/{server.pk}/sites/shop/backups/restore/prepare/",
+                    {"point": POINT, "scope": scope},
+                )
+                self.assertEqual(response.status_code, 302)
+                preparation = ChangePreparation.objects.filter(server=server).latest("pk")
+                self.assertEqual(preparation.kind_slug, restore.SLUG)
+                self.assertEqual(preparation.inputs["scope"], scope)
+
+    def test_a_forged_restore_scope_is_refused(self) -> None:
+        server = self.store()
+        response = self.client.post(
+            f"/servers/{server.pk}/sites/shop/backups/restore/prepare/",
+            {"point": POINT, "scope": "everything"},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ChangePreparation.objects.exists())
+
     def test_a_gated_restore_shows_one_sentence_and_one_reopen_action(self) -> None:
         server = self.store(
             gated=True,
@@ -433,14 +708,14 @@ class RestorePageTests(ChangeTestCase):
         page = self.client.get(f"/servers/{server.pk}/sites/shop/backups/")
         self.assertContains(
             page,
-            "This stopped after pausing the site to restore its database. Nothing after it ran.",
+            "This stopped after pausing the site to restore it. Nothing after it ran.",
         )
         self.assertContains(page, "Reopen site")
         self.assertNotContains(page, "This stopped after pausing the site for a full backup.")
         overview = self.client.get(f"/servers/{server.pk}/sites/shop/")
         self.assertContains(
             overview,
-            "This stopped after pausing the site to restore its database. Nothing after it ran.",
+            "This stopped after pausing the site to restore it. Nothing after it ran.",
         )
 
     def test_a_successful_restore_is_a_separate_finding_from_a_saved_point(self) -> None:

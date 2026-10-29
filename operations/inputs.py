@@ -47,8 +47,10 @@ class PreparationInputs:
     names: tuple[str, ...] = ()
     # The retained release a Roll back selects; empty for every other kind.
     release: str = ""
-    # The recovery point a database restore selects; empty for every other kind.
+    # The recovery point a restore selects and what it restores (database, files or the
+    # full site); empty for every other kind.
     point: str = ""
+    scope: str = ""
     # The site's Deploy switch: pending migrations run only when this is true.
     migrations: bool = True
     # Whether a created site is served over HTTPS. The dashboard passes True; the native
@@ -221,7 +223,14 @@ class PreparationInputs:
         if self.release:
             return {"version": 1, "identifier": self.identifier, "release": self.release}
         if self.point:
-            return {"version": 1, "identifier": self.identifier, "point": self.point}
+            selected: dict[str, object] = {
+                "version": 1,
+                "identifier": self.identifier,
+                "point": self.point,
+            }
+            if self.scope:
+                selected["scope"] = self.scope
+            return selected
         if self.readiness:
             return {
                 "version": 1,
@@ -612,14 +621,22 @@ def _identifier_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Pr
 def _recovery_point_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
-    """A database restore names its site and one Barectl recovery point."""
+    """A restore names its site, one Barectl recovery point and what to restore."""
     from backups import convention
     from sites.names import request
 
-    if set(value) != {"version", "identifier", "point"}:
+    if set(value) not in (
+        {"version", "identifier", "point"},
+        {"version", "identifier", "point", "scope"},
+    ):
         raise ValueError(INVALID_INPUTS)
-    identifier, point = value["identifier"], value["point"]
-    if not isinstance(identifier, str) or not isinstance(point, str):
+    identifier, point, scope = value["identifier"], value["point"], value.get("scope", "")
+    if (
+        not isinstance(identifier, str)
+        or not isinstance(point, str)
+        or not isinstance(scope, str)
+        or scope not in ("", *convention.SCOPES)
+    ):
         raise ValueError(INVALID_INPUTS)
     if convention.POINT.fullmatch(point) is None:
         raise ValueError(INVALID_INPUTS)
@@ -629,7 +646,7 @@ def _recovery_point_inputs(
         raise ValueError(INVALID_INPUTS) from None
     if canonical != identifier:
         raise ValueError(INVALID_INPUTS)
-    return PreparationInputs("", identifier, point=point)
+    return PreparationInputs("", identifier, point=point, scope=scope)
 
 
 def _site_remove_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:

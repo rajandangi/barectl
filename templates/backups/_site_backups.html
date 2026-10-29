@@ -11,7 +11,7 @@
         <div class="usa-alert__body">
           <p class="usa-alert__text">
             {% if backups.restore %}
-              This stopped after pausing the site to restore its database. Nothing after it ran.
+              This stopped after pausing the site to restore it. Nothing after it ran.
             {% else %}
               This stopped after pausing the site for a full backup. Nothing after it ran.
             {% endif %}
@@ -186,12 +186,23 @@
                   {% endif %}
                 </td>
                 <td>
-                  {% if backups_can_restore and point.restorable and point.has_database %}
+                  {% if backups_can_restore and point.restorable %}
                     <form class="usa-form"
                           method="post"
                           action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
                       {% csrf_token %}
                       <input type="hidden" name="point" value="{{ point.point }}">
+                      <label class="usa-label"
+                             for="restore-scope-{{ point.point }}">What to restore</label>
+                      <select class="usa-select" id="restore-scope-{{ point.point }}" name="scope">
+                        {% if backups.database and point.has_database %}
+                          <option value="database">Database only (the site stays online)</option>
+                        {% endif %}
+                        {% if point.has_files %}
+                          <option value="files">Files only (the database stays as it is now)</option>
+                          <option value="full">Full site (pauses the site briefly)</option>
+                        {% endif %}
+                      </select>
                       <button type="submit" class="usa-button usa-button--outline">Restore</button>
                     </form>
                   {% endif %}
