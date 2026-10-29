@@ -569,6 +569,9 @@ class RestoreFilesTests(SimpleTestCase):
     def test_a_staged_plain_release_is_admitted(self) -> None:
         temporary, base = self.stage()
         with temporary:
+            # The convention's public directory carries the setgid bit; a directory may
+            # keep it even though a setuid or setgid regular file is refused.
+            (base / "releases" / "initial" / "public").chmod(0o2750)
             admitted = restore_body.admitted(base.parent.parent.parent, IDENTIFIER, "plain")
             self.assertEqual(admitted["release"], base / "releases" / "initial")
 

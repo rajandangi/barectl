@@ -244,9 +244,8 @@ class BackupCase(ScenarioTestCase):
     def release_owns_its_files(self, release: str) -> None:
         """A restored release, and every entry in it, belongs to the site user (Phase D #401).
 
-        The plain-PHP assertion proves the release form Create and Deploy produce. The
-        WordPress form has fast-layer evidence and the recorded automation state; it is not
-        a second site in this item because the shared scenario must stay within 180 s.
+        This proves the release form Create, Deploy and Restore produce for the plain-PHP,
+        WordPress and Laravel items.
         """
         account = "s" + self.identifier
         root = f"/var/www/{self.identifier}/releases/{release}"
@@ -487,7 +486,6 @@ class BackupLifecycle(BackupCase):
         self.assertGreater(reconstructed.next_elapse_us, 0)
         self.disable_schedule()
         self.assertFalse(self.schedule_row().installed)
-
         self.capture()
         self.assertEqual(self.site_status("/"), 200)
         self.assertNotIn(
@@ -592,7 +590,6 @@ class BackupLifecycle(BackupCase):
         self.capture_full()
         full = [point for point in self.points() if point["scope"] == "full"]
         self.assertEqual(len(full), 1)
-        full_point = str(full[0]["point"])
         self.assertTrue(full[0]["complete"])
         self.assertEqual(full[0]["parts"], ["database", "files"])
         self.assertEqual(self.site_status("/"), 200)
@@ -674,49 +671,96 @@ class BackupLifecycle(BackupCase):
         self.assertIn('"kind":"restore"', journal)
         self.assertIn("restore_done", journal)
         self.assertNotIn(PASSPHRASE, journal)
-        # A files-only restore brings back the point's files as a new release owned by the
-        # site user, keeps the release it replaced and takes a files-only safety backup first.
-        replaced = self.native(f"readlink /var/www/{self.identifier}/current").strip()
+
+
+@tag(SCENARIO_TAG)
+class FullSiteRestore(BackupCase):
+    """A full point comes back as files only and then as the whole plain-PHP site (#401)."""
+
+    identifier = "bkfull"
+    domain = "bkfull.example.com"
+    prefix = "bkfull"
+    exclusive = True
+
+    def test_a_full_point_restores_files_only_then_the_whole_site(self) -> None:
+        self.prepare_site()
+        self.enable()
+        self.capture_full()
+        full = [point for point in self.points() if point["scope"] == "full"]
+        self.assertEqual(len(full), 1)
+        self.assertTrue(full[0]["complete"])
+        self.assertEqual(full[0]["parts"], ["database", "files"])
+        point = str(full[0]["point"])
+        serving = self.native(f"readlink /var/www/{self.identifier}/current").strip()
+        # Files only leaves the database where it is, so the two come from different times.
         self.write_file(
-            f"/var/www/{self.identifier}/current/public/hello.txt", "changed after the full point\n"
+            f"/var/www/{self.identifier}/current/public/hello.txt",
+            "changed after the full point\n",
         )
-        self.restore_files(full_point)
-        self.assertEqual(self.site_status("/"), 200)
-        self.assertIn(
-            "Welcome to your PHP site.",
-            self.native(f"cat /var/www/{self.identifier}/current/public/hello.txt"),
-        )
-        restored_release = self.native(f"readlink /var/www/{self.identifier}/current").strip()
-        self.assertNotEqual(restored_release, replaced)
-        self.assertEqual(
-            self.native(f"test -d /var/www/{self.identifier}/{replaced}; echo $?"), "0"
-        )
-        self.release_owns_its_files(restored_release.removeprefix("releases/"))
-        self.assertEqual(
-            self.native(
-                f"stat -c '%G %a' /var/www/{self.identifier}/current/public/hello.txt"
-            ).strip(),
-            "caddy 640",
-        )
-        files_safety = [row for row in self.points() if row["origin"] == "safety"]
-        self.assertEqual(len(files_safety), 2)
-        self.assertIn("files", {row["scope"] for row in files_safety})
-        # A full-site restore brings back the same point's files and database together.
-        self.write_file(f"/var/www/{self.identifier}/current/public/hello.txt", "changed again\n")
         self.native(
             f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
-            + shlex.quote(
-                "UPDATE recovery_check SET note='changed-after-the-full-point' WHERE id=7"
-            )
+            + shlex.quote("UPDATE recovery_check SET note='changed-after-the-point' WHERE id=7")
             + " s"
             + self.identifier
         )
-        before_full = len(self.points())
-        self.restore_full(full_point)
+        files_review = self.restore_files(point)
+        details = cast(list[dict[str, str]], files_review.document["details"])
+        self.assertIn("different points", "\n".join(row["value"] for row in details))
         self.assertEqual(self.site_status("/"), 200)
-        self.assertIn(
-            "Welcome to your PHP site.",
+        self.assertEqual(
             self.native(f"cat /var/www/{self.identifier}/current/public/hello.txt"),
+            "Welcome to your PHP site.\n",
+        )
+        self.assertEqual(
+            self.native(
+                f"{MYSQL} -N -B -e "  # noqa: S608 - checked fixture query in a disposable database
+                + shlex.quote("SELECT note FROM recovery_check WHERE id=7")
+                + " s"
+                + self.identifier
+            ).strip(),
+            "changed-after-the-point",
+        )
+        files_release = self.native(f"readlink /var/www/{self.identifier}/current").strip()
+        self.assertNotEqual(files_release, serving)
+        self.assertTrue(files_release.startswith("releases/restore-"))
+        self.assertEqual(
+            self.native(f"test -d /var/www/{self.identifier}/{serving}; echo $?").strip(), "0"
+        )
+        self.release_owns_its_files(files_release.removeprefix("releases/"))
+        self.assertEqual(
+            self.native(f"stat -c '%U %G %a' /var/www/{self.identifier}/{files_release}").strip(),
+            f"s{self.identifier} s{self.identifier} 711",
+        )
+        self.assertEqual(
+            self.native(
+                f"stat -c '%U %G %a' /var/www/{self.identifier}/current/public/hello.txt"
+            ).strip(),
+            f"s{self.identifier} caddy 640",
+        )
+        self.assertEqual(
+            self.native(
+                f"stat -c '%U %G %a' /var/www/{self.identifier}/current/public/index.php"
+            ).strip(),
+            f"s{self.identifier} s{self.identifier} 600",
+        )
+        after_files = self.points()
+        files_safety = [row for row in after_files if row["origin"] == "safety"]
+        self.assertEqual(len(files_safety), 1)
+        self.assertEqual(files_safety[0]["scope"], "files")
+        # Full site brings back the same point's files and database together.
+        self.write_file(f"/var/www/{self.identifier}/current/public/hello.txt", "changed again\n")
+        self.native(
+            f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
+            + shlex.quote("UPDATE recovery_check SET note='changed-again' WHERE id=7")
+            + " s"
+            + self.identifier
+        )
+        before_full = len(after_files)
+        self.restore_full(point)
+        self.assertEqual(self.site_status("/"), 200)
+        self.assertEqual(
+            self.native(f"cat /var/www/{self.identifier}/current/public/hello.txt"),
+            "Welcome to your PHP site.\n",
         )
         self.assertEqual(
             self.native(
@@ -727,16 +771,16 @@ class BackupLifecycle(BackupCase):
             ).strip(),
             "before-the-backup",
         )
-        full_restored = self.native(f"readlink /var/www/{self.identifier}/current").strip()
-        self.assertNotEqual(full_restored, restored_release)
+        full_release = self.native(f"readlink /var/www/{self.identifier}/current").strip()
+        self.assertNotEqual(full_release, files_release)
         self.assertEqual(
-            self.native(f"test -d /var/www/{self.identifier}/{restored_release}; echo $?"), "0"
+            self.native(f"test -d /var/www/{self.identifier}/{files_release}; echo $?").strip(), "0"
         )
-        self.release_owns_its_files(full_restored.removeprefix("releases/"))
+        self.release_owns_its_files(full_release.removeprefix("releases/"))
         after_full = self.points()
         self.assertEqual(len(after_full), before_full + 1)
         full_safety = [row for row in after_full if row["origin"] == "safety"]
-        self.assertEqual(len(full_safety), 3)
+        self.assertEqual(len(full_safety), 2)
         self.assertTrue(any(row["scope"] == "full" for row in full_safety))
 
 
