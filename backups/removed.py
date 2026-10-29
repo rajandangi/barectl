@@ -241,13 +241,16 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     _document(document)
     _ = context
     value = {
-        key: document[key]
-        for key in (
-            "identifier",
-            "repository",
-            "server_key",
-            "offsite",
-        )
+        "version": 1,
+        **{
+            key: document[key]
+            for key in (
+                "identifier",
+                "repository",
+                "server_key",
+                "offsite",
+            )
+        },
     }
     encoded = base64.b64encode(gzip.compress(json.dumps(value).encode(), mtime=0)).decode()
     return NativeBody(REMOVED_BYTES, (encoded,))

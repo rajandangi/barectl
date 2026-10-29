@@ -4,7 +4,10 @@ Remove site keeps a site's repositories; one explicit read lists them, and a res
 name one as its source only when the point's own files prove the target's kind.
 """
 
+import base64
+import gzip
 import importlib.resources
+import json
 from typing import cast, override
 from unittest import mock
 
@@ -392,7 +395,11 @@ class RemovedDeleteReviewTests(SimpleTestCase):
             values,
         )
         self.assertIn("Deletion is permanent", values)
-        removed.body(draft.document, BodyContext("unit", BOOT, 0))
+        native = removed.body(draft.document, BodyContext("unit", BOOT, 0))
+        payload = json.loads(gzip.decompress(base64.b64decode(native.arguments[0])))
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(payload["identifier"], SOURCE)
+        self.assertEqual(payload["repository"], convention.repository(SOURCE))
 
     def test_a_site_that_still_exists_is_refused(self) -> None:
         draft = removed.review(delete_evidence(removed_site=False), PreparationInputs("", SOURCE))
