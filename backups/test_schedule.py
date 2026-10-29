@@ -214,6 +214,64 @@ class FixedUnitTests(ChangeTestCase):
         self.assertEqual(rows[0].problem, "")
         self.assertEqual(schedule._next_label(rows[0]), "")
 
+    def test_an_integrity_slice_alone_is_not_a_backup_schedule(self) -> None:
+        document = json.loads(fixture("systemd-backup-schedule.json"))
+        row = document["sites"][0]
+        row["units"] = {
+            "slice": row["units"]["slice"],
+            "service": None,
+            "timer": None,
+        }
+        row["payload"] = None
+        row["script"] = None
+        row["show"]["service"] = None
+        row["show"]["timer"] = None
+        row["timers"] = []
+        command = schedule.observe_command((IDENTIFIER,))
+        shell = ReplayShell(
+            Transcript(
+                "backup-schedule-integrity-slice",
+                {},
+                "26.04",
+                "x86_64",
+                "ssh-ed25519 SHA256:x",
+                (
+                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
+                    (command, Recorded(ssh.CommandResult(0, json.dumps(document)))),
+                ),
+            )
+        )
+        rows = schedule.read(shell, (IDENTIFIER,))
+        if rows is None:
+            self.fail("The integrity slice alone was refused as a schedule.")
+        self.assertFalse(rows[0].installed)
+        self.assertEqual(rows[0].problem, "")
+
+    def test_an_orphan_schedule_service_without_its_payload_is_outside(self) -> None:
+        document = json.loads(fixture("systemd-backup-schedule.json"))
+        row = document["sites"][0]
+        row["payload"] = None
+        row["script"] = None
+        command = schedule.observe_command((IDENTIFIER,))
+        shell = ReplayShell(
+            Transcript(
+                "backup-schedule-orphan",
+                {},
+                "26.04",
+                "x86_64",
+                "ssh-ed25519 SHA256:x",
+                (
+                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
+                    (command, Recorded(ssh.CommandResult(0, json.dumps(document)))),
+                ),
+            )
+        )
+        rows = schedule.read(shell, (IDENTIFIER,))
+        if rows is None:
+            self.fail("The orphan schedule was not read.")
+        self.assertTrue(rows[0].installed)
+        self.assertIn("outside supported settings", rows[0].problem)
+
 
 class InspectTests(ChangeTestCase):
     def test_inspect_reads_every_site_even_when_the_site_probe_names_none(self) -> None:
@@ -261,6 +319,31 @@ class ReviewTests(ChangeTestCase):
         self.assertEqual(payload["units"], dict.fromkeys(("slice", "service", "timer"), "absent"))
         self.assertNotIn("RESTIC_PASSWORD=", json.dumps(payload))
         self.assertNotIn(CANARY, json.dumps(payload))
+
+    def test_a_schedule_is_set_alongside_the_integrity_slice(self) -> None:
+        slice_only = ObservedSchedule(
+            IDENTIFIER,
+            installed=False,
+            units={"slice": "a" * 64},
+        )
+        draft = schedule.review(
+            evidence(schedules=(slice_only,)),
+            PreparationInputs(
+                "",
+                IDENTIFIER,
+                schedule_state="on",
+                backup_schedule=True,
+                frequency="daily",
+                at="03:00",
+                scope="full",
+            ),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(
+            draft.document["units"],
+            {"slice": "a" * 64, "service": "absent", "timer": "absent"},
+        )
+        schedule.body(draft.document, BodyContext("unit", BOOT, 0))
 
     def test_an_overlapping_window_is_refused_with_the_next_free_slot(self) -> None:
         other = ObservedSchedule(
