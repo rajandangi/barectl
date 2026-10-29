@@ -7,6 +7,7 @@ import json
 from datetime import UTC, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
+from unittest import mock
 
 from django.test import Client
 from django.utils import timezone
@@ -212,6 +213,27 @@ class FixedUnitTests(ChangeTestCase):
         self.assertFalse(rows[0].installed)
         self.assertEqual(rows[0].problem, "")
         self.assertEqual(schedule._next_label(rows[0]), "")
+
+
+class InspectTests(ChangeTestCase):
+    def test_inspect_reads_every_site_even_when_the_site_probe_names_none(self) -> None:
+        observed = SimpleNamespace(
+            architecture=SimpleNamespace(value="x86_64"),
+            standing=None,
+        )
+        shell = SimpleNamespace(run=lambda _command: ssh.CommandResult(0, "alpha\n"))
+        with (
+            mock.patch.object(
+                schedule, "_site_record", return_value=(site_record(), (), BOOT, 100)
+            ),
+            mock.patch("discovery.observations.collect", return_value=observed),
+            mock.patch("backups.schedule.database_observation.installed_engines", return_value=[]),
+            mock.patch("backups.schedule.observation.read", return_value=None),
+            mock.patch.object(schedule, "read", return_value=()) as read,
+        ):
+            evidence = schedule.inspect(shell, PreparationInputs("", IDENTIFIER))
+        read.assert_called_once_with(shell, ("alpha",))
+        self.assertEqual(evidence.current_sites, ("alpha",))
 
 
 class ReviewTests(ChangeTestCase):

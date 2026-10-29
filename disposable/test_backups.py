@@ -297,7 +297,7 @@ class BackupCase(ScenarioTestCase):
         from datetime import UTC, datetime, timedelta
 
         now = datetime.now(UTC)
-        moment = now + timedelta(minutes=3 if now.second >= 45 else 2)
+        moment = now + timedelta(minutes=2 if now.second >= 50 else 1)
         return moment.strftime("%H:%M")
 
     def site_status(self, path: str = "/") -> int:
@@ -423,6 +423,7 @@ class BackupLifecycle(BackupCase):
             shell.run(f"rm -f {staged}")
             self.assertEqual(listing.exit_status, 0, listing.stdout)
             self.assertEqual(json.loads(listing.stdout or "[]"), [])
+
         # One reviewed schedule installs a fixed UTC timer. It fires a live capture with no
         # controller connected, and a fresh controller reads the same schedule back.
         at = self.next_schedule_time()
@@ -434,7 +435,7 @@ class BackupLifecycle(BackupCase):
         self.assertGreater(installed.next_elapse_us, 0)
         import time
 
-        end = time.monotonic() + 180
+        end = time.monotonic() + 80
         scheduled: list[dict[str, object]] = []
         while time.monotonic() < end and not scheduled:
             scheduled = [
@@ -466,6 +467,7 @@ class BackupLifecycle(BackupCase):
         self.assertGreater(reconstructed.next_elapse_us, 0)
         self.disable_schedule()
         self.assertFalse(self.schedule_row().installed)
+
         self.capture()
         self.assertEqual(self.site_status("/"), 200)
         self.assertNotIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))

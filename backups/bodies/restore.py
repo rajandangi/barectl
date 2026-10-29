@@ -480,7 +480,11 @@ def reviewed_point(document: dict[str, object], repository: str, key: str) -> bo
         found[part] = identifier
     if set(found) != set(parts):
         return False
-    return all(found[part] == str(document.get(part + "_snapshot", "")) for part in parts)
+    expected = {
+        "database": str(document.get("snapshot", "")),
+        "files": str(document.get("files_snapshot", "")),
+    }
+    return all(found[part] == expected[part] for part in parts)
 
 
 def _link_target_problem(

@@ -373,6 +373,32 @@ class RestoreReviewTests(ChangeTestCase):
                 with self.assertRaises(ValueError):
                     restore.body(forged, BodyContext("unit", BOOT, 0))
 
+    def test_the_reviewed_database_snapshot_is_bound_by_its_own_id(self) -> None:
+        draft = restore.review(evidence(), PreparationInputs("", IDENTIFIER, point=POINT))
+        rows = [
+            {
+                "id": draft.document["snapshot"],
+                "tags": [
+                    "barectl",
+                    "site:alpha",
+                    "scope:database",
+                    "part:database",
+                    "origin:manual",
+                    "capture:live",
+                    "point:" + POINT,
+                    "complete",
+                ],
+            }
+        ]
+        with mock.patch.object(restore_body, "snapshots", return_value=rows):
+            self.assertTrue(
+                restore_body.reviewed_point(
+                    draft.document,
+                    convention.repository(IDENTIFIER),
+                    convention.server_key(IDENTIFIER),
+                )
+            )
+
     def test_a_forged_snapshot_is_refused_when_the_point_is_listed_again(self) -> None:
         draft = restore.review(evidence(), PreparationInputs("", IDENTIFIER, point=POINT))
         rows = [
