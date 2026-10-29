@@ -10,7 +10,11 @@
       <div class="usa-alert usa-alert--warning">
         <div class="usa-alert__body">
           <p class="usa-alert__text">
-            This stopped after pausing the site for a full backup. Nothing after it ran.
+            {% if backups.restore %}
+              This stopped after pausing the site to restore its database. Nothing after it ran.
+            {% else %}
+              This stopped after pausing the site for a full backup. Nothing after it ran.
+            {% endif %}
           </p>
           {% if backups_can_reopen %}
             <form class="usa-form"
@@ -133,6 +137,7 @@
               <th scope="col">Scope</th>
               <th scope="col">Kept here</th>
               <th scope="col">Notes</th>
+              <th scope="col"><span class="usa-sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -145,6 +150,17 @@
                   {% if point.live %}Captured while the site ran.{% endif %}
                   {% if point.keep %}Kept.{% endif %}
                   {% if point.problem %}{{ point.problem }}{% endif %}
+                </td>
+                <td>
+                  {% if backups_can_restore and point.restorable and point.has_database %}
+                    <form class="usa-form"
+                          method="post"
+                          action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="point" value="{{ point.point }}">
+                      <button type="submit" class="usa-button usa-button--outline">Restore</button>
+                    </form>
+                  {% endif %}
                 </td>
               </tr>
             {% endfor %}

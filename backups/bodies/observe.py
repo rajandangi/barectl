@@ -128,7 +128,7 @@ def journal() -> dict[str, dict[str, object]]:
             value = json.loads(line[len("barectl-result ") :])
         except ValueError:
             continue
-        if not isinstance(value, dict) or value.get("kind") != "backup":
+        if not isinstance(value, dict) or value.get("kind") not in ("backup", "restore"):
             continue
         identifier = value.get("site")
         if not isinstance(identifier, str) or not identifier or identifier in newest:

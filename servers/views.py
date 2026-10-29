@@ -560,6 +560,10 @@ def _site_overview_context(
         and getattr(backup_context["backups"], "reopen", False)
     )
     context["site_reopen_can_prepare"] = backup_context.get("backups_can_reopen", False)
+    context["site_reopen_restore"] = bool(
+        backup_context.get("backups") is not None
+        and getattr(backup_context["backups"], "restore", False)
+    )
     if state.snapshot is not None and any(
         row.identifier == site.identifier for row in state.snapshot.collected.automation.value
     ):
