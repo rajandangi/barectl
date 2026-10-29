@@ -1,4 +1,4 @@
-# Backups (implemented, #396, #399, #400, #401, #402, #403 and #404)
+# Backups (implemented, #396, #399, #400, #401, #402, #403, #404 and #405)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
@@ -251,6 +251,26 @@ path, repository URL, credential or dump content.
 **Turn retention off** is one reviewed Site change. It removes the cleanup units and stops
 them; it deletes no recovery point.
 
+## Integrity
+
+Enabling backups installs one weekly integrity unit per repository, onsite and offsite, in
+the site's backup slice. Each run holds the per-repository native lock, runs `restic check`
+with a rotating `--read-data-subset`, and reads the newest complete recovery point back with
+`restic dump` through a private staging directory. The subset advances on every recorded run and
+covers the whole repository over twenty weeks; the result line names the subset that ran.
+
+The integrity finding is its own row per site and location, with its time. It is shown apart
+from the capture result, the offsite copy result and the recovery-point list. **Verified**
+means Barectl itself opened the newest point: a successful `restic snapshots` listing, or
+exit status 0 from the repository check alone, never marks a point verified. A corrupted pack
+is reported as an integrity failure. It changes no snapshot or capture, and the capture
+result stays as it was.
+
+A held per-repository lock or an offsite store that is not set up yet is a skip, never a
+success. Every run writes one `barectl-result` line with its class, location, counts, bytes,
+short point identifier and subset. It carries no path, repository URL, credential or dump
+content.
+
 ## Keep
 
 **Keep** on a recovery point is one reviewed Site change that toggles the point's `keep` tag
@@ -298,6 +318,8 @@ reconstructs that backups are enabled and the last result from this native evide
 | restic cache | `/var/cache/barectl/restic` | root `0700` |
 | Retention body and payload | `/etc/barectl/backups/retention/<id>.sh`, `<id>.json` | root `0600`, directory `0700` |
 | Cleanup units | `/etc/systemd/system/barectl-site-<id>-cleanup.service` and `.timer`, plus `-cleanupoffsite.service` and `.timer` | root-owned fixed templates |
+| Integrity units | `/etc/systemd/system/barectl-site-<id>-check.service` and `.timer`, plus `-checkoffsite.service` and `.timer` | root-owned fixed templates |
+| Integrity body and payload | `/etc/barectl/backups/integrity/<id>.sh`, `<id>.json` | root `0700` script, `0600` payload |
 
 ## Native evidence
 
@@ -306,15 +328,19 @@ a database-only capture, `backups/bodies/full.py` for a paused full capture,
 `backups/bodies/restore.py` for Database only, Files only and Full site restores, `backups/bodies/offsite.py` for offsite
 storage, `backups/bodies/copy.py` for Copy offsite again, `backups/bodies/reopen.py` for
 reopening a paused site, `backups/bodies/schedule.py` for the schedule install and its live
-tick, and `backups/bodies/retention.py` for retention cleanup, Keep and their unit templates;
-each prints its stages and a result line. The schedule read is
-`backups/bodies/observe_schedule.py`. The pause helpers shared by
+tick, `backups/bodies/retention.py` for retention cleanup, Keep and their unit templates, and
+`backups/bodies/integrity.py` for the weekly check; each prints its stages and a result line.
+The integrity run is appended to the Enable backups body, so the check script is the reviewed
+body itself. The schedule read is
+`backups/bodies/observe_schedule.py`. Passive discovery reads the newest integrity result
+lines for each location and stores them as typed `BackupIntegrity` rows; Check backups
+refreshes them with one bounded journal read. The pause helpers shared by
 the full capture and the restore are `backups/bodies/paused.py`. The read is
 `backups/bodies/observe.py`, shared with the database binding's pure catalog reader. The first
 shared Phase D native scenario is `disposable/test_backups.py`; its offsite checks use a
 local S3-compatible fixture (`disposable/native_mirror/s3.py`) in its own lane container and
-never the internet. The #401 files-only and full-site restore assertions extend the same
-scenario; the integration run records their measured addition. On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
+never the internet. The #401 files-only and full-site restore assertions and the #405 integrity
+assertions extend the same scenario; the integration run records their measured addition. On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured
 65.3 s for the test and 70 s for its scenario. The local full build measured 294 s against the 300 s target and

@@ -108,6 +108,41 @@ class BackupSchedule(models.Model):
         return f"backup schedule {state}: {self.identifier} on {self.server}"
 
 
+class BackupIntegrity(models.Model):
+    """One site's newest integrity finding for one location, from native result lines (#405).
+
+    It is a cached observation for the page, never authority: the next Check backups and the
+    next passive discovery replace it from the server's own journal.
+    """
+
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="backup_integrity")
+    identifier = models.CharField(max_length=24)
+    location = models.CharField(max_length=8)
+    result_class = models.CharField(max_length=20, blank=True)
+    reason = models.CharField(max_length=40, blank=True)
+    at = models.CharField(max_length=40, blank=True)
+    point = models.CharField(max_length=16, blank=True)
+    checked = models.PositiveSmallIntegerField(default=0)
+    snapshots = models.PositiveSmallIntegerField(default=0)
+    bytes = models.BigIntegerField(default=0)
+    subset = models.CharField(max_length=8, blank=True)
+    checked_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["server", "identifier", "location"],
+                name="one_backup_integrity_per_site_location",
+            )
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"backup integrity {self.result_class or 'not checked'}: {self.identifier}"
+
+
 class BackupObservation(models.Model):
     """One site's backup setup and newest result, from one discovery snapshot."""
 

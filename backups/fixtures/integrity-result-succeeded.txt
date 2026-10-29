@@ -1,0 +1,1 @@
+barectl-result {"class":"succeeded","reason":"","kind":"integrity","site":"alpha","location":"onsite","at":"2026-10-30T05:15:00+00:00","point":"1111111111111111","checked":2,"snapshots":1,"bytes":4096,"subset":"7/20"}

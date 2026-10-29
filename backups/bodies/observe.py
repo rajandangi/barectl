@@ -110,7 +110,11 @@ def bounded(argv: list[str], *, limit: int = 32768) -> tuple[int, bytes]:
     return process.returncode, output
 
 
-def journal() -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:  # noqa: C901 - one journal read
+def journal() -> tuple[  # noqa: C901 - one journal read
+    dict[str, dict[str, object]],
+    dict[str, dict[str, object]],
+    dict[str, dict[str, dict[str, object]]],
+]:
     status, output = bounded(
         [
             "/usr/bin/journalctl",
@@ -126,9 +130,10 @@ def journal() -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]
         limit=512 * 1024,
     )
     if status:
-        return {}, {}
+        return {}, {}, {}
     newest: dict[str, dict[str, object]] = {}
     copies: dict[str, dict[str, object]] = {}
+    integrity: dict[str, dict[str, dict[str, object]]] = {}
     for line in output.decode("utf-8", "replace").splitlines():
         if not line.startswith("barectl-result "):
             continue
@@ -136,10 +141,22 @@ def journal() -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]
             value = json.loads(line[len("barectl-result ") :])
         except ValueError:
             continue
-        if not isinstance(value, dict) or value.get("kind") not in ("backup", "copy", "restore"):
+        if not isinstance(value, dict) or value.get("kind") not in (
+            "backup",
+            "copy",
+            "restore",
+            "integrity",
+        ):
             continue
         identifier = value.get("site")
         if not isinstance(identifier, str) or not identifier:
+            continue
+        if value.get("kind") == "integrity":
+            finding_row = _integrity(value)
+            location = value.get("location")
+            if finding_row is None or location not in ("onsite", "offsite"):
+                continue
+            integrity.setdefault(identifier, {}).setdefault(str(location), finding_row)
             continue
         if value.get("kind") == "copy":
             if identifier in copies:
@@ -165,7 +182,20 @@ def journal() -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]
         if row["offsite"] not in ("", "copied", "failed"):
             row["offsite"] = ""
         newest[identifier] = row
-    return newest, copies
+    return newest, copies, integrity
+
+
+def _integrity(value: dict[str, object]) -> dict[str, object] | None:
+    row: dict[str, object] = {}
+    for key in ("location", "class", "reason", "at", "point", "subset"):
+        item = value.get(key)
+        row[key] = item if isinstance(item, str) and len(item) <= MAX_TEXT else ""
+    for key in ("checked", "snapshots", "bytes"):
+        item = value.get(key)
+        row[key] = item if type(item) is int and item >= 0 else 0
+    if row["class"] not in ("succeeded", "partial", "failed", "refused", "lock_busy"):
+        return None
+    return row
 
 
 def config_values(text: str) -> dict[str, object] | None:
@@ -290,7 +320,7 @@ def main() -> None:
     root_safe = (not os.path.lexists(REPOSITORY_ROOT) or controlled(REPOSITORY_ROOT)) and (
         not os.path.lexists(KEY_ROOT) or controlled(KEY_ROOT)
     )
-    latest, copies = journal()
+    latest, copies, integrities = journal()
     storage = offsite()
     rows = []
     for identifier in sites:
@@ -335,6 +365,7 @@ def main() -> None:
             if site_account(identifier)
             else (False, "The site's Linux account could not be read.")
         )
+        found_integrity = integrities.get(identifier)
         rows.append(
             {
                 "identifier": identifier,
@@ -346,6 +377,14 @@ def main() -> None:
                 "database_problem": database_problem[:MAX_TEXT],
                 "last": latest.get(identifier),
                 "copy": copies.get(identifier),
+                "integrity": (
+                    {
+                        "onsite": found_integrity.get("onsite"),
+                        "offsite": found_integrity.get("offsite"),
+                    }
+                    if found_integrity
+                    else None
+                ),
             }
         )
     sys.stdout.write(

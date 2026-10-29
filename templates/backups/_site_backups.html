@@ -95,6 +95,24 @@
         </p>
       {% endif %}
       <div class="barectl-card__summary">
+        <h3>Integrity</h3>
+        <p class="usa-hint">
+          A separate weekly check reads each backup store and the newest recovery point back.
+          Saved, copied offsite and verified are different findings.
+        </p>
+        <dl class="barectl-facts">
+          {% for finding in backups.integrity %}
+            <div>
+              <dt>{{ finding.location }}</dt>
+              <dd>
+                <strong>{{ finding.headline }}</strong> {{ finding.detail }}
+                {% if finding.time_label %}<span class="barectl-note">{{ finding.time_label }}</span>{% endif %}
+              </dd>
+            </div>
+          {% endfor %}
+        </dl>
+      </div>
+      <div class="barectl-card__summary">
         <h3>Keep backups for</h3>
         <p>{{ backups_retention_label }}</p>
         {% if backups_retention_problem %}
@@ -264,76 +282,83 @@
         <p>Choose <strong>Check backups</strong> to list recovery points.</p>
       {% endif %}
       {% if backups.points %}
-        <table class="usa-table usa-table--borderless">
-          <caption class="usa-sr-only">Recovery points for this site</caption>
-          <thead>
-            <tr>
-              <th scope="col">Taken</th>
-              <th scope="col">Scope</th>
-              <th scope="col">Kept here</th>
-              <th scope="col">Offsite</th>
-              <th scope="col">Notes</th>
-              <th scope="col"><span class="usa-sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for point in backups.points %}
+        <div class="usa-table-container--scrollable" tabindex="0">
+          <table class="usa-table usa-table--borderless">
+            <caption class="usa-sr-only">Recovery points for this site</caption>
+            <thead>
               <tr>
-                <td>{{ point.time_label }}</td>
-                <td>{{ point.scope }}</td>
-                <td>{{ point.status }}</td>
-                <td>{{ point.offsite_status }}</td>
-                <td>
-                  {% if point.live %}Captured while the site ran.{% endif %}
-                  {% if point.keep %}Kept.{% endif %}
-                  {% if point.problem %}{{ point.problem }}{% endif %}
-                  {% if backups_can_copy and point.restorable and point.offsite_status != "Copied offsite" %}
-                    <form method="post"
-                          action="{% url 'site_backups_copy_prepare' server.pk identifier %}">
-                      {% csrf_token %}
-                      <input type="hidden" name="point" value="{{ point.point }}">
-                      <button type="submit"
-                              class="usa-button usa-button--outline">Copy offsite again</button>
-                    </form>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if backups_can_keep and point.restorable %}
-                    <form class="usa-form"
-                          method="post"
-                          action="{% url 'site_backups_keep_prepare' server.pk identifier %}">
-                      {% csrf_token %}
-                      <input type="hidden" name="point" value="{{ point.point }}">
-                      <button type="submit" class="usa-button usa-button--outline">
-                        {% if point.keep %}Stop keeping{% else %}Keep{% endif %}
-                      </button>
-                    </form>
-                  {% endif %}
-                  {% if backups_can_restore and point.restorable and point.has_files or backups_can_restore and point.restorable and backups.database and point.has_database %}
-                    <form class="usa-form"
-                          method="post"
-                          action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
-                      {% csrf_token %}
-                      <input type="hidden" name="point" value="{{ point.point }}">
-                      <label class="usa-label"
-                             for="restore-scope-{{ point.point }}">What to restore</label>
-                      <select class="usa-select" id="restore-scope-{{ point.point }}" name="scope">
-                        {% if backups.database and point.has_database %}
-                          <option value="database">Database only (the site stays online)</option>
-                        {% endif %}
-                        {% if point.has_files %}
-                          <option value="files">Files only (the database stays as it is now)</option>
-                          <option value="full">Full site (pauses the site briefly)</option>
-                        {% endif %}
-                      </select>
-                      <button type="submit" class="usa-button usa-button--outline">Restore</button>
-                    </form>
-                  {% endif %}
-                </td>
+                <th scope="col">Taken</th>
+                <th scope="col">Scope</th>
+                <th scope="col">Kept here</th>
+                <th scope="col">Offsite</th>
+                <th scope="col">Verified</th>
+                <th scope="col">Notes</th>
+                <th scope="col"><span class="usa-sr-only">Actions</span></th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {% for point in backups.points %}
+                <tr>
+                  <td>{{ point.time_label }}</td>
+                  <td>{{ point.scope }}</td>
+                  <td>{{ point.status }}</td>
+                  <td>{{ point.offsite_status }}</td>
+                  <td>{{ point.verified }}</td>
+                  <td>
+                    {% if point.live %}Captured while the site ran.{% endif %}
+                    {% if point.keep %}Kept.{% endif %}
+                    {% if point.problem %}{{ point.problem }}{% endif %}
+                    {% if backups_can_copy and point.restorable and point.offsite_status != "Copied offsite" %}
+                      <form method="post"
+                            action="{% url 'site_backups_copy_prepare' server.pk identifier %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="point" value="{{ point.point }}">
+                        <button type="submit"
+                                class="usa-button usa-button--outline">Copy offsite again</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if backups_can_keep and point.restorable %}
+                      <form class="usa-form"
+                            method="post"
+                            action="{% url 'site_backups_keep_prepare' server.pk identifier %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="point" value="{{ point.point }}">
+                        <button type="submit" class="usa-button usa-button--outline">
+                          {% if point.keep %}Stop keeping{% else %}Keep{% endif %}
+                        </button>
+                      </form>
+                    {% endif %}
+                    {% if backups_can_restore and point.restorable and point.has_files or backups_can_restore and point.restorable and backups.database and point.has_database %}
+                      <form class="usa-form"
+                            method="post"
+                            action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="point" value="{{ point.point }}">
+                        <label class="usa-label"
+                               for="restore-scope-{{ point.point }}">What to restore</label>
+                        <select class="usa-select"
+                                id="restore-scope-{{ point.point }}"
+                                name="scope">
+                          {% if backups.database and point.has_database %}
+                            <option value="database">Database only (the site stays online)</option>
+                          {% endif %}
+                          {% if point.has_files %}
+                            <option value="files">Files only (the database stays as it is now)</option>
+                            <option value="full">Full site (pauses the site briefly)</option>
+                          {% endif %}
+                        </select>
+                        <button type="submit"
+                                class="usa-button usa-button--outline">Restore</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
         <details class="barectl-advanced">
           <summary>Advanced</summary>
           <ul>

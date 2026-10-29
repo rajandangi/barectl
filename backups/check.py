@@ -25,7 +25,7 @@ from operations.models import RemoteOperation
 from servers.models import Server
 from sites.names import valid_identifier
 
-from . import convention, observation
+from . import convention, integrity, observation
 from .models import BackupCheck
 
 READ_PERMISSIONS: Final = ("servers.view_server", VIEW_SITES)
@@ -212,6 +212,9 @@ def _read(check: BackupCheck) -> None:
             retention.record(
                 check.server, check.identifier, retention.read_policy(shell, check.identifier)
             )
+            findings = integrity.read_results(shell, check.identifier)
+            if findings is not None:
+                integrity.record(check.server, check.identifier, findings)
             row = _row(native, check.identifier)
             if row is None or not _enabled(row):
                 value = {

@@ -13,6 +13,7 @@ from operations.models import ChangePreparation
 from servers.models import Server
 
 from . import check
+from .testing import integrity as finding
 from .testing import point, record_backups, record_points, record_schedule, result
 
 
@@ -174,6 +175,39 @@ class BackupsBrowserTests(BrowserTestCase):
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
         expect(self.page.get_by_text("Saved here, offsite copy failed.")).to_be_visible()
         expect(self.page.get_by_text("Offsite copy failed.", exact=False).first).to_be_visible()
+        self.assert_no_native_terms()
+
+    def test_the_integrity_finding_is_shown_apart_from_the_capture_result(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result(), integrity=(finding(),))
+        record_points(server, (point(),), identifier="shop")
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_role("heading", name="Integrity")).to_be_visible()
+        expect(self.page.get_by_text("The newest recovery point was read back.")).to_be_visible()
+        expect(self.page.get_by_text("Database only saved.")).to_be_visible()
+        expect(self.page.get_by_text("On this server,", exact=False).first).to_be_visible()
+        self.assert_no_native_terms()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        expect(self.page.get_by_role("heading", name="Integrity")).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+    def test_a_corrupted_pack_is_its_own_finding_and_leaves_the_capture_result(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(
+            server,
+            enabled=True,
+            last=result(),
+            integrity=(finding(result_class="failed", reason="integrity_pack", point=""),),
+        )
+        record_points(server, (point(),), identifier="shop")
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_text("The last check found damaged data.")).to_be_visible()
+        expect(self.page.get_by_text("Database only saved.")).to_be_visible()
+        expect(self.page.get_by_text("Not verified")).to_be_visible()
         self.assert_no_native_terms()
 
     def test_a_gated_site_offers_one_reopen_action(self) -> None:

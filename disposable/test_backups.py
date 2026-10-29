@@ -942,6 +942,122 @@ class Retention(BackupCase):
 
 
 @tag(SCENARIO_TAG)
+class Integrity(BackupCase):
+    """The weekly check on a real server: read-back, rotation, damage and a held lock."""
+
+    def restic_shell(self, *arguments: str, offsite: bool = False) -> str:
+        from backups import convention
+
+        repository = (
+            convention.repository(IDENTIFIER)
+            if not offsite
+            else f"s3:https://{self.S3_HOST}/{self.S3_BUCKET}/{self.offsite_prefix()}/{IDENTIFIER}"
+        )
+        source = ". /etc/barectl/backups/offsite/capture.env; " if offsite else ""
+        return (
+            f"{source}RESTIC_REPOSITORY={repository} "
+            f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+            + shlex.join([convention.RESTIC_BIN, *arguments])
+        )
+
+    def point_ids(self) -> set[str]:
+        text = self.native(self.restic_shell("snapshots", "--json", "--no-lock"))
+        rows = json.loads(text[text.index("[") :])
+        found: set[str] = set()
+        for row in rows if isinstance(rows, list) else []:
+            tags = row.get("tags") if isinstance(row, dict) else None
+            if isinstance(tags, list):
+                found.update(
+                    str(tag)[6:]
+                    for tag in tags
+                    if isinstance(tag, str) and tag.startswith("point:")
+                )
+        return found
+
+    def integrity_result(self, location: str = "onsite") -> dict[str, object]:
+        unit = f"barectl-site-{IDENTIFIER}-" + (
+            "check.service" if location == "onsite" else "checkoffsite.service"
+        )
+        self.native(f"systemctl start {unit}")
+        text = self.native(
+            f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 1"
+        ).strip()
+        return dict(json.loads(text.removeprefix("barectl-result ")))
+
+    def last_integrity_subsets(self, location: str = "onsite") -> list[str]:
+        unit = f"barectl-site-{IDENTIFIER}-" + (
+            "check.service" if location == "onsite" else "checkoffsite.service"
+        )
+        text = self.native(
+            f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 20"
+        )
+        subsets = []
+        for line in reversed(text.splitlines()):
+            if line.startswith("barectl-result "):
+                row = json.loads(line.removeprefix("barectl-result "))
+                if isinstance(row, dict) and row.get("kind") == "integrity":
+                    subsets.append(str(row.get("subset", "")))
+        return subsets
+
+    def test_the_weekly_check_reads_the_newest_point_and_reports_a_corrupted_pack(self) -> None:
+        self.prepare_site()
+        self.start_s3()
+        self.enable()
+        self.offsite_setup()
+        capture = self.capture()
+        point = str(capture.document["point"])
+
+        self.assertFalse(self.last_integrity_subsets(), "A check ran before the first run.")
+        onsite = self.integrity_result()
+        self.assertEqual(onsite["class"], "succeeded", onsite)
+        self.assertEqual(onsite["location"], "onsite")
+        self.assertEqual(onsite["point"], point)
+        self.assertRegex(str(onsite["subset"]), r"\A([1-9]|1[0-9]|20)/20\Z")
+        again = self.integrity_result()
+        self.assertEqual(again["class"], "succeeded", again)
+        self.assertNotEqual(again["subset"], onsite["subset"], "The subset did not advance.")
+        self.assertEqual(again["point"], point)
+
+        offsite = self.integrity_result("offsite")
+        self.assertEqual(offsite["class"], "succeeded", offsite)
+        self.assertEqual(offsite["location"], "offsite")
+        self.assertEqual(offsite["point"], point)
+
+        packs = self.native(
+            f"find /var/lib/barectl-backups/{IDENTIFIER}/onsite/data -type f -name '*.p'"
+        ).split()
+        self.assertTrue(packs, "The repository holds no packs.")
+        pack = packs[0]
+        self.native(f"cp -p {pack} {pack}.bak")
+        self.native(f"printf damaged >> {pack}")
+        damaged = self.integrity_result()
+        self.assertEqual(damaged["class"], "failed", damaged)
+        self.assertEqual(damaged["reason"], "integrity_pack")
+        self.assertEqual(damaged["point"], "")
+        self.assertIn(point, self.point_ids(), "An integrity failure removed a recovery point.")
+
+        capture = self.capture()
+        self.assertTrue(capture.document["point"])
+        self.assertIn(point, self.point_ids(), "A capture after damage removed a recovery point.")
+
+        self.native(f"mv {pack}.bak {pack}")
+        repaired = self.integrity_result()
+        self.assertEqual(repaired["class"], "succeeded", repaired)
+        self.assertEqual(repaired["point"], point)
+
+        lock = f"/run/lock/barectl/backup-{IDENTIFIER}.lock"
+        self.native(f"install -m 0600 /dev/null {lock}")
+        self.native(f"flock -x {lock} -c 'sleep 3' >/dev/null 2>&1 &")
+        self.native("sleep 1")
+        skipped = self.integrity_result()
+        self.assertEqual(skipped["class"], "lock_busy", skipped)
+        self.assertEqual(skipped["reason"], "backup_lock")
+        self.assertNotEqual(skipped["class"], "succeeded")
+        self.native("sleep 4")
+
+
+@tag(SCENARIO_TAG)
 @tag("breadth")
 class RebootedFullBackup(BackupCase):
     breadth = True

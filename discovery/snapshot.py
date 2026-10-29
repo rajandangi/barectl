@@ -598,6 +598,7 @@ def _read_offsite(value: dict[str, object]) -> "OffsiteStorage | None":  # noqa:
 
 
 def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ...]) -> None:
+    from backups.integrity import record as record_integrity
     from backups.models import BackupObservation
 
     BackupObservation.objects.bulk_create(
@@ -634,6 +635,8 @@ def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ..
         )
         for backup in backups
     )
+    for backup in backups:
+        record_integrity(snapshot.server, backup.identifier, backup.integrity)
 
 
 class AttemptSnapshot(NamedTuple):

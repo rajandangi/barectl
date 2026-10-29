@@ -103,6 +103,33 @@ class OffsiteCopy:
 
 
 @dataclass(frozen=True)
+class IntegrityFinding:
+    """One weekly integrity run's safe result line for one location (#405)."""
+
+    location: str
+    result_class: str
+    reason: str
+    at: str
+    point: str
+    checked: int
+    snapshots: int
+    size: int
+    subset: str
+
+    @property
+    def time(self) -> datetime | None:
+        try:
+            return datetime.fromisoformat(self.at)
+        except ValueError:
+            return None
+
+    @property
+    def verified(self) -> bool:
+        """Only a successful read-back of a named point makes it verified."""
+        return self.result_class == "succeeded" and bool(self.point)
+
+
+@dataclass(frozen=True)
 class ObservedBackup:
     """One site's backup setup, from one snapshot's native evidence."""
 
@@ -116,6 +143,7 @@ class ObservedBackup:
     last: BackupResult | None = None
     offsite: OffsiteStorage | None = None
     copy: OffsiteCopy | None = None
+    integrity: tuple[IntegrityFinding, ...] = ()
 
     @property
     def enabled(self) -> bool:
@@ -229,10 +257,18 @@ _SITE_KEYS = {
 }
 
 
+INTEGRITY_LOCATIONS: Final = ("onsite", "offsite")
+INTEGRITY_SUBSET: Final = re.compile(r"[0-9]{1,3}/[0-9]{1,3}\Z")
+
+
 def _valid_site(value: object) -> bool:
-    if not isinstance(value, dict) or set(value) not in (_SITE_KEYS, _SITE_KEYS | {"copy"}):
+    if not isinstance(value, dict) or not set(value) <= _SITE_KEYS | {"copy", "integrity"}:
+        return False
+    if not set(value) >= _SITE_KEYS:
         return False
     if "copy" in value and not (value["copy"] is None or _valid_copy(value["copy"])):
+        return False
+    if "integrity" in value and not _valid_integrity(value["integrity"]):
         return False
     return (
         isinstance(value["identifier"], str)
@@ -276,6 +312,52 @@ def _valid_offsite(value: object) -> bool:
         and type(value["prune"]) is bool
         and isinstance(value["problem"], str)
         and len(value["problem"]) <= 500
+    )
+
+
+_FINDING_KEYS = {
+    "location",
+    "class",
+    "reason",
+    "at",
+    "point",
+    "checked",
+    "snapshots",
+    "bytes",
+    "subset",
+}
+
+
+def _valid_integrity(value: object) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict) or set(value) != {"onsite", "offsite"}:
+        return False
+    return all(
+        item is None or (isinstance(item, dict) and _valid_finding(item, location))
+        for location, item in value.items()
+    )
+
+
+def _valid_finding(value: dict[str, object], location: str) -> bool:
+    return bool(
+        set(value) == _FINDING_KEYS
+        and value["location"] == location
+        and value["class"] in CLASSES
+        and isinstance(value["reason"], str)
+        and len(value["reason"]) <= 500
+        and isinstance(value["at"], str)
+        and (value["at"] == "" or ISO.fullmatch(value["at"]) is not None)
+        and isinstance(value["point"], str)
+        and (value["point"] == "" or POINT.fullmatch(value["point"]) is not None)
+        and type(value["checked"]) is int
+        and 0 <= value["checked"] <= 10_000
+        and type(value["snapshots"]) is int
+        and 0 <= value["snapshots"] <= 16
+        and type(value["bytes"]) is int
+        and value["bytes"] >= 0
+        and isinstance(value["subset"], str)
+        and (value["subset"] == "" or INTEGRITY_SUBSET.fullmatch(value["subset"]) is not None)
     )
 
 
@@ -350,9 +432,41 @@ def observations(
                 _result(last) if isinstance(last, dict) else None,
                 offsite,
                 _copy(copy) if isinstance(copy, dict) else None,
+                integrity_of(row),
             )
         )
     return tuple(result)
+
+
+def integrity_of(row: dict[str, object]) -> tuple[IntegrityFinding, ...]:
+    """Every location's newest integrity finding on one observed site, if any."""
+    value = row.get("integrity")
+    if not isinstance(value, dict):
+        return ()
+    findings: list[IntegrityFinding] = []
+    for location in INTEGRITY_LOCATIONS:
+        item = value.get(location)
+        if isinstance(item, dict):
+            finding = finding_of(item, location)
+            if finding is not None:
+                findings.append(finding)
+    return tuple(findings)
+
+
+def finding_of(value: object, location: str) -> IntegrityFinding | None:
+    if not isinstance(value, dict) or not _valid_finding(value, location):
+        return None
+    return IntegrityFinding(
+        location,
+        str(value["class"]),
+        str(value["reason"]),
+        str(value["at"]),
+        str(value["point"]),
+        int(str(value["checked"])),
+        int(str(value["snapshots"])),
+        int(str(value["bytes"])),
+        str(value["subset"]),
+    )
 
 
 def offsite_of(value: dict[str, object] | None) -> OffsiteStorage | None:

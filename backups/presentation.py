@@ -9,7 +9,7 @@ from discovery.snapshot import CollectedSnapshot, ObservedSite
 
 from . import check, kit
 from .models import BackupCheck
-from .observation import ObservedBackup
+from .observation import IntegrityFinding, ObservedBackup
 
 SCOPE_LABELS = {
     "database": "Database only",
@@ -48,6 +48,16 @@ class CopyView:
 
 
 @dataclass(frozen=True)
+class IntegrityFindingView:
+    location: str
+    headline: str
+    detail: str
+    time_label: str
+    result_class: str
+    verified: bool
+
+
+@dataclass(frozen=True)
 class RecoveryPointView:
     time_label: str
     scope: str
@@ -60,6 +70,7 @@ class RecoveryPointView:
     incomplete: tuple[str, ...] = ()
     offsite_status: str = "Offsite storage not set up"
     parts: tuple[str, ...] = ()
+    verified: str = ""
 
     @property
     def restorable(self) -> bool:
@@ -104,6 +115,7 @@ class BackupsView:
     offsite: OffsiteView | None = None
     copy: CopyView | None = None
     restore: bool = False
+    integrity: tuple[IntegrityFindingView, ...] = ()
 
     @property
     def reopen(self) -> bool:
@@ -264,12 +276,118 @@ def _result_reason(reason: str) -> str:
     }.get(reason, "Barectl could not finish the backup. Check again or read the run's record.")
 
 
+def integrity_views(
+    findings: tuple[IntegrityFinding, ...],
+) -> tuple[IntegrityFindingView, ...]:
+    """The two locations' findings, separate from every capture or copy result."""
+    by_location = {finding.location: finding for finding in findings}
+    return tuple(
+        _integrity_view(location, by_location.get(location)) for location in ("onsite", "offsite")
+    )
+
+
+def _integrity_view(location: str, finding: IntegrityFinding | None) -> IntegrityFindingView:
+    label = "On this server" if location == "onsite" else "Offsite storage"
+    if finding is None:
+        return IntegrityFindingView(
+            label,
+            "Not checked yet.",
+            "Barectl checks this backup store every week and reads the newest point back.",
+            "",
+            "",
+            False,
+        )
+    at = _label(finding.time)
+    if finding.result_class == "succeeded" and finding.point:
+        return IntegrityFindingView(
+            label,
+            "The newest recovery point was read back.",
+            "Barectl opened the newest point itself, so it is verified here.",
+            at,
+            finding.result_class,
+            True,
+        )
+    if finding.result_class == "succeeded":
+        return IntegrityFindingView(
+            label,
+            "The backup store is healthy.",
+            "There is no complete recovery point to read back yet.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.result_class == "lock_busy":
+        return IntegrityFindingView(
+            label,
+            "The last check was skipped.",
+            "Another backup task was using this store. Nothing was marked verified.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.reason == "integrity_offsite":
+        return IntegrityFindingView(
+            label,
+            "Offsite checks wait for offsite storage.",
+            "Set up offsite storage and the next weekly check will read this store back.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.result_class == "failed" and finding.reason == "integrity_pack":
+        return IntegrityFindingView(
+            label,
+            "The last check found damaged data.",
+            "A stored data file could not be read. Recovery points were not changed, but "
+            "do not rely on one until the next check passes.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.result_class == "failed" and finding.reason == "integrity_readback":
+        return IntegrityFindingView(
+            label,
+            "The newest recovery point could not be read back.",
+            "The backup store is readable but its newest point did not open, so it is not "
+            "verified.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.result_class == "refused":
+        return IntegrityFindingView(
+            label,
+            "The last check did not run.",
+            "Barectl could not open this backup store. Nothing was marked verified.",
+            at,
+            finding.result_class,
+            False,
+        )
+    return IntegrityFindingView(
+        label,
+        "The last check failed.",
+        "Barectl could not finish reading this backup store. Nothing was marked verified.",
+        at,
+        finding.result_class,
+        False,
+    )
+
+
 def points_view(
-    listing: dict[str, object], copy: CopyView | None = None, *, configured: bool = False
+    listing: dict[str, object],
+    copy: CopyView | None = None,
+    *,
+    configured: bool = False,
+    integrity: tuple[IntegrityFinding, ...] = (),
 ) -> tuple[RecoveryPointView, ...]:
     raw = listing.get("points")
     if not isinstance(raw, list):
         return ()
+    verified: dict[str, list[str]] = {}
+    for finding in integrity:
+        if finding.verified:
+            label = "On this server, " if finding.location == "onsite" else "Offsite, "
+            verified.setdefault(finding.point, []).append(label + _label(finding.time))
     rows = []
     for point in raw:
         if not isinstance(point, dict):
@@ -293,6 +411,7 @@ def points_view(
                 tuple(str(item) for item in incomplete) if isinstance(incomplete, list) else (),
                 offsite_status=_point_offsite(point_id, copy, configured),
                 parts=tuple(str(item) for item in parts) if isinstance(parts, list) else (),
+                verified="; ".join(verified.get(point_id, [])) or "Not verified",
             )
         )
     return tuple(rows)
@@ -337,6 +456,7 @@ def view(
     *,
     checking: bool,
     gated: bool = False,
+    integrity: tuple[IntegrityFinding, ...] = (),
 ) -> BackupsView:
     backup = backup_of(collected, identifier) if collected is not None else None
     enabled = backup is not None and backup.enabled
@@ -378,7 +498,7 @@ def view(
         checked_at = latest_check.checked_at
         outcome = listing.get("outcome") if isinstance(listing, dict) else None
         if outcome == "observed":
-            points = points_view(listing, copy, configured=offsite is not None)
+            points = points_view(listing, copy, configured=offsite is not None, integrity=integrity)
         else:
             check_problem = str(listing.get("problem", "")) if isinstance(listing, dict) else ""
         stale = check.stale(latest_check)
@@ -405,6 +525,7 @@ def view(
         offsite,
         copy,
         restore,
+        integrity_views(integrity),
     )
 
 

@@ -23,7 +23,7 @@ from servers.models import Server
 from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 
-from . import check, convention, presentation, retention
+from . import check, convention, integrity, presentation, retention
 from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
 from .offsite import COPY_SLUG
 from .reopen import SLUG as REOPEN_SLUG
@@ -68,7 +68,13 @@ def context_for_site(
     active = check.active(server, identifier)
     gated = site is not None and SITE_GATED in site.missing
     view = presentation.view(
-        site, collected, identifier, latest, checking=active is not None, gated=gated
+        site,
+        collected,
+        identifier,
+        latest,
+        checking=active is not None,
+        gated=gated,
+        integrity=integrity.stored(server, identifier),
     )
     target = _target(snapshot, site)
     ready = (
