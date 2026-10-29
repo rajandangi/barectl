@@ -670,6 +670,76 @@ class DisasterRecovery(BackupCase):
 
 
 @tag(SCENARIO_TAG)
+class ScheduledCapture(BackupCase):
+    """One site's fixed timer fires a live capture without a controller (#402)."""
+
+    prefix = "bks"
+
+    def test_a_scheduled_capture_runs_and_is_reconstructed(self) -> None:
+        self.prepare_site()
+        self.enable()
+        # One reviewed schedule installs a fixed UTC timer. It fires a live capture with no
+        # controller connected, and a fresh controller reads the same schedule back.
+        at = self.next_schedule_time()
+        self.set_schedule(at)
+        installed = self.schedule_row()
+        self.assertTrue(installed.installed)
+        self.assertTrue(installed.timer_active)
+        self.assertTrue(installed.timer_enabled)
+        self.assertGreater(installed.next_elapse_us, 0)
+        import time
+
+        end = time.monotonic() + 80
+        scheduled: list[dict[str, object]] = []
+        while time.monotonic() < end and not scheduled:
+            scheduled = [
+                point
+                for point in self.points()
+                if point.get("origin") == "scheduled" and point.get("complete")
+            ]
+            if not scheduled:
+                time.sleep(2)
+        self.assertTrue(
+            scheduled,
+            "The real backup timer never fired a complete scheduled capture: "
+            + self.native(
+                f"journalctl -u barectl-site-{self.identifier}-backup.service "
+                "--no-pager -o cat -n 80"
+            ),
+        )
+        self.assertTrue(scheduled[0]["live"])
+        # The point is visible before the oneshot exits and releases the mutation lock, so
+        # wait for the run to finish before discovery takes its shared read lock.
+        end = time.monotonic() + 30
+        while time.monotonic() < end:
+            state = self.native(
+                "systemctl show --value -p ActiveState "
+                f"barectl-site-{self.identifier}-backup.service"
+            ).strip()
+            if state in ("inactive", "failed"):
+                break
+            time.sleep(0.25)
+        collected = self.observe()
+        backup = self.backup_row(collected)
+        if backup.last is None:
+            self.fail("No scheduled result was reconstructed.")
+        self.assertEqual(backup.last.origin, "scheduled")
+        self.assertIn(backup.last.result_class, ("succeeded", "partial"))
+        from operations.models import ChangeReview as Review
+        from operations.models import ChangeRun
+
+        ChangeRun.objects.all().delete()
+        Review.objects.all().delete()
+        reconstructed = self.schedule_row()
+        self.assertTrue(reconstructed.installed)
+        self.assertEqual(reconstructed.frequency, "daily")
+        self.assertEqual(reconstructed.at, at)
+        self.assertGreater(reconstructed.next_elapse_us, 0)
+        self.disable_schedule()
+        self.assertFalse(self.schedule_row().installed)
+
+
+@tag(SCENARIO_TAG)
 class BackupLifecycle(BackupCase):
     def test_enables_captures_and_reconstructs_from_native_evidence(self) -> None:
         from backups import check, convention, observation
@@ -723,63 +793,6 @@ class BackupLifecycle(BackupCase):
             self.assertEqual(listing.exit_status, 0, listing.stdout)
             self.assertEqual(json.loads(listing.stdout or "[]"), [])
 
-        # One reviewed schedule installs a fixed UTC timer. It fires a live capture with no
-        # controller connected, and a fresh controller reads the same schedule back.
-        at = self.next_schedule_time()
-        self.set_schedule(at)
-        installed = self.schedule_row()
-        self.assertTrue(installed.installed)
-        self.assertTrue(installed.timer_active)
-        self.assertTrue(installed.timer_enabled)
-        self.assertGreater(installed.next_elapse_us, 0)
-        import time
-
-        end = time.monotonic() + 80
-        scheduled: list[dict[str, object]] = []
-        while time.monotonic() < end and not scheduled:
-            scheduled = [
-                point
-                for point in self.points()
-                if point.get("origin") == "scheduled" and point.get("complete")
-            ]
-            if not scheduled:
-                time.sleep(2)
-        self.assertTrue(
-            scheduled,
-            "The real backup timer never fired a complete scheduled capture: "
-            + self.native(
-                "journalctl -u barectl-site-bkalpha-backup.service --no-pager -o cat -n 80"
-            ),
-        )
-        self.assertTrue(scheduled[0]["live"])
-        # The point is visible before the oneshot exits and releases the mutation lock, so
-        # wait for the run to finish before discovery takes its shared read lock.
-        end = time.monotonic() + 30
-        while time.monotonic() < end:
-            state = self.native(
-                "systemctl show --value -p ActiveState barectl-site-bkalpha-backup.service"
-            ).strip()
-            if state in ("inactive", "failed"):
-                break
-            time.sleep(0.25)
-        collected = self.observe()
-        backup = self.backup_row(collected)
-        if backup.last is None:
-            self.fail("No scheduled result was reconstructed.")
-        self.assertEqual(backup.last.origin, "scheduled")
-        self.assertIn(backup.last.result_class, ("succeeded", "partial"))
-        from operations.models import ChangeReview as Review
-        from operations.models import ChangeRun
-
-        ChangeRun.objects.all().delete()
-        Review.objects.all().delete()
-        reconstructed = self.schedule_row()
-        self.assertTrue(reconstructed.installed)
-        self.assertEqual(reconstructed.frequency, "daily")
-        self.assertEqual(reconstructed.at, at)
-        self.assertGreater(reconstructed.next_elapse_us, 0)
-        self.disable_schedule()
-        self.assertFalse(self.schedule_row().installed)
         self.capture()
         self.assertEqual(self.site_status("/"), 200)
         self.assertNotIn(
@@ -846,7 +859,6 @@ class BackupLifecycle(BackupCase):
         points = check.points(parsed or [])
         self.assertGreaterEqual(len(points), 1)
         self.assertTrue(points[0]["complete"])
-        database_point = points[0]["point"]
         # A fresh controller keeps no local change history and still sees the same state.
         from operations.models import ChangeReview as Review
         from operations.models import ChangeRun
@@ -888,11 +900,7 @@ class BackupLifecycle(BackupCase):
         self.assertEqual(full[0]["parts"], ["database", "files"])
         full_point = str(full[0]["point"])
         self.assertEqual(self.site_status("/"), 200)
-        # An export moves the same point to this computer without its private configuration;
-        # the server stage is removed and the archive holds the release, not a secret.
-        archive = self.export_point(full_point)
-        self.assertIn("releases/initial/public/hello.txt", self.archive_names(archive))
-        self.assertFalse(any("private" in name for name in self.archive_names(archive)))
+        # Export coverage lives in WordPressFullRestore.
         collected = self.observe()
         backup = self.backup_row(collected)
         if backup.last is None:
@@ -920,17 +928,8 @@ class BackupLifecycle(BackupCase):
             self.assertNotIn(
                 "respond 503", self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy")
             )
-        # A capture killed while it copies files stays gated, and one reviewed action reopens it.
-        from backups import reopen
-
-        self.large_file()
-        submitted = submit_change(self, change.BACK_UP_FULL, PreparationInputs("", self.identifier))
-        self.wait_stage(submitted.unit, "backup-files")
-        self.native(f"systemctl kill --signal=KILL {submitted.unit}")
-        self.assertEqual(self.site_status("/"), 503)
-        self.assertIn("respond 503", self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy"))
-        apply_change(self, reopen.REOPEN_SITE, PreparationInputs("", self.identifier), timeout=60)
-        self.assertEqual(self.site_status("/"), 200)
+        # A capture killed while it copies files stays gated and is reopened in
+        # RebootedFullBackup; this item keeps the database restore.
         # A database-only restore replaces the point's data, takes a safety copy first and
         # leaves the site serving. The import runs as the site principal, not a superuser.
         self.native(
@@ -943,7 +942,7 @@ class BackupLifecycle(BackupCase):
             + self.identifier
         )
         before_restore = len(self.points())
-        self.restore_database(str(database_point))
+        self.restore_database(full_point)
         self.assertEqual(self.site_status("/"), 200)
         self.assertEqual(
             self.native(
