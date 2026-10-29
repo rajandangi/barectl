@@ -94,6 +94,9 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> ExportEvidence:
     label = engines[0].label if len(engines) == 1 else ""
     version = engines[0].version if len(engines) == 1 else ""
     record, current_sites, boot_id, uptime = change._site_record(shell, inputs.identifier)
+    listing = shell.run(change.ALL_SITES_READ)
+    if listing.exit_status == 0 and not listing.truncated:
+        current_sites = tuple(listing.stdout.splitlines())
     backup: observation.ObservedBackup | None = None
     value = observation.read(shell, (inputs.identifier,), engine, architecture)
     if value is not None:
