@@ -670,6 +670,9 @@ def _offsite_command(document: dict[str, object], identifier: str, *arguments: s
     if plan is None:
         raise ValueError("The offsite copy is not the reviewed one.")
     repository = str(plan["repository"])
+    storage = plan.get("storage")
+    if not isinstance(storage, dict):
+        raise ValueError("The offsite copy is not the reviewed one.")
     script = "; ".join(
         [
             "set -a",
@@ -677,8 +680,16 @@ def _offsite_command(document: dict[str, object], identifier: str, *arguments: s
             f"RESTIC_REPOSITORY={shlex.quote(repository)}",
             f"RESTIC_PASSWORD_FILE={shlex.quote(convention.server_key(identifier))}",
             f"RESTIC_CACHE_DIR={shlex.quote(convention.CACHE_DIR)}",
+            f"AWS_DEFAULT_REGION={shlex.quote(str(storage.get('region', '')))}",
             "set +a",
-            shlex.join([convention.RESTIC_BIN, *arguments]),
+            shlex.join(
+                [
+                    convention.RESTIC_BIN,
+                    "-o",
+                    "s3.bucket-lookup=path",
+                    *arguments,
+                ]
+            ),
         ]
     )
     return "sh -c " + shlex.quote(script)
@@ -701,8 +712,18 @@ def verify_setup(shell: RemoteShell, review: ChangeReview) -> bool | None:
             f"RESTIC_REPOSITORY={shlex.quote(convention.health_repository(config))}",
             f"RESTIC_PASSWORD_FILE={shlex.quote(health_key)}",
             f"RESTIC_CACHE_DIR={shlex.quote(convention.CACHE_DIR)}",
+            f"AWS_DEFAULT_REGION={shlex.quote(str(config.get('region', '')))}",
             "set +a",
-            shlex.join([convention.RESTIC_BIN, "snapshots", "--json", "--no-lock"]),
+            shlex.join(
+                [
+                    convention.RESTIC_BIN,
+                    "-o",
+                    "s3.bucket-lookup=path",
+                    "snapshots",
+                    "--json",
+                    "--no-lock",
+                ]
+            ),
         ]
     )
     result = run_root(shell, "sh -c " + shlex.quote(script))
@@ -714,15 +735,15 @@ def verify_remove(shell: RemoteShell, review: ChangeReview) -> bool | None:
         review.document,
         BodyContext("", "", 0, f"{convention.KEY_ROOT}/.staged"),
     )
-    paths = " ".join(
-        shlex.quote(path)
+    checks = " && ".join(
+        f"test ! -e {shlex.quote(path)}"
         for path in (
             convention.OFFSITE_CONFIG,
             convention.OFFSITE_CAPTURE,
             convention.OFFSITE_PRUNE,
         )
     )
-    result = run_root(shell, f"sh -c {shlex.quote(f'test ! -e {paths}')}")
+    result = run_root(shell, f"sh -c {shlex.quote(checks)}")
     return result.exit_status == 0 and not result.truncated
 
 

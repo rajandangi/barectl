@@ -211,8 +211,8 @@ for reopening a paused site; each prints its stages and a result line. The pause
 the full capture and the restore are `backups/bodies/paused.py`. The read is
 `backups/bodies/observe.py`, shared with the database binding's pure catalog reader. The first
 shared Phase D native scenario is `disposable/test_backups.py`; its offsite checks use a
-local S3-compatible fixture (`disposable/native_mirror/s3.py`) on the lane and never the
-internet.
+local S3-compatible fixture (`disposable/native_mirror/s3.py`) in its own lane container and
+never the internet.
 On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured
