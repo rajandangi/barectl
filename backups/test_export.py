@@ -1,10 +1,13 @@
 """Export a recovery point: consent, archive exclusion, transfer and download (#409)."""
 
 import base64
+import gzip
 import importlib.resources
 import json
 import os
 import pathlib
+import subprocess
+import sys
 import tempfile
 import time
 from datetime import timedelta
@@ -103,6 +106,29 @@ class ExportReviewTests(SimpleTestCase):
         compile(export.EXPORT_SOURCE, "export-body", "exec")
         self.assertIn("def main(", export.EXPORT_SOURCE)
         self.assertTrue(export.EXPORT_BYTES.startswith(b"#!/bin/sh\n"))
+
+    def test_the_assembled_body_refuses_before_a_missing_repository(self) -> None:
+        draft = export.review(
+            evidence(parts=("files",), point_data=point(scope="files", parts=("files",))),
+            PreparationInputs("", IDENTIFIER, point=POINT),
+        )
+        document = {
+            **draft.document,
+            "engine": "",
+            "engine_major": "",
+            "snapshot": "",
+        }
+        encoded = base64.b64encode(gzip.compress(json.dumps(document).encode(), mtime=0)).decode()
+        completed = subprocess.run(  # noqa: S603 - the checked-in assembled body
+            [sys.executable, "-c", export.EXPORT_SOURCE, encoded],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        self.assertIn('"class":"refused"', completed.stdout)
+        self.assertIn("export_repository", completed.stdout)
 
     def test_the_review_names_one_site_but_derives_shared_consent(self) -> None:
         draft = export.review(evidence(), PreparationInputs("", IDENTIFIER, point=POINT))
