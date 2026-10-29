@@ -12,6 +12,7 @@ from typing import cast
 from django.test import tag
 
 from backups.observation import ObservedBackup
+from backups.schedule import ObservedBackupSchedule
 from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
 from operations.inputs import PreparationInputs
@@ -118,6 +119,54 @@ class BackupCase(ScenarioTestCase):
             timeout=180,
         )
 
+    def set_schedule(self, at: str, *, scope: str = "database") -> ChangeReview:
+        from backups import schedule
+
+        return apply_change(
+            self,
+            schedule.SET_BACKUP_SCHEDULE,
+            PreparationInputs(
+                "",
+                IDENTIFIER,
+                schedule_state="on",
+                backup_schedule=True,
+                frequency="daily",
+                at=at,
+                scope=scope,
+            ),
+            timeout=120,
+        )
+
+    def disable_schedule(self) -> ChangeReview:
+        from backups import schedule
+
+        return apply_change(
+            self,
+            schedule.SET_BACKUP_SCHEDULE,
+            PreparationInputs(
+                "",
+                IDENTIFIER,
+                schedule_state="off",
+                backup_schedule=True,
+            ),
+            timeout=120,
+        )
+
+    def schedule_row(self) -> ObservedBackupSchedule:
+        from backups import schedule
+
+        with self.shell() as shell:
+            rows = schedule.read(shell, (IDENTIFIER,))
+        if rows is None:
+            self.fail("The backup schedule could not be read.")
+        return rows[0]
+
+    def next_schedule_time(self) -> str:
+        from datetime import UTC, datetime, timedelta
+
+        moment = datetime.now(UTC) + timedelta(minutes=2)
+        return moment.strftime("%H:%M")
+
     def site_status(self, path: str = "/") -> int:
         return int(
             self.native(
@@ -197,6 +246,44 @@ class BackupLifecycle(BackupCase):
             shell.run(f"rm -f {staged}")
             self.assertEqual(listing.exit_status, 0, listing.stdout)
             self.assertEqual(json.loads(listing.stdout or "[]"), [])
+        # One reviewed schedule installs a fixed UTC timer. It fires a live capture with no
+        # controller connected, and a fresh controller reads the same schedule back.
+        at = self.next_schedule_time()
+        self.set_schedule(at)
+        installed = self.schedule_row()
+        self.assertTrue(installed.installed)
+        self.assertTrue(installed.timer_active)
+        self.assertTrue(installed.timer_enabled)
+        self.assertGreater(installed.next_elapse_us, 0)
+        import time
+
+        end = time.monotonic() + 180
+        scheduled: list[dict[str, object]] = []
+        while time.monotonic() < end and not scheduled:
+            scheduled = [point for point in self.points() if point.get("origin") == "scheduled"]
+            if not scheduled:
+                time.sleep(2)
+        self.assertTrue(scheduled, "The real backup timer never fired a scheduled capture.")
+        self.assertTrue(scheduled[0]["live"])
+        self.assertTrue(scheduled[0]["complete"])
+        collected = self.observe()
+        backup = self.backup_row(collected)
+        if backup.last is None:
+            self.fail("No scheduled result was reconstructed.")
+        self.assertEqual(backup.last.origin, "scheduled")
+        self.assertIn(backup.last.result_class, ("succeeded", "partial"))
+        from operations.models import ChangeReview as Review
+        from operations.models import ChangeRun
+
+        ChangeRun.objects.all().delete()
+        Review.objects.all().delete()
+        reconstructed = self.schedule_row()
+        self.assertTrue(reconstructed.installed)
+        self.assertEqual(reconstructed.frequency, "daily")
+        self.assertEqual(reconstructed.at, at)
+        self.assertGreater(reconstructed.next_elapse_us, 0)
+        self.disable_schedule()
+        self.assertFalse(self.schedule_row().installed)
         self.capture()
         self.assertEqual(self.site_status("/"), 200)
         self.assertNotIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))

@@ -87,4 +87,4 @@ exclude = ["*/.venv/*", "*/node_modules/*", "*/.git/*", "*/.codex/*", "*/staticf
 min_confidence = 60
 sort_by_size = true
 # The domains change reads this native record key by name.
-ignore_names = ["serving_form"]
+ignore_names = ["serving_form", "recent_backup"]

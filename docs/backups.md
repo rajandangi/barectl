@@ -1,4 +1,4 @@
-# Backups (implemented, #396, #399 and #400)
+# Backups (implemented, #396, #399, #400 and #402)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, and its recovery points. The planned
@@ -81,6 +81,40 @@ Caddy file. It never starts background work: Scheduled tasks or Queue workers as
 run again, so a half-migrated or half-copied site is never served with its work resumed
 unreviewed.
 
+## Schedule
+
+Each site has at most one **schedule**, created and turned off only through a reviewed
+Site change. It chooses **daily** or **weekly** (Monday) at an explicit `HH:MM` in UTC, a
+scope (**Database only** or **Full site**) and whether to copy the point offsite once offsite
+storage is set up. New sites start with no schedule; enabling backups does not create one.
+
+The schedule is a fixed native timer in the site's own backup slice, separate from its
+automation slice:
+
+- `barectl-site-<id>-backup.slice`, `.service` and `.timer`;
+- the service is a oneshot with a finite two-hour run window and no restart;
+- the timer sets `Persistent=false` (no catch-up), `AccuracySec=1s`,
+  `RandomizedDelaySec=0` and `DeferReactivation=yes`, and names its UTC calendar explicitly.
+
+A tick runs a fixed rendered body, not a change-engine run. It takes the global native lock
+with a bounded wait, then the site's `.deploy.lock`; when either is held it records a
+**skipped** run and exits, and a skip is never shown as a saved point. The capture is
+**live**: the database first, then the files, tagged `capture:live` and `origin:scheduled`,
+and never pauses the site. A full point is tagged complete only after both parts are
+verified present. The same body does not catch up: a missed window is missed.
+
+The review refuses a window that overlaps another site's window on the same server (a
+window is the hour the run starts in) and names the next free hour. The next run is shown
+only when systemd reports it; the page never invents a schedule. A fresh controller
+reconstructs the schedule and its next run from the units, the runtime payload and systemd
+during **Check backups** and every schedule review. An installed unit whose settings differ
+from the fixed template is **Outside supported settings**, is reported once, and blocks only
+that site's backup changes.
+
+Every change that names a site treats that site's running backup unit as busy, so a Deploy,
+PHP switch or restore never races a capture. Turning the schedule off stops and disables the
+timer, stops the service and slice, and removes the unit files and runtime payload.
+
 ## Restore database only
 
 Each listed **database-only** or **full site** recovery point offers **Restore** for its
@@ -149,8 +183,10 @@ reconstructs that backups are enabled and the last result from this native evide
 
 The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
 a database-only capture, `backups/bodies/full.py` for a paused full capture,
-`backups/bodies/restore.py` for a database restore and `backups/bodies/reopen.py` for
-reopening a paused site; each prints its stages and a result line. The pause helpers shared by
+`backups/bodies/restore.py` for a database restore, `backups/bodies/reopen.py` for
+reopening a paused site and `backups/bodies/schedule.py` for the schedule install and its
+live tick; each prints its stages and a result line. The schedule read is
+`backups/bodies/observe_schedule.py`. The pause helpers shared by
 the full capture and the restore are `backups/bodies/paused.py`. The read is
 `backups/bodies/observe.py`, shared with the database binding's pure catalog reader. The first
 shared Phase D native scenario is `disposable/test_backups.py`.

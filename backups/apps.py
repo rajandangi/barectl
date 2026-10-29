@@ -14,9 +14,11 @@ class BackupsConfig(AppConfig):
         from .change import BACK_UP_FULL, BACK_UP_NOW, ENABLE
         from .reopen import REOPEN_SITE
         from .restore import RESTORE
+        from .schedule import SET_BACKUP_SCHEDULE
 
         register_kind(ENABLE)
         register_kind(BACK_UP_NOW)
         register_kind(BACK_UP_FULL)
         register_kind(REOPEN_SITE)
         register_kind(RESTORE)
+        register_kind(SET_BACKUP_SCHEDULE)

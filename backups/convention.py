@@ -31,6 +31,112 @@ ORIGINS: Final = ("manual", "scheduled", "safety")
 POINT_TAG: Final = "point:"
 
 RESULT_PREFIX: Final = "barectl-result "
+# One schedule per site is a fixed timer in the site's own backup slice, separate from the
+# automation slice (docs/adr/0036, docs/adr/0037, #402). The body is a fixed rendered file,
+# never an engine run.
+SCHEDULE_ROOT: Final = "/etc/barectl/backups/schedule"
+SCHEDULE_SLICE: Final = "/etc/systemd/system/barectl-site-{identifier}-backup.slice"
+SCHEDULE_SERVICE: Final = "/etc/systemd/system/barectl-site-{identifier}-backup.service"
+SCHEDULE_TIMER: Final = "/etc/systemd/system/barectl-site-{identifier}-backup.timer"
+SCHEDULE_RUN_TIMEOUT: Final = "2h"
+SCHEDULE_LOCK_WAIT_SECONDS: Final = 30
+# A window is the hour a schedule starts in; another site's window overlaps when it begins
+# in that hour. The review refuses it and suggests the next free hour.
+SCHEDULE_WINDOW_MINUTES: Final = 60
+FREQUENCIES: Final = ("daily", "weekly")
+SCHEDULE_SCOPES: Final = ("database", "files", "full")
+WEEKLY_DAY: Final = "Mon"
+TIME: Final = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])\Z")
+
+
+def schedule_script(identifier: str) -> str:
+    if SITE_IDENTIFIER.fullmatch(identifier) is None:
+        raise ValueError("Not a site identifier.")
+    return f"{SCHEDULE_ROOT}/{identifier}.sh"
+
+
+def schedule_payload(identifier: str) -> str:
+    if SITE_IDENTIFIER.fullmatch(identifier) is None:
+        raise ValueError("Not a site identifier.")
+    return f"{SCHEDULE_ROOT}/{identifier}.json"
+
+
+def schedule_unit_file(identifier: str, kind: str) -> str:
+    if SITE_IDENTIFIER.fullmatch(identifier) is None:
+        raise ValueError("Not a site identifier.")
+    template = {
+        "slice": SCHEDULE_SLICE,
+        "service": SCHEDULE_SERVICE,
+        "timer": SCHEDULE_TIMER,
+    }.get(kind)
+    if template is None:
+        raise ValueError("Not a backup unit kind.")
+    return template.format(identifier=identifier)
+
+
+def schedule_unit_name(identifier: str, kind: str) -> str:
+    return schedule_unit_file(identifier, kind).rsplit("/", 1)[-1]
+
+
+def schedule_calendar(frequency: str, at: str) -> str:
+    """The explicit UTC calendar expression for one reviewed schedule."""
+    if frequency not in FREQUENCIES or TIME.fullmatch(at) is None:
+        raise ValueError("Not a reviewed backup schedule.")
+    day = f"{WEEKLY_DAY} " if frequency == "weekly" else ""
+    return f"{day}*-*-* {at}:00 UTC"
+
+
+def render_schedule_slice(identifier: str) -> str:
+    if SITE_IDENTIFIER.fullmatch(identifier) is None:
+        raise ValueError("Not a site identifier.")
+    return f"[Unit]\nDescription=Barectl backups for {identifier}\n\n[Slice]\n"
+
+
+def render_schedule_service(identifier: str) -> str:
+    if SITE_IDENTIFIER.fullmatch(identifier) is None:
+        raise ValueError("Not a site identifier.")
+    return (
+        "[Unit]\n"
+        f"Description=Barectl backup capture for {identifier}\n"
+        f"ConditionPathIsDirectory=/var/www/{identifier}\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"TimeoutStartSec={SCHEDULE_RUN_TIMEOUT}\n"
+        "KillMode=control-group\n"
+        f"Slice=barectl-site-{identifier}-backup.slice\n"
+        f"ExecStart=/bin/sh {schedule_script(identifier)} {schedule_payload(identifier)}\n"
+    )
+
+
+def render_schedule_timer(identifier: str, frequency: str, at: str) -> str:
+    calendar = schedule_calendar(frequency, at)
+    return (
+        "[Unit]\n"
+        f"Description=Barectl backup schedule for {identifier}\n"
+        "\n"
+        "[Timer]\n"
+        f"OnCalendar={calendar}\n"
+        "AccuracySec=1s\n"
+        "RandomizedDelaySec=0\n"
+        "Persistent=false\n"
+        "DeferReactivation=yes\n"
+        f"Unit=barectl-site-{identifier}-backup.service\n"
+        f"Slice=barectl-site-{identifier}-backup.slice\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+
+
+def render_schedule(identifier: str, kind: str, frequency: str = "", at: str = "") -> str:
+    if kind == "slice":
+        return render_schedule_slice(identifier)
+    if kind == "service":
+        return render_schedule_service(identifier)
+    if kind == "timer":
+        return render_schedule_timer(identifier, frequency, at)
+    raise ValueError("Not a backup unit kind.")
 
 
 def site_directory(identifier: str) -> str:

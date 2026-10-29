@@ -13,7 +13,7 @@ from operations.models import ChangePreparation
 from servers.models import Server
 
 from . import check
-from .testing import point, record_backups, record_points, result
+from .testing import point, record_backups, record_points, record_schedule, result
 
 
 @tag("browser")
@@ -98,6 +98,43 @@ class BackupsBrowserTests(BrowserTestCase):
         expect(self.page.get_by_role("heading", name="Back up all of shop")).to_be_visible()
         capture = ChangePreparation.objects.get(server=server)
         self.assertEqual(capture.kind_slug, "back_up_full_site")
+        self.assert_no_native_terms()
+
+    def test_a_schedule_is_set_through_its_review(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_role("heading", name="Schedule")).to_be_visible()
+        self.page.get_by_label("How often").select_option("weekly")
+        self.page.get_by_label("UTC time").fill("04:30")
+        self.page.get_by_label("What the schedule copies").select_option("full")
+        self.page.get_by_role("button", name="Set backup schedule").click()
+        expect(
+            self.page.get_by_role("heading", name="Change the backup schedule of shop")
+        ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "set_backup_schedule")
+        self.assertEqual(preparation.inputs["frequency"], "weekly")
+        self.assertEqual(preparation.inputs["at"], "04:30")
+        self.assert_no_native_terms()
+
+    def test_a_schedule_shows_the_next_run_and_turns_off(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        record_schedule(server, identifier="shop")
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_text("Daily at 03:00 UTC")).to_be_visible()
+        expect(self.page.get_by_text("Next run:")).to_be_visible()
+        self.assert_no_native_terms()
+        self.page.get_by_role("button", name="Turn off backup schedule").click()
+        expect(
+            self.page.get_by_role("heading", name="Change the backup schedule of shop")
+        ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "set_backup_schedule")
+        self.assertEqual(preparation.inputs, {"version": 1, "identifier": "shop", "state": "off"})
         self.assert_no_native_terms()
 
     def test_a_gated_site_offers_one_reopen_action(self) -> None:

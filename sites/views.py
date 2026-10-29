@@ -898,10 +898,17 @@ def server_wordpress_site_prepare(request: HttpRequest, pk: int) -> HttpResponse
 @permission_required(("servers.view_server", VIEW_SITES), raise_exception=True)
 def site_list(request: HttpRequest) -> HttpResponse:
     states = [server_state(server) for server in Server.objects.order_by("name", "pk")]
+    from backups.schedule import recent_missing
+
     rows = [
         {
             "state": state,
-            "sites": present_sites(state.snapshot.collected.sites) if state.snapshot else None,
+            "sites": present_sites(
+                state.snapshot.collected.sites,
+                recent_missing(state.snapshot.collected),
+            )
+            if state.snapshot
+            else None,
             "ready": status_line(state) == READY,
         }
         for state in states

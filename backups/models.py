@@ -37,6 +37,47 @@ class BackupCheck(RemoteOperation):
         return f"{self.get_status_display()} backup check of {self.identifier}"
 
 
+class BackupSchedule(models.Model):
+    """One site's last verified backup schedule, from native units and systemd (#402).
+
+    It is a cached observation for the page, never authority: the next review and the native
+    body re-read the server, and a next run is shown only when systemd reported one.
+    """
+
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="backup_schedules")
+    identifier = models.CharField(max_length=24)
+    frequency = models.CharField(max_length=10, blank=True)
+    at = models.CharField(max_length=5, blank=True)
+    scope = models.CharField(max_length=10, blank=True)
+    offsite = models.BooleanField(default=False)
+    installed = models.BooleanField(default=False)
+    timer_active = models.BooleanField(default=False)
+    timer_enabled = models.BooleanField(default=False)
+    service_active = models.BooleanField(default=False)
+    next_elapse_us = models.BigIntegerField(default=0)
+    last_trigger_us = models.BigIntegerField(default=0)
+    last_start_us = models.BigIntegerField(default=0)
+    last_exit_us = models.BigIntegerField(default=0)
+    result = models.CharField(max_length=20, blank=True)
+    exec_status = models.PositiveIntegerField(default=0)
+    problem = models.TextField(blank=True)
+    checked_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["server", "identifier"], name="one_backup_schedule_per_site"
+            )
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        state = "set" if self.installed else "not set"
+        return f"backup schedule {state}: {self.identifier} on {self.server}"
+
+
 class BackupObservation(models.Model):
     """One site's backup setup and newest result, from one discovery snapshot."""
 

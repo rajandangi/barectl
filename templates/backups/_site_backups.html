@@ -110,6 +110,63 @@
            href="{% url 'site_backups_kit' server.pk identifier %}">Recovery kit</a>
       </div>
       <p class="usa-hint">Backing up runs on the server and carries on if this computer disconnects.</p>
+      <section class="barectl-card" aria-labelledby="backup-schedule-heading">
+        <h3 id="backup-schedule-heading">Schedule</h3>
+        <p>{{ backup_schedule_state }}</p>
+        {% if backup_schedule_next %}
+          <p class="barectl-note">Next run: {{ backup_schedule_next }}</p>
+        {% elif backup_schedule.installed %}
+          <p class="barectl-note">Systemd has not reported the next run yet.</p>
+        {% endif %}
+        {% if backup_schedule_problem %}
+          <div class="usa-alert usa-alert--warning">
+            <div class="usa-alert__body">
+              <p class="usa-alert__text">{{ backup_schedule_problem }}</p>
+            </div>
+          </div>
+        {% endif %}
+        {% if backups_can_schedule %}
+          {% if backup_schedule.installed %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_schedule_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <input type="hidden" name="state" value="off">
+              <div class="barectl-page-actions">
+                <button type="submit" class="usa-button usa-button--outline">Turn off backup schedule</button>
+              </div>
+            </form>
+          {% else %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_schedule_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <input type="hidden" name="state" value="on">
+              <label class="usa-label" for="backup-frequency">How often</label>
+              <select class="usa-select" id="backup-frequency" name="frequency">
+                <option value="daily" {% if backup_schedule.frequency == "daily" %}selected{% endif %}>Daily</option>
+                <option value="weekly" {% if backup_schedule.frequency == "weekly" %}selected{% endif %}>Weekly (Monday)</option>
+              </select>
+              <label class="usa-label" for="backup-at">UTC time</label>
+              <input class="usa-input" id="backup-at" name="at" type="time" value="{{ backup_schedule.at|default:"03:00" }}" required>
+              <label class="usa-label" for="backup-schedule-scope">What the schedule copies</label>
+              <select class="usa-select" id="backup-schedule-scope" name="scope">
+                <option value="full" {% if backup_schedule.scope != "database" %}selected{% endif %}>Full site (the site stays online)</option>
+                {% if backups.database %}
+                  <option value="database" {% if backup_schedule.scope == "database" %}selected{% endif %}>Database only</option>
+                {% endif %}
+              </select>
+              <div class="usa-checkbox">
+                <input class="usa-checkbox__input" id="backup-offsite" name="offsite" type="checkbox" value="on" {% if backup_schedule.offsite %}checked{% endif %}>
+                <label class="usa-checkbox__label" for="backup-offsite">Copy offsite when it is set up</label>
+              </div>
+              <div class="barectl-page-actions">
+                <button type="submit" class="usa-button">Set backup schedule</button>
+              </div>
+            </form>
+          {% endif %}
+        {% endif %}
+      </section>
     {% endif %}
   </section>
   {% if backups.enabled %}

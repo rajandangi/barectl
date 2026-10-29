@@ -34,6 +34,7 @@ class InputShape(StrEnum):
     WORDPRESS_SETTINGS = "wordpress_settings"
     CERTIFICATE_EMAIL = "certificate_email"
     AUTOMATION_SCHEDULE = "automation_schedule"
+    BACKUP_SCHEDULE = "backup_schedule"
     LARAVEL_QUEUE_WORKERS = "laravel_queue_workers"
     SITE_LOG_ROTATION = "site_log_rotation"
 
@@ -92,6 +93,12 @@ class PreparationInputs:
     certificate_email: str | None = None
     # A site's scheduled-task change: "on", "off" or "run" (Phase C #357).
     schedule_state: str = ""
+    # A site's one backup schedule (#402): its state plus the reviewed window.
+    backup_schedule: bool = False
+    frequency: str = ""
+    at: str = ""
+    scope: str = ""
+    offsite: bool = False
     # A Laravel site's queue-worker action ("start", "stop", "restart") and, for a start,
     # the reviewed definition (Phase C #266).
     worker_action: str = ""
@@ -133,6 +140,20 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
+        if self.backup_schedule:
+            reviewed: dict[str, object] = {
+                "version": 1,
+                "identifier": self.identifier,
+                "state": self.schedule_state,
+            }
+            if self.schedule_state == "on":
+                reviewed.update(
+                    frequency=self.frequency,
+                    at=self.at,
+                    scope=self.scope,
+                    offsite=self.offsite,
+                )
+            return reviewed
         if self.worker_action:
             value: dict[str, object] = {
                 "version": 1,
@@ -752,6 +773,58 @@ def _schedule_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> Pre
     return PreparationInputs("", identifier, schedule_state=str(state))
 
 
+def _backup_schedule_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    """One site's backup schedule: on with a daily or weekly UTC window, or off."""
+    from backups import convention
+    from sites.names import valid_identifier
+
+    if "version" not in value or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    if set(value) not in (
+        {"version", "identifier", "state"},
+        {"version", "identifier", "state", "frequency", "at", "scope", "offsite"},
+    ):
+        raise ValueError(INVALID_INPUTS)
+    identifier, state = value["identifier"], value["state"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or state not in ("on", "off")
+        or not isinstance(state, str)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    if state == "off":
+        if set(value) != {"version", "identifier", "state"}:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs("", identifier, schedule_state="off", backup_schedule=True)
+    frequency, at, scope, offsite = (
+        value["frequency"],
+        value["at"],
+        value["scope"],
+        value["offsite"],
+    )
+    if (
+        frequency not in convention.FREQUENCIES
+        or not isinstance(at, str)
+        or convention.TIME.fullmatch(at) is None
+        or scope not in ("database", "full")
+        or type(offsite) is not bool
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(
+        "",
+        identifier,
+        schedule_state="on",
+        backup_schedule=True,
+        frequency=str(frequency),
+        at=at,
+        scope=str(scope),
+        offsite=offsite,
+    )
+
+
 def _worker_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
     from automation import workers
     from sites.names import valid_identifier
@@ -845,6 +918,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.WORDPRESS_SETTINGS: _settings_inputs,
     InputShape.CERTIFICATE_EMAIL: _certificate_email_inputs,
     InputShape.AUTOMATION_SCHEDULE: _schedule_inputs,
+    InputShape.BACKUP_SCHEDULE: _backup_schedule_inputs,
     InputShape.LARAVEL_QUEUE_WORKERS: _worker_inputs,
     InputShape.SITE_LOG_ROTATION: _site_log_rotation_inputs,
 }
