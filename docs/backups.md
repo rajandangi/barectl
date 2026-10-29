@@ -170,9 +170,9 @@ failure is refused with `backup_dump` and leaves no snapshot.
 Every capture writes one final safe `barectl-result` line with its result class, counts,
 bytes, a short point identifier and its offsite outcome (`copied`, `failed`, or empty when
 offsite storage is not set up). `Copy offsite again` writes its own `kind:"copy"` line, so
-discovery keeps the copy result apart from the capture result. A full capture first writes a `backup_paused` line so
-discovery can name a capture that was interrupted; the engine ignores that interim line and
-reads only the final outcome. Neither line carries a path, repository URL, credential or
+discovery keeps the copy result apart from the capture result. A full capture first writes a
+`backup_paused` line so discovery can name a capture that was interrupted; the engine ignores
+that interim line and reads only the final outcome. Neither line carries a path, repository URL, credential or
 dump content.
 
 ## Check backups
@@ -203,11 +203,14 @@ reconstructs that backups are enabled and the last result from this native evide
 
 The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
 a database-only capture, `backups/bodies/full.py` for a paused full capture,
-`backups/bodies/restore.py` for a database restore and `backups/bodies/reopen.py` for
-reopening a paused site; each prints its stages and a result line. The pause helpers shared by
+`backups/bodies/restore.py` for a database restore, `backups/bodies/offsite.py` for offsite
+storage and `backups/bodies/copy.py` for Copy offsite again, and `backups/bodies/reopen.py`
+for reopening a paused site; each prints its stages and a result line. The pause helpers shared by
 the full capture and the restore are `backups/bodies/paused.py`. The read is
 `backups/bodies/observe.py`, shared with the database binding's pure catalog reader. The first
-shared Phase D native scenario is `disposable/test_backups.py`.
+shared Phase D native scenario is `disposable/test_backups.py`; its offsite checks use a
+local S3-compatible fixture (`disposable/native_mirror/s3.py`) on the lane and never the
+internet.
 On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured
