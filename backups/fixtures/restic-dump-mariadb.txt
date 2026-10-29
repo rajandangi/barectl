@@ -1,0 +1,25 @@
+-- MariaDB dump 10.19  Distrib 11.8.2-MariaDB, for debian-linux-gnu (x86_64)
+--
+-- Host: localhost    Database: salpha
+-- ------------------------------------------------------
+-- Server version	11.8.2-MariaDB-ubu2404
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+
+--
+-- Table structure for table `recovery_check`
+--
+
+DROP TABLE IF EXISTS `recovery_check`;
+CREATE TABLE `recovery_check` (
+  `id` int(11) NOT NULL,
+  `note` varchar(40) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+LOCK TABLES `recovery_check` WRITE;
+INSERT INTO `recovery_check` VALUES (7,'before-the-backup');
+UNLOCK TABLES;

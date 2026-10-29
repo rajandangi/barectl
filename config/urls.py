@@ -10,6 +10,7 @@ from backups.views import (
     prepare_copy,
     prepare_enable,
     prepare_reopen,
+    prepare_restore,
     recovery_kit,
 )
 from bootstrap.certificate_email_views import prepare_certificate_email
@@ -353,6 +354,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/backups/reopen/prepare/",
         prepare_reopen,
         name="site_backups_reopen_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/restore/prepare/",
+        prepare_restore,
+        name="site_backups_restore_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/backups/check/",

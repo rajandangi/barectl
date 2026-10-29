@@ -4,7 +4,11 @@
     <div class="usa-alert usa-alert--warning">
       <div class="usa-alert__body">
         <p class="usa-alert__text">
-          This stopped after pausing the site for a full backup. Nothing after it ran.
+          {% if site_reopen_restore %}
+            This stopped after pausing the site to restore its database. Nothing after it ran.
+          {% else %}
+            This stopped after pausing the site for a full backup. Nothing after it ran.
+          {% endif %}
         </p>
         {% if site_reopen_can_prepare %}
           <form class="usa-form"

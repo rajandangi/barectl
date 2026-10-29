@@ -599,6 +599,70 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not prove that the site serves its files again, so it may still show "
         "the maintenance page. Read the run's journal and prepare a new review."
     ),
+    "restore_site": (
+        "The site's Linux account could not be read, so the restore stopped before changing "
+        "anything. Run discovery and prepare a new review."
+    ),
+    "restore_repository": (
+        "The site's backup repository could not be read, so nothing was restored. Read the "
+        "run's journal on the server, then prepare a new review."
+    ),
+    "restore_evidence": (
+        "The site's reviewed files changed before the run started, so nothing was restored. "
+        "Run discovery and prepare a new review."
+    ),
+    "restore_lock": (
+        "The site was busy with another change, so the restore was skipped. Prepare a new "
+        "review after that change finishes."
+    ),
+    "restore_disk": (
+        "The server does not have the free space the review keeps in reserve, so nothing was "
+        "restored. Free space, then prepare a new review."
+    ),
+    "restore_point": (
+        "The recovery point is missing or incomplete, so nothing was restored. Check backups "
+        "and prepare a new review."
+    ),
+    "restore_engine": (
+        "The recovery point was made by a different database version than this site uses, so "
+        "nothing was restored. Prepare a new review from a matching point."
+    ),
+    "restore_target": (
+        "The site's database changed since the review, so nothing was restored. Prepare a new "
+        "review against the current site."
+    ),
+    "restore_safety": (
+        "The safety backup could not be taken or checked, so nothing was overwritten. Read the "
+        "run's journal and prepare a new review."
+    ),
+    "restore_gate": (
+        "Barectl could not publish the maintenance page, so the site's database was not "
+        "changed. Read the run's journal, then prepare a new review."
+    ),
+    "restore_paused": (
+        "The restore stopped after pausing the site. Nothing after that ran. Reopen the site, "
+        "then prepare a new review."
+    ),
+    "restore_idle": (
+        "The site's running requests or background work did not finish within the reviewed "
+        "wait, so the database was not changed and the site stays paused. Reopen the site."
+    ),
+    "restore_import": (
+        "The database import did not finish, so the site stays paused and the data may be "
+        "partly replaced. Read the run's journal, then reopen the site and check what remained."
+    ),
+    "restore_data": (
+        "The import finished but its data checks did not pass, so the site stays paused. Read "
+        "the run's journal, then reopen the site and check the data."
+    ),
+    "restore_readiness": (
+        "The data was imported but the site did not answer its readiness check, so it stays "
+        "paused. Read the run's journal, then reopen the site and check the application."
+    ),
+    "restore_open": (
+        "Barectl could not remove the maintenance page, so the site stays paused. Read the "
+        "run's journal and prepare a new review."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -896,6 +960,22 @@ RESULT_REASONS: Final = frozenset(
         "offsite_copy",
         "offsite_remove",
         "site_reopen",
+        "restore_site",
+        "restore_repository",
+        "restore_evidence",
+        "restore_lock",
+        "restore_disk",
+        "restore_point",
+        "restore_engine",
+        "restore_target",
+        "restore_safety",
+        "restore_gate",
+        "restore_paused",
+        "restore_idle",
+        "restore_import",
+        "restore_data",
+        "restore_readiness",
+        "restore_open",
         "logrotate_missing",
         "rotation_invalid",
     }

@@ -27,6 +27,7 @@ from . import check, convention, presentation
 from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
 from .offsite import COPY_SLUG
 from .reopen import SLUG as REOPEN_SLUG
+from .restore import SLUG as RESTORE_SLUG
 
 if TYPE_CHECKING:
     from discovery.snapshot import ObservedSite
@@ -94,6 +95,13 @@ def context_for_site(
         "backups_can_back_up_full": can_prepare and managed and view.enabled,
         "backups_can_copy": can_prepare and managed and view.enabled and view.offsite is not None,
         "backups_can_reopen": can_prepare and view.reopen,
+        "backups_can_restore": (
+            can_prepare
+            and managed
+            and view.enabled
+            and view.database
+            and user.has_perm("operations.change_destructive")
+        ),
         "backups_can_check": bool(
             managed and user.has_perms((*check.READ_PERMISSIONS, VIEW_SITES))
         ),
@@ -186,8 +194,24 @@ def prepare_copy(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
     return redirect("change_detail", operation_id=queued.pk)
 
 
-def _prepare(
-    request: HttpRequest, pk: int, identifier: str, slug: str, target: str
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    point = request.POST.get("point", "")
+    if convention.POINT.fullmatch(point) is None:
+        raise Http404
+    return _prepare(request, pk, identifier, RESTORE_SLUG, "site_backups", point=point)
+
+
+def _prepare(  # noqa: C901 - one guarded preparation
+    request: HttpRequest,
+    pk: int,
+    identifier: str,
+    slug: str,
+    target: str,
+    *,
+    point: str = "",
 ) -> HttpResponse:
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
@@ -220,12 +244,22 @@ def _prepare(
             "This site is not paused by a full backup, so there is nothing to reopen.",
         )
         return redirect(target, pk=pk, identifier=identifier)
+    if slug == RESTORE_SLUG and not context["backups_can_restore"]:
+        messages.error(
+            request,
+            "Barectl cannot restore this site's database yet. Check backups and wait for the "
+            "current operation.",
+        )
+        return redirect(target, pk=pk, identifier=identifier)
+    inputs: dict[str, object] = {"version": 1, "identifier": identifier}
+    if slug == RESTORE_SLUG:
+        inputs["point"] = point
     try:
         queued = services.request_prepare(
             server,
             request.user,
             slug,
-            inputs={"version": 1, "identifier": identifier},
+            inputs=inputs,
         )
     except OperationRefused, ValueError:
         messages.error(request, "The saved connection changed. Refresh and prepare again.")

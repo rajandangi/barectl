@@ -12,6 +12,7 @@ from discovery.snapshot import Observation, ObservedSite, SiteAccount, save_snap
 from servers.models import Server
 from sites.bodies.common import SITE_GATED
 
+from .models import BackupCheck
 from .observation import BackupResult, ObservedBackup, OffsiteCopy, OffsiteStorage
 
 
@@ -92,4 +93,55 @@ def result(
         point,
         1,
         4096,
+    )
+
+
+def point(
+    *,
+    point: str = "0123456789abcdef",
+    time: str = "2026-10-27T11:00:00Z",
+    scope: str = "database",
+    parts: tuple[str, ...] = ("database",),
+    complete: bool = True,
+    live: bool = True,
+) -> dict[str, object]:
+    return {
+        "id": "a" * 64,
+        "short": "a" * 8,
+        "time": time,
+        "point": point,
+        "scope": scope,
+        "parts": list(parts),
+        "missing": [],
+        "incomplete": [],
+        "origin": "manual",
+        "live": live,
+        "keep": False,
+        "complete": complete,
+    }
+
+
+def record_points(
+    server: Server,
+    points: tuple[dict[str, object], ...] = (),
+    *,
+    identifier: str = "shop",
+    checked_at: datetime | None = None,
+) -> BackupCheck:
+    """One stored Check backups listing, as the Backups section reads it."""
+    BackupCheck.objects.filter(server=server, identifier=identifier).delete()
+    return BackupCheck.objects.create(
+        server=server,
+        identifier=identifier,
+        ssh_alias=server.ssh_alias,
+        status="succeeded",
+        finished_at=timezone.now(),
+        checked_at=checked_at or timezone.now(),
+        listing={
+            "version": 1,
+            "identifier": identifier,
+            "outcome": "observed",
+            "problem": "",
+            "points": list(points),
+        },
     )

@@ -51,6 +51,7 @@ BACKUP_SLUG: Final = "back_up_now"
 BACKUP_LABEL: Final = "Back up now"
 FULL_SLUG: Final = "back_up_full_site"
 FULL_LABEL: Final = "Back up full site"
+FULL_APPLICATIONS: Final = ("plain", "wordpress", "laravel")
 ESCROW: Final = (
     "I stored the recovery passphrase and the printed recovery kit somewhere other than "
     "this server and Barectl."
@@ -81,6 +82,15 @@ ENABLE_SOURCE: Final = importlib.resources.files("backups.bodies").joinpath("ena
 ENABLE_BYTES: Final = _packed(ENABLE_SOURCE)
 ENABLE_SHA256: Final = hashlib.sha256(ENABLE_BYTES).hexdigest()
 NATIVE_SOURCE: Final = importlib.resources.files("backups.bodies").joinpath("native.py").read_text()
+PAUSED_SOURCE: Final = without_imports(
+    importlib.resources.files("backups.bodies").joinpath("paused.py").read_text(),
+    (
+        "backups.bodies.native",
+        "sites.bodies.admission",
+        "sites.bodies.common",
+        "sites.bodies.site_fpm",
+    ),
+)
 BACKUP_SOURCE: Final = (
     NATIVE_SOURCE
     + "\n"
@@ -99,6 +109,7 @@ FULL_CORE: Final = without_imports(
         "sites.bodies.common",
         "sites.bodies.site_fpm",
         "backups.bodies.native",
+        "backups.bodies.paused",
     ),
 )
 FULL_SOURCE: Final = (
@@ -107,6 +118,8 @@ FULL_SOURCE: Final = (
     + site_observation.COMMON_SOURCE
     + "\n"
     + NATIVE_SOURCE
+    + "\n"
+    + PAUSED_SOURCE
     + "\n"
     + FULL_CORE
 )

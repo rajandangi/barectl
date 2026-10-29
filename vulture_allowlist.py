@@ -598,4 +598,5 @@ if TYPE_CHECKING:
         RecoveryPointView("", "", "", False, False, "", "").time_label,
         RecoveryPointView("", "", "", False, False, "", "").short_id,
         RecoveryPointView("", "", "", False, False, "", "").restorable,
+        RecoveryPointView("", "", "", False, False, "", "").has_database,
     )

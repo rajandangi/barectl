@@ -47,12 +47,13 @@ def document_result(
     point: str,
     snapshots: int,
     size: int,
+    kind: str = "backup",
     offsite: str = "",
 ) -> dict[str, object]:
     value: dict[str, object] = {
         "class": result_class,
         "reason": reason,
-        "kind": "backup",
+        "kind": kind,
         "site": str(document.get("identifier", "")),
         "scope": str(document.get("scope", "database")),
         "origin": str(document.get("origin", "manual")),
@@ -170,14 +171,10 @@ def environment_file(path: str) -> dict[str, str]:
     return values
 
 
-def restic(
-    argv: list[str],
-    *,
-    repository: str,
-    password: str,
-    extra: dict[str, str] | None = None,
-) -> tuple[int, str]:
-    environment = {
+def restic_environment(
+    repository: str, password: str, extra: dict[str, str] | None = None
+) -> dict[str, str]:
+    return {
         "PATH": "/usr/bin:/bin",
         "HOME": "/root",
         "LANG": "C",
@@ -187,6 +184,16 @@ def restic(
         "TZ": "UTC",
         **(extra or {}),
     }
+
+
+def restic(
+    argv: list[str],
+    *,
+    repository: str,
+    password: str,
+    extra: dict[str, str] | None = None,
+) -> tuple[int, str]:
+    environment = restic_environment(repository, password, extra)
     process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
         [RESTIC_BIN, *argv],
         stdin=subprocess.DEVNULL,
