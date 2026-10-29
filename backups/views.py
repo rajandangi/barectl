@@ -94,8 +94,21 @@ def context_for_site(
         and not polling
         and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
     )
+    offsite = collected.offsite.value if collected is not None else None
+    sources = []
+    if offsite is not None and offsite.configured:
+        for source in offsite.sources:
+            points = presentation.connected_points_view(source) if source.read else ()
+            sources.append(
+                {
+                    "identifier": source.identifier,
+                    "points": points,
+                    "problem": source.problem,
+                }
+            )
     context = {
         "backups": view,
+        "backups_sources": sources,
         "backups_target": target,
         "backups_can_enable": can_prepare and managed and user.has_perm(MANAGE_SECRETS),
         "backups_can_back_up": can_prepare and managed and view.enabled and view.database,
@@ -300,9 +313,23 @@ def prepare_keep(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
 def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     point = request.POST.get("point", "")
     scope = request.POST.get("scope", "database")
-    if convention.POINT.fullmatch(point) is None or scope not in SCOPES:
+    source = request.POST.get("source", "")
+    if (
+        convention.POINT.fullmatch(point) is None
+        or scope not in SCOPES
+        or (source and convention.SITE_IDENTIFIER.fullmatch(source) is None)
+    ):
         raise Http404
-    return _prepare(request, pk, identifier, RESTORE_SLUG, "site_backups", point=point, scope=scope)
+    return _prepare(
+        request,
+        pk,
+        identifier,
+        RESTORE_SLUG,
+        "site_backups",
+        point=point,
+        scope=scope,
+        source=source,
+    )
 
 
 def _prepare(  # noqa: C901 - one guarded preparation
@@ -314,6 +341,7 @@ def _prepare(  # noqa: C901 - one guarded preparation
     *,
     point: str = "",
     scope: str = "database",
+    source: str = "",
 ) -> HttpResponse:
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
@@ -358,6 +386,8 @@ def _prepare(  # noqa: C901 - one guarded preparation
         inputs["point"] = point
         if scope != "database":
             inputs["scope"] = scope
+        if source:
+            inputs["source"] = source
     try:
         queued = services.request_prepare(
             server,

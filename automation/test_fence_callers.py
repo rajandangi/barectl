@@ -408,9 +408,11 @@ def _restore_patches() -> dict[str, object]:
         "locked_file": lambda path, mode: True,
         "controlled": lambda path: True,
         "pwd": SimpleNamespace(getpwnam=lambda account: SimpleNamespace(pw_uid=1001, pw_gid=1001)),
-        "reviewed_point": lambda document, repository, key: True,
+        "reviewed_point": lambda document, repository, key, extra=None: True,
         "reviewed_files": lambda settings, application: ["/var/www/shop/current"],
-        "header_bytes": lambda repository, key, snapshot, filename: b"-- Server version\t11.8.2\n",
+        "header_bytes": lambda repository, key, snapshot, filename, extra=None: (
+            b"-- Server version\t11.8.2\n"
+        ),
         "count_tables": lambda engine, identifier: 0,
     }
 

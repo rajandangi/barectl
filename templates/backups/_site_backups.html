@@ -370,5 +370,85 @@
         </details>
       {% endif %}
     </section>
+    {% if backups_sources %}
+      <section class="barectl-card" aria-labelledby="connected-sources-heading">
+        <h2 id="connected-sources-heading">From connected backup storage</h2>
+        <p class="barectl-note">
+          These recovery points belong to another server's site. Barectl opens the source
+          repository read-only when you restore; the target keeps its own domain and
+          application data is never rewritten.
+        </p>
+        {% for source in backups_sources %}
+          <h3>{{ source.identifier }}</h3>
+          {% if source.problem %}
+            <p>{{ source.problem }}</p>
+          {% elif source.points %}
+            <div class="usa-table-container--scrollable" tabindex="0">
+              <table class="usa-table usa-table--borderless">
+                <caption class="usa-sr-only">Recovery points in connected storage for {{ source.identifier }}</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Taken</th>
+                    <th scope="col">Scope</th>
+                    <th scope="col">Location</th>
+                    <th scope="col">Notes</th>
+                    <th scope="col"><span class="usa-sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for point in source.points %}
+                    <tr>
+                      <td>{{ point.time_label }}</td>
+                      <td>{{ point.scope }}</td>
+                      <td>{{ point.offsite_status }}</td>
+                      <td>
+                        {% if point.live %}Captured while the source site ran.{% endif %}
+                        {% if point.problem %}{{ point.problem }}{% endif %}
+                      </td>
+                      <td>
+                        {% if backups_can_restore and point.restorable and point.has_files or backups_can_restore and point.restorable and backups.database and point.has_database %}
+                          <form class="usa-form"
+                                method="post"
+                                action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="point" value="{{ point.point }}">
+                            <input type="hidden" name="source" value="{{ source.identifier }}">
+                            <label class="usa-label"
+                                   for="source-restore-scope-{{ source.identifier }}-{{ point.point }}">What to restore</label>
+                            <select class="usa-select"
+                                    id="source-restore-scope-{{ source.identifier }}-{{ point.point }}"
+                                    name="scope">
+                              {% if backups.database and point.has_database %}
+                                <option value="database">Database only (the site stays online)</option>
+                              {% endif %}
+                              {% if point.has_files %}
+                                <option value="files">Files only (the database stays as it is now)</option>
+                                <option value="full">Full site (pauses the site briefly)</option>
+                              {% endif %}
+                            </select>
+                            <button type="submit"
+                                    class="usa-button usa-button--outline">Restore</button>
+                          </form>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <details class="barectl-advanced">
+              <summary>Advanced</summary>
+              <ul>
+                {% for point in source.points %}
+                  <li>{{ point.time_label }}: {{ point.short_id }}{% if point.point %} ({{ point.point }}){% endif %}</li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% else %}
+            <p>Connect the storage again to read this source's recovery points.</p>
+          {% endif %}
+        {% endfor %}
+      </section>
+    {% endif %}
   {% endif %}
 {% endif %}

@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror.serve import _Handler as MirrorHandler
     from disposable.test_backups import (
         BackupLifecycle,
+        DisasterRecovery,
         Integrity,
         LaravelFullRestore,
         RebootedFullBackup,
@@ -596,6 +597,7 @@ if TYPE_CHECKING:
     _backup_templates = (
         BackupsConfig,
         BackupLifecycle,
+        DisasterRecovery,
         Integrity,
         LaravelFullRestore,
         RebootedFullBackup,

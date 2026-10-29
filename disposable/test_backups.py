@@ -6,8 +6,11 @@ Ubuntu 26.04 host.
 """
 
 import json
+import os
 import shlex
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
@@ -388,6 +391,246 @@ class BackupCase(ScenarioTestCase):
             if name == "prefix":
                 return value
         raise AssertionError("The offsite config has no prefix.")
+
+
+@tag(SCENARIO_TAG)
+class DisasterRecovery(BackupCase):
+    """A second server connects to offsite storage, restores, then plain restic recovers (#408).
+
+    The source server keeps its site, offsite copy and recovery kit. A second server boots
+    from the same prepared layer with no controller history, creates a matching plain PHP
+    site under a different identifier and domain, connects the same local S3-compatible
+    storage with the kit facts, passphrase and keys, and restores the source point. A plain
+    ``restic`` run with the kit's onsite path and the passphrase alone then recovers the
+    source database without Barectl.
+    """
+
+    identifier = "bkdr"
+    domain = "bkdr.example.com"
+    target_identifier = "bkdr2"
+    target_domain = "bkdr2.example.com"
+    prefix = "bkdr"
+    layer = "L5"
+
+    def create_plain(self, identifier: str, domain: str) -> None:
+        from databases import site as database_site
+        from sites import change as sites_change
+
+        apply_change(
+            self,
+            sites_change.CREATE_SITE,
+            PreparationInputs("php84", identifier, (domain,)),
+            timeout=120,
+        )
+        apply_change(
+            self,
+            database_site.ADD_SITE_DATABASE,
+            PreparationInputs("", identifier),
+            timeout=120,
+        )
+
+    def enable_site(self, identifier: str) -> ChangeReview:
+        from backups import change
+
+        return apply_change(
+            self,
+            change.ENABLE,
+            PreparationInputs("", identifier),
+            timeout=150,
+            secret=PASSPHRASE.encode(),
+        )
+
+    def capture_site(self, identifier: str) -> ChangeReview:
+        from backups import change
+
+        return apply_change(
+            self, change.BACK_UP_FULL, PreparationInputs("", identifier), timeout=150
+        )
+
+    def site_points(self, identifier: str) -> list[dict[str, object]]:
+        from backups import check
+        from discovery.root_read import run_root
+
+        with self.shell() as shell:
+            listing = run_root(shell, check.listing_command(identifier))
+        return check.points(check.parse_listing(listing.stdout) or [])
+
+    @contextmanager
+    def on(self, environment: dict[str, str]) -> Iterator[None]:
+        previous = {name: os.environ.get(name) for name in environment}
+        os.environ.update(environment)
+        try:
+            yield
+        finally:
+            for name, value in previous.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+    def boot_second(self) -> dict[str, str]:
+        from .docker import docker
+        from .machine import Machine
+        from .scenarios import free_port
+
+        server = self._server_container()
+        image = docker("inspect", "-f", "{{.Config.Image}}", server).strip()
+        network = docker(
+            "inspect", "-f", "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}", server
+        ).strip()
+        second = Machine.boot(image, network=network)
+        self.addCleanup(second.remove)
+        public = Path(os.environ["BARECTL_SSH_TEST_KEY"] + ".pub").read_text(encoding="utf-8")
+        second.exec(
+            "install -d -m 700 /root/.ssh && "
+            f"printf %s {shlex.quote(public)} >/root/.ssh/authorized_keys && "
+            "chmod 600 /root/.ssh/authorized_keys"
+        )
+        scripts = Path(__file__).resolve().parent
+        forwarder = f"{server}-dr-forward"
+        port = free_port()
+        docker(
+            "run", "-d", "--name", forwarder, "--network", "bridge",
+            "-p", f"127.0.0.1:{port}:2200",
+            "-v", f"{scripts}:/native:ro", "--entrypoint", "python3", image,
+            "/native/native_mirror/forward.py", "--listen", "2200",
+            "--target", f"{second.address(network)}:22",
+        )  # fmt: skip
+        self.addCleanup(docker, "rm", "-f", forwarder)
+        docker("network", "connect", network, forwarder)
+        host_key = second.exec("cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub").strip()
+        with tempfile.NamedTemporaryFile("w", suffix=".known_hosts", delete=False) as known:
+            known.write(f"[127.0.0.1]:{port} {host_key}\n")
+        self.addCleanup(os.unlink, known.name)
+        return {
+            "BARECTL_SSH_TEST_HOST": "127.0.0.1",
+            "BARECTL_SSH_TEST_PORT": str(port),
+            "BARECTL_SSH_TEST_USER": "root",
+            "BARECTL_SSH_TEST_KEY": os.environ["BARECTL_SSH_TEST_KEY"],
+            "BARECTL_SSH_TEST_KNOWN_HOSTS": known.name,
+            "BARECTL_SSH_TEST_CONTAINER": second.name,
+        }
+
+    def test_a_second_server_restores_from_connected_storage_and_plain_restic(self) -> None:
+        from backups import connect, convention, kit, restore
+
+        source = self.identifier
+        self.create_plain(source, self.domain)
+        self.native(
+            f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
+            + shlex.quote(
+                "CREATE TABLE recovery_check (id INT PRIMARY KEY, note VARCHAR(40)); "
+                "INSERT INTO recovery_check VALUES (408, 'survived-the-loss')"
+            )
+            + f" s{source}"
+        )
+        self.write_file(
+            f"/var/www/{source}/current/public/offline.txt", "recovered-by-plain-restic\n"
+        )
+        self.enable_site(source)
+        self.start_s3()
+        self.offsite_setup()
+        self.capture_site(source)
+        points = [row for row in self.site_points(source) if row["scope"] == "full"]
+        self.assertEqual(len(points), 1)
+        point = str(points[0]["point"])
+        prefix = self.offsite_prefix()
+        # Plain restic with the kit's onsite path and the passphrase alone.
+        self.native(
+            "install -m 600 /dev/stdin /root/recovery-passphrase <<'EOF'\n" + PASSPHRASE + "\nEOF"
+        )
+        recovery = self.native(
+            f"RESTIC_REPOSITORY={convention.repository(source)} "
+            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+            f"{convention.RESTIC_BIN} snapshots --json --no-lock"
+        )
+        self.assertIn(point, recovery)
+        dumped = self.native(
+            f"RESTIC_REPOSITORY={convention.repository(source)} "
+            "RESTIC_PASSWORD_FILE=/root/recovery-passphrase "
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+            f"{convention.RESTIC_BIN} dump latest /{convention.dump_filename(source)} "
+            "| grep -c survived-the-loss"
+        )
+        self.assertEqual(dumped.strip(), "1")
+        kit_lines = kit.lines(
+            server_name="lost",
+            identifier=source,
+            restic_version="0.18.1",
+            provider="Amazon S3",
+            endpoint="https://s3.us-east-1.amazonaws.com",
+            bucket=self.S3_BUCKET,
+            prefix=prefix,
+        )
+        self.assertTrue(any(convention.repository(source) in line for line in kit_lines))
+        self.assertFalse(any(PASSPHRASE in line for line in kit_lines))
+
+        second = self.boot_second()
+        with self.on(second):
+            self.create_plain(self.target_identifier, self.target_domain)
+            self.enable_site(self.target_identifier)
+            secret = json.dumps(
+                {
+                    "values": {
+                        "access_key": "barectl-test-access",
+                        "secret_key": "barectl-test-secret",
+                        "passphrase": PASSPHRASE,
+                    }
+                }
+            ).encode()
+            apply_change(
+                self,
+                connect.CONNECT,
+                PreparationInputs(
+                    provider="s3",
+                    bucket=self.S3_BUCKET,
+                    region=self.S3_REGION,
+                    prefix=prefix,
+                    sites=(source,),
+                ),
+                timeout=120,
+                secret=secret,
+            )
+            with self.shell() as shell:
+                from backups import observation
+
+                value = observation.read(
+                    shell, (self.target_identifier,), "mariadb", Architecture.X86_64
+                )
+            if value is None:
+                self.fail("The connected storage was not observed on the second server.")
+            storage = observation.offsite_of(value)
+            if storage is None or not storage.sources:
+                self.fail("The second server did not read the connected source.")
+            self.assertEqual(storage.sources[0].identifier, source)
+            self.assertTrue(storage.sources[0].points())
+
+        with self.on(second):
+            apply_change(
+                self,
+                restore.RESTORE,
+                PreparationInputs(
+                    "",
+                    self.target_identifier,
+                    point=point,
+                    scope="full",
+                    source=source,
+                ),
+                timeout=180,
+                secret=PASSPHRASE.encode(),
+                expected="succeeded",
+            )
+            self.assertEqual(
+                self.native(f"cat /var/www/{self.target_identifier}/current/public/offline.txt"),
+                "recovered-by-plain-restic\n",
+            )
+            row = self.native(
+                f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
+                + shlex.quote("SELECT note FROM recovery_check WHERE id=408")
+                + f" s{self.target_identifier}"
+            ).strip()
+            self.assertEqual(row, "survived-the-loss")
 
 
 @tag(SCENARIO_TAG)

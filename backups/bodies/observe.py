@@ -19,6 +19,7 @@ OFFSITE_ROOT = KEY_ROOT + "/offsite"
 OFFSITE_CONFIG = OFFSITE_ROOT + "/config"
 OFFSITE_CAPTURE = OFFSITE_ROOT + "/capture.env"
 OFFSITE_PRUNE = OFFSITE_ROOT + "/prune.env"
+OFFSITE_SOURCES = OFFSITE_ROOT + "/sources"
 OFFSITE_HEALTH = "_health"
 PROFILE_ROOT = "/nix/var/nix/profiles/barectl"
 RESTIC_PROFILE = PROFILE_ROOT + "/restic"
@@ -114,6 +115,7 @@ def journal() -> tuple[  # noqa: C901 - one journal read
     dict[str, dict[str, object]],
     dict[str, dict[str, object]],
     dict[str, dict[str, dict[str, object]]],
+    dict[str, dict[str, object]],
 ]:
     status, output = bounded(
         [
@@ -130,10 +132,11 @@ def journal() -> tuple[  # noqa: C901 - one journal read
         limit=512 * 1024,
     )
     if status:
-        return {}, {}, {}
+        return {}, {}, {}, {}
     newest: dict[str, dict[str, object]] = {}
     copies: dict[str, dict[str, object]] = {}
     integrity: dict[str, dict[str, dict[str, object]]] = {}
+    connections: dict[str, dict[str, object]] = {}
     for line in output.decode("utf-8", "replace").splitlines():
         if not line.startswith("barectl-result "):
             continue
@@ -146,7 +149,11 @@ def journal() -> tuple[  # noqa: C901 - one journal read
             "copy",
             "restore",
             "integrity",
+            "connect",
         ):
+            continue
+        if value.get("kind") == "connect":
+            _connection(value, connections)
             continue
         identifier = value.get("site")
         if not isinstance(identifier, str) or not identifier:
@@ -182,7 +189,33 @@ def journal() -> tuple[  # noqa: C901 - one journal read
         if row["offsite"] not in ("", "copied", "failed"):
             row["offsite"] = ""
         newest[identifier] = row
-    return newest, copies, integrity
+    return newest, copies, integrity, connections
+
+
+def _connection(value: dict[str, object], found: dict[str, dict[str, object]]) -> None:
+    rows = value.get("sources")
+    if not isinstance(rows, list) or len(rows) > MAX_SITES:
+        return
+    for source in rows:
+        if not isinstance(source, dict):
+            continue
+        site = source.get("site")
+        if not isinstance(site, str) or site in found:
+            continue
+        snapshots = source.get("rows")
+        if not isinstance(snapshots, list) or len(snapshots) > 500:
+            continue
+        kept: list[dict[str, object]] = []
+        for snapshot in snapshots:
+            if not isinstance(snapshot, dict):
+                continue
+            trimmed = {
+                key: snapshot[key] for key in ("id", "time", "tags", "summary") if key in snapshot
+            }
+            if not isinstance(trimmed.get("id"), str) or not isinstance(trimmed.get("tags"), list):
+                continue
+            kept.append(trimmed)
+        found[site] = {"site": site, "rows": kept, "problem": ""}
 
 
 def _integrity(value: dict[str, object]) -> dict[str, object] | None:
@@ -239,7 +272,40 @@ def config_values(text: str) -> dict[str, object] | None:
     }
 
 
-def offsite() -> dict[str, object] | None:
+def source_sites() -> tuple[list[str], bool]:
+    """The source identifiers a connected storage was opened with, and whether it is safe."""
+    found = metadata(OFFSITE_SOURCES)
+    if found is None:
+        return [], True
+    if not (
+        found.get("uid") == 0
+        and found.get("gid") == 0
+        and found.get("type") == stat.S_IFREG
+        and found.get("mode") == 0o600
+        and found.get("links") == 1
+    ):
+        return [], False
+    try:
+        value = json.loads(pathlib.Path(OFFSITE_SOURCES).read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        return [], False
+    if not isinstance(value, dict) or set(value) != {"version", "sites"}:
+        return [], False
+    if value.get("version") != 1 or not isinstance(value.get("sites"), list):
+        return [], False
+    sites = value["sites"]
+    if (
+        len(sites) > MAX_SITES
+        or not all(isinstance(site, str) and site for site in sites)
+        or len(set(sites)) != len(sites)
+    ):
+        return [], False
+    return [str(site) for site in sites], True
+
+
+def offsite(  # noqa: C901 - one closed offsite read
+    connections: dict[str, dict[str, object]],
+) -> dict[str, object] | None:
     if not os.path.lexists(OFFSITE_ROOT):
         return None
     if not controlled(OFFSITE_ROOT):
@@ -300,6 +366,19 @@ def offsite() -> dict[str, object] | None:
             value["problem"] = "The offsite storage keys are outside supported settings."
     if metadata(OFFSITE_CAPTURE) is None:
         value["problem"] = "The offsite storage keys are missing."
+    sites, safe_sources = source_sites()
+    value["sites"] = sites
+    if not safe_sources:
+        value["problem"] = "The connected backup storage sources are outside supported settings."
+    value["sources"] = [
+        connections.get(site)
+        or {
+            "site": site,
+            "rows": [],
+            "problem": "Connect the storage again to read this source's recovery points.",
+        }
+        for site in sites
+    ]
     return value
 
 
@@ -320,8 +399,8 @@ def main() -> None:
     root_safe = (not os.path.lexists(REPOSITORY_ROOT) or controlled(REPOSITORY_ROOT)) and (
         not os.path.lexists(KEY_ROOT) or controlled(KEY_ROOT)
     )
-    latest, copies, integrities = journal()
-    storage = offsite()
+    latest, copies, integrities, connections = journal()
+    storage = offsite(connections)
     rows = []
     for identifier in sites:
         problems = []

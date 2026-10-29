@@ -115,6 +115,7 @@ def _point_row(snapshot: dict[str, object], tags: list[object]) -> dict[str, obj
         return None
     scope = _tag(tags, "scope:")
     part = _tag(tags, "part:") or (scope if scope in convention.PARTS else "")
+    application = _tag(tags, "application:")
     return {
         "id": identifier,
         "short": identifier[:8],
@@ -123,9 +124,11 @@ def _point_row(snapshot: dict[str, object], tags: list[object]) -> dict[str, obj
         "scope": scope,
         "part": part,
         "origin": _tag(tags, "origin:"),
+        "application": application if application in convention.APPLICATIONS else "",
         "live": lookup.get("capture:live", False),
         "keep": lookup.get("keep", False),
         "complete_part": lookup.get("complete", False),
+        "size": _processed_bytes(snapshot),
     }
 
 
@@ -143,6 +146,10 @@ def _combined(parts: list[dict[str, object]]) -> dict[str, object]:
     )
     restorable = bool(expected) and not missing and not incomplete
     first = parts[0]
+    application = next(
+        (str(part["application"]) for part in parts if str(part.get("application", ""))),
+        "",
+    )
     return {
         "id": str(first["id"]),
         "short": str(first["short"]),
@@ -150,13 +157,28 @@ def _combined(parts: list[dict[str, object]]) -> dict[str, object]:
         "point": str(first["point"]),
         "scope": scope,
         "parts": sorted(present),
+        "snapshots": {
+            str(part["part"]): str(part["id"])
+            for part in parts
+            if str(part["part"]) and part["complete_part"] is True
+        },
+        "application": application,
         "missing": missing,
         "incomplete": incomplete,
         "origin": str(first["origin"]),
         "live": all(part["live"] is True for part in parts),
         "keep": any(part["keep"] is True for part in parts),
+        "size": sum(int(str(part.get("size", 0))) for part in parts),
         "complete": restorable,
     }
+
+
+def _processed_bytes(snapshot: dict[str, object]) -> int:
+    summary = snapshot.get("summary")
+    if not isinstance(summary, dict):
+        return 0
+    value = summary.get("total_bytes_processed", summary.get("data_added", 0))
+    return value if type(value) is int and value >= 0 else 0
 
 
 def _tag(tags: list[object], prefix: str) -> str:

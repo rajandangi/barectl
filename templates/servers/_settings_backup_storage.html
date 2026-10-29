@@ -52,6 +52,12 @@
           Object lock and immutability are not configured. S3 Object Lock and R2 bucket locks
           are provider features outside Barectl.
         </p>
+        {% if panel.sources %}
+          <p>
+            Connected source sites:
+            {% for source in panel.sources %}{{ source }}{% if not forloop.last %}, {% endif %}{% endfor %}
+          </p>
+        {% endif %}
         <details class="barectl-advanced">
           <summary>Advanced</summary>
           <ul>
@@ -60,6 +66,16 @@
           </ul>
         </details>
         {% if backup_storage_can_prepare %}
+          {% if backup_storage_can_replace %}
+            <form method="post"
+                  action="{% url 'backup_storage_replace_prepare' server.pk %}"
+                  class="usa-form">
+              {% csrf_token %}
+              <button type="submit" class="usa-button">Replace recovery passphrase</button>
+              <span class="usa-hint">Adds the new key to every repository, checks it, then
+              removes the old key.</span>
+            </form>
+          {% endif %}
           <form method="post"
                 action="{% url 'backup_storage_remove_prepare' server.pk %}"
                 class="usa-form">
@@ -77,6 +93,51 @@
           private files on this server.
         </p>
         {% if backup_storage_can_prepare %}
+          <h3>Connect existing backup storage</h3>
+          <p>
+            Use the recovery kit from the server you lost. Barectl opens that server's
+            repositories read-only and writes only this server's private settings.
+          </p>
+          <form method="post"
+                action="{% url 'backup_storage_connect_prepare' server.pk %}"
+                class="usa-form">
+            {% csrf_token %}
+            <input type="hidden" name="provider" value="s3">
+            <label class="usa-label" for="connect-s3-bucket">Bucket</label>
+            <input class="usa-input"
+                   id="connect-s3-bucket"
+                   name="bucket"
+                   autocomplete="off"
+                   required>
+            <label class="usa-label" for="connect-s3-region">Region</label>
+            <input class="usa-input"
+                   id="connect-s3-region"
+                   name="region"
+                   autocomplete="off"
+                   placeholder="us-east-1"
+                   required>
+            <label class="usa-label" for="connect-s3-prefix">Prefix</label>
+            <div class="usa-hint" id="connect-s3-prefix-hint">The prefix the recovery kit names.</div>
+            <input class="usa-input"
+                   id="connect-s3-prefix"
+                   name="prefix"
+                   autocomplete="off"
+                   aria-describedby="connect-s3-prefix-hint"
+                   required>
+            <label class="usa-label" for="connect-s3-sites">Source sites</label>
+            <div class="usa-hint" id="connect-s3-sites-hint">
+              The site identifiers the recovery kit lists, separated by commas.
+            </div>
+            <input class="usa-input"
+                   id="connect-s3-sites"
+                   name="sites"
+                   autocomplete="off"
+                   aria-describedby="connect-s3-sites-hint"
+                   required>
+            <button type="submit" class="usa-button usa-button--outline">
+              Connect existing backup storage
+            </button>
+          </form>
           <h3>Amazon S3</h3>
           <form method="post"
                 action="{% url 'backup_storage_prepare' server.pk %}"

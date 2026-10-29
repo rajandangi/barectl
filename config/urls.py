@@ -36,7 +36,12 @@ from operations.views import (
     server_change_prepare,
 )
 from runtimes.defaults_views import prepare_default
-from servers.backup_storage_views import prepare_remove_storage, prepare_storage
+from servers.backup_storage_views import (
+    prepare_connect,
+    prepare_remove_storage,
+    prepare_replace_passphrase,
+    prepare_storage,
+)
 from servers.views import (
     activity,
     activity_rows,
@@ -173,6 +178,16 @@ urlpatterns = [
         "servers/<int:pk>/settings/backup-storage/remove/prepare/",
         prepare_remove_storage,
         name="backup_storage_remove_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/backup-storage/connect/prepare/",
+        prepare_connect,
+        name="backup_storage_connect_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/backup-storage/passphrase/prepare/",
+        prepare_replace_passphrase,
+        name="backup_storage_replace_prepare",
     ),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),

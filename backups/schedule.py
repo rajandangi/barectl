@@ -761,6 +761,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "frequency": frequency,
         "at": at,
         "scope": scope,
+        "application": application,
         "engine": evidence.engine if dump else "",
         "repository": convention.repository(str(inputs.identifier)),
         "server_key": convention.server_key(str(inputs.identifier)),
@@ -847,6 +848,7 @@ def _document(document: dict[str, object]) -> dict[str, object]:
             for kind in KINDS
         )
         or type(document.get("offsite")) is not bool
+        or document.get("application") not in ("", *convention.APPLICATIONS)
     ):
         raise ValueError("The backup schedule review is not a valid immutable selection.")
     files = document.get("files")
@@ -896,6 +898,7 @@ def _document(document: dict[str, object]) -> dict[str, object]:
         "frequency": frequency,
         "at": at,
         "scope": scope,
+        "application": str(document.get("application", "")),
         "offsite": document["offsite"],
         "engine": str(document.get("engine", "")),
         "repository": str(document.get("repository", "")),
