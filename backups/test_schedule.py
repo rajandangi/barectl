@@ -29,6 +29,7 @@ from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consen
 from servers.models import Server
 
 from . import convention, observation, presentation, schedule
+from .bodies import schedule as schedule_body
 from .testing import record_backups, record_schedule, result
 
 IDENTIFIER = "alpha"
@@ -271,6 +272,29 @@ class FixedUnitTests(ChangeTestCase):
             self.fail("The orphan schedule was not read.")
         self.assertTrue(rows[0].installed)
         self.assertIn("outside supported settings", rows[0].problem)
+
+
+class RuntimePayloadTests(ChangeTestCase):
+    def test_the_runtime_payload_keeps_the_application_for_file_scope(self) -> None:
+        document = {
+            "identifier": IDENTIFIER,
+            "frequency": "daily",
+            "at": "03:00",
+            "scope": "files",
+            "application": "plain",
+            "offsite": False,
+            "engine": "",
+            "repository": convention.repository(IDENTIFIER),
+            "server_key": convention.server_key(IDENTIFIER),
+            "files": [f"/var/www/{IDENTIFIER}/current"],
+            "dump": [],
+            "filename": convention.dump_filename(IDENTIFIER),
+            "offsite_plan": {},
+        }
+        runtime = schedule_body._runtime(document)
+        self.assertEqual(runtime["application"], "plain")
+        checked = schedule_body._run_checked(runtime)
+        self.assertEqual(checked.scope, "files")
 
 
 class InspectTests(ChangeTestCase):

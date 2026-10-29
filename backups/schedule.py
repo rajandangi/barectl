@@ -79,6 +79,7 @@ RUNTIME_KEYS: Final = frozenset(
         "frequency",
         "at",
         "scope",
+        "application",
         "offsite",
         "engine",
         "repository",
@@ -402,6 +403,7 @@ def _runtime(value: object) -> dict[str, object] | None:
         or not isinstance(document.get("at"), str)
         or convention.TIME.fullmatch(str(document["at"])) is None
         or document.get("scope") not in convention.SCHEDULE_SCOPES
+        or document.get("application") not in ("", *convention.APPLICATIONS)
         or type(document.get("offsite")) is not bool
         or not isinstance(document.get("engine"), str)
         or not isinstance(document.get("repository"), str)

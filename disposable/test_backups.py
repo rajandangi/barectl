@@ -745,9 +745,23 @@ class BackupLifecycle(BackupCase):
             if not scheduled:
                 time.sleep(2)
         self.assertTrue(
-            scheduled, "The real backup timer never fired a complete scheduled capture."
+            scheduled,
+            "The real backup timer never fired a complete scheduled capture: "
+            + self.native(
+                "journalctl -u barectl-site-bkalpha-backup.service --no-pager -o cat -n 80"
+            ),
         )
         self.assertTrue(scheduled[0]["live"])
+        # The point is visible before the oneshot exits and releases the mutation lock, so
+        # wait for the run to finish before discovery takes its shared read lock.
+        end = time.monotonic() + 30
+        while time.monotonic() < end:
+            state = self.native(
+                "systemctl show --value -p ActiveState barectl-site-bkalpha-backup.service"
+            ).strip()
+            if state in ("inactive", "failed"):
+                break
+            time.sleep(0.25)
         collected = self.observe()
         backup = self.backup_row(collected)
         if backup.last is None:
