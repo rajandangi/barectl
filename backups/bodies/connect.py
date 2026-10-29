@@ -73,9 +73,12 @@ def secret_values(path: str) -> dict[str, object]:
 
 def write_private(path: str, text: str) -> None:
     temporary = path + ".tmp"
+    payload = text.encode()
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        os.write(descriptor, text.encode())
+        written = 0
+        while written < len(payload):
+            written += os.write(descriptor, payload[written:])
         os.fsync(descriptor)
     finally:
         os.close(descriptor)

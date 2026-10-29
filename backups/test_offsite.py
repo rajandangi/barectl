@@ -20,6 +20,7 @@ from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consen
 from runtimes.catalog import Architecture, load
 
 from . import change, convention, kit, observation, offsite
+from .bodies import offsite as offsite_body
 
 IDENTIFIER = "alpha"
 BOOT = "8f14e45f-ea6f-4c1c-9b7b-2f0f4c1c9b7b"
@@ -122,6 +123,34 @@ def backup_evidence(
         current_sites=(IDENTIFIER,),
         offsite=offsite_value,
     )
+
+
+class ConfigWriteTests(ChangeTestCase):
+    def test_an_empty_or_partial_offsite_config_is_not_supported(self) -> None:
+        for text in ("", "provider=s3\n", "provider=s3\nbucket=barectl-backups\n"):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                convention.read_config(text)
+
+    def test_the_offsite_writer_leaves_only_a_complete_final_file(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config"
+            text = convention.render_config(
+                {
+                    "provider": "s3",
+                    "bucket": BUCKET,
+                    "region": "us-east-1",
+                    "endpoint": "https://s3.us-east-1.amazonaws.com",
+                    "prefix": PREFIX,
+                    "prune": "no",
+                }
+            )
+            offsite_body.write_file(str(path), text)
+            self.assertEqual(path.read_text(), text)
+            self.assertEqual([item.name for item in Path(directory).iterdir()], ["config"])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
 
 class SetupReviewTests(ChangeTestCase):

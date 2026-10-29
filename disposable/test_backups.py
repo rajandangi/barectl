@@ -9,6 +9,7 @@ outcome or a safe failure on a real Ubuntu 26.04 host.
 import json
 import os
 import shlex
+import shutil
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -65,20 +66,19 @@ class BackupCase(ScenarioTestCase):
         fixture CA.
         """
         from . import mirror
-        from .docker import docker, quietly
+        from .docker import docker
 
         certificate, key = mirror.mirror_certificate([self.S3_HOST, self.S3_DUALSTACK_HOST])
         fixture = Path(__file__).resolve().parent / "native_mirror" / "s3.py"
-        root = tempfile.TemporaryDirectory()
-        self.s3_root = Path(root.name)
-        self.addCleanup(root.cleanup)
+        self.s3_root = Path(tempfile.mkdtemp())
+        self.addCleanup(self._remove_s3_root)
         server = self._server_container()
         network = docker(
             "inspect", "-f", "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}", server
         ).strip()
         image = docker("inspect", "-f", "{{.Config.Image}}", server).strip()
         self.s3_container = f"{server}-s3"
-        self.addCleanup(quietly, "rm", "-f", self.s3_container)
+        self.addCleanup(self._stop_s3)
         docker(
             "run", "-d", "--name", self.s3_container, "--pull=never",
             "--network", network, "--network-alias", self.S3_HOST,
@@ -92,6 +92,17 @@ class BackupCase(ScenarioTestCase):
             "--certificate", "/tls/cert.pem", "--key", "/tls/key.pem",
         )  # fmt: skip
         self._wait_for_s3()
+
+    def _stop_s3(self) -> None:
+        """Remove the fixture's root-owned bucket contents before the local directory."""
+        from .docker import quietly
+
+        quietly("exec", self.s3_container, "sh", "-c", "rm -rf /srv/s3/* /srv/s3/.[!.]*")
+        quietly("rm", "-f", self.s3_container)
+
+    def _remove_s3_root(self) -> None:
+        shutil.rmtree(self.s3_root)
+        self.assertFalse(self.s3_root.exists(), "the local S3 fixture root was not removed")
 
     def _server_container(self) -> str:
         import os
