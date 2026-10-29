@@ -8,6 +8,7 @@
     "disposable.test_automation.LaravelQueueWorkers": 118.5,
     "disposable.test_automation.WordPressServerCron": 109.7,
     "disposable.test_backups.BackupLifecycle": 65.2,
+    "disposable.test_backups.FullSiteRestore": 63.3,
     "disposable.test_backups.LaravelFullRestore": 3.0,
     "disposable.test_backups.Retention": 20.0,
     "disposable.test_backups.WordPressFullRestore": 3.0,

@@ -431,9 +431,15 @@ def _safety_backup(  # noqa: C901 - one reviewed safety capture
             argv.extend(str(item) for item in dump)
         else:
             files = document.get("files")
-            if not isinstance(files, list):
+            if not isinstance(files, list) or not files:
                 return False
-            argv.extend(str(item) for item in files)
+            current = pathlib.Path(str(files[0]))
+            if current.name != "current" or not current.is_symlink():
+                return False
+            release = pathlib.Path(os.path.realpath(current))
+            if release.parent != current.parent / "releases" or not release.is_dir():
+                return False
+            argv.extend([str(release), *(str(item) for item in files[1:])])
         status, _output = restic(argv, repository=repository, password=key)
         if status != 0:
             return False
@@ -529,7 +535,9 @@ def _admitted_tree(base: pathlib.Path) -> None:
                 continue
             if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
                 raise ValueError("The recovery point holds a device, FIFO or socket.")
-            if info.st_mode & SETUID:
+            # A directory may keep the convention's own setgid bit (public is 2750);
+            # setuid and setgid on a regular file are never admitted.
+            if stat.S_ISREG(info.st_mode) and info.st_mode & SETUID:
                 raise ValueError("The recovery point holds a setuid or setgid file.")
 
 
