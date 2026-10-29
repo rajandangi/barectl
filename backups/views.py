@@ -75,6 +75,7 @@ def context_for_site(
         checking=active is not None,
         gated=gated,
         integrity=integrity.stored(server, identifier),
+        removed=check.latest_removed(server),
     )
     target = _target(snapshot, site)
     ready = (
@@ -160,6 +161,18 @@ def prepare_backup(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
     if scope != "database":
         raise Http404
     return _prepare(request, pk, identifier, BACKUP_SLUG, "site_backups")
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_back_up_first(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """A paused Full site capture from a Deploy's confirm screen (#358, #407).
+
+    It is the ordinary Full site review with one recorded input, so a successful run
+    offers Continue to Deploy; the engine chains nothing.
+    """
+    return _prepare(request, pk, identifier, FULL_SLUG, "site_deployments", before_deploy=True)
 
 
 @require_POST
@@ -300,9 +313,27 @@ def prepare_keep(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
 def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     point = request.POST.get("point", "")
     scope = request.POST.get("scope", "database")
+    source = request.POST.get("source", "")
     if convention.POINT.fullmatch(point) is None or scope not in SCOPES:
         raise Http404
-    return _prepare(request, pk, identifier, RESTORE_SLUG, "site_backups", point=point, scope=scope)
+    if source:
+        # Only a repository the last explicit read listed as removed may be named.
+        if not valid_identifier(source) or source == identifier:
+            raise Http404
+        server = get_object_or_404(Server, pk=pk)
+        listed = {str(row.get("identifier")) for row in check.latest_removed(server)}
+        if source not in listed:
+            raise Http404
+    return _prepare(
+        request,
+        pk,
+        identifier,
+        RESTORE_SLUG,
+        "site_backups",
+        point=point,
+        scope=scope,
+        source=source,
+    )
 
 
 def _prepare(  # noqa: C901 - one guarded preparation
@@ -314,6 +345,8 @@ def _prepare(  # noqa: C901 - one guarded preparation
     *,
     point: str = "",
     scope: str = "database",
+    source: str = "",
+    before_deploy: bool = False,
 ) -> HttpResponse:
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
@@ -358,6 +391,10 @@ def _prepare(  # noqa: C901 - one guarded preparation
         inputs["point"] = point
         if scope != "database":
             inputs["scope"] = scope
+        if source:
+            inputs["source"] = source
+    if before_deploy:
+        inputs["from_deploy"] = True
     try:
         queued = services.request_prepare(
             server,

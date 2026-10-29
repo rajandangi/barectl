@@ -72,6 +72,7 @@ class PlainChange:
     after_label: str = ""
     after_url: str = ""
     after_permission: str = ""
+    after_post: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,14 @@ class NextAction:
     kind: str
     url: str
     permission: str = ""
+
+
+@dataclass(frozen=True)
+class ExtraAction:
+    """A second, optional action a confirm screen offers beside Apply (#407)."""
+
+    label: str
+    url: str
 
 
 @dataclass(frozen=True)
@@ -133,6 +142,18 @@ def _home_url(home: plain_words.Home, server_id: int | None, identifier: str) ->
             if identifier
             else reverse("server_sites", args=[server_id])
         )
+    if home is plain_words.Home.SITE_DEPLOYMENTS:
+        return (
+            reverse("site_deployments", args=[server_id, identifier])
+            if identifier
+            else reverse("server_sites", args=[server_id])
+        )
+    if home is plain_words.Home.SITE_DEPLOY_PREPARE:
+        return (
+            reverse("site_deploy_prepare", args=[server_id, identifier])
+            if identifier
+            else reverse("server_sites", args=[server_id])
+        )
     return reverse("server_detail", args=[server_id])
 
 
@@ -145,6 +166,8 @@ def plain_change(
     raw_selection = inputs.get("selection")
     selection = plain_words.selection_label(raw_selection) if isinstance(raw_selection, str) else ""
     words = plain_words.words_for(kind_slug)
+    if words is not None and words.before_deploy is not None and inputs.get("from_deploy") is True:
+        words = words.before_deploy
     if words is None:
         return PlainChange(
             title=kind_label,
@@ -161,6 +184,7 @@ def plain_change(
         after_label=words.after,
         after_url=_home_url(words.after_home, server_id, identifier) if words.after else "",
         after_permission=words.after_permission,
+        after_post=words.after_post,
     )
 
 
@@ -199,7 +223,10 @@ def _run_next(run: ChangeRun, outcome: RunOutcome, after: PlainChange) -> NextAc
         return NextAction("Check what happened", "check", reverse("run_check", args=[run.pk]))
     if outcome == RunOutcome.SUCCEEDED and after.after_url:
         return NextAction(
-            after.after_label, "link", after.after_url, permission=after.after_permission
+            after.after_label,
+            "prepare" if after.after_post else "link",
+            after.after_url,
+            permission=after.after_permission,
         )
     if outcome == RunOutcome.FAILED and preparation_id is not None:
         return NextAction(
@@ -315,6 +342,8 @@ class ReviewView:
     fence: FenceSummary | None = None
     # A printable recovery kit, when the review must show it before escrow (Phase D #396).
     kit_lines: list[str] = field(default_factory=list)
+    # A backup an operator may take before applying this review (Phase D #407).
+    extra_action: ExtraAction | None = None
 
     @property
     def eligible(self) -> bool:
@@ -349,6 +378,27 @@ class ChangeView:
     @property
     def active(self) -> bool:
         return self.outcome in {PreparationOutcome.QUEUED, PreparationOutcome.RUNNING}
+
+
+def _extra_action(review: ChangeReview) -> ExtraAction | None:
+    """The one backup a Deploy confirm screen can take first (#358, #407).
+
+    The engine knows nothing about it: this is the review's own extra button, and the
+    backup it prepares is an ordinary reviewed Full site capture.
+    """
+    document = review.document
+    if document.get("back_up_first") is not True:
+        return None
+    identifier = document.get("identifier")
+    if not isinstance(identifier, str) or review.preparation is None:
+        return None
+    server_id = review.preparation.server_id
+    if server_id is None:
+        return None
+    return ExtraAction(
+        "Back up first",
+        reverse("site_backups_before_deploy_prepare", args=[server_id, identifier]),
+    )
 
 
 def review_view(review: ChangeReview) -> ReviewView:
@@ -428,6 +478,7 @@ def review_view(review: ChangeReview) -> ReviewView:
             if isinstance(line, str)
         ],
         secret_generate=document.get("secret_generate") is True,
+        extra_action=_extra_action(review),
         secret_fields=[
             {
                 "key": str(item["key"]),

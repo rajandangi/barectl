@@ -7,6 +7,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
+from backups import presentation as backup_presentation
 from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome
 from discovery.presentation import VIEW_SITES
@@ -36,6 +37,11 @@ def context_for_site(
         else None
     )
     names = tuple(site.server_names) if site is not None else ()
+    backup = (
+        backup_presentation.backup_of(snapshot.collected, identifier)
+        if snapshot is not None
+        else None
+    )
     allowed = (
         site is not None
         and snapshot is not None
@@ -46,6 +52,7 @@ def context_for_site(
         and site.file == f"/etc/caddy/sites/{identifier}.caddy"
     )
     return {
+        "site_remove_has_backups": backup is not None and backup.enabled,
         "site_remove_domains": names,
         "site_remove_primary": names[0] if names else "",
         "site_remove_can_prepare": (

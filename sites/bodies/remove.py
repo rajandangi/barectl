@@ -66,6 +66,50 @@ RUNTIMES = ("php84", "php85")
 CERTIFICATE_SUFFIXES = (".crt", ".key", ".json")
 MARIADB = "mariadb"
 POSTGRESQL = "postgresql"
+# The backup convention (backups/convention.py) owns these fixed names. This body names
+# them again so it never imports the backups app on the server: a Remove site disables and
+# removes the site's own backup units, copy, check, cleanup and integrity payloads, and
+# keeps its repositories (Phase D #407).
+BACKUP_ROLES = ("backup", "copy", "check", "checkoffsite", "cleanup", "cleanupoffsite")
+BACKUP_PAYLOAD_ROLES = ("schedule", "integrity", "retention")
+BACKUP_REPOSITORY_ROOT = "/var/lib/barectl-backups"
+BACKUP_KEY_ROOT = "/etc/barectl/backups"
+
+
+def backup_paths(identifier: str) -> list[str]:
+    """The site's own backup units and payloads; its repositories are never in this list."""
+    return [
+        *(
+            f"/etc/systemd/system/barectl-site-{identifier}-{role}.{kind}"
+            for role in BACKUP_ROLES
+            for kind in ("service", "timer")
+        ),
+        f"/etc/systemd/system/barectl-site-{identifier}-backup.slice",
+        *(
+            f"/etc/barectl/backups/{role}/{identifier}.{suffix}"
+            for role in BACKUP_PAYLOAD_ROLES
+            for suffix in ("sh", "json")
+        ),
+    ]
+
+
+def backup_repository(identifier: str) -> str:
+    return f"{BACKUP_REPOSITORY_ROOT}/{identifier}/onsite"
+
+
+def backup_key(identifier: str) -> str:
+    return f"{BACKUP_KEY_ROOT}/{identifier}.key"
+
+
+def backup_unit_names(identifier: str) -> list[str]:
+    """The timers first, then their services, then the slice: systemd stops them in order."""
+    return [
+        *(f"barectl-site-{identifier}-{role}.timer" for role in BACKUP_ROLES if role != "backup"),
+        f"barectl-site-{identifier}-backup.timer",
+        *(f"barectl-site-{identifier}-{role}.service" for role in BACKUP_ROLES if role != "backup"),
+        f"barectl-site-{identifier}-backup.service",
+        f"barectl-site-{identifier}-backup.slice",
+    ]
 
 
 def site_paths(identifier: str) -> list[str]:
@@ -236,6 +280,9 @@ def inventory(identifier: str) -> dict[str, object]:
         "proxy_group": group("p" + identifier),
         "certificates": certificates(names),
         "services": {unit: service(unit) for unit in service_units(identifier)},
+        "backup_paths": {path: exists(path) for path in backup_paths(identifier)},
+        "backup_repository": exists(backup_repository(identifier)),
+        "backup_key": exists(backup_key(identifier)),
         "other_sites": other,
         "caddy_matches": caddy_matches,
         "caddy_data_directory": caddy_data_directory(),
@@ -245,6 +292,21 @@ def inventory(identifier: str) -> dict[str, object]:
     stable = {key: item for key, item in value.items() if key not in ("uptime", "services")}
     value["digest"] = hashlib.sha256(canonical(stable).encode()).hexdigest()
     return value
+
+
+def remove_backup_units(identifier: str) -> None:
+    """Disable and remove the site's own backup units; its repositories stay (Phase D #407)."""
+    for name in backup_unit_names(identifier):
+        for action in ("stop", "disable", "reset-failed"):
+            subprocess.run(  # noqa: S603 - fixed reviewed unit name
+                ["/usr/bin/systemctl", action, name],
+                capture_output=True,
+                timeout=120,
+                check=False,
+            )
+    for path in backup_paths(identifier):
+        remove_path(path)
+    daemon_reload()
 
 
 def remove_automation(document: dict[str, object], identifier: str) -> None:
@@ -565,6 +627,9 @@ def verify(document: dict[str, object]) -> str:
     paths = current.get("paths")
     if isinstance(paths, dict) and any(paths.values()):
         return "site_remove_verify"
+    backup = current.get("backup_paths")
+    if isinstance(backup, dict) and any(backup.values()):
+        return "site_remove_verify"
     if current.get("account") is not None or current.get("proxy_account") is not None:
         return "site_remove_verify"
     if current.get("account_group") is not None or current.get("proxy_group") is not None:
@@ -616,6 +681,10 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
         if not fence(document, identifier):
             result("refused", "automation_fence")
             return 1
+        # The site's own backup units go first among the removals and are never restored.
+        stage("backups")
+        remove_backup_units(identifier)
+        changed = True
         if not current["caddy_matches"]:
             # A previous attempt may have left Caddy serving its old in-memory
             # configuration after the file changed. Make disk and memory agree before

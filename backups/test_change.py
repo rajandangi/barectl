@@ -534,6 +534,10 @@ class PageTests(ChangeTestCase):
             check.listing_command(IDENTIFIER),
             __import__("discovery.ssh", fromlist=["CommandResult"]).CommandResult(0, listing),
         )
+        self.remote.answer_root(
+            observation.removed_command(),
+            __import__("discovery.ssh", fromlist=["CommandResult"]).CommandResult(0, ""),
+        )
         response = self.client.post(f"/servers/{server.pk}/sites/{IDENTIFIER}/backups/check/")
         self.assertEqual(response.status_code, 302)
         self.run_worker()
@@ -543,6 +547,7 @@ class PageTests(ChangeTestCase):
         self.assertIsNotNone(row.checked_at)
         self.assertEqual(row.listing["outcome"], "observed")
         self.assertEqual(len(row.listing["points"]), 1)
+        self.assertEqual(row.listing["removed"], [])
         page = self.client.get(f"/servers/{server.pk}/sites/{IDENTIFIER}/backups/")
         self.assertContains(page, "Saved here")
 

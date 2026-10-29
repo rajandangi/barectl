@@ -38,10 +38,33 @@ class RemovalReviewTests(SimpleTestCase):
             "php-fpm-site-php84@alpha.service",
             "MariaDB: salpha database and principal",
             "alpha.example.com",
-            "No backup exists",
+            "No backups exist for this site",
         ):
             self.assertIn(expected, text)
         self.assertEqual(draft.current_sites, ("alpha",))
+
+    def test_the_review_removes_backup_units_and_keeps_the_repositories(self) -> None:
+        draft = remove.review(evidence(backups=True), PreparationInputs("", "alpha"))
+        self.assertTrue(draft.eligible, draft.refusals)
+        details = cast(list[dict[str, str]], draft.document["details"])
+        text = "\n".join(item["value"] for item in details)
+        for unit in (
+            "barectl-site-alpha-backup.timer",
+            "barectl-site-alpha-copy.service",
+            "barectl-site-alpha-check.timer",
+            "barectl-site-alpha-checkoffsite.timer",
+            "barectl-site-alpha-cleanup.timer",
+            "barectl-site-alpha-cleanupoffsite.timer",
+            "/etc/barectl/backups/schedule/alpha.sh",
+        ):
+            self.assertIn(unit, text)
+        # The repositories are kept and named; the review never promises their deletion.
+        self.assertIn("/var/lib/barectl-backups/alpha/onsite (onsite, kept)", text)
+        self.assertIn("/etc/barectl/backups/alpha.key (its key, kept)", text)
+        self.assertIn("its offsite copy stays in the bucket", text)
+        self.assertNotIn("No backup", text)
+        self.assertIn("Its backups are kept", str(draft.effects[0].text))
+        self.assertIn("backup repositories are kept", " ".join(draft.postconditions))
 
     def test_nothing_left_proposes_no_changes(self) -> None:
         draft = remove.review(
@@ -81,6 +104,27 @@ class RemovalReviewTests(SimpleTestCase):
         self.assertFalse(
             remove.valid_inventory({**cast(dict[str, object], value), "extra": 1}, "alpha")
         )
+
+    def test_a_removal_never_deletes_a_backup_repository(self) -> None:
+        import subprocess
+
+        from sites.bodies import remove as native
+
+        with (
+            mock.patch.object(native, "daemon_reload", create=True),
+            mock.patch.object(subprocess, "run"),
+            mock.patch.object(native, "remove_path") as removed,
+        ):
+            native.remove_backup_units("alpha")
+        deleted = {call.args[0] for call in removed.call_args_list}
+        self.assertEqual(deleted, set(native.backup_paths("alpha")))
+        for kept in (
+            native.backup_repository("alpha"),
+            native.backup_key("alpha"),
+            "/var/lib/barectl-backups/alpha",
+        ):
+            self.assertNotIn(kept, deleted)
+        self.assertNotIn(native.backup_repository("alpha"), set(native.site_paths("alpha")))
 
 
 class RemovalApplyTests(ChangeTestCase):

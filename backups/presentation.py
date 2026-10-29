@@ -1,5 +1,6 @@
 """The Backups section's wording, from stored rows only (#396, #179)."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -7,7 +8,7 @@ from django.utils import timezone
 
 from discovery.snapshot import CollectedSnapshot, ObservedSite
 
-from . import check, kit
+from . import check, convention, kit
 from .models import BackupCheck
 from .observation import IntegrityFinding, ObservedBackup
 
@@ -85,6 +86,11 @@ class RecoveryPointView:
         return "files" in self.parts
 
     @property
+    def restorable_elsewhere(self) -> bool:
+        """A removed site's kind is only provable from a point that holds files (#407)."""
+        return self.restorable and self.has_files
+
+    @property
     def problem(self) -> str:
         if self.missing:
             return (
@@ -95,6 +101,15 @@ class RecoveryPointView:
         if self.incomplete:
             return "This point is not complete."
         return ""
+
+
+@dataclass(frozen=True)
+class RemovedRepositoryView:
+    """One removed site's repository, from the last explicit read (#407)."""
+
+    identifier: str
+    points: tuple[RecoveryPointView, ...] = ()
+    problem: str = ""
 
 
 @dataclass(frozen=True)
@@ -116,6 +131,7 @@ class BackupsView:
     copy: CopyView | None = None
     restore: bool = False
     integrity: tuple[IntegrityFindingView, ...] = ()
+    removed: tuple[RemovedRepositoryView, ...] = ()
 
     @property
     def reopen(self) -> bool:
@@ -427,6 +443,32 @@ def _point_offsite(point: str, copy: CopyView | None, configured: bool) -> str:
     return "Offsite copy failed" if copy.failed else "Copied offsite"
 
 
+def removed_views(rows: Sequence[Mapping[str, object]]) -> tuple[RemovedRepositoryView, ...]:
+    """Every removed site's listed points, from one explicit read's bounded answer."""
+    result: list[RemovedRepositoryView] = []
+    for row in rows[:8]:
+        identifier = row.get("identifier")
+        if (
+            not isinstance(identifier, str)
+            or convention.SITE_IDENTIFIER.fullmatch(identifier) is None
+        ):
+            continue
+        raw = row.get("points")
+        listed = (
+            points_view({"points": [item for item in raw if isinstance(item, dict)]})
+            if isinstance(raw, list)
+            else ()
+        )
+        result.append(
+            RemovedRepositoryView(
+                identifier,
+                listed,
+                str(row.get("problem", "")) if isinstance(row.get("problem"), str) else "",
+            )
+        )
+    return tuple(result)
+
+
 def copy_view(copy: object | None) -> CopyView | None:
     from .observation import OffsiteCopy
 
@@ -457,6 +499,7 @@ def view(
     checking: bool,
     gated: bool = False,
     integrity: tuple[IntegrityFinding, ...] = (),
+    removed: Sequence[Mapping[str, object]] = (),
 ) -> BackupsView:
     backup = backup_of(collected, identifier) if collected is not None else None
     enabled = backup is not None and backup.enabled
@@ -526,6 +569,7 @@ def view(
         copy,
         restore,
         integrity_views(integrity),
+        removed_views(removed),
     )
 
 

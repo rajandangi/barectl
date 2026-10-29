@@ -1,4 +1,4 @@
-# Backups (implemented, #396, #399, #400, #401, #402, #403, #404, #405 and #406)
+# Backups (implemented, #396, #399, #400, #401, #402, #403, #404, #405, #406 and #407)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
@@ -137,6 +137,39 @@ Caddy file. It never starts background work: Scheduled tasks or Queue workers as
 run again, so a half-migrated or half-copied site is never served with its work resumed
 unreviewed.
 
+## Back up first on Deploy
+
+A Laravel **Deploy** whose confirm screen finds pending migrations, on a site whose backups
+are enabled, offers **Back up first** beside its apply button. It prepares one ordinary
+paused **Full site** capture and changes nothing else. The engine has no chain: the capture
+is its own review, and when it succeeds its run page offers **Continue to Deploy**, which
+prepares a fresh Deploy review. That review reads the newest safe recovery point from the
+site's journal and names it in the migration acknowledgement instead of the "no backup" gap
+(#358), for example *the newest recovery point is 27 Oct 2026, 11:00 (01234567)*. A site
+without backups keeps today's acknowledgement, and a Deploy with no pending migrations
+offers no **Back up first**.
+
+The confirm screen sees the migrations already on the server: the current release's
+migration files that the site's migrations table does not record, read through the site's
+own database principal without Artisan. A Deploy learns the fetched commit's own migrations
+only at apply time, where it proves and runs them as before; the review never claims to know
+them earlier, and an unreadable table is reported as no pending migrations rather than as
+"everything is pending".
+
+## Remove site keeps backups
+
+**Remove site** (#356, Destructive) now first disables and removes the site's own backup
+units: its backup slice, capture timer and service, check and offsite check units, cleanup
+units and their schedule, integrity and retention payloads. It never deletes a repository.
+The site's onsite repository (`/var/lib/barectl-backups/<id>/onsite`), its server key and
+its offsite copy in the bucket stay where they are, and the review names every path it keeps
+as well as the units it removes. A site with no backups says so.
+
+**Check backups** also lists the repositories of sites that are no longer on the server.
+Each is bounded, read-only and names only its points, times, scopes and short identifiers;
+the page shows them as **Backups of a removed site** after a check and makes no SSH
+connection of its own. The list is stored on the check's own row, never in the repository.
+
 ## Schedule
 
 Each site has at most one **schedule**, created and turned off only through a reviewed
@@ -224,7 +257,14 @@ Verification keeps three findings apart:
 Only after all three does the gate open and the site's background work resume. A restore that
 stops partway stays gated with one sentence and **Reopen site**, exactly like an interrupted
 full capture; **Check what happened** inspects the original run and never submits it again.
-Cross-server restores and exporting a point remain planned.
+A recovery point from the kept backups of a removed site can be restored into a matching
+site (**Backups of a removed site** on its Backups section). The review names the removed
+site as the source and refuses unless the point holds files that prove the target's own kind
+(Laravel's private environment, WordPress's private configuration, or neither for plain PHP)
+and the database copies share the same engine major. It restores from the kept repository
+and takes its safety backup in the target's own repository. A database-only point of a
+removed site cannot prove its kind, so it is not offered for this. Cross-server restores and
+exporting a point remain planned.
 
 ## Retention
 
@@ -303,8 +343,10 @@ dump content.
 **Check backups** is an explicit authorized read through the worker. It runs
 `restic snapshots --json --no-lock` with the site's server key and stores the bounded,
 Barectl-tagged listing on its request row with the time it was read. It never changes the
-repository and never authorizes a restore. Opening the Backups section makes no SSH
-connection. A listing older than 15 minutes is labelled as possibly out of date.
+repository and never authorizes a restore. The same read lists each repository a removed
+site kept, one bounded listing per repository, and stores those points on the same row, so
+any site's Backups section shows them after a check and opening the section still makes no
+SSH connection. A listing older than 15 minutes is labelled as possibly out of date.
 
 ## Discovery
 
@@ -312,6 +354,8 @@ Passive discovery reads the restic profile, each site's root-only repository and
 whether the site database exists, and the newest safe `barectl-result` line in the journal.
 It runs no restic command, lists no snapshots and contacts no storage. A fresh controller
 reconstructs that backups are enabled and the last result from this native evidence alone.
+A removed site's kept repository is a fact only an explicit read names: **Check backups**
+lists it, and passive discovery never invents one.
 
 ## Paths
 
@@ -349,8 +393,9 @@ assertions extend the same scenario, and #406 adds `WordPressFullRestore` and
 `LaravelFullRestore` there: one WordPress site created on the prepared L5 layer and the
 prepared Laravel site, each with a paused full capture, a full restore with its safety backup,
 and data, ownership, permission and readiness checks; the Laravel item also proves a restored
-release counts toward Deploy's retention. The #405 and #406 items' hosted times are not yet
-measured: the shard record carries a 5 s placeholder until the orchestrator runs them on the
+release counts toward Deploy's retention. The #407 assertions add a real Deploy with pending migrations whose confirm screen offers
+**Back up first**, and a real Remove site that keeps its repository and lists it as removed.
+The #405, #406 and #407 items' hosted times are not yet measured: the shard record carries a 5 s placeholder until the orchestrator runs them on the
 integration tip. On the local ubuntu-26.04 lane the #401 scenario measured 62 to 65 s for the
 `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed

@@ -17,8 +17,8 @@ from django.utils import timezone
 from databases import observation as database_observation
 from discovery.presentation import VIEW_SITES
 from discovery.root_read import run_root
-from discovery.snapshot import current_snapshot
-from discovery.ssh import connect_operation
+from discovery.snapshot import Snapshot, current_snapshot
+from discovery.ssh import RemoteShell, connect_operation
 from operations import lifecycle
 from operations.lifecycle import OperationRefused, recovers_first
 from operations.models import RemoteOperation
@@ -170,6 +170,33 @@ def _tag(tags: list[object], prefix: str) -> str:
     )
 
 
+def removed_points(shell: RemoteShell, snapshot: Snapshot) -> list[dict[str, object]]:
+    """Every removed site's recovery points, from one more bounded listing per repository.
+
+    A removed site's repository is kept by Remove site (#407). Its points are listed here so
+    the Backups section can offer them to a matching site; the read changes nothing.
+    """
+    current = tuple(site.identifier for site in snapshot.collected.sites.value)
+    names = observation.removed(shell, current)
+    result: list[dict[str, object]] = []
+    for identifier in names or ():
+        listing = run_root(shell, listing_command(identifier))
+        text = listing.stdout
+        parsed = (
+            None
+            if listing.exit_status or listing.truncated or len(text) > MAX_BYTES
+            else parse_listing(text)
+        )
+        result.append(
+            {
+                "identifier": identifier,
+                "points": points(parsed) if parsed is not None else [],
+                "problem": "" if parsed is not None else "The recovery points could not be read.",
+            }
+        )
+    return result
+
+
 def _engine(server: Server) -> str:
     snapshot = current_snapshot(server)
     if snapshot is None:
@@ -187,6 +214,7 @@ def _authorized(check: BackupCheck) -> None:
 def _read(check: BackupCheck) -> None:
     _authorized(check)
     snapshot = current_snapshot(check.server)
+    removed: list[dict[str, object]] = []
     if snapshot is None:
         value: dict[str, object] = {
             "version": 1,
@@ -206,6 +234,7 @@ def _read(check: BackupCheck) -> None:
         )
         engine = _engine(check.server)
         with connect_operation(check) as shell:
+            removed = removed_points(shell, snapshot)
             native = observation.read(shell, (check.identifier,), engine, architecture)
             from . import retention
 
@@ -260,6 +289,7 @@ def _read(check: BackupCheck) -> None:
                         ),
                     }
                 )
+    value["removed"] = removed
     now = timezone.now()
     with transaction.atomic():
         if not lifecycle.succeed(check.pk, now):
@@ -317,6 +347,24 @@ def latest_check(server: Server, identifier: str) -> BackupCheck | None:
         .order_by("-finished_at", "-pk")
         .first()
     )
+
+
+def latest_removed(server: Server) -> list[dict[str, object]]:
+    """Every removed site's points from this server's newest successful explicit read.
+
+    One Check backups on any site refreshes the server-wide set; the page then shows it
+    without another SSH connection (Phase D #407).
+    """
+    row = (
+        BackupCheck.objects.filter(server=server, status=RemoteOperation.Status.SUCCEEDED)
+        .exclude(listing={})
+        .order_by("-finished_at", "-pk")
+        .first()
+    )
+    if row is None:
+        return []
+    removed = row.listing.get("removed") if isinstance(row.listing, dict) else None
+    return [item for item in removed if isinstance(item, dict)] if isinstance(removed, list) else []
 
 
 def active(server: Server, identifier: str) -> BackupCheck | None:

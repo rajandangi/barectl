@@ -40,6 +40,7 @@ class InputShape(StrEnum):
     OFFSITE_STORAGE = "offsite_storage"
     SITE_BACKUP_POINT = "site_backup_point"
     BACKUP_RETENTION = "backup_retention"
+    BACKUP_CAPTURE = "backup_capture"
 
 
 @dataclass(frozen=True)
@@ -51,10 +52,15 @@ class PreparationInputs:
     release: str = ""
     # The recovery point a restore selects; empty for every other kind.
     point: str = ""
+    # A restore from the kept backups of a removed site names that site; empty otherwise.
+    source: str = ""
     # A reviewed backup retention period in days; 0 for every other kind.
     days: int = 0
     # The site's Deploy switch: pending migrations run only when this is true.
     migrations: bool = True
+    # A full capture prepared from a Deploy confirm screen offers its completion link back
+    # to Deploy (#407); the engine gains no chain of its own.
+    from_deploy: bool = False
     # Whether a created site is served over HTTPS. The dashboard passes True; the native
     # scenarios and the change kind's own default keep sites HTTP-only unless asked.
     https: bool = False
@@ -259,6 +265,8 @@ class PreparationInputs:
             }
             if self.scope:
                 selected["scope"] = self.scope
+            if self.source:
+                selected["source"] = self.source
             return selected
         if self.readiness:
             return {
@@ -279,6 +287,8 @@ class PreparationInputs:
                     value["primary"] = self.primary
                 if not self.migrations:
                     value["migrations"] = False
+                if self.from_deploy:
+                    value["from_deploy"] = True
                 return value
             return {"version": 1, "selection": self.selection, "identifier": self.identifier}
         if self.identifier:
@@ -652,19 +662,24 @@ def _recovery_point_inputs(
 ) -> PreparationInputs:
     """A restore names its site, one Barectl recovery point and what to restore."""
     from backups import convention
-    from sites.names import request
+    from sites.names import request, valid_identifier
 
     if set(value) not in (
         {"version", "identifier", "point"},
         {"version", "identifier", "point", "scope"},
+        {"version", "identifier", "point", "source"},
+        {"version", "identifier", "point", "scope", "source"},
     ):
         raise ValueError(INVALID_INPUTS)
     identifier, point, scope = value["identifier"], value["point"], value.get("scope", "")
+    source = value.get("source", "")
     if (
         not isinstance(identifier, str)
         or not isinstance(point, str)
         or not isinstance(scope, str)
         or scope not in ("", *convention.SCOPES)
+        or not isinstance(source, str)
+        or (source and (source == identifier or not valid_identifier(source)))
     ):
         raise ValueError(INVALID_INPUTS)
     if convention.POINT.fullmatch(point) is None:
@@ -675,7 +690,7 @@ def _recovery_point_inputs(
         raise ValueError(INVALID_INPUTS) from None
     if canonical != identifier:
         raise ValueError(INVALID_INPUTS)
-    return PreparationInputs("", identifier, point=point, scope=scope)
+    return PreparationInputs("", identifier, point=point, scope=scope, source=source)
 
 
 def _site_remove_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
@@ -1006,6 +1021,28 @@ def _certificate_email_inputs(
     return PreparationInputs(certificate_email=email)
 
 
+def _backup_capture_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    """A full capture, and whether it was prepared from a Deploy's confirm screen (#407)."""
+    from sites.names import valid_identifier
+
+    if set(value) not in (
+        {"version", "identifier"},
+        {"version", "identifier", "from_deploy"},
+    ):
+        raise ValueError(INVALID_INPUTS)
+    identifier = value["identifier"]
+    from_deploy = value.get("from_deploy", False)
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or type(from_deploy) is not bool
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, from_deploy=from_deploy)
+
+
 _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], PreparationInputs]] = {
     InputShape.SITE_CREATE: _site_inputs,
     InputShape.WORDPRESS_CREATE: _wordpress_create_inputs,
@@ -1035,4 +1072,5 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.OFFSITE_STORAGE: _offsite_storage_inputs,
     InputShape.SITE_BACKUP_POINT: _site_backup_point_inputs,
     InputShape.BACKUP_RETENTION: _backup_retention_inputs,
+    InputShape.BACKUP_CAPTURE: _backup_capture_inputs,
 }

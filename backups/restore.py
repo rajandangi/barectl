@@ -40,6 +40,7 @@ from sites.configuration import (
     render_maintenance,
     render_wordpress_caddy,
 )
+from sites.names import valid_identifier
 
 from . import change, check, convention, observation
 from .bodies import restore as restore_body
@@ -154,10 +155,50 @@ class RestoreEvidence:
     current_sites: tuple[str, ...]
     boot_id: str
     uptime_centiseconds: int | None
+    # The site whose kept repository holds the point. Empty means this site's own (#407).
+    source: str = ""
+    # The kind of site the point's files show, when they can prove it.
+    source_kind: str = ""
 
 
 def point_listing_command(identifier: str) -> str:
     return check.listing_command(identifier)
+
+
+# A removed site's kind is provable from the files its recovery point holds (#407).
+KIND_MARKERS: Final = (("laravel", "private/laravel.env"), ("wordpress", "private/wp-config.php"))
+
+
+def kind_command(source: str, snapshot: str, path: str) -> str:
+    argv = [
+        "/usr/bin/env",
+        f"RESTIC_REPOSITORY={convention.repository(source)}",
+        f"RESTIC_PASSWORD_FILE={convention.server_key(source)}",
+        f"RESTIC_CACHE_DIR={convention.CACHE_DIR}",
+        convention.RESTIC_BIN,
+        "ls",
+        "--json",
+        "--no-lock",
+        snapshot,
+        "/" + path.lstrip("/"),
+    ]
+    return shlex.join(argv)
+
+
+def point_kind(shell: RemoteShell, source: str, snapshot: str) -> str:
+    """Which kind of site a removed site's files point came from, or "" when unproven."""
+    if not snapshot or not source:
+        return ""
+    missing = 0
+    for application, path in KIND_MARKERS:
+        result = run_root(shell, kind_command(source, snapshot, f"/var/www/{source}/{path}"))
+        if result.exit_status == 0 and not result.truncated:
+            return application
+        if result.exit_status == 1:
+            missing += 1
+            continue
+        return ""
+    return "plain" if missing == len(KIND_MARKERS) else ""
 
 
 def header_command(identifier: str, snapshot: str, filename: str) -> str:
@@ -299,15 +340,21 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RestoreEvidence:
     value = observation.read(shell, (inputs.identifier,), engine, architecture)
     if value is not None:
         backup = change._observed(value, inputs.identifier)
-    point, snapshots, size = _read_point(shell, inputs.identifier, inputs.point)
+    source = inputs.source or inputs.identifier
+    point, snapshots, size = _read_point(shell, source, inputs.point)
     if point is not None:
         point = {**point, "size": size}
     point_version = _point_version(
         shell,
-        inputs.identifier,
+        source,
         snapshots.get("database", ""),
-        convention.dump_filename(inputs.identifier),
+        convention.dump_filename(source),
         engine,
+    )
+    kind = (
+        str(record.get("application", "plain"))
+        if source == inputs.identifier and record is not None
+        else point_kind(shell, source, snapshots.get("files", ""))
     )
     empty, target_problem = _target_empty(shell, engine, inputs.identifier)
     disk = observed.filesystem.value.avail_bytes if observed.filesystem.value else 0
@@ -330,6 +377,8 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RestoreEvidence:
         current_sites,
         boot_id,
         uptime,
+        source if source != inputs.identifier else "",
+        kind,
     )
 
 
@@ -338,9 +387,30 @@ def _scope(inputs: PreparationInputs) -> str:
 
 
 def _refusals(  # noqa: C901 - one closed set of refusal checks
-    evidence: RestoreEvidence, settings: SiteSettings | None, scope: str
+    evidence: RestoreEvidence, settings: SiteSettings | None, scope: str, application: str
 ) -> list[str]:
     refusals: list[str] = []
+    if evidence.source:
+        if evidence.source in evidence.current_sites:
+            refusals.append(
+                f"Site {evidence.source} still exists, so restore from its own Backups section "
+                "instead of the kept backups of a removed site."
+            )
+        if scope == "database":
+            refusals.append(
+                "A removed site's database-only point cannot prove which kind of site it came "
+                "from. Restore a full recovery point instead."
+            )
+        elif not evidence.source_kind:
+            refusals.append(
+                "Barectl could not read the removed site's files, so it cannot confirm which "
+                "kind of site the recovery point came from."
+            )
+        elif evidence.source_kind != application:
+            refusals.append(
+                "That recovery point was taken from a different kind of site, so it cannot be "
+                "restored into this one."
+            )
     if evidence.standing != Standing.TARGET_STACK:
         refusals.append("Set up and verify the host foundation before restoring a site.")
     if settings is None or evidence.site is None:
@@ -551,6 +621,18 @@ def _details(
             ),
         },
     ]
+    if evidence.source:
+        rows.insert(
+            1,
+            {
+                "label": "Source",
+                "value": (
+                    f"The kept backups of removed site {evidence.source}. Barectl keeps that "
+                    "repository and restores from it into this site; the removed site is not "
+                    "recreated and nothing of it is served."
+                ),
+            },
+        )
     if scope == "files":
         rows.insert(
             3,
@@ -611,7 +693,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             document={"version": 1},
         )
     settings, application = _site(evidence.site)
-    refusals = _refusals(evidence, settings, scope)
+    refusals = _refusals(evidence, settings, scope, application)
     point = evidence.point or {}
     parts = set(evidence.point_parts)
     point_major = restore_body.engine_major(evidence.engine, evidence.point_version)
@@ -662,14 +744,17 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "engine_major": current_major,
         "point_engine_version": evidence.point_version,
         "point_major": point_major,
-        "repository": convention.repository(inputs.identifier),
-        "server_key": convention.server_key(inputs.identifier),
+        "source": evidence.source,
+        "repository": convention.repository(evidence.source or inputs.identifier),
+        "server_key": convention.server_key(evidence.source or inputs.identifier),
+        "safety_repository": convention.repository(inputs.identifier),
+        "safety_key": convention.server_key(inputs.identifier),
         "point": inputs.point,
         "scope": scope,
         "point_scope": str(point.get("scope", "")),
         "snapshot": snapshot,
         "files_snapshot": files_snapshot,
-        "filename": convention.dump_filename(inputs.identifier),
+        "filename": convention.dump_filename(evidence.source or inputs.identifier),
         "point_time": str(point.get("time", "")),
         "point_live": point.get("live") is True,
         "point_size": size,
@@ -772,6 +857,7 @@ def _base_document(document: dict[str, object]) -> None:
     application = document.get("application")
     names = document.get("names")
     point = document.get("point")
+    source = str(document.get("source") or identifier)
     snapshot = document.get("snapshot")
     files_snapshot = document.get("files_snapshot")
     if (
@@ -781,6 +867,7 @@ def _base_document(document: dict[str, object]) -> None:
         or not all(isinstance(name, str) for name in names)
         or not isinstance(point, str)
         or convention.POINT.fullmatch(point) is None
+        or not valid_identifier(source)
         or not isinstance(snapshot, str)
         or not isinstance(files_snapshot, str)
         or (snapshot and restore_body.SNAPSHOT.fullmatch(snapshot) is None)
@@ -825,9 +912,16 @@ def _restore_document(document: dict[str, object]) -> None:  # noqa: C901 - one 
         or scope not in SCOPES
         or safety_scope not in SCOPES
         or document.get("point_scope") not in convention.SCOPES
-        or document.get("repository") != convention.repository(identifier)
-        or document.get("server_key") != convention.server_key(identifier)
-        or document.get("filename") != convention.dump_filename(identifier)
+        or document.get("repository")
+        != convention.repository(str(document.get("source") or identifier))
+        or document.get("server_key")
+        != convention.server_key(str(document.get("source") or identifier))
+        or (document.get("safety_repository") or convention.repository(identifier))
+        != convention.repository(identifier)
+        or (document.get("safety_key") or convention.server_key(identifier))
+        != convention.server_key(identifier)
+        or document.get("filename")
+        != convention.dump_filename(str(document.get("source") or identifier))
         or type(target_empty) is not bool
         or type(document.get("point_size")) is not int
         or not isinstance(release, str)
@@ -899,8 +993,11 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
             "readiness",
             "engine",
             "engine_major",
+            "source",
             "repository",
             "server_key",
+            "safety_repository",
+            "safety_key",
             "point",
             "scope",
             "snapshot",

@@ -6,6 +6,7 @@ from operations.engine import ReviewDraft
 from operations.fakes import BOOT_ID
 from operations.inputs import PreparationInputs
 from sites import remove
+from sites.bodies.remove import backup_paths
 
 PATHS = (
     "/etc/caddy/sites/alpha.caddy",
@@ -21,6 +22,7 @@ PATHS = (
     "/run/valkey/alpha",
     "/etc/systemd/system/valkey-server@alpha.service.d",
 )
+BACKUP_PATHS = tuple(backup_paths("alpha"))
 DIGEST = "a" * 64
 
 
@@ -29,6 +31,7 @@ def evidence(
     names: tuple[str, ...] = ("alpha.example.com",),
     present: bool = True,
     binding_state: str = "satisfied",
+    backups: bool = False,
 ) -> remove.RemovalEvidence:
     current = (
         binding.Binding("mariadb", "alpha", binding_state, ("principal", "database", "privileges"))
@@ -79,6 +82,9 @@ def evidence(
                 "php-fpm-site-php85@alpha.service": ["loaded", "inactive", "dead"],
                 "valkey-server@alpha.service": ["loaded", "active", "running"],
             },
+            "backup_paths": dict.fromkeys(BACKUP_PATHS, backups),
+            "backup_repository": backups,
+            "backup_key": backups,
             "other_sites": ["beta"],
             "caddy_matches": True,
             "caddy_data_directory": "/var/lib/caddy/.local/share/caddy",
@@ -89,6 +95,6 @@ def evidence(
     )
 
 
-def removal_draft() -> ReviewDraft:
+def removal_draft(*, backups: bool = False) -> ReviewDraft:
     """The removal review of the recorded alpha site."""
-    return remove.review(evidence(), PreparationInputs("", "alpha"))
+    return remove.review(evidence(backups=backups), PreparationInputs("", "alpha"))

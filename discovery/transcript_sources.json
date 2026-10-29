@@ -17,7 +17,7 @@
     "discovery/observations/probes.py": "59a89e5900eaa0e3333a20ab6815899d8731936ae2c9350d4589b9690ba57c7a",
     "discovery/observations/standing.py": "cb3a6007318ea0767621dce3385a62370b46435e66c56a39703e32215e1cc11b",
     "discovery/snapshot.py": "4b26880ba0751f3ef476293e4984fafaa2af904fc3c51195336b4b413766e205",
-    "laravel/observation.py": "791418bf4fe0544f6e64a128a462efdacd4be4581a07a0a2afb9bd7a0957b20d",
+    "laravel/observation.py": "90bc010b51f82ed8b77bd5da66ae3d2123bec50aa5b55f109bb4a021243418a8",
     "logs/read.py": "bca3174ebb0e2fc4fca8ccb766965be9e0cbe815f611608c2f6b188992f86ecb",
     "runtimes/observation.py": "f96262d7529bbd3dd9433eea67b6e0ae3a1cfd992afcc523e0c14b012b955841",
     "sites/bodies/admission.py": "4d0901b9b088660d518ec3c234a9c9557a9e15c7460ed44f6c0dd597141974dc",

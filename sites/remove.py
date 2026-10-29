@@ -32,6 +32,7 @@ from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of
 
 from . import observation
+from .bodies.remove import backup_key, backup_paths, backup_repository
 from .configuration import PHP_RUNTIMES
 from .names import canonical_name, valid_identifier
 
@@ -39,6 +40,7 @@ SLUG: Final = "remove_site"
 LABEL: Final = "Remove site"
 STAGES: Final = (
     "preflight",
+    "backups",
     "gate",
     "caddy",
     "services",
@@ -48,6 +50,10 @@ STAGES: Final = (
     "files",
     "accounts",
     "verify",
+)
+KEPT_BACKUPS: Final = (
+    "The site's backup repository stays on this server, and its offsite copy stays in the "
+    "bucket. Both can be restored into a matching site."
 )
 
 _BINDING_SOURCE: Final = importlib.resources.files("databases").joinpath("binding.py").read_text()
@@ -77,11 +83,6 @@ BODY_BYTES: Final = (
     .rstrip(b"\n")
 )
 BODY_SHA256: Final = hashlib.sha256(BODY_BYTES).hexdigest()
-
-NO_BACKUP: Final = (
-    "No backup exists. Phase D adds backups; this removal deletes files, the database and "
-    "its data, and the certificate, and none of it can be recovered."
-)
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,9 @@ def valid_inventory(value: object, identifier: str) -> bool:  # noqa: C901 - a c
         "proxy_group",
         "certificates",
         "services",
+        "backup_paths",
+        "backup_repository",
+        "backup_key",
         "other_sites",
         "caddy_matches",
         "caddy_data_directory",
@@ -235,6 +239,16 @@ def valid_inventory(value: object, identifier: str) -> bool:  # noqa: C901 - a c
     ):
         return False
     if not _identifier_list(value["other_sites"]):
+        return False
+    backup = value["backup_paths"]
+    if (
+        not isinstance(backup, dict)
+        or len(backup) != len(backup_paths(identifier))
+        or set(backup) != set(backup_paths(identifier))
+        or not all(type(present) is bool for present in backup.values())
+        or type(value["backup_repository"]) is not bool
+        or type(value["backup_key"]) is not bool
+    ):
         return False
     if type(value["caddy_matches"]) is not bool or not isinstance(
         value["caddy_data_directory"], str
@@ -352,7 +366,8 @@ def _effects(identifier: str, primary: str) -> tuple[DeclaredEffect, ...]:
                 f"Delete site {primary}: its Caddy file, services, PHP-FPM, HAProxy and object "
                 "cache configuration, database and principal, stored certificate, directory, "
                 "accounts and background work. The database and every site file are "
-                "destroyed, and its scheduled tasks are never started again."
+                "destroyed, and its scheduled tasks are never started again. Its backups are "
+                "kept."
             ),
             (identifier,),
             destroys_data=True,
@@ -389,6 +404,12 @@ def _details(
     other = raw_other if isinstance(raw_other, list) else []
     raw_services = inventory["services"]
     services = raw_services if isinstance(raw_services, dict) else {}
+    raw_backup = inventory.get("backup_paths")
+    backup_paths_present = (
+        [path for path, present in raw_backup.items() if present is True]
+        if isinstance(raw_backup, dict)
+        else []
+    )
     return [
         {"label": "Site", "value": names},
         {"label": "Deleted files and configuration", "value": "\n".join(_deleted_paths(inventory))},
@@ -397,6 +418,11 @@ def _details(
             "value": "\n".join(
                 f"{unit} ({state[1] or 'not loaded'})" for unit, state in services.items()
             ),
+        },
+        {
+            "label": "Backup units removed",
+            "value": "\n".join(backup_paths_present)
+            or "No backup units are installed for this site.",
         },
         {"label": "Database", "value": database_value},
         {"label": "Certificate", "value": certificate},
@@ -432,8 +458,21 @@ def _details(
                 else "This is the server's only site."
             ),
         },
-        {"label": "Backups", "value": NO_BACKUP},
+        {"label": "Backups", "value": _kept_backups(inventory)},
     ]
+
+
+def _kept_backups(inventory: dict[str, object]) -> str:
+    """The repositories a removal keeps, named; it never deletes one (Phase D #407)."""
+    identifier = str(inventory.get("identifier", ""))
+    kept: list[str] = []
+    if inventory.get("backup_repository") is True and valid_identifier(identifier):
+        kept.append(f"{backup_repository(identifier)} (onsite, kept)")
+    if inventory.get("backup_key") is True and valid_identifier(identifier):
+        kept.append(f"{backup_key(identifier)} (its key, kept)")
+    if not kept:
+        return "No backups exist for this site."
+    return "\n".join([*kept, KEPT_BACKUPS])
 
 
 def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa: C901 - one review
@@ -475,8 +514,11 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa:
     database = _database_document(evidence, identifier, database_exists)
     paths = inventory.get("paths")
     present_paths = isinstance(paths, dict) and any(paths.values())
+    raw_backup = inventory.get("backup_paths")
+    present_backup = isinstance(raw_backup, dict) and any(raw_backup.values())
     artifacts = (
         present_paths
+        or present_backup
         or account is not None
         or proxy is not None
         or inventory.get("account_group") is not None
@@ -538,6 +580,10 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa:
             (
                 "The site's scheduled tasks and background work are stopped and removed, "
                 "never started again."
+            ),
+            (
+                "The site's backup units are gone and its backup repositories are kept, "
+                "onsite and offsite."
             ),
         ),
         refusals=tuple(refusals),
@@ -701,6 +747,9 @@ def verify(shell: RemoteShell, review: ChangeReview) -> bool | None:
         return None
     paths = inventory["paths"]
     if isinstance(paths, dict) and any(paths.values()):
+        return False
+    backup = inventory.get("backup_paths")
+    if isinstance(backup, dict) and any(backup.values()):
         return False
     if (
         inventory["account"] is not None
