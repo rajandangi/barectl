@@ -3,7 +3,7 @@
 The checked-in body is installed by **Enable backups** as two fixed weekly units in the
 site's backup slice, one per location. A run holds the per-repository native lock, runs
 ``restic check`` with a rotating ``--read-data-subset``, and reads the newest complete
-recovery point back through ``restic dump`` into a private, empty stage. A held lock or an
+recovery point back through ``restic dump`` and a private staging directory. A held lock or an
 unconfigured offsite store is a skip, never a success; a corrupted pack or a failed read-back
 is an integrity failure and never changes a capture or a snapshot (docs/adr/0031, Phase D
 #358 and #405).
@@ -430,7 +430,7 @@ def read_back(
     point: dict[str, object],
     filename: str,
 ) -> tuple[int, int] | None:
-    """Read every part of one point back into an empty private stage, counting bytes."""
+    """Read every part of one point back through a private stage, counting bytes."""
     try:
         directory = _stage_directory()
     except OSError, ValueError:

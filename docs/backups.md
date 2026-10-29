@@ -256,7 +256,7 @@ them; it deletes no recovery point.
 Enabling backups installs one weekly integrity unit per repository, onsite and offsite, in
 the site's backup slice. Each run holds the per-repository native lock, runs `restic check`
 with a rotating `--read-data-subset`, and reads the newest complete recovery point back with
-`restic dump` into a private, empty stage. The subset advances on every recorded run and
+`restic dump` through a private staging directory. The subset advances on every recorded run and
 covers the whole repository over twenty weeks; the result line names the subset that ran.
 
 The integrity finding is its own row per site and location, with its time. It is shown apart
