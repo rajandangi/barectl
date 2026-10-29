@@ -47,6 +47,7 @@
                 <li>
                   {% if site.identifier %}<a href="{% url 'site_detail' state.server.pk site.identifier %}">{{ site.domains|join:", "|default:site.identifier }}</a>{% else %}{{ site.file }}{% endif %}
                   {{ site.verdict }}
+                  {% if not site.recent_backup %}<strong>No recent backup.</strong>{% endif %}
                 </li>
           {% empty %}<li>No sites in this observation.</li>{% endfor %}
             </ul>

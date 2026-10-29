@@ -212,6 +212,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Another barectl run still had processes on the server, so this run stopped before "
         "changing anything. Prepare a new review after it finishes."
     ),
+    "active_backup": (
+        "This site's scheduled backup still had processes on the server, so this run stopped "
+        "before changing anything. Prepare a new review after it finishes."
+    ),
     "capacity": (
         "The server kept too many finished barectl runs when this run held the lock, so it "
         "stopped before changing anything. Clear finished runs with a reviewed cleanup, "
@@ -954,6 +958,10 @@ RESULT_REASONS: Final = frozenset(
         "backup_idle",
         "backup_paused",
         "backup_gate",
+        "backup_offsite",
+        "schedule_timer",
+        "schedule_units",
+        "schedule_install",
         "offsite_bucket",
         "offsite_repository",
         "offsite_key",
@@ -1119,6 +1127,27 @@ def _lock_busy() -> str:
     return f'{{ r \'{{"class":"lock_busy"}}\'; exit {native.Code.LOCK_BUSY}; }}'
 
 
+def _backup_step(review: ChangeReview) -> list[str]:
+    """A running scheduled backup is busy for every change that names its site (#402)."""
+    sites = [
+        site
+        for site in review.affected_sites
+        if isinstance(site, str) and re.fullmatch(r"[a-z][a-z0-9]{2,23}", site)
+    ]
+    if not sites:
+        return []
+    paths = " ".join(
+        f"/sys/fs/cgroup/system.slice/barectl-site-{site}-backup.service/cgroup.events"
+        for site in sites
+    )
+    return [
+        (
+            f'for e in {paths}; do [ -e "$e" ] || continue; '
+            f"grep -qx 'populated 1' \"$e\" && {_refused('active_backup')}; done"
+        )
+    ]
+
+
 def _sites_step(review: ChangeReview) -> list[str]:
     if not review.sites_read:
         return []
@@ -1256,6 +1285,7 @@ def payload(
             f'[ "$e" = {own} ] && continue; [ -e "$e" ] || continue; '
             f"grep -qx 'populated 1' \"$e\" && {_refused('active_run')}; done"
         ),
+        *_backup_step(review),
         (f"n=$({native.RETAINED_UNITS} | grep -c .)"),
         f'[ "$((n - 1))" -lt {kind.capacity} ] || {_refused("capacity")}',
         *_sites_step(review),

@@ -194,6 +194,7 @@ def _read(check: BackupCheck) -> None:
             "outcome": "unreadable",
             "problem": "The site has not been observed yet.",
             "points": [],
+            "schedule": {},
         }
     else:
         from runtimes.catalog import architecture_of
@@ -214,6 +215,7 @@ def _read(check: BackupCheck) -> None:
                     "outcome": "missing",
                     "problem": "Backups are not enabled for this site.",
                     "points": [],
+                    "schedule": {},
                 }
             else:
                 result = run_root(shell, listing_command(check.identifier))
@@ -223,6 +225,12 @@ def _read(check: BackupCheck) -> None:
                     if result.exit_status or result.truncated or len(text) > MAX_BYTES
                     else parse_listing(text)
                 )
+                from . import schedule
+
+                observed_schedule = schedule.read(shell, (check.identifier,))
+                if observed_schedule is not None:
+                    for observed_row in observed_schedule:
+                        schedule.record(check.server, observed_row)
                 value = (
                     {
                         "version": 1,
@@ -230,6 +238,7 @@ def _read(check: BackupCheck) -> None:
                         "outcome": "unreadable",
                         "problem": "The recovery points could not be read.",
                         "points": [],
+                        "schedule": {},
                     }
                     if parsed is None
                     else {
@@ -238,6 +247,9 @@ def _read(check: BackupCheck) -> None:
                         "outcome": "observed",
                         "problem": "",
                         "points": points(parsed),
+                        "schedule": schedule.listing(
+                            observed_schedule[0] if observed_schedule else None
+                        ),
                     }
                 )
     now = timezone.now()

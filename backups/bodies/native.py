@@ -247,6 +247,8 @@ def copy_point(  # noqa: C901 - one reviewed copy
     onsite: str,
     key: str,
     plan: object,
+    *,
+    release: bool = True,
 ) -> tuple[str, str]:
     """Copy one point to the reviewed offsite repository under the repository lock.
 
@@ -269,7 +271,8 @@ def copy_point(  # noqa: C901 - one reviewed copy
         or capture != "/etc/barectl/backups/offsite/capture.env"
     ):
         return "failed", "offsite_copy"
-    release_mutation_lock()
+    if release:
+        release_mutation_lock()
     try:
         extra = environment_file(str(capture))
     except OSError, ValueError:
