@@ -23,7 +23,7 @@ from servers.models import Server
 from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 
-from . import check, convention, presentation
+from . import check, convention, presentation, retention
 from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
 from .offsite import COPY_SLUG
 from .reopen import SLUG as REOPEN_SLUG
@@ -87,7 +87,7 @@ def context_for_site(
         and not polling
         and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
     )
-    return {
+    context = {
         "backups": view,
         "backups_target": target,
         "backups_can_enable": can_prepare and managed and user.has_perm(MANAGE_SECRETS),
@@ -109,6 +109,12 @@ def context_for_site(
         "backups_polling": polling or active is not None,
         "backups_kit_lines": presentation.kit_lines(server.name, identifier, collected),
     }
+    retention.context_for_site(server, identifier, context)
+    context["backups_can_set_retention"] = bool(
+        can_prepare and managed and view.enabled and user.has_perm("operations.change_destructive")
+    )
+    context["backups_can_keep"] = bool(can_prepare and managed and view.enabled)
+    return context
 
 
 @never_cache
@@ -181,6 +187,94 @@ def prepare_copy(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
             server,
             request.user,
             COPY_SLUG,
+            inputs={"version": 1, "identifier": identifier, "point": point},
+        )
+    except OperationRefused, ValueError:
+        messages.error(request, "The saved connection changed. Refresh and prepare again.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if queued is None:
+        messages.error(request, "Wait for the current operation before preparing this review.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    return redirect("change_detail", operation_id=queued.pk)
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_retention(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """Set how long this site's recovery points are kept."""
+    if not valid_identifier(identifier) or not isinstance(request.user, User):
+        raise Http404
+    days = request.POST.get("days", "")
+    if not days.isdigit() or int(days) not in convention.RETENTION_DAYS:
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    context = context_for_site(server, identifier, request.user)
+    if not context["backups_can_set_retention"]:
+        messages.error(
+            request,
+            "Barectl cannot change this site's retention yet. Wait for the current "
+            "operation or ask an administrator.",
+        )
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    try:
+        queued = services.request_prepare(
+            server,
+            request.user,
+            retention.SET_SLUG,
+            inputs={"version": 1, "identifier": identifier, "days": int(days)},
+        )
+    except OperationRefused, ValueError:
+        messages.error(request, "The saved connection changed. Refresh and prepare again.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if queued is None:
+        messages.error(request, "Wait for the current operation before preparing this review.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    return redirect("change_detail", operation_id=queued.pk)
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_disable_retention(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """Turn retention off without deleting anything."""
+    if not valid_identifier(identifier) or not isinstance(request.user, User):
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    context = context_for_site(server, identifier, request.user)
+    if not context["backups_can_disable_retention"]:
+        messages.error(request, "This site has no retention policy to turn off.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    return _prepare(request, pk, identifier, retention.DISABLE_SLUG, "site_backups")
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_keep(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """Toggle one recovery point's keep tag; nothing is deleted."""
+    if not valid_identifier(identifier) or not isinstance(request.user, User):
+        raise Http404
+    point = request.POST.get("point", "")
+    if convention.POINT.fullmatch(point) is None:
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    context = context_for_site(server, identifier, request.user)
+    if not context["backups_can_keep"]:
+        messages.error(
+            request,
+            "Barectl cannot keep this recovery point yet. Wait for the current operation.",
+        )
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    try:
+        queued = services.request_prepare(
+            server,
+            request.user,
+            retention.KEEP_SLUG,
             inputs={"version": 1, "identifier": identifier, "point": point},
         )
     except OperationRefused, ValueError:

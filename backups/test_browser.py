@@ -193,6 +193,41 @@ class BackupsBrowserTests(BrowserTestCase):
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
 
+    def test_retention_is_chosen_and_its_destructive_review_is_shown(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_role("heading", name="Keep backups for")).to_be_visible()
+        self.page.get_by_label("How long to keep recovery points").select_option("14")
+        self.page.get_by_role("button", name="Set retention").click()
+        expect(self.page.get_by_role("heading", name="Set retention")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "set_backup_retention")
+        self.assertEqual(preparation.inputs, {"version": 1, "identifier": "shop", "days": 14})
+        self.assert_no_native_terms()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        expect(self.page.get_by_role("heading", name="Set retention")).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+    def test_a_recovery_point_is_kept_from_its_row(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        record_points(server, (point(),))
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        self.page.get_by_role("button", name="Keep", exact=True).click()
+        expect(self.page.get_by_role("heading", name="Keep recovery point")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "keep_recovery_point")
+        self.assertEqual(
+            preparation.inputs,
+            {"version": 1, "identifier": "shop", "point": "0123456789abcdef"},
+        )
+        self.assert_no_native_terms()
+
     def test_a_gated_restore_offers_the_same_one_reopen_action(self) -> None:
         server = Server.objects.get(name="Production")
         record_backups(

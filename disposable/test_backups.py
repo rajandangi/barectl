@@ -495,6 +495,184 @@ class BackupLifecycle(BackupCase):
 
 
 @tag(SCENARIO_TAG)
+class Retention(BackupCase):
+    """Retention and Keep on a real server: backdated points, read-back and independent sides."""
+
+    def restic_repository(self, offsite: bool = False) -> str:
+        from backups import convention
+
+        if not offsite:
+            return convention.repository(IDENTIFIER)
+        return f"s3:https://{self.S3_HOST}/{self.S3_BUCKET}/{self.offsite_prefix()}/{IDENTIFIER}"
+
+    def restic_shell(self, *arguments: str, offsite: bool = False) -> str:
+        from backups import convention
+
+        source = ". /etc/barectl/backups/offsite/capture.env; " if offsite else ""
+        return (
+            f"{source}RESTIC_REPOSITORY={self.restic_repository(offsite)} "
+            f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
+            f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+            + shlex.join([convention.RESTIC_BIN, *arguments])
+        )
+
+    def create_point(
+        self,
+        point: str,
+        when: str,
+        *,
+        scope: str = "database",
+        part: str = "database",
+        keep: bool = False,
+        filename: str = "",
+        offsite: bool = False,
+    ) -> None:
+        from backups import convention
+
+        tags = [
+            "barectl",
+            f"site:{IDENTIFIER}",
+            f"scope:{scope}",
+            f"part:{part}",
+            "origin:manual",
+            "capture:live",
+            f"point:{point}",
+            "complete",
+        ]
+        if keep:
+            tags.append("keep")
+        tag_arguments = [item for tag in tags for item in ("--tag", tag)]
+        if part == "database":
+            name = filename or convention.dump_filename(IDENTIFIER)
+            command = "printf 'fixture dump' | " + self.restic_shell(
+                "backup",
+                "--stdin",
+                "--stdin-filename",
+                name,
+                "--time",
+                when,
+                *tag_arguments,
+                offsite=offsite,
+            )
+        else:
+            command = self.restic_shell(
+                "backup", "--time", when, *tag_arguments, "/etc/hostname", offsite=offsite
+            )
+        self.native(command)
+
+    def snapshot_rows(self, offsite: bool = False) -> list[dict[str, object]]:
+        import json as json_module
+
+        text = self.native(self.restic_shell("snapshots", "--json", "--no-lock", offsite=offsite))
+        start = text.index("[")
+        return [row for row in json_module.loads(text[start:]) if isinstance(row, dict)]
+
+    def points(self, offsite: bool = False) -> set[str]:
+        found: set[str] = set()
+        for row in self.snapshot_rows(offsite):
+            tags = row.get("tags")
+            if not isinstance(tags, list):
+                continue
+            for value in tags:
+                if isinstance(value, str) and value.startswith("point:"):
+                    found.add(value[6:])
+        return found
+
+    def snapshot_ids(self, point: str, offsite: bool = False) -> list[str]:
+        found = []
+        for row in self.snapshot_rows(offsite):
+            tags = row.get("tags")
+            if (
+                isinstance(tags, list)
+                and f"point:{point}" in tags
+                and isinstance(row.get("id"), str)
+            ):
+                found.append(str(row["id"]))
+        return found
+
+    def foreign_present(self) -> bool:
+        return "hand-made" in self.native(self.restic_shell("snapshots", "--json", "--no-lock"))
+
+    def cleanup_result(self, location: str = "onsite") -> dict[str, object]:
+        import json as json_module
+
+        unit = f"barectl-site-{IDENTIFIER}-" + (
+            "cleanup.service" if location == "onsite" else "cleanupoffsite.service"
+        )
+        self.native(f"systemctl start {unit}")
+        text = self.native(
+            f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 1"
+        ).strip()
+        return dict(json_module.loads(text.removeprefix("barectl-result ")))
+
+    def test_retention_keeps_the_newest_point_and_never_touches_foreign_snapshots(self) -> None:
+        from backups import retention
+
+        self.prepare_site()
+        self.start_s3()
+        self.enable()
+        self.offsite_setup()
+
+        old = "aaaaaaaaaaaaaaaa"
+        kept = "bbbbbbbbbbbbbbbb"
+        old_full = "cccccccccccccccc"
+        new_full = "eeeeeeeeeeeeeeee"
+        corrupt = "dddddddddddddddd"
+        self.create_point(old, "2026-08-01 03:00:00")
+        self.create_point(kept, "2026-08-02 03:00:00", keep=True)
+        self.create_point(old_full, "2026-08-03 03:00:00", scope="full", part="database")
+        self.create_point(old_full, "2026-08-03 03:00:00", scope="full", part="files")
+        self.create_point(new_full, "2026-10-29 03:00:00", scope="full", part="database")
+        self.create_point(new_full, "2026-10-29 03:00:00", scope="full", part="files")
+        self.create_point(corrupt, "2026-10-30 03:00:00", filename="wrong.sql")
+        self.create_point(old, "2026-08-01 03:00:00", offsite=True)
+        self.create_point(kept, "2026-08-02 03:00:00", keep=True, offsite=True)
+        self.native(self.restic_shell("backup", "--tag", "hand-made", "/etc/hostname"))
+        before = self.points()
+        offsite_before = self.points(offsite=True)
+
+        review = apply_change(
+            self,
+            retention.SET,
+            PreparationInputs("", IDENTIFIER, days=7),
+            timeout=180,
+        )
+        self.assertIn(old, {str(row["point"]) for row in review.document["deletions"]})
+        self.assertEqual(self.points(), before, "Applying retention deleted a point.")
+        self.assertEqual(self.points(offsite=True), offsite_before)
+
+        refused = self.cleanup_result()
+        self.assertIn(refused["class"], ("partial", "failed"))
+        self.assertIn(corrupt, self.points(), "A failed read-back did not keep the group.")
+        self.assertIn(old, self.points())
+
+        ids = self.snapshot_ids(corrupt)
+        self.assertTrue(ids)
+        self.native(self.restic_shell("forget", *ids))
+
+        result = self.cleanup_result()
+        self.assertEqual(result["class"], "succeeded")
+        self.assertIn("onsite", result)
+        self.assertNotIn(old, self.points())
+        self.assertNotIn(old_full, self.points())
+        self.assertIn(new_full, self.points())
+        self.assertIn(kept, self.points())
+        self.assertTrue(self.foreign_present())
+        self.assertIn(old, self.points(offsite=True), "Onsite cleanup changed offsite.")
+
+        offsite_result = self.cleanup_result("offsite")
+        self.assertEqual(offsite_result["class"], "succeeded")
+        self.assertNotIn(old, self.points(offsite=True))
+        self.assertIn(kept, self.points(offsite=True))
+
+        self.native("systemctl stop systemd-timesyncd 2>/dev/null || true")
+        self.native("timedatectl set-ntp false 2>/dev/null || true")
+        skipped = self.cleanup_result()
+        self.assertEqual(skipped["class"], "refused")
+        self.assertEqual(skipped["reason"], "cleanup_clock")
+
+
+@tag(SCENARIO_TAG)
 @tag("breadth")
 class RebootedFullBackup(BackupCase):
     breadth = True

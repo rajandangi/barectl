@@ -206,6 +206,11 @@ def _read(check: BackupCheck) -> None:
         engine = _engine(check.server)
         with connect_operation(check) as shell:
             native = observation.read(shell, (check.identifier,), engine, architecture)
+            from . import retention
+
+            retention.record(
+                check.server, check.identifier, retention.read_policy(shell, check.identifier)
+            )
             row = _row(native, check.identifier)
             if row is None or not _enabled(row):
                 value = {

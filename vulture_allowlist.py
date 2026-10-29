@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from disposable.test_backups import (
         BackupLifecycle,
         RebootedFullBackup,
+        Retention,
     )
     from disposable.test_cache import LaravelObjectCache, SiteObjectCache, ValkeyInstall
     from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
@@ -593,6 +594,7 @@ if TYPE_CHECKING:
         BackupsConfig,
         BackupLifecycle,
         RebootedFullBackup,
+        Retention,
         LastBackupView("", "", "", "").headline,
         LastBackupView("", "", "", "").time_label,
         RecoveryPointView("", "", "", False, False, "", "").time_label,

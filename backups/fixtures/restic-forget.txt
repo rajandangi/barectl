@@ -1,0 +1,78 @@
+[
+  {
+    "tags": null,
+    "host": "",
+    "paths": [],
+    "keep": [
+      {
+        "time": "2026-10-28T03:00:00Z",
+        "tree": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "paths": ["/salpha.sql"],
+        "hostname": "web",
+        "username": "root",
+        "uid": 0,
+        "gid": 0,
+        "tags": [
+          "barectl",
+          "site:alpha",
+          "scope:database",
+          "part:database",
+          "origin:manual",
+          "capture:live",
+          "point:3333333333333333",
+          "complete"
+        ],
+        "program_version": "restic 0.18.1",
+        "id": "3333333333333333333333333333333333333333333333333333333333333333",
+        "short_id": "33333333"
+      },
+      {
+        "time": "2026-10-25T03:00:00Z",
+        "tree": "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3",
+        "paths": ["/salpha.sql"],
+        "hostname": "web",
+        "username": "root",
+        "uid": 0,
+        "gid": 0,
+        "tags": [
+          "barectl",
+          "site:alpha",
+          "scope:database",
+          "part:database",
+          "origin:manual",
+          "capture:live",
+          "point:2222222222222222",
+          "complete"
+        ],
+        "program_version": "restic 0.18.1",
+        "id": "2222222222222222222222222222222222222222222222222222222222222222",
+        "short_id": "22222222"
+      }
+    ],
+    "remove": [
+      {
+        "time": "2026-09-01T03:00:00Z",
+        "tree": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+        "paths": ["/salpha.sql"],
+        "hostname": "web",
+        "username": "root",
+        "uid": 0,
+        "gid": 0,
+        "tags": [
+          "barectl",
+          "site:alpha",
+          "scope:database",
+          "part:database",
+          "origin:manual",
+          "capture:live",
+          "point:1111111111111111",
+          "complete"
+        ],
+        "program_version": "restic 0.18.1",
+        "id": "1111111111111111111111111111111111111111111111111111111111111111",
+        "short_id": "11111111"
+      }
+    ],
+    "reasons": []
+  }
+]

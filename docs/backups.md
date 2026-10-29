@@ -1,4 +1,4 @@
-# Backups (implemented, #396, #399, #400 and #403)
+# Backups (implemented, #396, #399, #400, #403 and #404)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
@@ -162,6 +162,43 @@ and **Reopen site**, exactly like an interrupted full capture; **Check what happ
 inspects the original run and never submits it again. Restoring files only, full-site
 restores, cross-server restores and exporting a point remain planned.
 
+## Retention
+
+**Keep backups for** offers 1 week, 2 weeks, 3 weeks, 1 month or 6 months. No policy exists
+until an operator reviews one; 1 week is preselected only when the site has no policy yet.
+**Set retention** is one reviewed **Destructive** change. Its review runs
+`restic forget --dry-run --json` against fresh onsite and offsite listings and lists every
+recovery point the policy would delete now, with its time, scope and location, and says that
+deletion is permanent. Applying installs the site's cleanup units and deletes nothing itself.
+
+Cleanup runs daily onsite and weekly offsite as fixed native units in the site's backup slice.
+Each run first requires a synchronized clock from `timedatectl`; otherwise it skips with that
+reason. For each location, scope and part it runs `restic forget` filtered by the Barectl
+marker and `complete` tag, with `--group-by ''`, `--keep-within <period>d`, `--keep-last 1` and
+`--keep-tag keep`, and then `prune`. Because full points share one capture time, their parts
+expire together. Untagged or hand-made snapshots are reported and never touched, and onsite
+and offsite results are computed independently.
+
+Before forgetting in a scope, cleanup restore-reads the newest complete point there (offsite
+uses its weekly read-back). If the read fails, everything in that scope is kept and reported.
+The newest readable point per scope and location is always kept. A held per-repository lock is
+a skip, never a success; restic's own stale-lock rule applies and Barectl never runs
+`unlock --remove-all`.
+
+Every cleanup run writes one `barectl-result` line with `deleted`, `kept`, `skipped` and
+`failed` point counts per location, plus the `foreign` snapshots it left alone. It carries no
+path, repository URL, credential or dump content.
+
+**Turn retention off** is one reviewed Site change. It removes the cleanup units and stops
+them; it deletes no recovery point.
+
+## Keep
+
+**Keep** on a recovery point is one reviewed Site change that toggles the point's `keep` tag
+and changes no other tag. It never deletes a snapshot. Retention's `--keep-tag keep` then
+preserves the point until it is unkept. Keeping a point uses only the onsite repository, so it
+never needs offsite credentials.
+
 ## Restic results
 
 Restic's exit codes map to the engine's result classes: `0` succeeded, `3` partial (a
@@ -200,13 +237,16 @@ reconstructs that backups are enabled and the last result from this native evide
 | Server key | `/etc/barectl/backups/<id>.key` | root `0600` |
 | restic profile | `/nix/var/nix/profiles/barectl/restic` | root, the pinned catalog build |
 | restic cache | `/var/cache/barectl/restic` | root `0700` |
+| Retention body and payload | `/etc/barectl/backups/retention/<id>.sh`, `<id>.json` | root `0600`, directory `0700` |
+| Cleanup units | `/etc/systemd/system/barectl-site-<id>-cleanup.service` and `.timer`, plus `-cleanupoffsite.service` and `.timer` | root-owned fixed templates |
 
 ## Native evidence
 
 The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
 a database-only capture, `backups/bodies/full.py` for a paused full capture,
 `backups/bodies/restore.py` for a database restore, `backups/bodies/offsite.py` for offsite
-storage and `backups/bodies/copy.py` for Copy offsite again, and `backups/bodies/reopen.py`
+storage and `backups/bodies/copy.py` for Copy offsite again, `backups/bodies/retention.py`
+for retention cleanup, Keep and their unit templates, and `backups/bodies/reopen.py`
 for reopening a paused site; each prints its stages and a result line. The pause helpers shared by
 the full capture and the restore are `backups/bodies/paused.py`. The read is
 `backups/bodies/observe.py`, shared with the database binding's pure catalog reader. The first

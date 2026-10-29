@@ -38,6 +38,7 @@ class InputShape(StrEnum):
     SITE_LOG_ROTATION = "site_log_rotation"
     OFFSITE_STORAGE = "offsite_storage"
     SITE_BACKUP_POINT = "site_backup_point"
+    BACKUP_RETENTION = "backup_retention"
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,8 @@ class PreparationInputs:
     release: str = ""
     # The recovery point a database restore selects; empty for every other kind.
     point: str = ""
+    # A reviewed backup retention period in days; 0 for every other kind.
+    days: int = 0
     # The site's Deploy switch: pending migrations run only when this is true.
     migrations: bool = True
     # Whether a created site is served over HTTPS. The dashboard passes True; the native
@@ -141,6 +144,12 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
+        if self.days:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "days": self.days,
+            }
         if self.provider:
             if self.provider == "s3":
                 return {
@@ -876,6 +885,25 @@ def _site_backup_point_inputs(
     return PreparationInputs("", identifier, point=point)
 
 
+def _backup_retention_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from backups import convention
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier", "days"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, days = value["identifier"], value["days"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or type(days) is not int
+        or days not in convention.RETENTION_DAYS
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, days=days)
+
+
 def _certificate_email_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -916,4 +944,5 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.SITE_LOG_ROTATION: _site_log_rotation_inputs,
     InputShape.OFFSITE_STORAGE: _offsite_storage_inputs,
     InputShape.SITE_BACKUP_POINT: _site_backup_point_inputs,
+    InputShape.BACKUP_RETENTION: _backup_retention_inputs,
 }

@@ -8,9 +8,12 @@ from backups.views import (
     check_now,
     prepare_backup,
     prepare_copy,
+    prepare_disable_retention,
     prepare_enable,
+    prepare_keep,
     prepare_reopen,
     prepare_restore,
+    prepare_retention,
     recovery_kit,
 )
 from bootstrap.certificate_email_views import prepare_certificate_email
@@ -359,6 +362,21 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/backups/restore/prepare/",
         prepare_restore,
         name="site_backups_restore_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/retention/prepare/",
+        prepare_retention,
+        name="site_backups_retention_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/retention/disable/prepare/",
+        prepare_disable_retention,
+        name="site_backups_retention_disable_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/keep/prepare/",
+        prepare_keep,
+        name="site_backups_keep_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/backups/check/",

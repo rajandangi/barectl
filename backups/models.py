@@ -37,6 +37,36 @@ class BackupCheck(RemoteOperation):
         return f"{self.get_status_display()} backup check of {self.identifier}"
 
 
+class BackupRetention(models.Model):
+    """One site's retention policy, from the last verified read of its cleanup units (#404).
+
+    It is a cached observation for the page, never authority: the next review, apply and
+    cleanup all read the server's own units and payload again.
+    """
+
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="backup_retentions")
+    identifier = models.CharField(max_length=24)
+    installed = models.BooleanField(default=False)
+    days = models.PositiveSmallIntegerField(default=0)
+    offsite = models.BooleanField(default=False)
+    problem = models.TextField(blank=True)
+    checked_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["server", "identifier"], name="one_backup_retention_per_site"
+            )
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        state = f"{self.days} days" if self.installed else "not set"
+        return f"backup retention {state}: {self.identifier} on {self.server}"
+
+
 class BackupObservation(models.Model):
     """One site's backup setup and newest result, from one discovery snapshot."""
 

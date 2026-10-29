@@ -15,6 +15,7 @@ class BackupsConfig(AppConfig):
         from .offsite import COPY, REMOVE, SET_UP
         from .reopen import REOPEN_SITE
         from .restore import RESTORE
+        from .retention import DISABLE, KEEP, SET
 
         register_kind(ENABLE)
         register_kind(BACK_UP_NOW)
@@ -24,3 +25,6 @@ class BackupsConfig(AppConfig):
         register_kind(REMOVE)
         register_kind(COPY)
         register_kind(RESTORE)
+        register_kind(SET)
+        register_kind(DISABLE)
+        register_kind(KEEP)
