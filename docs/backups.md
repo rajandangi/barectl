@@ -2,8 +2,7 @@
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
-points. The planned Phase D behaviour, including schedules, retention, restoring files and
-export, is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358);
+points. The planned Phase D behaviour, including retention, restoring files and export, is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358);
 this page describes only what is built.
 
 ## Offsite storage
