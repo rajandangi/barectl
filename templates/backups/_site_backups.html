@@ -499,6 +499,20 @@
         {% empty %}
           <p>No recovery points were listed in this repository.</p>
         {% endfor %}
+        {% if backups_can_delete_removed %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_removed_delete_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <input type="hidden" name="source" value="{{ repository.identifier }}">
+            <button type="submit"
+                    class="usa-button usa-button--outline">Delete these backups</button>
+            <p class="usa-hint">
+              Deletes the kept onsite repository and its offsite recovery points permanently.
+              It does not recreate the removed site.
+            </p>
+          </form>
+        {% endif %}
       {% endfor %}
       <p class="usa-hint">
         Check backups lists these repositories again; the list holds no repository path.

@@ -12,6 +12,7 @@ import hashlib
 import importlib.resources
 import json
 import os
+import pathlib
 from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 from typing import ClassVar, cast
@@ -410,9 +411,10 @@ def _restore_patches() -> dict[str, object]:
         "pwd": SimpleNamespace(getpwnam=lambda account: SimpleNamespace(pw_uid=1001, pw_gid=1001)),
         "reviewed_point": lambda document, repository, key, extra=None: True,
         "reviewed_files": lambda settings, application: ["/var/www/shop/current"],
-        "header_bytes": lambda repository, key, snapshot, filename, extra=None: (
-            b"-- Server version\t11.8.2\n"
-        ),
+        "repository_locks": lambda identifiers, wait_seconds=0.0: [],
+        "_stage": lambda identifier, point, suffix="": pathlib.Path("/nonexistent/barectl-stage"),
+        "write_dump": lambda *args, **kwargs: True,
+        "dump_problem": lambda engine, path, major: "",
         "count_tables": lambda engine, identifier: 0,
     }
 

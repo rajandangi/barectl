@@ -13,6 +13,7 @@ for **Reopen site** (docs/adr/0022, docs/adr/0038, docs/adr/0040).
 """
 
 import base64
+import contextlib
 import gzip
 import http.client
 import json
@@ -49,6 +50,7 @@ from backups.bodies.native import (
     free_bytes,
     locked_file,
     offsite_extra,
+    repository_locks,
     restic,
     restic_environment,
     safe_config,
@@ -90,6 +92,12 @@ OFFSITE_CAPTURE: Final = "/etc/barectl/backups/offsite/capture.env"
 MARIADB_SOCKET: Final = "/run/mysqld/mysqld.sock"
 READY_SECONDS: Final = 30
 HEADER_BYTES: Final = 8192
+DUMP_TAIL_BYTES: Final = 65536
+RESTORE_LOCK_WAIT_SECONDS: Final = 5.0
+DUMP_COMPLETE: Final = {
+    "mariadb": b"-- Dump completed",
+    "postgresql": b"-- PostgreSQL database dump complete",
+}
 MARIADB_VERSION = re.compile(r"-- Server version\s+([0-9]+(?:\.[0-9]+)+)")
 POSTGRESQL_VERSION = re.compile(r"-- Dumped from database version ([0-9]+(?:\.[0-9]+)+)")
 MARIADB_MAJOR = re.compile(r"(?:[0-9]+:)?([0-9]+)\.([0-9]+)")
@@ -269,41 +277,54 @@ def _quote(value: str) -> str:
     return shlex.quote(value)
 
 
-def header_bytes(
+def write_dump(
     repository: str,
     key: str,
     snapshot: str,
     filename: str,
+    target: pathlib.Path,
     extra: dict[str, str] | None = None,
-) -> bytes | None:
-    process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
-        dump_argv(snapshot, filename, repository),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        env=restic_environment(repository, key, extra),
-        start_new_session=True,
-    )
+) -> bool:
+    """Download one whole dump into the private stage before the site is touched."""
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     try:
-        if process.stdout is None:
-            return None
-        output = process.stdout.read(HEADER_BYTES)
+        with os.fdopen(descriptor, "wb") as output:
+            process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
+                dump_argv(snapshot, filename, repository),
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=subprocess.DEVNULL,
+                env=restic_environment(repository, key, extra),
+                start_new_session=True,
+            )
+            status = process.wait()
+            output.flush()
+            os.fsync(output.fileno())
     finally:
-        process.kill()
-        process.wait()
-    return output or None
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+    return status == 0 and target.is_file() and target.stat().st_size > 0
 
 
-def import_stream(
-    repository: str,
-    key: str,
-    snapshot: str,
-    filename: str,
-    engine: str,
-    identifier: str,
-    extra: dict[str, str] | None = None,
-) -> tuple[bool, int]:
-    """Stream the dump into the site's engine client, counting the tables it creates."""
+def dump_problem(engine: str, path: pathlib.Path, major: str) -> str:
+    """Why a staged dump cannot be imported, or "" when it is complete and same-major."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            header = handle.read(HEADER_BYTES)
+            handle.seek(max(0, size - DUMP_TAIL_BYTES))
+            tail = handle.read()
+    except OSError:
+        return "restore_repository"
+    if engine_major(engine, dump_version(engine, header.decode("utf-8", "replace"))) != major:
+        return "restore_engine"
+    if DUMP_COMPLETE[engine] not in tail:
+        return "restore_dump"
+    return ""
+
+
+def import_staged(path: pathlib.Path, engine: str, identifier: str) -> tuple[bool, int]:
+    """Import one validated private dump as the site principal, counting its tables."""
     client = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
         import_argv(engine, identifier),
         stdin=subprocess.PIPE,
@@ -311,39 +332,27 @@ def import_stream(
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    source = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
-        dump_argv(snapshot, filename, repository),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        env=restic_environment(repository, key, extra),
-        start_new_session=True,
-    )
     expected = 0
     stdin = client.stdin
-    stdout = source.stdout
-    failed = stdin is None or stdout is None
+    failed = stdin is None
     try:
-        if stdin is not None and stdout is not None:
+        if stdin is not None:
             stdin.write(import_preamble(engine, identifier))
             stdin.flush()
-            for line in stdout:
-                if line.startswith(b"CREATE TABLE"):
-                    expected += 1
-                stdin.write(line)
+            with path.open("rb") as source:
+                for line in source:
+                    if line.startswith(b"CREATE TABLE"):
+                        expected += 1
+                    stdin.write(line)
             stdin.close()
             client.stdin = None
-            stdout.close()
-            source.stdout = None
     except BrokenPipeError, OSError:
         failed = True
     finally:
         if failed:
             client.kill()
-            source.kill()
-        source_status = source.wait()
         client_status = client.wait()
-    return (not failed and source_status == 0 and client_status == 0), expected
+    return (not failed and client_status == 0), expected
 
 
 def readiness_request(settings: SimpleNamespace, path: str, original: str) -> int:
@@ -941,11 +950,11 @@ def files_problem(settings: SimpleNamespace, application: str, release_name: str
     return ""
 
 
-def _stage(identifier: str, point: str) -> pathlib.Path:
+def _stage(identifier: str, point: str, suffix: str = "") -> pathlib.Path:
     root = pathlib.Path(STAGE_ROOT)
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(root, 0o700)
-    directory = root / identifier / point
+    directory = root / identifier / (point + suffix)
     if directory.is_symlink() or directory.is_file():
         directory.unlink()
     elif directory.exists():
@@ -1210,7 +1219,39 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
             )
         )
         raise SystemExit(LOCK_BUSY)
+    try:
+        repository_lock_list = repository_locks(
+            (expected_source, identifier), wait_seconds=RESTORE_LOCK_WAIT_SECONDS
+        )
+    except OSError, ValueError:
+        emit_result(
+            document_result(
+                document,
+                "refused",
+                "restore_repository",
+                point=point,
+                snapshots=0,
+                size=0,
+                kind="restore",
+            )
+        )
+        raise SystemExit(REFUSED) from None
+    if repository_lock_list is None:
+        emit_result(
+            document_result(
+                document,
+                "lock_busy",
+                "restore_lock",
+                point=point,
+                snapshots=0,
+                size=0,
+                kind="restore",
+            )
+        )
+        raise SystemExit(LOCK_BUSY)
     staging: pathlib.Path | None = None
+    dump_stage: pathlib.Path | None = None
+    dump_path: pathlib.Path | None = None
     try:
         if free_bytes() < HEADROOM_BYTES + int(str(document.get("point_size", 0))):
             emit_result(
@@ -1239,24 +1280,16 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                 )
             )
             raise SystemExit(REFUSED)
-        if "database" in parts:
-            header = header_bytes(
-                capture_repository,
-                capture_key,
-                snapshot,
-                str(document.get("filename", "")),
-                source_extra,
-            )
-            if (
-                header is None
-                or engine_major(engine, dump_version(engine, header.decode("utf-8", "replace")))
-                != major
-            ):
+        # Only a database restore may skip its safety copy, so only it depends on the
+        # target already being empty; a full restore always takes the reviewed one.
+        if "database" in parts and scope == "database":
+            empty = count_tables(engine, identifier)
+            if empty is None or (empty == 0) != bool(document.get("target_empty")):
                 emit_result(
                     document_result(
                         document,
                         "refused",
-                        "restore_engine",
+                        "restore_target",
                         point=point,
                         snapshots=0,
                         size=0,
@@ -1264,23 +1297,6 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                     )
                 )
                 raise SystemExit(REFUSED)
-            # Only a database restore may skip its safety copy, so only it depends on the
-            # target already being empty; a full restore always takes the reviewed one.
-            if scope == "database":
-                empty = count_tables(engine, identifier)
-                if empty is None or (empty == 0) != bool(document.get("target_empty")):
-                    emit_result(
-                        document_result(
-                            document,
-                            "refused",
-                            "restore_target",
-                            point=point,
-                            snapshots=0,
-                            size=0,
-                            kind="restore",
-                        )
-                    )
-                    raise SystemExit(REFUSED)
         # The safety backup matches the restore's scope. A database-only restore takes it
         # live; a files or full restore pauses the site briefly for an exact point.
         if tags:
@@ -1373,6 +1389,46 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                     )
                 )
                 raise SystemExit(REFUSED) from None
+        if "database" in parts:
+            # The whole dump is downloaded and checked in private staging before the pause:
+            # a truncated or different-major copy is refused while the site still serves.
+            stage("dump")
+            dump_stage = _stage(identifier, point, "-database")
+            dump_path = dump_stage / "dump.sql"
+            if not write_dump(
+                capture_repository,
+                capture_key,
+                snapshot,
+                str(document.get("filename", "")),
+                dump_path,
+                source_extra,
+            ):
+                emit_result(
+                    document_result(
+                        document,
+                        "refused",
+                        "restore_repository",
+                        point=point,
+                        snapshots=0,
+                        size=0,
+                        kind="restore",
+                    )
+                )
+                raise SystemExit(REFUSED)
+            problem = dump_problem(engine, dump_path, major)
+            if problem:
+                emit_result(
+                    document_result(
+                        document,
+                        "refused",
+                        problem,
+                        point=point,
+                        snapshots=0,
+                        size=0,
+                        kind="restore",
+                    )
+                )
+                raise SystemExit(REFUSED)
         failure = begin_pause(document, settings, identifier, point)
         if failure is not None:
             emit_result(
@@ -1390,15 +1446,20 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
         imported = 0
         if "database" in parts:
             stage("import")
-            ok, imported = import_stream(
-                capture_repository,
-                capture_key,
-                snapshot,
-                str(document.get("filename", "")),
-                engine,
-                identifier,
-                source_extra,
-            )
+            if dump_path is None:
+                emit_result(
+                    document_result(
+                        document,
+                        "partial",
+                        "restore_import",
+                        point=point,
+                        snapshots=1,
+                        size=0,
+                        kind="restore",
+                    )
+                )
+                raise SystemExit(PARTIAL)
+            ok, imported = import_staged(dump_path, engine, identifier)
             if not ok:
                 emit_result(
                     document_result(
@@ -1518,6 +1579,10 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
     finally:
         if staging is not None:
             shutil.rmtree(staging, ignore_errors=True)
+        if dump_stage is not None:
+            shutil.rmtree(dump_stage, ignore_errors=True)
+        for held in repository_lock_list:
+            os.close(held)
         os.close(lock)
 
 

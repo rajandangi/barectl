@@ -1034,6 +1034,47 @@ def listing(row: ObservedBackupSchedule | None) -> dict[str, object]:
     }
 
 
+def missed_at(
+    row: ObservedBackupSchedule | BackupSchedule | None,
+) -> datetime | None:
+    """The most recent scheduled time a timer should have fired, when it is configured.
+
+    ``Persistent=false`` means a missed calendar time is not caught up, so systemd's next
+    elapse is one interval after the time that passed without a run.
+    """
+    if (
+        row is None
+        or not row.installed
+        or not row.timer_active
+        or row.frequency not in convention.FREQUENCIES
+        or row.next_elapse_us <= 0
+    ):
+        return None
+    interval = timedelta(days=7 if row.frequency == "weekly" else 1)
+    try:
+        due = datetime.fromtimestamp(row.next_elapse_us / 1_000_000, tz=UTC) - interval
+    except OverflowError, OSError, ValueError:
+        return None
+    return due
+
+
+def missed(
+    row: ObservedBackupSchedule | BackupSchedule | None,
+    last: observation.BackupResult | None,
+    now: datetime | None = None,
+) -> bool:
+    """Whether the schedule passed its last expected time without a result line."""
+    due = missed_at(row)
+    if due is None or last is None:
+        return False
+    last_time = last.time
+    if last_time is None:
+        return False
+    if last_time.tzinfo is None:
+        last_time = last_time.replace(tzinfo=UTC)
+    return last_time < due and due <= (now or datetime.now(tz=UTC))
+
+
 def _next_label(row: ObservedBackupSchedule | BackupSchedule | None) -> str:
     if row is None or row.next_elapse_us <= 0:
         return ""

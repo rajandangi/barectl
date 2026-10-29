@@ -17,6 +17,7 @@ from typing import NoReturn, cast
 
 from backups.bodies.native import (
     KEY_ROOT,
+    LOCK_BUSY,
     REFUSED,
     REPOSITORY_ROOT,
     SUCCESS,
@@ -24,6 +25,7 @@ from backups.bodies.native import (
     emit_result,
     locked_file,
     offsite_extra,
+    repository_locks,
     restic,
     safe_config,
     stage,
@@ -33,6 +35,7 @@ OFFSITE_ROOT = KEY_ROOT + "/offsite"
 OFFSITE_CAPTURE = OFFSITE_ROOT + "/capture.env"
 OFFSITE_PRUNE = OFFSITE_ROOT + "/prune.env"
 OFFSITE_HEALTH = "_health"
+REMOVE_LOCK_WAIT_SECONDS = 5.0
 PROVIDERS = ("s3", "r2")
 
 
@@ -291,9 +294,14 @@ def setup(document: dict[str, object], secret_path: str) -> None:  # noqa: C901 
     raise SystemExit(SUCCESS)
 
 
-def remove(document: dict[str, object], secret_path: str) -> None:
+def remove(document: dict[str, object], secret_path: str) -> None:  # noqa: C901 - one removal
     config = cast(dict[str, object], document.get("config"))
-    if not config_ok(config):
+    sites_value = document.get("sites")
+    if (
+        not config_ok(config)
+        or not isinstance(sites_value, list)
+        or not all(isinstance(site, str) for site in sites_value)
+    ):
         failed("offsite_remove")
     stage("preflight")
     try:
@@ -302,16 +310,31 @@ def remove(document: dict[str, object], secret_path: str) -> None:
         refused("offsite_key")
     if str(values.get("bucket", "")) != str(config.get("bucket", "")):
         refused("offsite_remove")
-    stage("remove")
-    for path in (OFFSITE_ROOT + "/config", OFFSITE_CAPTURE, OFFSITE_PRUNE):
-        try:
-            pathlib.Path(path).unlink(missing_ok=True)
-        except OSError:
-            failed("offsite_remove")
-    stage("verify")
-    for path in (OFFSITE_ROOT + "/config", OFFSITE_CAPTURE, OFFSITE_PRUNE):
-        if os.path.lexists(path):
-            failed("offsite_remove")
+    # Every copy or cleanup for a site holds its repository lock. Removing the setting
+    # must wait for those to finish rather than pull the credentials out from under them.
+    try:
+        locks = repository_locks(
+            [str(site) for site in sites_value], wait_seconds=REMOVE_LOCK_WAIT_SECONDS
+        )
+    except OSError, ValueError:
+        failed("offsite_remove")
+    if locks is None:
+        emit_result({"class": "lock_busy", "reason": "backup_lock", "kind": "offsite"})
+        raise SystemExit(LOCK_BUSY)
+    try:
+        stage("remove")
+        for path in (OFFSITE_ROOT + "/config", OFFSITE_CAPTURE, OFFSITE_PRUNE):
+            try:
+                pathlib.Path(path).unlink(missing_ok=True)
+            except OSError:
+                failed("offsite_remove")
+        stage("verify")
+        for path in (OFFSITE_ROOT + "/config", OFFSITE_CAPTURE, OFFSITE_PRUNE):
+            if os.path.lexists(path):
+                failed("offsite_remove")
+    finally:
+        for held in locks:
+            os.close(held)
     emit_result({"class": "succeeded", "kind": "offsite", "action": "remove"})
     raise SystemExit(SUCCESS)
 

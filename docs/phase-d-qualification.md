@@ -16,7 +16,10 @@ The scenario times on the left of [Scenarios](#scenarios), the module time and t
 `feat/358-phase-d-protection`. The right-hand scenario column, the failure item and the
 build in [Build budget](#build-budget) belong to the `feat/410-qualification` head that
 merged that tip and added #410's test and documentation changes; [Handoff](#handoff) names
-the final head. No hosted run of the #410 head exists.
+the final head. No hosted run of the #410 head exists. The review pass that follows #410 adds
+assertions to the existing `disposable/test_backups.py` items and no new scenario class; those
+assertions are **unrun** in this record because the orchestrator runs the native scenarios once
+on the integration tip.
 
 | Evidence | Where |
 | --- | --- |
@@ -116,7 +119,8 @@ What the items prove:
   opens the repository with the passphrase alone. It takes a Database only point with an
   offsite copy, proves a failed copy keeps the onsite point and says **Saved here, offsite
   copy failed**, repairs it with **Copy offsite again**, and proves removing offsite storage
-  leaves every copy in the bucket. It reconstructs the same state from a controller with no
+  waits for a held repository lock and skips, then leaves every copy in the bucket. It
+  reconstructs the same state from a controller with no
   local change history, proves the journal holds no passphrase, and proves a failed dump
   leaves no point. A paused Full site point writes both parts under one identifier and
   reopens the site only after both are present; a Database only restore takes and lists its
@@ -124,20 +128,27 @@ What the items prove:
 - **`FullSiteRestore`** restores Files only from a full point with the warning that files and
   database then come from different points, and then restores the whole site; both restored
   releases are site-owned, keep the convention's permissions, and leave the previous release
-  retained.
+  retained. The #410 review pass adds two assertions to this item, **unrun here**: a held
+  repository lock makes the restore skip with `restore_lock` rather than race, and a point
+  whose dump has a valid header but no completion marker is refused with `restore_dump` while
+  the site answers 200 and no plain-text `.sql` remains in the private stage.
 - **`WordPressFullRestore`** restores uploads, the private configuration and the database of a
   real WordPress site, keeps the target's own database settings, re-applies the WordPress
   permissions and reads both HTTPS readiness answers.
 - **`LaravelFullRestore`** restores a Laravel release with `vendor/`, the shared `.env`,
   `storage/` and `bootstrap/cache`, proves the `/up` readiness answer, counts the restored
   release toward Deploy's retention, offers **Back up first** on a Deploy with pending
-  migrations, and proves **Remove site** keeps the repository and lists it as a removed site.
+  migrations, proves **Remove site** keeps the repository and lists it as a removed site, and
+  deletes that kept repository through **Delete removed-site backups**, proving the repository,
+  server key and removed listing are gone.
 - **`ScheduledCapture`** installs the one reviewed schedule, waits for the real timer to fire
   a live capture with no controller connected, reads the live point, reconstructs the
   schedule on a fresh controller and turns it off.
 - **`Retention`** creates backdated points, proves the newest-verified rule keeps a group
   when its newest point does not read back, honours `keep`, never touches a foreign snapshot,
-  skips on an unsynchronized clock, and computes onsite and offsite independently.
+  skips on an unsynchronized clock, and computes onsite and offsite independently. It runs
+  the weekly offsite integrity check before offsite cleanup, so cleanup consumes that check's
+  recorded read-back instead of paying for a second S3 read.
 - **`Integrity`** runs `restic check` with its rotating subset and reads the newest point back;
   a corrupted pack is its own failure, the capture result is unchanged, and a held lock is a
   skip.
@@ -276,7 +287,7 @@ results and integrity findings from native evidence. A repository listing is onl
 | The local full build meets the 300 s target with all Phase D scenarios | **Not met**: 360 s against 300 s and 900 s ([Build budget](#build-budget)); named as a defect with its next action |
 | The backup requirement documents are reduced to pointers to #358 | `docs/v0.6.md`, `docs/backup-retention.md`, `docs/backups-native-design.md` and `docs/backups-competitor-analysis.md` were deleted in `e330fe8` and their surviving behaviour lives in `docs/backups.md`; [the target architecture's Backups section](target-architecture.md#backups) now describes current behaviour, and the [glossary](../GLOSSARY.md) holds the Phase D terms |
 | Every new native check joins one of #358's four shared native scenarios, no new suite, and the ticket records the measured addition | `BackupFailure` joins the existing `disposable/test_backups.py` module (the backup and restore lifecycle scenario's suite); measured 55.4 s; the build stays inside the 900 s limit and misses the 300 s target as above |
-| Default paths follow #179's journeys and the banned-terms check; snapshot IDs, repositories, units and journal lines appear only under Logs or Advanced | The [backup browser suite](backups.md) passes 22 tests in 12.7 s with its banned-terms check; `BackupFailure` renders the operator sentence and one **Reopen site** action, and the snapshot identifiers stay under Advanced in the recovery-point table |
+| Default paths follow #179's journeys and the banned-terms check; snapshot IDs, repositories, units and journal lines appear only under Logs or Advanced | The [backup browser suite](backups.md) passes 24 tests in 12.2 s with its banned-terms check, including the skipped-run and removed-repository deletion journeys; `BackupFailure` renders the operator sentence and one **Reopen site** action, and the snapshot identifiers stay under Advanced in the recovery-point table |
 
 ## Not qualified
 
@@ -295,6 +306,11 @@ results and integrity findings from native evidence. A repository listing is onl
 - **Replace recovery passphrase, schedule-overlap warnings and the Export transfer.** These
   are fast-layer and browser evidence; no native item exercises them. Export's native
   assertions remain the gap #409 recorded.
+- **The review pass's new native assertions.** The held-lock restore, truncated-dump refusal,
+  held-lock offsite removal, removed-repository deletion and offsite-cleanup read-back
+  assertions were added after the measured #410 build and are unrun here. Their fast and
+  request evidence is in `backups/test_restore.py`, `backups/test_removed.py`,
+  `backups/test_offsite.py`, `backups/test_retention.py` and `backups/test_schedule.py`.
 - **The build target and the joint fast stage.** 360 s against 300 s and 68 s against 60 s at
   this head; the next actions are item consolidation and the validator consolidation the
   Phase C record already names.

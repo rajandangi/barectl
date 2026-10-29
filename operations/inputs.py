@@ -43,6 +43,7 @@ class InputShape(StrEnum):
     BACKUP_CAPTURE = "backup_capture"
     CONNECT_OFFSITE_STORAGE = "connect_offsite_storage"
     REPLACE_RECOVERY_PASSPHRASE = "replace_recovery_passphrase"  # noqa: S105 - a shape name
+    REMOVED_BACKUP = "removed_backup"
 
 
 @dataclass(frozen=True)
@@ -1150,4 +1151,5 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.BACKUP_CAPTURE: _backup_capture_inputs,
     InputShape.CONNECT_OFFSITE_STORAGE: _connect_offsite_inputs,
     InputShape.REPLACE_RECOVERY_PASSPHRASE: _replace_passphrase_inputs,
+    InputShape.REMOVED_BACKUP: _identifier_inputs,
 }

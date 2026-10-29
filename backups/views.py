@@ -24,11 +24,12 @@ from servers.models import Server
 from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 
-from . import check, convention, downloads, integrity, presentation, retention
+from . import check, convention, downloads, integrity, presentation, retention, schedule
 from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
 from .export import SLUG as EXPORT_SLUG
 from .models import BackupExport
 from .offsite import COPY_SLUG
+from .removed import SLUG as DELETE_REMOVED_SLUG
 from .reopen import SLUG as REOPEN_SLUG
 from .restore import SCOPES
 from .restore import SLUG as RESTORE_SLUG
@@ -79,6 +80,7 @@ def context_for_site(
         gated=gated,
         integrity=integrity.stored(server, identifier),
         removed=check.latest_removed(server),
+        schedule=schedule.stored(server, identifier),
     )
     downloads.expire(server, identifier)
     target = _target(snapshot, site)
@@ -130,6 +132,9 @@ def context_for_site(
             and managed
             and view.enabled
             and user.has_perm("operations.change_destructive")
+        ),
+        "backups_can_delete_removed": bool(
+            can_prepare and user.has_perm("operations.change_destructive")
         ),
         "backups_can_export": (
             can_prepare and managed and view.enabled and user.has_perm("operations.change_shared")
@@ -368,6 +373,46 @@ def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpRespo
         scope=scope,
         source=source,
     )
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_delete_removed(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """Delete the kept backups of a removed site; only a reviewed Destructive change does."""
+    source = request.POST.get("source", "")
+    if not valid_identifier(identifier) or not valid_identifier(source):
+        raise Http404
+    if not isinstance(request.user, User):
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    listed = {str(row.get("identifier")) for row in check.latest_removed(server)}
+    if source not in listed:
+        raise Http404
+    context = context_for_site(server, identifier, request.user)
+    if not context["backups_can_delete_removed"]:
+        messages.error(
+            request,
+            "Barectl cannot delete this removed site's backups. Wait for the current "
+            "operation or ask an administrator.",
+        )
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    try:
+        queued = services.request_prepare(
+            server,
+            request.user,
+            DELETE_REMOVED_SLUG,
+            inputs={"version": 1, "identifier": source},
+        )
+    except OperationRefused, ValueError:
+        messages.error(request, "The saved connection changed. Refresh and prepare again.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if queued is None:
+        messages.error(request, "Wait for the current operation before preparing this review.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    return redirect("change_detail", operation_id=queued.pk)
 
 
 @require_POST

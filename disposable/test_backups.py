@@ -827,6 +827,22 @@ class BackupLifecycle(BackupCase):
             timeout=120,
         )
         self.assertTrue(any(str(point["point"]) == failed.point for point in self.offsite_points()))
+        # Removing offsite storage waits for the site's repository lock: a held lock skips it
+        # rather than pulling the keys out from under a copy (#410).
+        lock = f"/run/lock/barectl/backup-{self.identifier}.lock"
+        self.native(f"install -m 0600 /dev/null {lock}")
+        self.native(f"flock -x {lock} -c 'sleep 8' >/dev/null 2>&1 &")
+        self.native("sleep 1")
+        apply_change(
+            self,
+            offsite.REMOVE,
+            PreparationInputs(),
+            timeout=60,
+            secret=json.dumps({"values": {"bucket": self.S3_BUCKET}}).encode(),
+            expected="lock_busy",
+            reason="backup_lock",
+        )
+        self.native("sleep 8")
         # Removing offsite storage leaves every copy in the bucket.
         before_files = self.offsite_files()
         apply_change(
@@ -1070,6 +1086,73 @@ class FullSiteRestore(BackupCase):
         self.assertEqual(len(full_safety), 2)
         self.assertTrue(any(row["scope"] == "full" for row in full_safety))
 
+        # -- A truncated database copy is refused in private staging, before the pause (#410)
+        from backups import convention as backup_convention
+
+        truncated = "1234567890abcdef"
+        truncated_dump = (
+            "-- MariaDB dump 10.19  Distrib 11.8.2, for debian-linux-gnu\n"
+            "-- Server version\t\t11.8.2-MariaDB\n"
+            "\n"
+            "CREATE TABLE truncated (id INT PRIMARY KEY);\n"
+            "INSERT INTO truncated VALUES (1);\n"
+        )
+        with self.shell() as shell:
+            write(self, shell, "/root/barectl-truncated.sql", truncated_dump)
+        tags = [
+            "barectl",
+            f"site:{self.identifier}",
+            "scope:database",
+            "part:database",
+            "origin:manual",
+            "capture:live",
+            f"point:{truncated}",
+            "complete",
+            "application:plain",
+        ]
+        tag_arguments = " ".join(f"--tag {shlex.quote(tag)}" for tag in tags)
+        self.native(
+            "cat /root/barectl-truncated.sql | env "
+            f"RESTIC_REPOSITORY={backup_convention.repository(self.identifier)} "
+            f"RESTIC_PASSWORD_FILE={backup_convention.server_key(self.identifier)} "
+            f"RESTIC_CACHE_DIR={backup_convention.CACHE_DIR} "
+            f"{backup_convention.RESTIC_BIN} backup --stdin --stdin-filename "
+            f"{backup_convention.dump_filename(self.identifier)} "
+            f"--time '2026-10-30 04:00:00' {tag_arguments}"
+        )
+        from backups import restore as backup_restore
+
+        apply_change(
+            self,
+            backup_restore.RESTORE,
+            PreparationInputs("", self.identifier, point=truncated),
+            timeout=120,
+            expected="refused",
+            reason="restore_dump",
+        )
+        self.assertEqual(self.site_status("/"), 200)
+        self.assertEqual(
+            self.native("find /var/lib/barectl-restore -type f | wc -l").strip(),
+            "0",
+            "A plain-text dump survived the refused restore.",
+        )
+
+        # -- A held repository lock makes the restore wait, then skip; it never races (#410)
+        lock = f"/run/lock/barectl/backup-{self.identifier}.lock"
+        self.native(f"install -m 0600 /dev/null {lock}")
+        self.native(f"flock -x {lock} -c 'sleep 8' >/dev/null 2>&1 &")
+        self.native("sleep 1")
+        apply_change(
+            self,
+            backup_restore.RESTORE,
+            PreparationInputs("", self.identifier, point=point, scope="full"),
+            timeout=60,
+            expected="lock_busy",
+            reason="restore_lock",
+        )
+        self.assertEqual(self.site_status("/"), 200)
+        self.native("sleep 8")
+
 
 @tag(SCENARIO_TAG)
 class Retention(BackupCase):
@@ -1280,6 +1363,9 @@ class Retention(BackupCase):
         self.assertTrue(self.foreign_present())
         self.assertIn(old, self.retained_points(offsite=True), "Onsite cleanup changed offsite.")
 
+        # Offsite cleanup consumes the weekly check's recorded read-back instead of doing
+        # its own S3 read (#410); run the check first, as the weekly window does.
+        self.native(f"systemctl start barectl-site-{self.identifier}-checkoffsite.service || true")
         offsite_result = self.cleanup_result("offsite")
         self.assertEqual(offsite_result["class"], "succeeded")
         self.assertNotIn(old, self.retained_points(offsite=True))
@@ -1934,3 +2020,20 @@ class LaravelFullRestore(BackupCase):
         self.assertEqual(removed_names, (self.identifier,))
         kept = backup_check.points(backup_check.parse_listing(listing.stdout) or [])
         self.assertIn(str(point), {str(row["point"]) for row in kept})
+
+        # -- The kept repository is deleted only by the reviewed Destructive change (#410)
+        from backups import removed as removed_backups
+
+        apply_change(
+            self,
+            removed_backups.DELETE,
+            PreparationInputs("", self.identifier),
+            timeout=120,
+        )
+        self.assertEqual(self.native(f"test ! -e {repository}; echo $?").strip(), "0")
+        self.assertEqual(
+            self.native(f"test ! -e /etc/barectl/backups/{self.identifier}.key; echo $?").strip(),
+            "0",
+        )
+        with self.shell() as shell:
+            self.assertEqual(backup_observation.removed(shell, ()), ())

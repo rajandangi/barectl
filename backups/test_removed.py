@@ -8,24 +8,27 @@ import importlib.resources
 from typing import cast, override
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.contrib.auth.models import Permission
+from django.test import Client, SimpleTestCase
 
 from bootstrap.standing import Standing
 from discovery import ssh
 from discovery.recorded import Recorded, ReplayShell, Transcript
+from operations.consent import consent_of
 from operations.engine import BodyContext, ReviewDraft
 from operations.inputs import PreparationInputs
-from operations.models import ChangePreparation
+from operations.models import ChangePreparation, Consent
 from runtimes.catalog import Architecture
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 
-from . import check, convention, observation, presentation, restore
+from . import check, convention, observation, presentation, removed, restore
 from .testing import point, record_backups, record_points
 
 IDENTIFIER = "alpha"
 SOURCE = "beta"
 FILES = "b" * 64
+BOOT = "8f14e45f-ea6f-4c1c-9b7b-2f0f4c1c9b7b"
 
 
 def fixture(name: str) -> str:
@@ -328,6 +331,153 @@ class RemovedRestoreRequestTests(ControllerConfigTestCase):
             response = self.client.get(f"/servers/{self.server.pk}/sites/{IDENTIFIER}/backups/")
         self.assertContains(response, "Backups of a removed site")
         self.assertContains(response, "Restore into this site")
+        self.assertContains(response, f'name="source" value="{SOURCE}"')
+
+    def _rows(self) -> list[ChangePreparation]:
+        from operations.services import read_changes
+
+        return [row.preparation for row in read_changes(self.server).rows]
+
+
+def storage() -> observation.OffsiteStorage:
+    return observation.OffsiteStorage(
+        "s3",
+        "barectl-test",
+        "us-east-1",
+        "https://s3.us-east-1.amazonaws.com",
+        "barectl/abc",
+    )
+
+
+def delete_evidence(
+    *, removed_site: bool = True, offsite: observation.OffsiteStorage | None = None
+) -> removed.RemovedEvidence:
+    return removed.RemovedEvidence(
+        Architecture.X86_64,
+        Standing.TARGET_STACK,
+        "mariadb",
+        offsite,
+        (IDENTIFIER,),
+        "8f14e45f-ea6f-4c1c-9b7b-2f0f4c1c9b7b",
+        100,
+        SOURCE,
+        True,
+        True,
+        "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1",
+        removed_site,
+        "",
+    )
+
+
+class RemovedDeleteReviewTests(SimpleTestCase):
+    def test_deleting_a_removed_sites_backups_is_destructive_and_names_both_paths(self) -> None:
+        draft = removed.review(delete_evidence(offsite=storage()), PreparationInputs("", SOURCE))
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(consent_of(draft.effects), Consent.DESTRUCTIVE)
+        details = cast(list[dict[str, str]], draft.document["details"])
+        values = "\n".join(row["value"] for row in details)
+        self.assertIn(convention.repository(SOURCE), values)
+        self.assertIn(
+            convention.offsite_repository(
+                {
+                    "provider": "s3",
+                    "bucket": "barectl-test",
+                    "region": "us-east-1",
+                    "endpoint": "https://s3.us-east-1.amazonaws.com",
+                    "prefix": "barectl/abc",
+                    "prune": "no",
+                },
+                SOURCE,
+            ),
+            values,
+        )
+        self.assertIn("Deletion is permanent", values)
+        removed.body(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_a_site_that_still_exists_is_refused(self) -> None:
+        draft = removed.review(delete_evidence(removed_site=False), PreparationInputs("", SOURCE))
+        self.assertFalse(draft.eligible)
+        self.assertTrue(
+            any(
+                "not listed as the backups of a removed site" in refusal
+                for refusal in draft.refusals
+            )
+        )
+
+    def test_a_forged_offsite_repository_is_refused_by_the_body(self) -> None:
+        draft = removed.review(delete_evidence(offsite=storage()), PreparationInputs("", SOURCE))
+        forged = dict(draft.document)
+        forged["offsite"] = {
+            **cast(dict[str, object], forged["offsite"]),
+            "repository": "s3:https://elsewhere/bucket/barectl/abc/" + SOURCE,
+        }
+        with self.assertRaises(ValueError):
+            removed.body(forged, BodyContext("unit", BOOT, 0))
+
+
+class RemovedDeleteRequestTests(ControllerConfigTestCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.grant(
+            "view_server",
+            "view_changes",
+            "view_siteobservation",
+            "change_site",
+            "change_destructive",
+        )
+        self.client.force_login(self.user)
+        self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        record_backups(self.server, identifier=IDENTIFIER, enabled=True)
+        record_points(
+            self.server,
+            (),
+            identifier=IDENTIFIER,
+            removed=(
+                {
+                    "identifier": SOURCE,
+                    "points": [point(scope="full", parts=("database", "files"))],
+                    "problem": "",
+                },
+            ),
+        )
+        self.url = f"/servers/{self.server.pk}/sites/{IDENTIFIER}/backups/removed/delete/prepare/"
+
+    def test_deleting_a_removed_sites_backups_queues_the_reviewed_kind(self) -> None:
+        response = self.client.post(self.url, {"source": SOURCE})
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].kind_slug, removed.SLUG)
+        self.assertEqual(rows[0].inputs, {"version": 1, "identifier": SOURCE})
+        self.assertRedirects(response, f"/changes/{rows[0].pk}/")
+
+    def test_a_source_the_last_read_never_listed_is_refused(self) -> None:
+        response = self.client.post(self.url, {"source": "gamma"})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self._rows(), [])
+
+    def test_deleting_needs_the_destructive_permission(self) -> None:
+        self.user.user_permissions.remove(Permission.objects.get(codename="change_destructive"))
+        response = self.client.post(self.url, {"source": SOURCE})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._rows(), [])
+
+    def test_deleting_a_removed_sites_backups_needs_csrf(self) -> None:
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        response = client.post(self.url, {"source": SOURCE})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self._rows(), [])
+
+    def test_deleting_is_post_only(self) -> None:
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(self._rows(), [])
+
+    def test_the_page_offers_delete_without_ssh(self) -> None:
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            response = self.client.get(f"/servers/{self.server.pk}/sites/{IDENTIFIER}/backups/")
+        self.assertContains(response, "Delete these backups")
         self.assertContains(response, f'name="source" value="{SOURCE}"')
 
     def _rows(self) -> list[ChangePreparation]:
