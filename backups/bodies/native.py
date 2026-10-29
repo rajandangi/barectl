@@ -203,6 +203,7 @@ def restic(
     repository: str,
     password: str,
     extra: dict[str, str] | None = None,
+    stream: bool = False,
 ) -> tuple[int, str]:
     environment = restic_environment(repository, password, extra)
     # restic selects virtual-hosted URLs for Amazon endpoints; Barectl's templates are
@@ -211,7 +212,7 @@ def restic(
     process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
         [RESTIC_BIN, *options, *argv],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
+        stdout=subprocess.DEVNULL if stream else subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         env=environment,
         start_new_session=True,
@@ -222,7 +223,14 @@ def restic(
         process.kill()
         process.communicate()
         raise
-    return process.returncode, output.decode("utf-8", "replace")
+    return process.returncode, "" if stream else output.decode("utf-8", "replace")
+
+
+def offsite_extra(storage: object, extra: dict[str, str]) -> dict[str, str]:
+    """The region every offsite backend needs alongside its root-only key file."""
+    if isinstance(storage, dict) and isinstance(storage.get("region"), str):
+        extra["AWS_DEFAULT_REGION"] = storage["region"]
+    return extra
 
 
 def snapshots(
@@ -282,8 +290,7 @@ def copy_point(  # noqa: C901 - one reviewed copy
         return "failed", "offsite_key"
     if not extra.get("AWS_ACCESS_KEY_ID") or not extra.get("AWS_SECRET_ACCESS_KEY"):
         return "failed", "offsite_key"
-    if isinstance(storage.get("region"), str):
-        extra["AWS_DEFAULT_REGION"] = storage["region"]
+    extra = offsite_extra(storage, extra)
     try:
         lock = repository_lock(identifier)
     except OSError, ValueError:

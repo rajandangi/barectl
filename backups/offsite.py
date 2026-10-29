@@ -669,30 +669,14 @@ def _offsite_command(document: dict[str, object], identifier: str, *arguments: s
     plan = validate_capture(document.get("offsite"))
     if plan is None:
         raise ValueError("The offsite copy is not the reviewed one.")
-    repository = str(plan["repository"])
     storage = plan.get("storage")
     if not isinstance(storage, dict):
         raise ValueError("The offsite copy is not the reviewed one.")
-    script = "; ".join(
-        [
-            "set -a",
-            f". {shlex.quote(convention.OFFSITE_CAPTURE)}",
-            f"RESTIC_REPOSITORY={shlex.quote(repository)}",
-            f"RESTIC_PASSWORD_FILE={shlex.quote(convention.server_key(identifier))}",
-            f"RESTIC_CACHE_DIR={shlex.quote(convention.CACHE_DIR)}",
-            f"AWS_DEFAULT_REGION={shlex.quote(str(storage.get('region', '')))}",
-            "set +a",
-            shlex.join(
-                [
-                    convention.RESTIC_BIN,
-                    "-o",
-                    "s3.bucket-lookup=path",
-                    *arguments,
-                ]
-            ),
-        ]
+    return convention.offsite_restic_command(
+        identifier,
+        {str(key): str(value) for key, value in storage.items()},
+        *arguments,
     )
-    return "sh -c " + shlex.quote(script)
 
 
 def verify_setup(shell: RemoteShell, review: ChangeReview) -> bool | None:

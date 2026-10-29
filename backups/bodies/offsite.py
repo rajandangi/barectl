@@ -23,6 +23,7 @@ from backups.bodies.native import (
     controlled,
     emit_result,
     locked_file,
+    offsite_extra,
     restic,
     safe_config,
     stage,
@@ -249,9 +250,7 @@ def setup(document: dict[str, object], secret_path: str) -> None:  # noqa: C901 
         refused("offsite_key")
     if not controlled(KEY_ROOT):
         refused("offsite_key")
-    extra = environment(access, secret)
-    if isinstance(config.get("region"), str):
-        extra["AWS_DEFAULT_REGION"] = str(config["region"])
+    extra = offsite_extra(config, environment(access, secret))
     stage("credentials")
     if not healthy(config, health_key, extra):
         refused("offsite_bucket")

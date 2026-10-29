@@ -724,19 +724,30 @@ class BackupLifecycle(BackupCase):
 class Retention(BackupCase):
     """Retention and Keep on a real server: backdated points, read-back and independent sides."""
 
+    def offsite_config(self) -> dict[str, str]:
+        from backups import convention
+
+        return convention.read_config(self.native(f"cat {convention.OFFSITE_CONFIG}"))
+
     def restic_repository(self, offsite: bool = False) -> str:
         from backups import convention
 
         if not offsite:
             return convention.repository(IDENTIFIER)
-        return f"s3:https://{self.S3_HOST}/{self.S3_BUCKET}/{self.offsite_prefix()}/{IDENTIFIER}"
+        return convention.offsite_repository(self.offsite_config(), IDENTIFIER)
 
     def restic_shell(self, *arguments: str, offsite: bool = False) -> str:
         from backups import convention
 
-        source = ". /etc/barectl/backups/offsite/capture.env; " if offsite else ""
+        if offsite:
+            return convention.offsite_restic_command(
+                IDENTIFIER,
+                self.offsite_config(),
+                *arguments,
+                env_paths=(convention.OFFSITE_PRUNE, convention.OFFSITE_CAPTURE),
+            )
         return (
-            f"{source}RESTIC_REPOSITORY={self.restic_repository(offsite)} "
+            f"RESTIC_REPOSITORY={self.restic_repository()} "
             f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
             f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
             + shlex.join([convention.RESTIC_BIN, *arguments])
@@ -819,16 +830,32 @@ class Retention(BackupCase):
     def foreign_present(self) -> bool:
         return "hand-made" in self.native(self.restic_shell("snapshots", "--json", "--no-lock"))
 
+    def unsynchronize_clock(self) -> None:
+        self.native("systemctl stop systemd-timesyncd 2>/dev/null || true")
+        self.native("timedatectl set-ntp false 2>/dev/null || true")
+        if self.native("timedatectl show --property=NTPSynchronized --value").strip() == "no":
+            return
+        saved = "/usr/bin/timedatectl.barectl-saved"
+        self.native(f"mv /usr/bin/timedatectl {saved}")
+        with self.shell() as shell:
+            write(self, shell, "/usr/bin/timedatectl", "#!/bin/sh\nprintf 'no\\n'\n")
+        self.native("chmod 0755 /usr/bin/timedatectl")
+        self.addCleanup(
+            self.native,
+            f"if [ -e {saved} ]; then mv {saved} /usr/bin/timedatectl; fi",
+        )
+
     def cleanup_result(self, location: str = "onsite") -> dict[str, object]:
         import json as json_module
 
         unit = f"barectl-site-{IDENTIFIER}-" + (
             "cleanup.service" if location == "onsite" else "cleanupoffsite.service"
         )
-        self.native(f"systemctl start {unit}")
+        self.native(f"systemctl start {unit} || true")
         text = self.native(
             f"journalctl -u {unit} --no-pager -o cat --grep '^barectl-result ' -n 1"
         ).strip()
+        self.native(f"systemctl reset-failed {unit} 2>/dev/null || true")
         return dict(json_module.loads(text.removeprefix("barectl-result ")))
 
     def test_retention_keeps_the_newest_point_and_never_touches_foreign_snapshots(self) -> None:
@@ -848,11 +875,18 @@ class Retention(BackupCase):
         self.create_point(kept, "2026-08-02 03:00:00", keep=True)
         self.create_point(old_full, "2026-08-03 03:00:00", scope="full", part="database")
         self.create_point(old_full, "2026-08-03 03:00:00", scope="full", part="files")
-        self.create_point(new_full, "2026-10-29 03:00:00", scope="full", part="database")
-        self.create_point(new_full, "2026-10-29 03:00:00", scope="full", part="files")
-        self.create_point(corrupt, "2026-10-30 03:00:00", filename="wrong.sql")
-        self.create_point(old, "2026-08-01 03:00:00", offsite=True)
-        self.create_point(kept, "2026-08-02 03:00:00", keep=True, offsite=True)
+        self.create_point(new_full, "2026-10-28 03:00:00", scope="full", part="database")
+        self.create_point(new_full, "2026-10-28 03:00:00", scope="full", part="files")
+        self.create_point(corrupt, "2026-10-29 03:00:00", filename="wrong.sql")
+        from backups import offsite
+
+        for copied in (old, kept):
+            apply_change(
+                self,
+                offsite.COPY,
+                PreparationInputs("", IDENTIFIER, point=copied),
+                timeout=120,
+            )
         self.native(self.restic_shell("backup", "--tag", "hand-made", "/etc/hostname"))
         before = self.points()
         offsite_before = self.points(offsite=True)
@@ -875,6 +909,14 @@ class Retention(BackupCase):
         ids = self.snapshot_ids(corrupt)
         self.assertTrue(ids)
         self.native(self.restic_shell("forget", *ids))
+        newest = "ffffffffffffffff"
+        self.create_point(newest, "2026-10-29 04:00:00")
+        apply_change(
+            self,
+            offsite.COPY,
+            PreparationInputs("", IDENTIFIER, point=newest),
+            timeout=120,
+        )
 
         result = self.cleanup_result()
         self.assertEqual(result["class"], "succeeded")
@@ -882,6 +924,7 @@ class Retention(BackupCase):
         self.assertNotIn(old, self.points())
         self.assertNotIn(old_full, self.points())
         self.assertIn(new_full, self.points())
+        self.assertIn(newest, self.points())
         self.assertIn(kept, self.points())
         self.assertTrue(self.foreign_present())
         self.assertIn(old, self.points(offsite=True), "Onsite cleanup changed offsite.")
@@ -890,9 +933,9 @@ class Retention(BackupCase):
         self.assertEqual(offsite_result["class"], "succeeded")
         self.assertNotIn(old, self.points(offsite=True))
         self.assertIn(kept, self.points(offsite=True))
+        self.assertIn(newest, self.points(offsite=True))
 
-        self.native("systemctl stop systemd-timesyncd 2>/dev/null || true")
-        self.native("timedatectl set-ntp false 2>/dev/null || true")
+        self.unsynchronize_clock()
         skipped = self.cleanup_result()
         self.assertEqual(skipped["class"], "refused")
         self.assertEqual(skipped["reason"], "cleanup_clock")

@@ -6,6 +6,8 @@ the same source share it (docs/quality.md#python-typing-policy).
 """
 
 import re
+import shlex
+from collections.abc import Sequence
 from typing import Final
 
 MARKER: Final = "barectl"
@@ -290,6 +292,42 @@ def offsite_repository(config: dict[str, str], identifier: str) -> str:
     ):
         raise ValueError("Not a supported offsite storage template.")
     return f"s3:{config['endpoint']}/{config['bucket']}/{config['prefix']}/{identifier}"
+
+
+def offsite_restic_command(
+    identifier: str,
+    config: dict[str, str],
+    *arguments: str,
+    env_paths: Sequence[str] = (OFFSITE_CAPTURE,),
+) -> str:
+    """One offsite restic command, with the same credentials and options as a copy.
+
+    The scenario helper and every product reader run this exact shell so the repository's
+    path-style URL, region and root-only environment file cannot drift apart (#403, #404).
+    """
+    repository = offsite_repository(config, identifier)
+    if not env_paths or not all(path.startswith(KEY_ROOT + "/") for path in env_paths):
+        raise ValueError("Not a root-only offsite environment file.")
+    if len(env_paths) == 1:
+        load = f". {shlex.quote(env_paths[0])}"
+    else:
+        load = (
+            f"if [ -f {shlex.quote(env_paths[0])} ]; then . {shlex.quote(env_paths[0])}; "
+            f"else . {shlex.quote(env_paths[1])}; fi"
+        )
+    script = "; ".join(
+        [
+            "set -a",
+            load,
+            f"RESTIC_REPOSITORY={shlex.quote(repository)}",
+            f"RESTIC_PASSWORD_FILE={shlex.quote(server_key(identifier))}",
+            f"RESTIC_CACHE_DIR={shlex.quote(CACHE_DIR)}",
+            f"AWS_DEFAULT_REGION={shlex.quote(config.get('region', ''))}",
+            "set +a",
+            shlex.join([RESTIC_BIN, "-o", "s3.bucket-lookup=path", *arguments]),
+        ]
+    )
+    return "sh -c " + shlex.quote(script)
 
 
 def health_repository(config: dict[str, str]) -> str:

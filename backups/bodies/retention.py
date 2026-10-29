@@ -34,14 +34,13 @@ from backups.bodies.native import (
     LOCK_BUSY,
     PARTIAL,
     REFUSED,
-    RESTIC_BIN,
     SUCCESS,
     controlled,
     emit_result,
     locked_file,
+    offsite_extra,
     repository_lock,
     restic,
-    restic_environment,
     stage,
 )
 
@@ -149,7 +148,6 @@ def render_timer(identifier: str, role: str) -> str:
         "Persistent=false\n"
         "DeferReactivation=yes\n"
         f"Unit={unit_name(identifier, role)}.service\n"
-        f"Slice={BACKUP_SLICE_NAME.format(identifier=identifier)}\n"
         "\n"
         "[Install]\n"
         "WantedBy=timers.target\n"
@@ -213,12 +211,10 @@ def _checked_units(value: object) -> dict[str, str]:
 def _offsite(value: object) -> dict[str, object] | None:
     if value is None:
         return None
-    if not isinstance(value, dict) or set(value) != {
-        "repository",
-        "capture_env",
-        "prune_env",
-        "storage",
-    }:
+    if not isinstance(value, dict) or set(value) not in (
+        {"repository", "capture_env", "prune_env", "storage"},
+        {"repository", "config", "capture_env", "prune_env", "storage"},
+    ):
         raise ValueError("The offsite cleanup is not the reviewed one.")
     repository, capture, prune, storage = (
         value["repository"],
@@ -231,6 +227,10 @@ def _offsite(value: object) -> dict[str, object] | None:
         or not repository.startswith("s3:https://")
         or capture != "/etc/barectl/backups/offsite/capture.env"
         or prune != "/etc/barectl/backups/offsite/prune.env"
+        or (
+            value.get("config", "/etc/barectl/backups/offsite/config")
+            != "/etc/barectl/backups/offsite/config"
+        )
         or not isinstance(storage, dict)
     ):
         raise ValueError("The offsite cleanup is not the reviewed one.")
@@ -495,7 +495,11 @@ def _repository(value: dict[str, object], location: str) -> tuple[str, str, dict
         return None
     if not extra.get("AWS_ACCESS_KEY_ID") or not extra.get("AWS_SECRET_ACCESS_KEY"):
         return None
-    return str(offsite["repository"]), str(value["server_key"]), extra
+    return (
+        str(offsite["repository"]),
+        str(value["server_key"]),
+        offsite_extra(offsite.get("storage"), extra),
+    )
 
 
 def environment_values(path: str) -> dict[str, str]:
@@ -621,22 +625,13 @@ def _read_back(
     parts = cast("dict[str, str]", point["parts"])
     for part, snapshot in parts.items():
         target = "/" if part == "files" else "/" + filename.lstrip("/")
-        argv = ["dump", "--no-lock", snapshot, target]
-        environment = restic_environment(repository, password, extra)
-        process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
-            [RESTIC_BIN, *argv],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=environment,
-            start_new_session=True,
+        status, _output = restic(
+            ["dump", "--no-lock", snapshot, target],
+            repository=repository,
+            password=password,
+            extra=extra,
+            stream=True,
         )
-        try:
-            status = process.wait()
-        except BaseException:
-            process.kill()
-            process.communicate()
-            raise
         if status:
             return False
     return True
@@ -947,8 +942,8 @@ def main() -> None:
         sys.stderr.flush()
         emit_result({"class": "refused", "reason": "evidence", "kind": "retention"})
         raise SystemExit(REFUSED) from None
-    except Exception:
-        sys.stderr.write("barectl-problem The retention change could not finish.\n")
+    except Exception as error:
+        sys.stderr.write(f"barectl-problem {type(error).__name__}: {error}\n")
         sys.stderr.flush()
         emit_result({"class": "failed", "reason": "backup_unknown", "kind": "retention"})
         raise SystemExit(REFUSED) from None

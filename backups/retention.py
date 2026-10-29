@@ -32,6 +32,7 @@ from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from servers.models import Server
+from sites import observation as site_observation
 
 from . import change, check, convention
 from .bodies import retention as retention_body
@@ -70,7 +71,15 @@ RETENTION_CORE: Final = without_imports(
     importlib.resources.files("backups.bodies").joinpath("retention.py").read_text(),
     ("automation.bodies.units", "backups.bodies.native"),
 )
-RETENTION_SOURCE: Final = AUTOMATION_SOURCE + "\n" + change.NATIVE_SOURCE + "\n" + RETENTION_CORE
+RETENTION_SOURCE: Final = (
+    site_observation.COMMON_SOURCE
+    + "\n"
+    + AUTOMATION_SOURCE
+    + "\n"
+    + change.NATIVE_SOURCE
+    + "\n"
+    + RETENTION_CORE
+)
 RETENTION_BYTES: Final = change._packed(RETENTION_SOURCE, script_path=True)
 RETENTION_BODY_SHA256: Final = hashlib.sha256(RETENTION_BYTES).hexdigest()
 KEEP_CORE: Final = without_imports(
@@ -157,12 +166,20 @@ def unit_read_command(identifier: str) -> str:
         retention_body.payload_path(identifier),
     ]
     steps = []
+    script = retention_body.script_path(identifier)
     for path in paths:
         quoted = shlex.quote(path)
         steps.append(f"printf 'barectl-file %s\\n' {quoted}")
-        steps.append(
-            f"if [ -f {quoted} ]; then base64 -w0 {quoted}; printf '\\n'; else printf -- '-\\n'; fi"
-        )
+        if path == script:
+            # The packed body is larger than the SSH answer bound; its presence is enough.
+            steps.append(
+                f"if [ -f {quoted} ]; then printf 'cHJlc2VudA==\\n'; else printf -- '-\\n'; fi"
+            )
+        else:
+            steps.append(
+                f"if [ -f {quoted} ]; then base64 -w0 {quoted}; "
+                "printf '\\n'; else printf -- '-\\n'; fi"
+            )
     return "sh -c " + shlex.quote("; ".join(steps))
 
 
@@ -403,23 +420,15 @@ def onsite_command(identifier: str, *arguments: str) -> str:
 def offsite_command(plan: dict[str, object] | None, identifier: str, *arguments: str) -> str:
     if plan is None:
         raise ValueError("The offsite cleanup is not the reviewed one.")
-    repository = str(plan["repository"])
-    script = "; ".join(
-        [
-            "set -a",
-            (
-                f"if [ -f {shlex.quote(convention.OFFSITE_PRUNE)} ]; then "
-                f". {shlex.quote(convention.OFFSITE_PRUNE)}; else "
-                f". {shlex.quote(convention.OFFSITE_CAPTURE)}; fi"
-            ),
-            f"RESTIC_REPOSITORY={shlex.quote(repository)}",
-            f"RESTIC_PASSWORD_FILE={shlex.quote(convention.server_key(identifier))}",
-            f"RESTIC_CACHE_DIR={shlex.quote(convention.CACHE_DIR)}",
-            "set +a",
-            shlex.join([convention.RESTIC_BIN, *arguments]),
-        ]
+    storage = plan.get("storage")
+    if not isinstance(storage, dict):
+        raise ValueError("The offsite cleanup is not the reviewed one.")
+    return convention.offsite_restic_command(
+        identifier,
+        {str(key): str(value) for key, value in storage.items()},
+        *arguments,
+        env_paths=(convention.OFFSITE_PRUNE, convention.OFFSITE_CAPTURE),
     )
-    return "sh -c " + shlex.quote(script)
 
 
 def _location_command(
