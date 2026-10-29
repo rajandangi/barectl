@@ -46,6 +46,9 @@ def transcript(entries: tuple[tuple[str, Recorded], ...]) -> ReplayShell:
 
 
 class RemovedRepositoryReadTests(SimpleTestCase):
+    def test_the_read_is_one_shell_pipeline(self) -> None:
+        self.assertNotIn("exec for", observation.removed_command())
+
     def test_the_read_names_every_repository_no_observed_site_owns(self) -> None:
         shell = transcript(
             (

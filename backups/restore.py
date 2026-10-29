@@ -267,7 +267,7 @@ def _point_size(rows: list[dict[str, object]], snapshot: str) -> int:
 def _site(record: dict[str, object] | None) -> tuple[SiteSettings | None, str]:
     if record is None:
         return None, ""
-    application = str(record.get("application", "plain"))
+    application = change.site_application(record)
     names = record.get("names")
     if application not in change.FULL_APPLICATIONS or not isinstance(names, list):
         return None, application

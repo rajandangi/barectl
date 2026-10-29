@@ -3,6 +3,7 @@
 import hashlib
 import importlib.resources
 import json
+from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast, override
@@ -634,6 +635,22 @@ class FullReviewTests(ChangeTestCase):
         )
         self.assertEqual(draft.document["application"], "wordpress")
         change.body_full(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_a_laravel_serving_form_with_a_plain_application_uses_laravel_scope(self) -> None:
+        base = self.enabled()
+        site = {**(base.site or {}), "application": "plain", "serving_form": "laravel"}
+        draft = change.review_full(replace(base, site=site), PreparationInputs("", IDENTIFIER))
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["application"], "laravel")
+        self.assertEqual(
+            draft.document["files"],
+            [
+                f"/var/www/{IDENTIFIER}/current",
+                f"/var/www/{IDENTIFIER}/private/laravel.env",
+                f"/var/www/{IDENTIFIER}/private/storage",
+                f"/var/www/{IDENTIFIER}/private/cache",
+            ],
+        )
 
     def test_a_laravel_full_capture_copies_the_release_and_shared_state(self) -> None:
         draft = change.review_full(

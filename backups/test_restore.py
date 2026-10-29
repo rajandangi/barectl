@@ -210,6 +210,17 @@ class RestorePointTests(SimpleTestCase):
             self.fail("The engine ignored the final restore result.")
         self.assertEqual(parsed.result_class, "succeeded")
         self.assertEqual(parsed.reason, "restore_done")
+        for reason in ("restore_files", "restore_config"):
+            self.assertEqual(
+                parse_result_line(
+                    'barectl-result {"class":"partial","reason":"'
+                    + reason
+                    + '","kind":"restore","site":"alpha","scope":"files","origin":"",'
+                    '"at":"2026-10-30T01:00:00+00:00","point":"0123456789abcdef",'
+                    '"snapshots":1,"bytes":4096}'
+                ),
+                type(parsed)(result_class="partial", reason=reason),
+            )
 
     def test_the_import_replaces_only_the_sites_own_database(self) -> None:
         preamble = restore_body.import_preamble("mariadb", IDENTIFIER).decode()
@@ -403,6 +414,22 @@ class RestoreReviewTests(ChangeTestCase):
         self.assertIn("WordPress", values)
         self.assertIn("private configuration is replaced", values)
         self.assertIn("database settings are kept", values)
+
+    def test_a_laravel_serving_form_with_a_plain_application_restores_laravel_scope(self) -> None:
+        selected = evidence(parts=("database", "files"), point_data=point(scope="full"))
+        selected = replace(
+            selected,
+            site={**(selected.site or {}), "application": "plain", "serving_form": "laravel"},
+        )
+        draft = restore.review(
+            selected, PreparationInputs("", IDENTIFIER, point=POINT, scope="full")
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["application"], "laravel")
+        self.assertEqual(
+            draft.document["shared"],
+            ["private/laravel.env", "private/storage", "private/cache"],
+        )
 
     def test_a_laravel_restore_replaces_its_shared_state_as_a_whole(self) -> None:
         draft = restore.review(
