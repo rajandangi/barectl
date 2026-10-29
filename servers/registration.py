@@ -187,6 +187,9 @@ def remove_server(server: Server) -> None:
             forget_changes(server)
             forget_log_reads(server)
             forget_backup_checks(server)
+            from backups.downloads import forget_exports
+
+            forget_exports(server)
             keep_run_audit(server)
             # Deleting through a queryset leaves the instance usable if the commit fails.
             Server.objects.filter(pk=server.pk).delete()

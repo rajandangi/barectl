@@ -1,11 +1,12 @@
 """The site Backups section and its three actions (Phase D #396, #179)."""
 
+import contextlib
 from typing import TYPE_CHECKING
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
@@ -23,8 +24,10 @@ from servers.models import Server
 from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 
-from . import check, convention, integrity, presentation, retention
+from . import check, convention, downloads, integrity, presentation, retention
 from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
+from .export import SLUG as EXPORT_SLUG
+from .models import BackupExport
 from .offsite import COPY_SLUG
 from .reopen import SLUG as REOPEN_SLUG
 from .restore import SCOPES
@@ -76,6 +79,7 @@ def context_for_site(
         gated=gated,
         integrity=integrity.stored(server, identifier),
     )
+    downloads.expire(server, identifier)
     target = _target(snapshot, site)
     ready = (
         target
@@ -96,6 +100,11 @@ def context_for_site(
     )
     context = {
         "backups": view,
+        "backups_exports": tuple(
+            BackupExport.objects.filter(server=server, identifier=identifier)
+            .exclude(status=BackupExport.Status.CANCELLED)
+            .order_by("-created_at", "-pk")[:5]
+        ),
         "backups_target": target,
         "backups_can_enable": can_prepare and managed and user.has_perm(MANAGE_SECRETS),
         "backups_can_back_up": can_prepare and managed and view.enabled and view.database,
@@ -107,6 +116,9 @@ def context_for_site(
             and managed
             and view.enabled
             and user.has_perm("operations.change_destructive")
+        ),
+        "backups_can_export": (
+            can_prepare and managed and view.enabled and user.has_perm("operations.change_shared")
         ),
         "backups_can_check": bool(
             managed and user.has_perms((*check.READ_PERMISSIONS, VIEW_SITES))
@@ -305,6 +317,17 @@ def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpRespo
     return _prepare(request, pk, identifier, RESTORE_SLUG, "site_backups", point=point, scope=scope)
 
 
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_export(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """Export one recovery point to this computer; moving the data needs Shared consent."""
+    point = request.POST.get("point", "")
+    if convention.POINT.fullmatch(point) is None:
+        raise Http404
+    return _prepare(request, pk, identifier, EXPORT_SLUG, "site_backups", point=point)
+
+
 def _prepare(  # noqa: C901 - one guarded preparation
     request: HttpRequest,
     pk: int,
@@ -353,11 +376,18 @@ def _prepare(  # noqa: C901 - one guarded preparation
             "operation.",
         )
         return redirect(target, pk=pk, identifier=identifier)
+    if slug == EXPORT_SLUG and not context["backups_can_export"]:
+        messages.error(
+            request,
+            "Barectl cannot export this recovery point yet. Wait for the current operation "
+            "or ask an administrator.",
+        )
+        return redirect(target, pk=pk, identifier=identifier)
     inputs: dict[str, object] = {"version": 1, "identifier": identifier}
-    if slug == RESTORE_SLUG:
+    if slug in (RESTORE_SLUG, EXPORT_SLUG):
         inputs["point"] = point
-        if scope != "database":
-            inputs["scope"] = scope
+    if slug == RESTORE_SLUG and scope != "database":
+        inputs["scope"] = scope
     try:
         queued = services.request_prepare(
             server,
@@ -405,3 +435,95 @@ def check_now(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     else:
         messages.success(request, "Barectl is listing this site's recovery points.")
     return redirect("site_backups", pk=pk, identifier=identifier)
+
+
+class _Served:
+    """A one-shot download: closing the response removes the staged file."""
+
+    def __init__(self, path: object) -> None:
+        import pathlib
+
+        self._path = pathlib.Path(str(path))
+        self._handle = self._path.open("rb")
+        self.name = self._path.name
+
+    def read(self, size: int = -1) -> bytes:
+        return self._handle.read(size)
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self._handle.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._handle.tell()
+
+    def close(self) -> None:
+        self._handle.close()
+        with contextlib.suppress(OSError):
+            self._path.unlink()
+        with contextlib.suppress(OSError):
+            self._path.parent.rmdir()
+
+
+def _export_row(request: HttpRequest, pk: int, token: str) -> tuple[Server, BackupExport]:
+    if isinstance(request.user, AnonymousUser):
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    downloads.expire(server)
+    row = BackupExport.objects.filter(server=server, token=token).first()
+    if row is None or row.status != BackupExport.Status.READY or row.expired:
+        raise Http404
+    return server, row
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(
+    ("servers.view_server", VIEW_SITES, "operations.change_shared"), raise_exception=True
+)
+def download_export(
+    request: HttpRequest, pk: int, token: str, artifact: str
+) -> StreamingHttpResponse:
+    """Serve one export artifact from private staging; never connect to the server."""
+    if downloads.TOKEN.fullmatch(token) is None or artifact not in downloads.ARTIFACTS:
+        raise Http404
+    _server, row = _export_row(request, pk, token)
+    if artifact == "files" and not row.has_files:
+        raise Http404
+    if artifact == "database" and not row.has_database:
+        raise Http404
+    try:
+        path = downloads.served(row, artifact)
+    except FileNotFoundError:
+        raise Http404 from None
+    downloads.mark_served(row, artifact)
+    name = (
+        f"{row.identifier}-{row.point}-files.tar"
+        if artifact == "files"
+        else f"{row.identifier}-{row.point}-database.sql"
+    )
+    response = FileResponse(
+        _Served(path),
+        as_attachment=True,
+        filename=name,
+        content_type="application/x-tar" if artifact == "files" else "application/sql",
+    )
+    response["Cache-Control"] = "no-store"
+    response["Pragma"] = "no-cache"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@require_POST
+@login_required
+@permission_required(
+    ("servers.view_server", VIEW_SITES, "operations.change_shared"), raise_exception=True
+)
+def cancel_export(request: HttpRequest, pk: int, token: str) -> HttpResponse:
+    """Delete an export's private staging now; nothing on the server remains."""
+    if downloads.TOKEN.fullmatch(token) is None:
+        raise Http404
+    server, row = _export_row(request, pk, token)
+    downloads.cancel(row)
+    messages.success(request, "Barectl removed this export's copy from this computer.")
+    return redirect("site_backups", pk=server.pk, identifier=row.identifier)

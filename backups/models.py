@@ -11,6 +11,7 @@ from typing import ClassVar, override
 from django.conf import settings
 from django.db import models
 from django.db.models.expressions import Combinable
+from django.utils import timezone
 
 from operations.models import RemoteOperation
 from servers.models import Server
@@ -141,6 +142,61 @@ class BackupIntegrity(models.Model):
     @override
     def __str__(self) -> str:
         return f"backup integrity {self.result_class or 'not checked'}: {self.identifier}"
+
+
+class BackupExport(models.Model):
+    """One approved export whose artifacts are in private controller staging (#409).
+
+    It holds no file content and no server path: the token names a private directory and
+    the download URL. The row expires; expiry, cancellation and a completed download remove
+    the directory without connecting to the server.
+    """
+
+    class Status(models.TextChoices):
+        READY = "ready", "Ready"
+        CANCELLED = "cancelled", "Cancelled"
+        EXPIRED = "expired", "Expired"
+
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="backup_exports")
+    identifier = models.CharField(max_length=24)
+    point = models.CharField(max_length=16)
+    token = models.CharField(max_length=32, unique=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    status = models.CharField(max_length=10, choices=Status, default=Status.READY)
+    files_bytes = models.BigIntegerField(default=0)
+    database_bytes = models.BigIntegerField(default=0)
+    files_served = models.BooleanField(default=False)
+    database_served = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ["-created_at", "-pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"export of {self.identifier} on {self.server}"
+
+    @property
+    def has_files(self) -> bool:
+        return self.files_bytes > 0
+
+    @property
+    def has_database(self) -> bool:
+        return self.database_bytes > 0
+
+    @property
+    def complete(self) -> bool:
+        return (not self.has_files or self.files_served) and (
+            not self.has_database or self.database_served
+        )
+
+    @property
+    def expired(self) -> bool:
+        return self.status == self.Status.EXPIRED or self.expires_at <= timezone.now()
 
 
 class BackupObservation(models.Model):

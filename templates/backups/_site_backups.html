@@ -353,6 +353,16 @@
                                 class="usa-button usa-button--outline">Restore</button>
                       </form>
                     {% endif %}
+                    {% if backups_can_export and point.restorable %}
+                      <form class="usa-form"
+                            method="post"
+                            action="{% url 'site_backups_export_prepare' server.pk identifier %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="point" value="{{ point.point }}">
+                        <button type="submit"
+                                class="usa-button usa-button--outline">Export</button>
+                      </form>
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}
@@ -369,6 +379,46 @@
           </ul>
         </details>
       {% endif %}
+    </section>
+  {% endif %}
+  {% if backups.enabled and backups_exports and backups_can_export %}
+    <section class="barectl-card" aria-labelledby="backups-exports-heading">
+      <h2 id="backups-exports-heading">Exports</h2>
+      <p class="usa-hint">
+        These copies are on this computer only. The download needs your account, expires,
+        and Barectl removes the copy after it is downloaded or cancelled.
+      </p>
+      <ul class="usa-list usa-list--unstyled">
+        {% for export in backups_exports %}
+          <li>
+            <p>
+              <strong>{{ export.created_at|date:"j M Y, H:i" }}</strong>
+              <span class="barectl-note">· expires {{ export.expires_at|date:"j M Y, H:i" }}</span>
+            </p>
+            {% if export.status == "ready" and not export.expired %}
+              {% if export.complete %}
+                <p class="barectl-note">Downloaded.</p>
+              {% endif %}
+              {% if export.has_files and not export.files_served %}
+                <a class="usa-button usa-button--outline"
+                   href="{% url 'site_backups_export_download' server.pk export.token 'files' %}">Download files</a>
+              {% endif %}
+              {% if export.has_database and not export.database_served %}
+                <a class="usa-button usa-button--outline"
+                   href="{% url 'site_backups_export_download' server.pk export.token 'database' %}">Download database</a>
+              {% endif %}
+              <form class="usa-form"
+                    method="post"
+                    action="{% url 'site_backups_export_cancel' server.pk export.token %}">
+                {% csrf_token %}
+                <button type="submit" class="usa-button usa-button--outline">Cancel export</button>
+              </form>
+            {% else %}
+              <p class="barectl-note">This export is no longer available.</p>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
     </section>
   {% endif %}
 {% endif %}
