@@ -229,6 +229,18 @@
               continues there if this computer disconnects.
             </p>
           </form>
+          {% if review.extra_action %}
+            <form class="usa-form barectl-extra-action"
+                  method="post"
+                  action="{{ review.extra_action.url }}">
+              {% csrf_token %}
+              <button type="submit" class="usa-button usa-button--outline">{{ review.extra_action.label }}</button>
+            </form>
+            <p class="usa-hint">
+              Take one full recovery point first. The deploy is its own step, and Barectl
+              offers it again when the copy finishes.
+            </p>
+          {% endif %}
         {% else %}
           <p class="barectl-note" id="apply-unavailable">{{ apply_reason }}</p>
           {% if review.run_id %}

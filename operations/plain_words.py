@@ -19,6 +19,9 @@ class Home(StrEnum):
     SERVER_SITE_CREATE = "server_site_create"
     SITE = "site"
     SITE_BACKUPS = "site_backups"
+    SITE_DEPLOYMENTS = "site_deployments"
+    # A POST endpoint, used only as a run's completion action.
+    SITE_DEPLOY_PREPARE = "site_deploy_prepare"
 
 
 @dataclass(frozen=True)
@@ -35,9 +38,72 @@ class ChangeWords:
     after: str = ""
     after_home: Home = Home.SERVER
     after_permission: str = ""
+    # A completion action that starts the next review itself is a CSRF-protected POST.
+    after_post: bool = False
+    # Wording for the same kind when it runs as one step before a Deploy (#407).
+    before_deploy: ChangeWords | None = None
 
 
 _ENGINE_LABELS: Final[dict[str, str]] = {"mariadb": "MariaDB", "postgresql": "PostgreSQL"}
+
+_BACK_UP_STEPS: Final = {
+    "preflight": "Checking the site",
+    "gate": "Pausing the site",
+    "drain": "Finishing requests already running",
+    "backup-database": "Copying the database",
+    "backup-files": "Copying the files",
+    "verify": "Checking the recovery point",
+    "open": "Reopening the site",
+}
+_BACK_UP_FULL_SITE: Final = ChangeWords(
+    title="Back up all of {site}",
+    summary=(
+        (
+            "Barectl copies this site's database and files into one encrypted recovery "
+            "point on the server."
+        ),
+        (
+            "Visitors see a short maintenance page while the copy is taken. The site's "
+            "scheduled tasks and queue workers are stopped first and started again when "
+            "the copy finishes."
+        ),
+        (
+            "Logs, caches, sessions, temporary files, other releases and server settings are "
+            "left out."
+        ),
+        (
+            "If the copy stops partway, the site stays paused until you reopen it. "
+            "Barectl never deletes older copies to make room."
+        ),
+    ),
+    action="Back up now",
+    steps=_BACK_UP_STEPS,
+    home=Home.SITE_BACKUPS,
+    after="Back to backups",
+    after_home=Home.SITE_BACKUPS,
+    # Prepared from a Deploy confirm screen: the same capture, then back to Deploy (#407).
+    before_deploy=ChangeWords(
+        title="Back up {site} before deploying",
+        summary=(
+            "Barectl takes one full recovery point before the deploy changes this site's data.",
+            (
+                "Visitors see a short maintenance page while the copy is taken. The site's "
+                "scheduled tasks and queue workers are stopped first and started again when "
+                "the copy finishes."
+            ),
+            (
+                "The deploy is its own step. When the copy finishes, Barectl offers "
+                "Continue to Deploy."
+            ),
+        ),
+        action="Back up first",
+        steps=_BACK_UP_STEPS,
+        home=Home.SITE_DEPLOYMENTS,
+        after="Continue to Deploy",
+        after_home=Home.SITE_DEPLOY_PREPARE,
+        after_post=True,
+    ),
+)
 
 
 def selection_label(selection: str) -> str:
@@ -456,41 +522,7 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to backups",
         after_home=Home.SITE_BACKUPS,
     ),
-    "back_up_full_site": ChangeWords(
-        title="Back up all of {site}",
-        summary=(
-            (
-                "Barectl copies this site's database and files into one encrypted recovery "
-                "point on the server."
-            ),
-            (
-                "Visitors see a short maintenance page while the copy is taken. The site's "
-                "scheduled tasks and queue workers are stopped first and started again when "
-                "the copy finishes."
-            ),
-            (
-                "Logs, caches, sessions, temporary files, other releases and server settings "
-                "are left out."
-            ),
-            (
-                "If the copy stops partway, the site stays paused until you reopen it. "
-                "Barectl never deletes older copies to make room."
-            ),
-        ),
-        action="Back up now",
-        steps={
-            "preflight": "Checking the site",
-            "gate": "Pausing the site",
-            "drain": "Finishing requests already running",
-            "backup-database": "Copying the database",
-            "backup-files": "Copying the files",
-            "verify": "Checking the recovery point",
-            "open": "Reopening the site",
-        },
-        home=Home.SITE_BACKUPS,
-        after="Back to backups",
-        after_home=Home.SITE_BACKUPS,
-    ),
+    "back_up_full_site": _BACK_UP_FULL_SITE,
     "set_backup_schedule": ChangeWords(
         title="Change the backup schedule of {site}",
         summary=(

@@ -12,7 +12,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 from django.utils import timezone
 
-from operations import engine, plain_words
+from operations import engine, lifecycle, plain_words
 from operations.consent import DeclaredEffect, Scope
 from operations.fakes import finished_unit
 from operations.models import (
@@ -189,6 +189,16 @@ class PlainWordTests(SimpleTestCase):
                     self.assertTrue(label)
                     self.assertEqual(native_terms_in(label), [], label)
 
+    def test_the_backup_before_a_deploy_reads_in_plain_words(self) -> None:
+        words = plain_words.words_for("back_up_full_site")
+        if words is None or words.before_deploy is None:
+            self.fail("Back up first has no plain words.")
+        variant = words.before_deploy
+        self.assertEqual(variant.action, "Back up first")
+        self.assertIn("before deploying", variant.title)
+        for text in (variant.title, variant.action, *variant.summary):
+            self.assertEqual(native_terms_in(text), [], text)
+
     def test_a_kind_without_words_falls_back_to_its_label_and_stage_names(self) -> None:
         self.assertIsNone(plain_words.words_for("unlisted_kind"))
         self.assertEqual(plain_words.step_label(None, "preflight", ""), "preflight")
@@ -232,6 +242,68 @@ class PlainWordTests(SimpleTestCase):
         self.assertEqual(success.after_label, "Create site")
         self.assertEqual(success.after_url, "/servers/7/sites/create/")
         self.assertEqual(success.after_permission, "operations.change_site")
+
+    def test_a_full_backup_prepared_from_deploy_returns_to_deploy(self) -> None:
+        preparation = ChangePreparation(
+            kind_slug="back_up_full_site",
+            inputs={"version": 1, "identifier": "shop", "from_deploy": True},
+        )
+        preparation.server_id = 7
+        plain = plain_change("back_up_full_site", "Back up full site", preparation, "Web")
+        self.assertEqual(plain.action, "Back up first")
+        self.assertEqual(plain.home_url, "/servers/7/sites/shop/deployments/")
+        self.assertEqual(plain.after_label, "Continue to Deploy")
+        self.assertEqual(plain.after_url, "/servers/7/sites/shop/deployments/deploy/prepare/")
+        self.assertTrue(plain.after_post)
+        ordinary = ChangePreparation(kind_slug="back_up_full_site", inputs={"identifier": "shop"})
+        ordinary.server_id = 7
+        self.assertEqual(
+            plain_change("back_up_full_site", "Back up full site", ordinary, "Web").action,
+            "Back up now",
+        )
+
+
+class ExtraActionTests(SimpleTestCase):
+    def test_a_deploy_review_with_pending_migrations_offers_back_up_first(self) -> None:
+        from operations import presentation
+        from operations.models import ChangeReview
+
+        preparation = ChangePreparation(kind_slug="deploy_laravel_site", inputs={"version": 1})
+        preparation.server_id = 7
+        review = ChangeReview(
+            preparation=preparation,
+            kind_slug="deploy_laravel_site",
+            intent="",
+            eligible=True,
+            consent="site",
+            boot_id=BOOT_ID,
+            admission_expires_at=timezone.now() + timedelta(minutes=5),
+            document={"identifier": "shop", "back_up_first": True},
+        )
+        with mock.patch.object(lifecycle, "connection_current", return_value=True):
+            view = presentation.review_view(review)
+        if view.extra_action is None:
+            self.fail("The Back up first action was not offered.")
+        self.assertEqual(view.extra_action.label, "Back up first")
+        self.assertEqual(
+            view.extra_action.url, "/servers/7/sites/shop/backups/back-up-first/prepare/"
+        )
+
+    def test_a_review_without_pending_migrations_offers_no_extra_action(self) -> None:
+        from operations import presentation
+        from operations.models import ChangeReview
+
+        review = ChangeReview(
+            kind_slug="deploy_laravel_site",
+            intent="",
+            eligible=True,
+            consent="site",
+            boot_id=BOOT_ID,
+            admission_expires_at=timezone.now() + timedelta(minutes=5),
+            document={"identifier": "shop", "back_up_first": False},
+        )
+        with mock.patch.object(lifecycle, "connection_current", return_value=True):
+            self.assertIsNone(presentation.review_view(review).extra_action)
 
 
 class ScreenTestCase(ChangeTestCase):

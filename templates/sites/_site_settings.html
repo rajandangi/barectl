@@ -28,16 +28,29 @@
     proxy, its database and database account, its stored certificate, its directory and its
     Linux accounts. The site's files and database data are destroyed.
   </p>
-  <div class="usa-alert usa-alert--warning">
-    <div class="usa-alert__body">
-      <h3 class="usa-alert__heading">No backup exists</h3>
-      <p class="usa-alert__text">
-        Phase D adds backups, so nothing can restore this site after removal. The confirm
-        screen lists everything that will be deleted. Nothing changes until you confirm it by
-        typing the site's primary domain.
-      </p>
+  {% if site_remove_has_backups %}
+    <div class="usa-alert usa-alert--info">
+      <div class="usa-alert__body">
+        <h3 class="usa-alert__heading">Your backups are kept</h3>
+        <p class="usa-alert__text">
+          Removing the site keeps its backup repository on this server and its offsite copy in
+          the bucket, and Barectl names both before you confirm the removal. The backups can
+          be restored into a matching site later.
+        </p>
+      </div>
     </div>
-  </div>
+  {% else %}
+    <div class="usa-alert usa-alert--warning">
+      <div class="usa-alert__body">
+        <h3 class="usa-alert__heading">No backup exists</h3>
+        <p class="usa-alert__text">
+          Nothing can restore this site after removal. The confirm screen lists everything
+          that will be deleted. Nothing changes until you confirm it by typing the site's
+          primary domain.
+        </p>
+      </div>
+    </div>
+  {% endif %}
   {% if site_remove_domains %}
     <p class="barectl-note">
       Primary domain: <code>{{ site_remove_primary }}</code>

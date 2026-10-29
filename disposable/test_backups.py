@@ -1246,6 +1246,81 @@ class WordPressFullRestore(BackupCase):
         safety = [row for row in after if row["origin"] == "safety"]
         self.assertEqual(len(safety), 1)
         self.assertEqual(safety[0]["scope"], "full")
+        # -- Deploy with pending migrations offers Back up first (#407) ----------------
+        from backups import change as backup_change
+        from backups import check as backup_check
+        from backups import observation as backup_observation
+        from discovery.root_read import run_root
+        from laravel import change as laravel_change
+        from sites import remove as site_remove
+
+        migration = "2026_10_31_000000_create_before_deploy_table"
+        with self.shell() as shell:
+            write(
+                self,
+                shell,
+                f"/var/www/{self.identifier}/current/database/migrations/{migration}.php",
+                "<?php\n",
+            )
+            shell.run(
+                f"chown s{self.identifier}:s{self.identifier} "
+                f"/var/www/{self.identifier}/current/database/migrations/{migration}.php"
+            )
+        deploy_inputs = PreparationInputs("", self.identifier)
+        with self.shell() as shell:
+            draft = laravel_change.DEPLOY_SITE.review(
+                laravel_change.DEPLOY_SITE.inspect(shell, deploy_inputs), deploy_inputs
+            )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertIn(migration, cast(list[str], draft.document["pending_migrations"]))
+        self.assertTrue(draft.document["back_up_first"])
+        self.assertIn("Back up first", str(draft.document["acknowledgement"]))
+        # Back up first is the ordinary paused full capture with one recorded input.
+        apply_change(
+            self,
+            backup_change.BACK_UP_FULL,
+            PreparationInputs("", self.identifier, from_deploy=True),
+            timeout=180,
+        )
+        with self.shell() as shell:
+            after_backup = laravel_change.DEPLOY_SITE.review(
+                laravel_change.DEPLOY_SITE.inspect(shell, deploy_inputs), deploy_inputs
+            )
+        full_point = next(
+            row for row in self.points() if row.get("scope") == "full" and row.get("complete")
+        )
+        acknowledgement = str(after_backup.document["acknowledgement"])
+        self.assertIn(str(full_point["point"])[:8], acknowledgement)
+        self.assertNotIn("has no automatic backup", acknowledgement)
+
+        # -- Remove site keeps the repository and lists it as removed (#407) ----------
+        with self.shell() as shell:
+            before_remove = backup_observation.removed(shell, ())
+        apply_change(
+            self,
+            site_remove.REMOVE,
+            PreparationInputs("", self.identifier, primary=self.domain),
+            timeout=180,
+        )
+        repository = f"/var/lib/barectl-backups/{self.identifier}/onsite"
+        self.assertEqual(self.native(f"test -d {repository}; echo $?").strip(), "0")
+        self.assertEqual(
+            self.native(f"test -f /etc/barectl/backups/{self.identifier}.key; echo $?").strip(),
+            "0",
+        )
+        self.assertEqual(
+            self.native(
+                f"systemctl list-unit-files 'barectl-site-{self.identifier}-*' --no-legend | wc -l"
+            ).strip(),
+            "0",
+        )
+        with self.shell() as shell:
+            names = backup_observation.removed(shell, ())
+            listing = run_root(shell, backup_check.listing_command(self.identifier))
+        self.assertEqual(before_remove, ())
+        self.assertEqual(names, (self.identifier,))
+        kept = backup_check.points(backup_check.parse_listing(listing.stdout) or [])
+        self.assertIn(str(full_point["point"]), {str(row["point"]) for row in kept})
 
 
 @tag(SCENARIO_TAG)

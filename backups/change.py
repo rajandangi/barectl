@@ -1057,5 +1057,5 @@ BACK_UP_FULL: Final = ChangeKind(
     body=body_full,
     verify=verify_full,
     refresh_discovery=True,
-    input_shape=InputShape.SITE,
+    input_shape=InputShape.BACKUP_CAPTURE,
 )

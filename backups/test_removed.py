@@ -1,0 +1,356 @@
+"""Kept backups of a removed site: listed, restorable into a matching site (#407).
+
+Remove site keeps a site's repositories; one explicit read lists them, and a restore may
+name one as its source only when the point's own files prove the target's kind.
+"""
+
+import importlib.resources
+from typing import cast, override
+from unittest import mock
+
+from django.test import SimpleTestCase
+
+from bootstrap.standing import Standing
+from discovery import ssh
+from discovery.recorded import Recorded, ReplayShell, Transcript
+from operations.engine import BodyContext, ReviewDraft
+from operations.inputs import PreparationInputs
+from operations.models import ChangePreparation
+from runtimes.catalog import Architecture
+from servers.models import Server
+from servers.testing import ControllerConfigTestCase
+
+from . import check, convention, observation, presentation, restore
+from .testing import point, record_backups, record_points
+
+IDENTIFIER = "alpha"
+SOURCE = "beta"
+FILES = "b" * 64
+
+
+def fixture(name: str) -> str:
+    return importlib.resources.files("backups.fixtures").joinpath(name).read_text(encoding="utf-8")
+
+
+def transcript(entries: tuple[tuple[str, Recorded], ...]) -> ReplayShell:
+    return ReplayShell(
+        Transcript(
+            "removed",
+            {},
+            "26.04",
+            "x86_64",
+            "ssh-ed25519 SHA256:x",
+            (("id -u", Recorded(ssh.CommandResult(0, "0\n"))), *entries),
+        )
+    )
+
+
+class RemovedRepositoryReadTests(SimpleTestCase):
+    def test_the_read_names_every_repository_no_observed_site_owns(self) -> None:
+        shell = transcript(
+            (
+                (
+                    observation.removed_command(),
+                    Recorded(ssh.CommandResult(0, "alpha\nbeta\n")),
+                ),
+            )
+        )
+        self.assertEqual(observation.removed(shell, ("alpha",)), ("beta",))
+        self.assertEqual(observation.removed(shell, ("alpha",)), ("beta",))
+
+    def test_an_unreadable_or_invalid_answer_lists_nothing(self) -> None:
+        for answer in ("", "Beta\n", "beta\nalpha\n", "a\nb\nc\nd\ne\nf\ng\nh\ni\n"):
+            shell = transcript(
+                (
+                    (
+                        observation.removed_command(),
+                        Recorded(ssh.CommandResult(0, answer)),
+                    ),
+                )
+            )
+            with self.subTest(answer=answer):
+                self.assertEqual(observation.removed(shell, ()), () if answer == "" else None)
+
+    def test_a_failed_read_is_unknown(self) -> None:
+        shell = transcript(
+            (
+                (
+                    observation.removed_command(),
+                    Recorded(ssh.CommandResult(1, "")),
+                ),
+            )
+        )
+        self.assertIsNone(observation.removed(shell, ()))
+
+
+class RemovedPointTests(SimpleTestCase):
+    def test_a_listed_removed_repository_shows_its_restorable_points(self) -> None:
+        view = presentation.removed_views(
+            [
+                {
+                    "identifier": SOURCE,
+                    "problem": "",
+                    "points": [
+                        point(scope="full", parts=("database", "files")),
+                        point(point="fedcba9876543210", scope="database", parts=("database",)),
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(len(view), 1)
+        self.assertEqual(view[0].identifier, SOURCE)
+        self.assertTrue(view[0].points[0].restorable_elsewhere)
+        self.assertFalse(view[0].points[1].restorable_elsewhere)
+
+    def test_a_repository_the_read_could_not_open_names_its_problem(self) -> None:
+        view = presentation.removed_views(
+            [
+                {
+                    "identifier": SOURCE,
+                    "problem": "The recovery points could not be read.",
+                    "points": [],
+                }
+            ]
+        )
+        self.assertEqual(view[0].problem, "The recovery points could not be read.")
+
+    def test_an_invalid_identifier_is_ignored(self) -> None:
+        self.assertEqual(presentation.removed_views([{"identifier": "../beta"}]), ())
+
+
+class PointKindTests(SimpleTestCase):
+    def test_a_laravel_marker_proves_the_source_kind(self) -> None:
+        shell = transcript(
+            (
+                (
+                    restore.kind_command(SOURCE, FILES, f"/var/www/{SOURCE}/private/laravel.env"),
+                    Recorded(ssh.CommandResult(0, '{"struct_type":"node"}')),
+                ),
+            )
+        )
+        self.assertEqual(restore.point_kind(shell, SOURCE, FILES), "laravel")
+
+    def test_a_wordpress_marker_proves_the_source_kind(self) -> None:
+        shell = transcript(
+            (
+                (
+                    restore.kind_command(SOURCE, FILES, f"/var/www/{SOURCE}/private/laravel.env"),
+                    Recorded(ssh.CommandResult(1, "")),
+                ),
+                (
+                    restore.kind_command(SOURCE, FILES, f"/var/www/{SOURCE}/private/wp-config.php"),
+                    Recorded(ssh.CommandResult(0, '{"struct_type":"node"}')),
+                ),
+            )
+        )
+        self.assertEqual(restore.point_kind(shell, SOURCE, FILES), "wordpress")
+
+    def test_no_private_marker_means_a_plain_site(self) -> None:
+        shell = transcript(
+            (
+                (
+                    restore.kind_command(SOURCE, FILES, f"/var/www/{SOURCE}/private/laravel.env"),
+                    Recorded(ssh.CommandResult(1, "")),
+                ),
+                (
+                    restore.kind_command(SOURCE, FILES, f"/var/www/{SOURCE}/private/wp-config.php"),
+                    Recorded(ssh.CommandResult(1, "")),
+                ),
+            )
+        )
+        self.assertEqual(restore.point_kind(shell, SOURCE, FILES), "plain")
+
+    def test_an_unreadable_copy_proves_nothing(self) -> None:
+        shell = transcript(
+            (
+                (
+                    restore.kind_command(SOURCE, FILES, f"/var/www/{SOURCE}/private/laravel.env"),
+                    Recorded(ssh.CommandResult(2, "")),
+                ),
+            )
+        )
+        self.assertEqual(restore.point_kind(shell, SOURCE, FILES), "")
+        self.assertEqual(restore.point_kind(shell, SOURCE, ""), "")
+
+
+def evidence(
+    *, source: str = SOURCE, kind: str = "laravel", application: str = "laravel"
+) -> restore.RestoreEvidence:
+    """One restorable full point taken from the kept repository of a removed site."""
+    selected = point(scope="full", parts=("database", "files"))
+    return restore.RestoreEvidence(
+        Architecture.X86_64,
+        Standing.TARGET_STACK,
+        "mariadb",
+        "MariaDB",
+        "11.8.2",
+        {
+            "identifier": IDENTIFIER,
+            "names": [f"{IDENTIFIER}.test"],
+            "runtime": "php84",
+            "https": True,
+            "readiness": "/",
+            "application": application,
+            "serving_form": "plain",
+            "state": "complete",
+            "problem": "",
+            "account": [1001, 1001, f"/var/www/{IDENTIFIER}", "/usr/sbin/nologin", [1001]],
+        },
+        observation.ObservedBackup(
+            IDENTIFIER,
+            "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1",
+            True,
+            True,
+            (),
+            True,
+            "",
+            None,
+        ),
+        {**selected, "size": 4096},
+        "a" * 64,
+        FILES,
+        ("database", "files"),
+        "11.8.2",
+        False,
+        "",
+        2 * 1024 * 1024 * 1024,
+        (IDENTIFIER,),
+        "8f14e45f-ea6f-4c1c-9b7b-2f0f4c1c9b7b",
+        100,
+        source if source != IDENTIFIER else "",
+        kind,
+    )
+
+
+class RemovedRestoreReviewTests(SimpleTestCase):
+    def draft(self, *, scope: str = "full", **values: object) -> ReviewDraft:
+        return restore.review(
+            evidence(**values),  # type: ignore[arg-type]
+            PreparationInputs("", IDENTIFIER, point="0123456789abcdef", scope=scope, source=SOURCE),
+        )
+
+    def test_a_full_point_of_a_matching_removed_site_is_restorable(self) -> None:
+        draft = self.draft()
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["source"], SOURCE)
+        self.assertEqual(draft.document["repository"], convention.repository(SOURCE))
+        self.assertEqual(draft.document["server_key"], convention.server_key(SOURCE))
+        self.assertEqual(draft.document["safety_repository"], convention.repository(IDENTIFIER))
+        self.assertEqual(draft.document["safety_key"], convention.server_key(IDENTIFIER))
+        self.assertEqual(draft.document["filename"], convention.dump_filename(SOURCE))
+        details = cast(list[dict[str, str]], draft.document["details"])
+        values = "\n".join(row["value"] for row in details)
+        self.assertIn("kept backups of removed site beta", values)
+        restore.body(draft.document, BodyContext("unit", "8f14e45f-ea6f-4c1c-9b7b-2f0f4c1c9b7b", 0))
+
+    def test_a_different_kind_is_refused(self) -> None:
+        draft = self.draft(kind="wordpress")
+        self.assertIn(
+            "That recovery point was taken from a different kind of site, so it cannot be "
+            "restored into this one.",
+            draft.refusals,
+        )
+
+    def test_a_database_only_point_of_a_removed_site_is_refused(self) -> None:
+        draft = self.draft(scope="database")
+        self.assertTrue(any("cannot prove which kind" in refusal for refusal in draft.refusals))
+
+    def test_a_forged_source_and_repository_cannot_build_a_body(self) -> None:
+        draft = self.draft()
+        forged = {**draft.document, "repository": convention.repository(IDENTIFIER)}
+        with self.assertRaises(ValueError):
+            restore.body(forged, BodyContext("unit", "8f14e45f-ea6f-4c1c-9b7b-2f0f4c1c9b7b", 0))
+        forged = {**draft.document, "source": "../escape"}
+        with self.assertRaises(ValueError):
+            restore.body(forged, BodyContext("unit", "8f14e45f-ea6f-4c1c-9b7b-2f0f4c1c9b7b", 0))
+
+
+class RemovedRestoreRequestTests(ControllerConfigTestCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.grant(
+            "view_server",
+            "view_changes",
+            "view_siteobservation",
+            "change_site",
+            "change_destructive",
+        )
+        self.client.force_login(self.user)
+        self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        record_backups(self.server, identifier=IDENTIFIER, enabled=True)
+        record_points(
+            self.server,
+            (),
+            identifier=IDENTIFIER,
+            removed=(
+                {
+                    "identifier": SOURCE,
+                    "points": [point(scope="full", parts=("database", "files"))],
+                    "problem": "",
+                },
+            ),
+        )
+        self.url = f"/servers/{self.server.pk}/sites/{IDENTIFIER}/backups/restore/prepare/"
+
+    def test_a_listed_removed_repository_can_be_named_as_the_source(self) -> None:
+        response = self.client.post(
+            self.url,
+            {"point": "0123456789abcdef", "scope": "full", "source": SOURCE},
+        )
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].kind_slug, restore.SLUG)
+        self.assertEqual(rows[0].inputs["source"], SOURCE)
+        self.assertRedirects(response, f"/changes/{rows[0].pk}/")
+
+    def test_a_source_the_last_read_never_listed_is_refused(self) -> None:
+        response = self.client.post(
+            self.url,
+            {"point": "0123456789abcdef", "scope": "full", "source": "gamma"},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self._rows(), [])
+
+    def test_the_site_itself_is_never_its_own_removed_source(self) -> None:
+        response = self.client.post(
+            self.url,
+            {"point": "0123456789abcdef", "scope": "full", "source": IDENTIFIER},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self._rows(), [])
+
+    def test_the_page_lists_the_removed_backups_without_ssh(self) -> None:
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            response = self.client.get(f"/servers/{self.server.pk}/sites/{IDENTIFIER}/backups/")
+        self.assertContains(response, "Backups of a removed site")
+        self.assertContains(response, "Restore into this site")
+        self.assertContains(response, f'name="source" value="{SOURCE}"')
+
+    def _rows(self) -> list[ChangePreparation]:
+        from operations.services import read_changes
+
+        return [row.preparation for row in read_changes(self.server).rows]
+
+
+class RemovedListingStorageTests(ControllerConfigTestCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+
+    def test_the_last_explicit_check_carries_the_removed_repositories(self) -> None:
+        record_points(
+            self.server,
+            (),
+            identifier=IDENTIFIER,
+            removed=({"identifier": SOURCE, "points": [], "problem": ""},),
+        )
+        self.assertEqual(
+            check.latest_removed(self.server), [{"identifier": SOURCE, "points": [], "problem": ""}]
+        )
+
+    def test_a_check_of_another_site_still_names_them(self) -> None:
+        record_points(self.server, (), identifier="alpha", removed=())
+        record_points(self.server, (), identifier="gamma", removed=({"identifier": SOURCE},))
+        self.assertEqual(check.latest_removed(self.server), [{"identifier": SOURCE}])

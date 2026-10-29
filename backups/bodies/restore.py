@@ -34,6 +34,7 @@ from automation.bodies.units import fence, restore
 from backups.bodies.native import (
     FAILED,
     HEADROOM_BYTES,
+    KEY_ROOT,
     LOCK_BUSY,
     PARTIAL,
     REFUSED,
@@ -513,7 +514,7 @@ def _link_target_problem(
     return resolved != base and base not in resolved.parents
 
 
-def _admitted_tree(base: pathlib.Path) -> None:
+def _admitted_tree(base: pathlib.Path, target: str) -> None:
     """Refuse traversal, foreign links, devices, FIFOs, sockets, setuid and setgid."""
     for root, directories, files in os.walk(base, followlinks=False):
         here = pathlib.Path(root)
@@ -524,7 +525,7 @@ def _admitted_tree(base: pathlib.Path) -> None:
                 raise ValueError("The recovery point holds an unsupported path.")
             info = path.lstat()
             if stat.S_ISLNK(info.st_mode):
-                if _link_target_problem(path, os.readlink(path), base, base.name):
+                if _link_target_problem(path, os.readlink(path), base, target):
                     raise ValueError("The recovery point holds a link outside the convention.")
                 continue
             if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
@@ -534,15 +535,19 @@ def _admitted_tree(base: pathlib.Path) -> None:
 
 
 def admitted(  # noqa: C901 - one closed admission
-    stage_directory: pathlib.Path, identifier: str, application: str
+    stage_directory: pathlib.Path, identifier: str, application: str, target: str = ""
 ) -> dict[str, object]:
-    """Admit one staged file point, returning its release and private state."""
+    """Admit one staged file point, returning its release and private state.
+
+    ``identifier`` is the site the point was taken from and ``target`` the site it becomes;
+    a removed site's point therefore keeps no absolute link into its old directory (#407).
+    """
     if application not in APPLICATIONS:
         raise ValueError("The site's application is not supported.")
     base = stage_directory / "var" / "www" / identifier
     if base.is_symlink() or not base.is_dir():
         raise ValueError("The recovery point has no site directory.")
-    _admitted_tree(base)
+    _admitted_tree(base, target or identifier)
     entries = {entry.name for entry in base.iterdir()}
     allowed = {"releases", "private"} if SHARED[application] else {"releases"}
     if entries != allowed:
@@ -971,8 +976,11 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
     encoded = sys.argv[1] if argument is None else argument
     document = json.loads(gzip.decompress(base64.b64decode(encoded)))
     identifier = str(document.get("identifier", ""))
+    source = str(document.get("source") or identifier)
     repository = str(document.get("repository", ""))
     key = str(document.get("server_key", ""))
+    safety_repository = str(document.get("safety_repository") or repository)
+    safety_key = str(document.get("safety_key") or key)
     point = str(document.get("point", ""))
     scope = str(document.get("scope", ""))
     application = str(document.get("application", ""))
@@ -987,8 +995,11 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
     parts = expected_parts(document)
     if (
         IDENTIFIER.fullmatch(identifier) is None
-        or repository != f"{REPOSITORY_ROOT}/{identifier}/onsite"
-        or not key.startswith("/etc/barectl/backups/")
+        or IDENTIFIER.fullmatch(source) is None
+        or repository != f"{REPOSITORY_ROOT}/{source}/onsite"
+        or key != f"{KEY_ROOT}/{source}.key"
+        or safety_repository != f"{REPOSITORY_ROOT}/{identifier}/onsite"
+        or safety_key != f"{KEY_ROOT}/{identifier}.key"
         or POINT.fullmatch(point) is None
         or scope not in SCOPES
         or application not in APPLICATIONS
@@ -1176,7 +1187,7 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
         if tags:
             if safety_scope == "database":
                 stage("safety")
-                if not _safety_backup(document, repository, key, settings):
+                if not _safety_backup(document, safety_repository, safety_key, settings):
                     emit_result(
                         document_result(
                             document,
@@ -1205,7 +1216,7 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                     )
                     raise SystemExit(PARTIAL if failure[0] == "partial" else REFUSED)
                 stage("safety")
-                backed_up = _safety_backup(document, repository, key, settings)
+                backed_up = _safety_backup(document, safety_repository, safety_key, settings)
                 if not resume(document, settings, identifier):
                     emit_result(
                         document_result(
@@ -1249,7 +1260,7 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                 )
                 raise SystemExit(REFUSED)
             try:
-                staged = admitted(staging, identifier, application)
+                staged = admitted(staging, source, application, identifier)
             except ValueError:
                 emit_result(
                     document_result(

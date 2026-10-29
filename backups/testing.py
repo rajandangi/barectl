@@ -156,6 +156,7 @@ def record_points(
     *,
     identifier: str = "shop",
     checked_at: datetime | None = None,
+    removed: tuple[dict[str, object], ...] = (),
 ) -> BackupCheck:
     """One stored Check backups listing, as the Backups section reads it."""
     BackupCheck.objects.filter(server=server, identifier=identifier).delete()
@@ -172,6 +173,7 @@ def record_points(
             "outcome": "observed",
             "problem": "",
             "points": list(points),
+            "removed": list(removed),
         },
     )
 

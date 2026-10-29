@@ -516,6 +516,51 @@ class HttpSiteBrowserTests(BrowserTestCase):
         expect(acknowledgement).to_be_checked()
         self.assert_phone_layout()
 
+    def test_operator_takes_a_backup_before_a_deploy_with_pending_migrations(self) -> None:
+        from unittest import mock
+
+        from backups.testing import record_backups
+        from laravel.change import MIGRATION_ACKNOWLEDGEMENT
+        from operations.models import ChangePreparation
+        from operations.services import read_changes
+        from sites.ui_testing import record_deploy_review
+
+        server = Server.objects.get(name="Production")
+        record_laravel_releases(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/deployments/")
+            self.page.get_by_role("button", name="Deploy", exact=True).click()
+            expect(
+                self.page.get_by_role("heading", name="Deploy Laravel site", level=1)
+            ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        record_deploy_review(preparation, pending=("2026_10_19_000001_create_fixture_widgets",))
+        # The site's backups are enabled on the server, so Back up first is allowed.
+        record_backups(server, identifier="alpha", enabled=True)
+        self.page.reload()
+        expect(
+            self.page.get_by_role("heading", name="Deploy Laravel site", level=1)
+        ).to_be_visible()
+        # With backups on, the acknowledgement never claims there is no backup, and the
+        # confirm screen offers the one recovery point it can take first.
+        expect(self.page.get_by_text(MIGRATION_ACKNOWLEDGEMENT, exact=True)).to_have_count(0)
+        back_up = self.page.get_by_role("button", name="Back up first", exact=True)
+        back_up.focus()
+        expect(back_up).to_be_focused()
+        self.page.keyboard.press("Enter")
+        expect(
+            self.page.get_by_role("heading", name="Back up alpha before deploying", level=1)
+        ).to_be_visible()
+        queued = [row.preparation for row in read_changes(server).rows]
+        self.assertEqual(len(queued), 2)
+        self.assertEqual(
+            sorted(row.inputs.get("from_deploy") is True for row in queued), [False, True]
+        )
+        self.assert_phone_layout()
+
     def test_operator_rolls_back_to_a_release_chosen_from_the_list(self) -> None:
         from unittest import mock
 
@@ -728,11 +773,13 @@ class HttpSiteBrowserTests(BrowserTestCase):
     def test_operator_prepares_a_removal_and_types_the_domain_to_confirm(self) -> None:
         from unittest import mock
 
+        from backups.testing import record_backups
         from operations.models import ChangePreparation
         from sites.ui_testing import record_removal_review
 
         server = Server.objects.get(name="Production")
         record_http_sites(server)
+        record_backups(server, identifier="alpha", enabled=True)
         for codename in (
             "view_siteobservation",
             "view_changes",
@@ -743,7 +790,9 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
             self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/settings/")
-            expect(self.page.get_by_text("No backup exists", exact=True)).to_be_visible()
+            # With backups enabled the page promises they are kept, never that none exist.
+            expect(self.page.get_by_text("Your backups are kept", exact=True)).to_be_visible()
+            expect(self.page.get_by_text("No backup exists", exact=True)).to_have_count(0)
             button = self.page.get_by_role("button", name="Remove site", exact=True)
             button.focus()
             expect(button).to_be_focused()
@@ -755,9 +804,14 @@ class HttpSiteBrowserTests(BrowserTestCase):
             preparation.inputs,
             {"version": 1, "identifier": "alpha", "primary": "alpha.example.com"},
         )
-        record_removal_review(preparation)
+        record_removal_review(preparation, backups=True)
         self.page.reload()
         expect(self.page.get_by_role("heading", name="Remove site", level=1)).to_be_visible()
+        # The review names the repositories it keeps and the units it removes.
+        self.page.get_by_role("button", name="Show details", exact=True).click()
+        expect(self.page.get_by_text("Backup units removed", exact=True)).to_be_visible()
+        kept = "/var/lib/barectl-backups/alpha/onsite (onsite, kept)"
+        expect(self.page.get_by_text(kept)).to_be_visible()
         label = "Type alpha.example.com to confirm this removal."
         expect(self.page.get_by_text(label, exact=True)).to_be_visible()
         confirmation = self.page.get_by_label(label, exact=True)

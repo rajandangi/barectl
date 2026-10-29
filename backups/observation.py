@@ -9,6 +9,7 @@ repository.
 import importlib.resources
 import json
 import re
+import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -228,6 +229,40 @@ def read(
     return value
 
 
+REMOVED_LIMIT: Final = 8
+REMOVED_NAME: Final = re.compile(r"[a-z][a-z0-9]{2,23}")
+
+# The repositories a removed site leaves behind are evidence no passive read names: the
+# read above answers for observed sites only. One bounded root read lists every repository
+# a site once had; the controller intersects it with the sites it observed (Phase D #407).
+REMOVED_SCRIPT: Final = (
+    'for d in /var/lib/barectl-backups/*; do [ -d "$d/onsite" ] || continue; '
+    '[ -f "$d/onsite/config" ] || continue; n=${d##*/}; '
+    '[ -f "/etc/barectl/backups/$n.key" ] || continue; printf "%s\\n" "$n"; done '
+    "| LC_ALL=C sort | /usr/bin/head -c 4097"
+)
+
+
+def removed_command() -> str:
+    return "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + REMOVED_SCRIPT]))
+
+
+def removed(shell: RemoteShell, current: Sequence[str]) -> tuple[str, ...] | None:
+    """The site identifiers whose repository remains but whose site no longer exists."""
+    result = run_root(shell, removed_command())
+    if result.exit_status or result.truncated or len(result.stdout) > 4096:
+        return None
+    names = [line for line in result.stdout.splitlines() if line]
+    if (
+        len(names) > REMOVED_LIMIT
+        or not all(REMOVED_NAME.fullmatch(name) is not None for name in names)
+        or names != sorted(set(names))
+    ):
+        return None
+    present = set(current)
+    return tuple(name for name in names if name not in present)
+
+
 def valid(value: dict[str, object], identifiers: Sequence[str]) -> bool:
     if value.get("version") != 1 or set(value) not in (
         {"version", "sites"},
@@ -418,24 +453,41 @@ def observations(
         row = by_identifier.get(site.identifier)
         if row is None:
             continue
-        last = row.get("last")
-        copy = row.get("copy")
-        result.append(
-            ObservedBackup(
-                site.identifier,
-                str(row["profile"]),
-                bool(row["repository"]),
-                bool(row["key"]),
-                tuple(str(item) for item in row["problems"]),
-                bool(row["database"]),
-                str(row["database_problem"]),
-                _result(last) if isinstance(last, dict) else None,
-                offsite,
-                _copy(copy) if isinstance(copy, dict) else None,
-                integrity_of(row),
-            )
-        )
+        result.append(_observation(row, offsite))
     return tuple(result)
+
+
+def one(value: dict[str, object] | None, identifier: str) -> ObservedBackup | None:
+    """One site's backup setup from one read, without a site observation to name it."""
+    if value is None:
+        return None
+    rows = value.get("sites")
+    if not isinstance(rows, list):
+        return None
+    row = next(
+        (item for item in rows if isinstance(item, dict) and item.get("identifier") == identifier),
+        None,
+    )
+    return _observation(row, offsite_of(value)) if isinstance(row, dict) else None
+
+
+def _observation(row: dict[str, object], offsite: OffsiteStorage | None) -> ObservedBackup:
+    last = row.get("last")
+    copy = row.get("copy")
+    problems = row.get("problems")
+    return ObservedBackup(
+        str(row["identifier"]),
+        str(row["profile"]),
+        bool(row["repository"]),
+        bool(row["key"]),
+        tuple(str(item) for item in problems) if isinstance(problems, list) else (),
+        bool(row["database"]),
+        str(row["database_problem"]),
+        _result(last) if isinstance(last, dict) else None,
+        offsite,
+        _copy(copy) if isinstance(copy, dict) else None,
+        integrity_of(row),
+    )
 
 
 def integrity_of(row: dict[str, object]) -> tuple[IntegrityFinding, ...]:

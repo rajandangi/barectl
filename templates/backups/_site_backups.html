@@ -371,4 +371,49 @@
       {% endif %}
     </section>
   {% endif %}
+  {% if backups.removed and backups_can_restore %}
+    <section class="barectl-card" aria-labelledby="removed-backups-heading">
+      <h2 id="removed-backups-heading">Backups of a removed site</h2>
+      <p>
+        These backup repositories belonged to sites that are no longer on this server.
+        Barectl keeps them; restoring one into this site replaces this site's data.
+      </p>
+      {% for repository in backups.removed %}
+        <h3>{{ repository.identifier }}</h3>
+        {% if repository.problem %}<p class="usa-alert usa-alert--warning">{{ repository.problem }}</p>{% endif %}
+        {% for point in repository.points %}
+          <p>
+            {{ point.time_label }} · {{ point.scope }} · {{ point.status }}
+            {% if point.live %}(captured while the site ran){% endif %}
+          </p>
+          {% if point.restorable_elsewhere %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <input type="hidden" name="point" value="{{ point.point }}">
+              <input type="hidden" name="source" value="{{ repository.identifier }}">
+              <label class="usa-label" for="removed-restore-scope-{{ repository.identifier }}-{{ point.point }}">What to restore</label>
+              <select class="usa-select"
+                      id="removed-restore-scope-{{ repository.identifier }}-{{ point.point }}"
+                      name="scope">
+                <option value="files">Files only (the database stays as it is now)</option>
+                <option value="full">Full site (pauses the site briefly)</option>
+              </select>
+              <button type="submit" class="usa-button usa-button--outline">Restore into this site</button>
+            </form>
+          {% elif not point.has_files %}
+            <p class="usa-hint">
+              Database only, so Barectl cannot confirm which kind of site it came from.
+            </p>
+          {% endif %}
+        {% empty %}
+          <p>No recovery points were listed in this repository.</p>
+        {% endfor %}
+      {% endfor %}
+      <p class="usa-hint">
+        Check backups lists these repositories again; the list holds no repository path.
+      </p>
+    </section>
+  {% endif %}
 {% endif %}

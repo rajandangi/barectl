@@ -13,6 +13,8 @@ from typing import Final
 
 from automation import fence as automation_fence
 from automation.bodies.source import AUTOMATION_SOURCE
+from backups import observation as backup_observation
+from backups.observation import ObservedBackup
 from bootstrap.standing import Standing
 from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
@@ -28,10 +30,14 @@ from . import observation
 from .configuration import GATE_TEMPLATE, RETAINED_RELEASES, repository_locator, repository_ref
 
 SLUG: Final = "deploy_laravel_site"
-MIGRATION_ACKNOWLEDGEMENT: Final = (
-    "I understand pending migrations may change data, that rolling back code does not "
-    "reverse them, and that Barectl has no automatic backup."
+_ACKNOWLEDGEMENT_HEAD: Final = (
+    "I understand pending migrations may change data, that rolling back code does not reverse them"
 )
+MIGRATION_ACKNOWLEDGEMENT: Final = (
+    _ACKNOWLEDGEMENT_HEAD + ", and that Barectl has no automatic backup."
+)
+MIGRATION_NAME: Final = re.compile(r"[0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{6}_[a-z0-9_]{1,120}")
+BACK_UP_FIRST_LABEL: Final = "Back up first"
 BODY_SOURCE: Final = (
     AUTOMATION_SOURCE
     + "\n"
@@ -72,6 +78,12 @@ class DeployEvidence:
     commit: str | None
     resolved: bool
     runtime_version: str
+    # The current release's migrations the site's table does not record, or None when they
+    # could not be read. A Deploy knows new migrations only after it fetches, so this is
+    # the evidence the confirm screen has (Phase D #407).
+    pending: tuple[str, ...] | None = None
+    # The site's backup setup, from the same native read the Backups section uses.
+    backup: ObservedBackup | None = None
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> DeployEvidence:
@@ -105,7 +117,24 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> DeployEvidence:
         commit,
         resolved,
         _runtime_version(shell, snapshot, site_row, row, architecture),
+        observation.pending(shell, inputs.identifier),
+        _backup(shell, snapshot, inputs.identifier, architecture),
     )
+
+
+def _backup(
+    shell: RemoteShell,
+    snapshot: CollectedSnapshot,
+    identifier: str,
+    architecture: Architecture | None,
+) -> ObservedBackup | None:
+    """The site's backup setup, from the same bounded read the Backups section uses."""
+    from databases import observation as database_observation
+
+    engines = database_observation.installed_engines(snapshot)
+    engine = engines[0].engine if len(engines) == 1 and engines[0].managed else ""
+    value = backup_observation.read(shell, (identifier,), engine, architecture)
+    return backup_observation.one(value, identifier)
 
 
 def _runtime_version(
@@ -243,11 +272,19 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     refusals = _eligibility(evidence)
     site = evidence.site
     row = evidence.laravel
+    pending = list(evidence.pending or ())
+    point, at = _recovery_point(evidence.backup)
+    enabled = evidence.backup is not None and evidence.backup.enabled
     document: dict[str, object] = {
         "version": 1,
         "body_sha256": BODY_SHA256,
         "identifier": inputs.identifier,
-        "acknowledgement": MIGRATION_ACKNOWLEDGEMENT,
+        "acknowledgement": migration_acknowledgement(pending, enabled, point, at),
+        "pending_migrations": pending,
+        "backups_enabled": enabled,
+        "recovery_point": point,
+        "recovery_at": at,
+        "back_up_first": enabled and bool(pending),
     }
     effects: tuple[DeclaredEffect, ...] = ()
     repository = str(row["repository"]) if row else ""
@@ -289,7 +326,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             gate=GATE_TEMPLATE,
             caddy=caddy,
             https=bool(site["https"]),
-            details=_details(row, commit, prune, required, bool(inputs.migrations)),
+            details=_details(row, commit, prune, required, bool(inputs.migrations), pending),
         )
         if not refusals:
             effects = (
@@ -343,10 +380,62 @@ def _disk_required() -> int:
     return 512 * 1024 * 1024
 
 
+def _recovery_point(backup: ObservedBackup | None) -> tuple[str, str]:
+    """The newest complete point Barectl itself reported, if there is one."""
+    if backup is None or backup.last is None:
+        return "", ""
+    last = backup.last
+    if not last.succeeded or not last.point:
+        return "", ""
+    return last.point, last.at
+
+
+def _point_label(at: str) -> str:
+    from datetime import UTC, datetime
+
+    from django.utils import timezone
+
+    try:
+        parsed = datetime.fromisoformat(at)
+    except ValueError:
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return timezone.localtime(parsed).strftime("%-d %b %Y, %H:%M")
+
+
+def migration_acknowledgement(
+    pending: list[str], backups_enabled: bool, point: str, at: str
+) -> str:
+    """The confirmed sentence, naming the recovery point once the site has backups (#358)."""
+    if not backups_enabled:
+        return MIGRATION_ACKNOWLEDGEMENT
+    label = _point_label(at)
+    if point and label:
+        return (
+            f"{_ACKNOWLEDGEMENT_HEAD}. Barectl's newest recovery point is {label} "
+            f"({point[:8]}), and you can restore it if the migration goes wrong."
+        )
+    if pending:
+        return (
+            f"{_ACKNOWLEDGEMENT_HEAD}. Backups are on, and {BACK_UP_FIRST_LABEL} takes a full "
+            "recovery point before anything changes."
+        )
+    return (
+        f"{_ACKNOWLEDGEMENT_HEAD}. Backups are on for this site, but it has no complete "
+        "recovery point yet."
+    )
+
+
 def _details(
-    row: dict[str, object], commit: str, prune: list[str], required: int, migrations: bool
+    row: dict[str, object],
+    commit: str,
+    prune: list[str],
+    required: int,
+    migrations: bool,
+    pending: list[str],
 ) -> list[dict[str, str]]:
-    return [
+    review = [
         {"label": "Repository", "value": str(row["repository"])},
         {"label": "Branch", "value": str(row["branch"])},
         {"label": "Commit", "value": commit},
@@ -360,6 +449,9 @@ def _details(
             else "Off, pending migrations are reported in the run's journal and not run",
         },
     ]
+    if pending:
+        review.append({"label": "Pending now", "value": ", ".join(pending)})
+    return review
 
 
 _DOCUMENT_KEYS: Final = (
@@ -386,13 +478,38 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     if (
         document.get("version") != 1
         or document.get("body_sha256") != BODY_SHA256
-        or document.get("acknowledgement") != MIGRATION_ACKNOWLEDGEMENT
+        or document.get("acknowledgement") != _reviewed_acknowledgement(document)
     ):
         raise ValueError("The deploy review is not a valid immutable selection.")
     value = {key: document.get(key) for key in _DOCUMENT_KEYS}
     value["automation_fence"] = automation_fence.checked(document)
     encoded = base64.b64encode(gzip.compress(json.dumps(value).encode(), mtime=0)).decode()
     return NativeBody(BODY_BYTES.rstrip(b"\n"), (encoded,))
+
+
+def _reviewed_acknowledgement(document: dict[str, object]) -> str:
+    """The sentence this review's own recorded facts produce, or the legacy constant."""
+    pending = document.get("pending_migrations")
+    if pending is None:
+        # A review prepared before backups named the gap (#358): still a valid selection.
+        return MIGRATION_ACKNOWLEDGEMENT
+    enabled = document.get("backups_enabled")
+    point = document.get("recovery_point")
+    at = document.get("recovery_at")
+    if (
+        not isinstance(pending, list)
+        or len(pending) > 64
+        or not all(isinstance(name, str) and MIGRATION_NAME.fullmatch(name) for name in pending)
+        or type(enabled) is not bool
+        or not isinstance(point, str)
+        or (point and re.fullmatch(r"[0-9a-f]{16}", point) is None)
+        or not isinstance(at, str)
+        or len(at) > 40
+        or (at and not point)
+        or document.get("back_up_first") is not (enabled and bool(pending))
+    ):
+        raise ValueError("The deploy review's migration facts are not the reviewed ones.")
+    return migration_acknowledgement(pending, enabled, point, at)
 
 
 def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:

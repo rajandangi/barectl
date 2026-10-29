@@ -413,7 +413,10 @@ def _recorded_inputs(preparation: ChangePreparation) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
-def record_deploy_review(preparation: ChangePreparation) -> ChangeReview:
+def record_deploy_review(
+    preparation: ChangePreparation, *, pending: tuple[str, ...] | None = ()
+) -> ChangeReview:
+    """The review a Deploy preparation would publish, with its migration evidence."""
     from laravel.review_testing import deploy_draft
 
     inputs = _recorded_inputs(preparation)
@@ -422,6 +425,7 @@ def record_deploy_review(preparation: ChangePreparation) -> ChangeReview:
         deploy_draft(
             str(inputs.get("identifier", "")),
             migrations=bool(inputs.get("migrations", True)),
+            pending=pending,
         ),
     )
 
@@ -436,7 +440,7 @@ def record_rollback_review(preparation: ChangePreparation) -> ChangeReview:
     )
 
 
-def record_removal_review(preparation: ChangePreparation) -> ChangeReview:
+def record_removal_review(preparation: ChangePreparation, *, backups: bool = False) -> ChangeReview:
     from sites.removal_testing import removal_draft
 
-    return record_review(preparation, removal_draft())
+    return record_review(preparation, removal_draft(backups=backups))

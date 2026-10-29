@@ -1,5 +1,6 @@
 """Deploy and Roll back evidence and reviews shared by the fast and browser tests."""
 
+from backups.observation import BackupResult, ObservedBackup
 from bootstrap.standing import Standing
 from laravel import change, rollback
 from operations.engine import ReviewDraft
@@ -70,7 +71,12 @@ def site_record(identifier: str = "s4alpha") -> SiteRecord:
     }
 
 
-def deploy_evidence(identifier: str = "s4alpha") -> change.DeployEvidence:
+def deploy_evidence(
+    identifier: str = "s4alpha",
+    *,
+    pending: tuple[str, ...] | None = (),
+    backup: ObservedBackup | None = None,
+) -> change.DeployEvidence:
     return change.DeployEvidence(
         Standing.TARGET_STACK,
         Architecture.X86_64,
@@ -82,12 +88,44 @@ def deploy_evidence(identifier: str = "s4alpha") -> change.DeployEvidence:
         "b" * 40,
         True,
         "",
+        pending,
+        backup,
     )
 
 
-def deploy_draft(identifier: str = "s4alpha", *, migrations: bool = True) -> ReviewDraft:
+def backup(
+    identifier: str = "s4alpha",
+    *,
+    enabled: bool = True,
+    result: BackupResult | None = None,
+) -> ObservedBackup:
+    """One site's backup setup, as the Deploy review reads it."""
+    return ObservedBackup(
+        identifier,
+        "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1" if enabled else "",
+        enabled,
+        enabled,
+        (),
+        True,
+        "",
+        result,
+    )
+
+
+def deploy_draft(
+    identifier: str = "s4alpha",
+    *,
+    migrations: bool = True,
+    pending: tuple[str, ...] | None = (),
+    backup_result: BackupResult | None = None,
+) -> ReviewDraft:
     return change.review(
-        deploy_evidence(identifier), PreparationInputs("", identifier, migrations=migrations)
+        deploy_evidence(
+            identifier,
+            pending=pending,
+            backup=backup(identifier, result=backup_result) if pending else None,
+        ),
+        PreparationInputs("", identifier, migrations=migrations),
     )
 
 
