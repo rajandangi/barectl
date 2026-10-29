@@ -12,6 +12,7 @@ staticfiles/
 node_modules/
 static/dist/
 .quiet-run/
+/exports/
 .DS_Store
 *.pem
 *.key

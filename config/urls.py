@@ -6,12 +6,15 @@ from automation.views import prepare_schedule
 from automation.worker_views import prepare_workers
 from backups.schedule import prepare_schedule as prepare_backup_schedule
 from backups.views import (
+    cancel_export,
     check_now,
+    download_export,
     prepare_back_up_first,
     prepare_backup,
     prepare_copy,
     prepare_disable_retention,
     prepare_enable,
+    prepare_export,
     prepare_keep,
     prepare_reopen,
     prepare_restore,
@@ -409,6 +412,21 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/backups/check/",
         check_now,
         name="site_backups_check",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/export/prepare/",
+        prepare_export,
+        name="site_backups_export_prepare",
+    ),
+    path(
+        "servers/<int:pk>/backups/exports/<str:token>/cancel/",
+        cancel_export,
+        name="site_backups_export_cancel",
+    ),
+    path(
+        "servers/<int:pk>/backups/exports/<str:token>/<str:artifact>/",
+        download_export,
+        name="site_backups_export_download",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/backups/copy/prepare/",

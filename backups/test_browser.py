@@ -1,5 +1,6 @@
 """Journey: Backups on a site, from not backed up through an explicit check (#396)."""
 
+import pathlib
 import tempfile
 from typing import override
 
@@ -416,6 +417,73 @@ class BackupsBrowserTests(BrowserTestCase):
             {"version": 1, "identifier": "shop", "point": "0123456789abcdef"},
         )
         self.assert_no_native_terms()
+
+    def test_an_export_is_prepared_and_downloaded_from_its_recovery_point(self) -> None:
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import downloads
+        from .bodies import export as export_body
+        from .models import BackupExport
+
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        record_points(server, (point(scope="full", parts=("database", "files")),))
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_text("Saved here")).to_be_visible()
+        self.assert_no_native_terms()
+        self.page.get_by_role("button", name="Export", exact=True).click()
+        expect(self.page.get_by_role("heading", name="Export", level=1)).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "export_recovery_point")
+        self.assertEqual(
+            preparation.inputs,
+            {"version": 1, "identifier": "shop", "point": "0123456789abcdef"},
+        )
+        self.assert_no_native_terms()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        expect(self.page.get_by_role("heading", name="Export", level=1)).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+        self.page.set_viewport_size({"width": 1280, "height": 800})
+
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(override_settings(EXPORT_STAGING_PATH=directory))
+        token = "d" * 32
+        staged = downloads.local_root(token)
+        staged.mkdir(parents=True)
+        (staged / export_body.FILES_NAME).write_bytes(b"tar-content")
+        (staged / export_body.DATABASE_NAME).write_bytes(b"dump-content")
+        BackupExport.objects.create(
+            server=server,
+            identifier="shop",
+            point="0123456789abcdef",
+            token=token,
+            files_bytes=11,
+            database_bytes=12,
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        self.assert_no_native_terms()
+        with self.page.expect_download() as download_info:
+            self.page.get_by_role("link", name="Download files").click()
+        download = download_info.value
+        self.assertEqual(download.suggested_filename, "shop-0123456789abcdef-files.tar")
+        self.assertEqual(pathlib.Path(download.path()).read_bytes(), b"tar-content")
+        url = f"{self.live_server_url}/servers/{server.pk}/backups/exports/{token}/database/"
+        response = self.page.request.get(url)
+        self.assertEqual(response.status, 200)
+        self.assertIn("no-store", response.headers["cache-control"])
+        self.assertEqual(response.body(), b"dump-content")
+
+        BackupExport.objects.filter(token=token).update(
+            expires_at=timezone.now() - timedelta(minutes=1)
+        )
+        expired = self.page.request.get(url)
+        self.assertEqual(expired.status, 404)
 
     def test_a_gated_restore_offers_the_same_one_reopen_action(self) -> None:
         server = Server.objects.get(name="Production")

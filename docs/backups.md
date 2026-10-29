@@ -1,8 +1,8 @@
-# Backups (implemented, #396, #399, #400, #401, #402, #403, #404, #405, #406, #407 and #408)
+# Backups (implemented, #396, #399, #400, #401, #402, #403, #404, #405, #406, #407, #408 and #409)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
-points. The planned Phase D behaviour, including retention, restoring files and export, is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358);
+points. The planned Phase D behaviour is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358);
 this page describes only what is built.
 
 ## Offsite storage
@@ -300,8 +300,35 @@ warns that the target keeps its own domain and that Barectl never rewrites appli
 and the source passphrase is typed again on apply because Barectl does not store it. Applying
 re-lists the source repository read-only before the safety backup and refuses a missing,
 incomplete, different-kind or different-engine-major point before touching the target. The
-source database version is checked when the repository is opened. Exporting a point remains
-planned.
+source database version is checked when the repository is opened.
+
+## Export
+
+**Export** on a recovery point copies it to this computer for local development. It is one
+reviewed change that declares the new **site data leaves the server** effect, so its consent is
+**Shared** even though it names one site; a Site operator can prepare it but cannot apply it.
+There is no new permission name and no public URL.
+
+The server restores the point's files snapshot into a private root-only stage and admits it
+with the restore rules. It builds one `files.tar` archive of the release (and, for Laravel,
+the shared `storage/` directory) and one `database.sql` dump when the point has a database
+part. It never adds the site's private configuration: WordPress's `wp-config.php`, Laravel's
+`.env` and its cached configuration. A canary over the archive refuses the export if a private
+file's bytes or name are present. One export is capped at 48 MiB in total (32 MiB for each
+artifact); a larger point is refused rather than moved.
+
+The worker moves the archive and dump through the same `RemoteShell` connection it already
+uses, in bounded 32 KiB reads, and keeps them in private controller staging. Each read is one
+fixed `dd`/`base64` command, so the existing command timeout and 64 KiB output bound apply;
+there is no second SSH connection or transfer service. The transfer checks the size and
+SHA-256 of each artifact and removes the server stage on every path. A stage left by a killed
+worker is bounded and pruned by the next export of that site.
+
+The Backups section lists the export with **Download files** and **Download database**. Each
+download needs `operations.change_shared`, is marked no-store and attachment, and expires
+after 30 minutes. A completed download removes its file; **Cancel export** removes the copy
+immediately; expiry removes it without connecting to the server. Nothing is stored in the
+database as a blob.
 
 ## Retention
 

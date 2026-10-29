@@ -391,6 +391,43 @@ class BackupCase(ScenarioTestCase):
                 return value
         raise AssertionError("The offsite config has no prefix.")
 
+    def export_point(self, point: str) -> Path:
+        """Export one point through the review and the bounded transfer (#409).
+
+        The archive and dump land in this controller's private staging. The server stage is
+        removed by the transfer, and the local stage is removed by cleanup.
+        """
+        from backups import downloads, export
+        from backups.bodies import export as export_body
+
+        review = apply_change(
+            self,
+            export.EXPORT,
+            PreparationInputs("", self.identifier, point=point),
+            timeout=120,
+        )
+        token = str(review.document["token"])
+        directory = downloads.local_root(token)
+        archive = directory / export_body.FILES_NAME
+        dump = directory / export_body.DATABASE_NAME
+        self.assertTrue(archive.is_file(), "The export wrote no files archive.")
+        self.assertTrue(dump.is_file(), "The export wrote no database dump.")
+        self.assertEqual(
+            self.native(
+                f"test ! -e {export_body.stage_path(self.identifier, token)}; echo $?"
+            ).strip(),
+            "0",
+            "The server kept the export stage.",
+        )
+        self.addCleanup(downloads._remove_local, token)
+        return archive
+
+    def archive_names(self, archive: Path) -> list[str]:
+        import tarfile
+
+        with tarfile.open(archive, "r") as bundle:
+            return bundle.getnames()
+
 
 @tag(SCENARIO_TAG)
 class DisasterRecovery(BackupCase):
@@ -835,7 +872,13 @@ class BackupLifecycle(BackupCase):
         self.assertEqual(len(full), 1)
         self.assertTrue(full[0]["complete"])
         self.assertEqual(full[0]["parts"], ["database", "files"])
+        full_point = str(full[0]["point"])
         self.assertEqual(self.site_status("/"), 200)
+        # An export moves the same point to this computer without its private configuration;
+        # the server stage is removed and the archive holds the release, not a secret.
+        archive = self.export_point(full_point)
+        self.assertIn("releases/initial/public/hello.txt", self.archive_names(archive))
+        self.assertFalse(any("private" in name for name in self.archive_names(archive)))
         collected = self.observe()
         backup = self.backup_row(collected)
         if backup.last is None:
@@ -1461,6 +1504,15 @@ class WordPressFullRestore(BackupCase):
         self.assertEqual(len(points), 1)
         self.assertTrue(points[0]["complete"])
         point = str(points[0]["point"])
+        private = self.native(f"cat /var/www/{self.identifier}/private/wp-config.php")
+        secret = next(
+            line.split("'")[3] for line in private.splitlines() if "define( 'AUTH_KEY'" in line
+        )
+        export = self.export_point(point)
+        names = self.archive_names(export)
+        self.assertTrue(any(name.startswith("releases/") for name in names))
+        self.assertFalse(any("wp-config.php" in name for name in names))
+        self.assertNotIn(secret.encode(), export.read_bytes())
         serving = self.native(f"readlink /var/www/{self.identifier}/current").strip()
         title = self.option()
         private_digest = self.native(
@@ -1602,10 +1654,10 @@ class WordPressFullRestore(BackupCase):
             "0",
         )
         with self.shell() as shell:
-            names = backup_observation.removed(shell, ())
+            removed_names = backup_observation.removed(shell, ())
             listing = run_root(shell, backup_check.listing_command(self.identifier))
         self.assertEqual(before_remove, ())
-        self.assertEqual(names, (self.identifier,))
+        self.assertEqual(removed_names, (self.identifier,))
         kept = backup_check.points(backup_check.parse_listing(listing.stdout) or [])
         self.assertIn(str(full_point["point"]), {str(row["point"]) for row in kept})
 

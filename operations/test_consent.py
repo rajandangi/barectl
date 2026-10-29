@@ -62,6 +62,24 @@ class ConsentDerivationTests(TestCase):
         )
         self.assertEqual(consent_of(effects), Consent.DESTRUCTIVE)
 
+    def test_data_leaving_the_server_needs_shared_consent(self) -> None:
+        leaving = DeclaredEffect(
+            Scope.SITE, "Copy this site's data off the server.", ("alpha",), leaves_server=True
+        )
+        self.assertEqual(consent_of((leaving,)), Consent.SHARED)
+        self.assertEqual(affected_sites_of((leaving,)), ("alpha",))
+        # The Site operator preset holds change_site only, so Shared consent keeps export
+        # away from it without a new permission name (Phase D #358, #409).
+        self.assertNotIn(CHANGE_SHARED, CONSENT_PERMISSIONS[Consent.SITE])
+        self.assertIn(CHANGE_SHARED, CONSENT_PERMISSIONS[consent_of((leaving,))])
+
+    def test_data_loss_outranks_data_leaving_the_server(self) -> None:
+        effects = (
+            DeclaredEffect(Scope.SITE, "Copy data off the server.", ("alpha",), leaves_server=True),
+            DeclaredEffect(Scope.SITE, "Replace data.", ("alpha",), destroys_data=True),
+        )
+        self.assertEqual(consent_of(effects), Consent.DESTRUCTIVE)
+
     def test_a_shared_effect_outranks_a_site_effect(self) -> None:
         effects = (effect(Scope.SITE, "alpha"), effect(Scope.SHARED))
         self.assertEqual(consent_of(effects), Consent.SHARED)
