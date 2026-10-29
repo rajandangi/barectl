@@ -824,7 +824,9 @@ def laravel_release(directory: str) -> bool:
     )
 
 
-def directory_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str, str]:
+def directory_shape(  # noqa: C901 - one recognition of the whole release layout
+    settings: SimpleNamespace, uid: int, gid: int
+) -> tuple[str, str]:
     current = pathlib.Path(settings.directory) / "current"
     try:
         target = os.readlink(current)
@@ -843,10 +845,12 @@ def directory_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str,
     # only ``public``: every other directory is traversal-only and PHP source is the site
     # user's (Phase B; docs/adr/0040-classify-laravel-release-permissions.md).
     classified = laravel_release(release)
+    # Every release Barectl creates or restores belongs to the site user (Phase D #401).
+    # A root-owned release is the earlier form and stays recognizable on existing sites.
+    release_forms = ((uid, gid, 0o711), (0, 0, 0o755))
     directories = (
         (settings.directory, 0, 0, 0o755),
         (settings.directory + "/releases", 0, 0, 0o755),
-        (release, uid, gid, 0o711) if classified else (release, 0, 0, 0o755),
         (release + "/public", uid, caddy_gid, 0o2750),
         (settings.directory + "/private", uid, gid, 0o700),
         (settings.directory + "/private/sessions", uid, gid, 0o700),
@@ -859,6 +863,13 @@ def directory_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str,
             return "partial", "A required site directory is absent."
         if not metadata_matches(path, owner, group, mode, stat.S_IFDIR):
             return "unsupported", "A site directory has unsupported ownership or permissions."
+    if fingerprint(release) is None:
+        return "partial", "A required site directory is absent."
+    if not any(
+        metadata_matches(release, owner, group, mode, stat.S_IFDIR)
+        for owner, group, mode in release_forms
+    ):
+        return "unsupported", "A site directory has unsupported ownership or permissions."
     for path in laravel_sources(release) if classified else ():
         if fingerprint(path) is None:
             return "partial", "A required site file is absent."
@@ -1990,7 +2001,7 @@ def create_layout(settings: SimpleNamespace) -> int:
         ("/var/www", "root", "root", "755"),
         (settings.directory, "root", "root", "755"),
         (settings.directory + "/releases", "root", "root", "755"),
-        (settings.directory + "/releases/initial", "root", "root", "755"),
+        (settings.directory + "/releases/initial", settings.account, settings.account, "711"),
         (settings.directory + "/releases/initial/public", settings.account, "caddy", "2750"),
         (settings.directory + "/private", settings.account, settings.account, "700"),
         (settings.directory + "/private/sessions", settings.account, settings.account, "700"),

@@ -156,10 +156,9 @@ root-only staging directory and admitted there: absolute or traversing paths, li
 the convention's own, device files, FIFOs, sockets, setuid and setgid files are all refused
 while the site still runs. The site is then paused and drained exactly as a full capture does.
 
-- **Files** become a new release directory in the site's release layout. Its files belong to
-  the target site user whatever the archive recorded; a Laravel release is site-owned, while
-  a plain or WordPress release directory keeps the root-owned entry discovery recognizes.
-  Root performs only the `current` switch, as Deploy does. The release that was serving stays
+- **Files** become a new release directory in #356's site-owned release form, owned by the
+  target site user whatever the archive recorded. Root performs only the `current` switch,
+  as Deploy does. The release that was serving stays
   retained, and the restored release counts toward Deploy's retention of `current` plus five. Laravel's shared `.env`, `storage/` and
   `bootstrap/cache` are replaced as a whole, not overlaid. WordPress's private configuration
   file is replaced but the target's own database settings in it are kept, because the site

@@ -21,7 +21,7 @@
     "logs/read.py": "bca3174ebb0e2fc4fca8ccb766965be9e0cbe815f611608c2f6b188992f86ecb",
     "runtimes/observation.py": "f96262d7529bbd3dd9433eea67b6e0ae3a1cfd992afcc523e0c14b012b955841",
     "sites/bodies/admission.py": "4d0901b9b088660d518ec3c234a9c9557a9e15c7460ed44f6c0dd597141974dc",
-    "sites/bodies/common.py": "694a3e4bd94ae56761d71af56a508a5b8e5a16eda27c2f434df1dd50e6ff52d6",
+    "sites/bodies/common.py": "dd2988e15c84cedf286798513a97d54b47a57876bae0278d3185b0d1f7be5539",
     "sites/bodies/logrotate.py": "8938568127e758f9ead603712a61d8276d9fbfb967531d4cd8b47a7d112d3b8f",
     "sites/bodies/node.py": "9004ee87dfa0e018397ba548f4a8b09b441e98651344cf59c65b543b8ded7df7",
     "sites/bodies/php_runtime.py": "923779b42a16c2aecd4986ff1ecd8c965f8b05c0a3d3b3fec7ddcb4eb3d47ac6",

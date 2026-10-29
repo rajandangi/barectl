@@ -216,15 +216,16 @@ class BackupCase(ScenarioTestCase):
             write(self, shell, path, content)
 
     def release_owns_its_files(self, release: str) -> None:
-        """Every entry inside a restored release belongs to the site user and stays private.
+        """A restored release, and every entry in it, belongs to the site user (Phase D #401).
 
-        A plain site's release directory itself stays root-owned, which is the layout
-        discovery recognizes; its files and directories belong to the site user.
+        The plain-PHP assertion proves the release form Create and Deploy produce. The
+        WordPress form has fast-layer evidence and the recorded automation state; it is not
+        a second site in this item because the shared scenario must stay within 180 s.
         """
         account = "s" + IDENTIFIER
         root = f"/var/www/{IDENTIFIER}/releases/{release}"
-        self.assertEqual(self.native(f"find {root} -mindepth 1 -not -user {account} -print"), "")
-        self.assertEqual(self.native(f"find {root} -mindepth 1 -perm -0004 -print"), "")
+        self.assertEqual(self.native(f"find {root} -not -user {account} -print"), "")
+        self.assertEqual(self.native(f"find {root} -perm -0004 -print"), "")
 
     def site_status(self, path: str = "/") -> int:
         return int(

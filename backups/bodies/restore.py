@@ -786,11 +786,6 @@ def place(
     if application == "laravel":
         _link_shared(target, settings)
     classify_release(target, application, owner, group, caddy)
-    if application != "laravel":
-        # A plain or WordPress release directory stays root-owned, which is the shape
-        # discovery already recognizes; every file inside it belongs to the site user.
-        os.chown(target, 0, 0)
-        os.chmod(target, 0o755)  # noqa: S103 - the reviewed root-owned release entry
     staged_shared = staged.get("shared")
     if not isinstance(staged_shared, dict):
         raise ValueError("The recovery point's private files are incomplete.")
