@@ -299,6 +299,30 @@ class Handler(BaseHTTPRequestHandler):
             self._error(404, "NoSuchKey", "The object does not exist.")
             return
         data = path.read_bytes()
+        requested = self.headers.get("Range", "")
+        if requested.startswith("bytes="):
+            start_text, _, end_text = requested.removeprefix("bytes=").partition("-")
+            try:
+                start = int(start_text or "0")
+                end = min(int(end_text) if end_text else len(data) - 1, len(data) - 1)
+            except ValueError:
+                self._error(416, "InvalidRange", "The requested range is not valid.")
+                return
+            if start > end or start >= len(data):
+                self._error(416, "InvalidRange", "The requested range is not satisfiable.")
+                return
+            self._send(
+                206,
+                data[start : end + 1],
+                content_type="application/octet-stream",
+                headers={
+                    "ETag": self._md5(path),
+                    "Last-Modified": formatdate(path.stat().st_mtime, usegmt=True),
+                    "Accept-Ranges": "bytes",
+                    "Content-Range": f"bytes {start}-{end}/{len(data)}",
+                },
+            )
+            return
         self._send(
             200,
             data,
@@ -306,6 +330,7 @@ class Handler(BaseHTTPRequestHandler):
             headers={
                 "ETag": self._md5(path),
                 "Last-Modified": formatdate(path.stat().st_mtime, usegmt=True),
+                "Accept-Ranges": "bytes",
             },
         )
 
