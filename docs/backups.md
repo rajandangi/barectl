@@ -1,10 +1,10 @@
-# Backups (implemented, #396 and #399)
+# Backups (implemented, #396, #399 and #400)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, and its recovery points. The planned
-Phase D behaviour, including schedules, retention, restores, offsite storage and export, is
-the [Phase D specification](https://github.com/rajandangi/barectl/issues/358); this page
-describes only what is built.
+Phase D behaviour, including schedules, retention, restoring files, offsite storage and
+export, is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358);
+this page describes only what is built.
 
 ## Enable backups
 
@@ -81,6 +81,33 @@ Caddy file. It never starts background work: Scheduled tasks or Queue workers as
 run again, so a half-migrated or half-copied site is never served with its work resumed
 unreviewed.
 
+## Restore database only
+
+Each listed **database-only** or **full site** recovery point offers **Restore** for its
+database. It is one reviewed **Destructive** change with a typed confirmation of the
+site's primary domain. The review names the exact recovery point and target site, what is
+replaced (the site's own database; other sites' databases are not touched), the matching
+site kind and database engine major, the free disk it keeps, and the expected downtime. It
+says whether a safety backup will be taken: an empty target skips it and the review says so.
+
+Applying re-lists the point under the site's `.deploy.lock` and refuses a missing,
+incomplete or different-engine-major copy before the site is touched. When the target holds
+data it takes and verifies a database-only safety backup first. It then pauses and drains
+the site exactly as a full capture does, replaces the site's own database with the point's
+data and verifies three findings separately:
+
+- the import finished;
+- the data checks passed (the database holds the tables the point contained);
+- the site answered its readiness check through its private admission path.
+
+The database import streams `restic dump` into the site's own engine client as the site's
+Linux user over the local socket, as the `s<id>` principal, never a superuser, and needs no
+network when the point is onsite. Only after all three findings does the gate open and the
+site's background work resume. A restore that stops partway stays gated with one sentence
+and **Reopen site**, exactly like an interrupted full capture; **Check what happened**
+inspects the original run and never submits it again. Restoring files only, full-site
+restores, cross-server restores and exporting a point remain planned.
+
 ## Restic results
 
 Restic's exit codes map to the engine's result classes: `0` succeeded, `3` partial (a
@@ -121,10 +148,12 @@ reconstructs that backups are enabled and the last result from this native evide
 ## Native evidence
 
 The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
-a database-only capture, `backups/bodies/full.py` for a paused full capture and
-`backups/bodies/reopen.py` for reopening a paused site; each prints its stages and a result
-line. The read is `backups/bodies/observe.py`, shared with the database binding's pure
-catalog reader. The first shared Phase D native scenario is `disposable/test_backups.py`.
+a database-only capture, `backups/bodies/full.py` for a paused full capture,
+`backups/bodies/restore.py` for a database restore and `backups/bodies/reopen.py` for
+reopening a paused site; each prints its stages and a result line. The pause helpers shared by
+the full capture and the restore are `backups/bodies/paused.py`. The read is
+`backups/bodies/observe.py`, shared with the database binding's pure catalog reader. The first
+shared Phase D native scenario is `disposable/test_backups.py`.
 On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured

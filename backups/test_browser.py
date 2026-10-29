@@ -13,7 +13,7 @@ from operations.models import ChangePreparation
 from servers.models import Server
 
 from . import check
-from .testing import record_backups, result
+from .testing import point, record_backups, record_points, result
 
 
 @tag("browser")
@@ -31,6 +31,7 @@ class BackupsBrowserTests(BrowserTestCase):
             "view_changes",
             "change_site",
             "change_shared",
+            "change_destructive",
             "manage_secrets",
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
@@ -124,3 +125,49 @@ class BackupsBrowserTests(BrowserTestCase):
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
+
+    def test_a_listed_point_restores_its_database_through_its_confirmation(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        record_points(server, (point(),))
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_text("Saved here")).to_be_visible()
+        self.assert_no_native_terms()
+        self.page.get_by_role("button", name="Restore", exact=True).click()
+        expect(
+            self.page.get_by_role("heading", name="Restore the database of shop")
+        ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "restore_database")
+        self.assertEqual(
+            preparation.inputs,
+            {"version": 1, "identifier": "shop", "point": "0123456789abcdef"},
+        )
+        self.assert_no_native_terms()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        expect(
+            self.page.get_by_role("heading", name="Restore the database of shop")
+        ).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+    def test_a_gated_restore_offers_the_same_one_reopen_action(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(
+            server,
+            enabled=True,
+            gated=True,
+            last=result(result_class="partial", reason="restore_paused"),
+        )
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(
+            self.page.get_by_text(
+                "This stopped after pausing the site to restore its database. Nothing after it ran."
+            )
+        ).to_be_visible()
+        self.page.get_by_role("button", name="Reopen site").click()
+        expect(self.page.get_by_role("heading", name="Reopen shop")).to_be_visible()
+        self.assert_no_native_terms()

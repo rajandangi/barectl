@@ -1,8 +1,8 @@
-"""Backups lifecycle: enable, take a database-only point, and reconstruct it (#396).
+"""Backups lifecycle: enable, capture, restore and reconstruct from native evidence.
 
 docs/quality.md#native-layer. This is the first shared Phase D scenario; later slices extend
-it with full captures, restore, retention and disaster recovery. Each check is an
-operator-visible outcome on a real Ubuntu 26.04 host.
+it with retention and disaster recovery. Each check is an operator-visible outcome on a real
+Ubuntu 26.04 host.
 """
 
 import json
@@ -108,6 +108,16 @@ class BackupCase(ScenarioTestCase):
             self, change.BACK_UP_FULL, PreparationInputs("", IDENTIFIER), timeout=150
         )
 
+    def restore_database(self, point: str) -> ChangeReview:
+        from backups import restore
+
+        return apply_change(
+            self,
+            restore.RESTORE,
+            PreparationInputs("", IDENTIFIER, point=point),
+            timeout=180,
+        )
+
     def site_status(self, path: str = "/") -> int:
         return int(
             self.native(
@@ -204,6 +214,7 @@ class BackupLifecycle(BackupCase):
         points = check.points(parsed or [])
         self.assertEqual(len(points), 1)
         self.assertTrue(points[0]["complete"])
+        database_point = points[0]["point"]
         # A fresh controller keeps no local change history and still sees the same state.
         from operations.models import ChangeReview as Review
         from operations.models import ChangeRun
@@ -280,6 +291,46 @@ class BackupLifecycle(BackupCase):
         self.assertIn("respond 503", self.native(f"cat /etc/caddy/sites/{IDENTIFIER}.caddy"))
         apply_change(self, reopen.REOPEN_SITE, PreparationInputs("", IDENTIFIER), timeout=60)
         self.assertEqual(self.site_status("/"), 200)
+        # A database-only restore replaces the point's data, takes a safety copy first and
+        # leaves the site serving. The import runs as the site principal, not a superuser.
+        self.native(
+            f"{MYSQL} -e "  # noqa: S608 - checked fixture statement in a disposable database
+            + shlex.quote(
+                "UPDATE recovery_check SET note='after-the-point' WHERE id=7; "
+                "CREATE TABLE after_the_point (id INT PRIMARY KEY)"
+            )
+            + " s"
+            + IDENTIFIER
+        )
+        before_restore = len(self.points())
+        self.restore_database(str(database_point))
+        self.assertEqual(self.site_status("/"), 200)
+        self.assertEqual(
+            self.native(
+                f"{MYSQL} -N -B -e "  # noqa: S608 - checked fixture query in a disposable database
+                + shlex.quote("SELECT note FROM recovery_check WHERE id=7")
+                + " s"
+                + IDENTIFIER
+            ).strip(),
+            "before-the-backup",
+        )
+        query = (
+            f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='s{IDENTIFIER}' "  # noqa: S608
+            "AND TABLE_NAME='after_the_point'"
+        )
+        self.assertEqual(
+            self.native(f"{MYSQL} -N -B -e " + shlex.quote(query)).strip(),
+            "0",
+        )
+        after_restore = self.points()
+        safety = [row for row in after_restore if row["origin"] == "safety"]
+        self.assertEqual(len(safety), 1)
+        self.assertEqual(safety[0]["scope"], "database")
+        self.assertEqual(len(after_restore), before_restore + 1)
+        journal = self.native("journalctl --no-pager -o cat --grep '^barectl-result ' | tail -n 20")
+        self.assertIn('"kind":"restore"', journal)
+        self.assertIn("restore_done", journal)
+        self.assertNotIn(PASSPHRASE, journal)
 
     def points(self) -> list[dict[str, object]]:
         from backups import check

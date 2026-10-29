@@ -424,6 +424,35 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to backups",
         after_home=Home.SITE_BACKUPS,
     ),
+    "restore_database": ChangeWords(
+        title="Restore the database of {site}",
+        summary=(
+            (
+                "Barectl replaces this site's database with the recovery point you chose. Any "
+                "table or view it does not contain is removed; other sites' databases are "
+                "not touched."
+            ),
+            (
+                "The site shows a maintenance page while the data is imported and checked. If "
+                "the restore stops partway, the site stays paused until you reopen it."
+            ),
+        ),
+        action="Restore database",
+        steps={
+            "preflight": "Checking the site",
+            "check": "Checking the recovery point",
+            "safety": "Taking a safety backup",
+            "gate": "Pausing the site",
+            "drain": "Letting requests finish",
+            "import": "Restoring the database",
+            "checks": "Checking the data",
+            "readiness": "Checking the site answers",
+            "open": "Reopening the site",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
     "reopen_site": ChangeWords(
         title="Reopen {site}",
         summary=(

@@ -42,10 +42,15 @@ class RecoveryPointView:
     point: str
     missing: tuple[str, ...] = ()
     incomplete: tuple[str, ...] = ()
+    parts: tuple[str, ...] = ()
 
     @property
     def restorable(self) -> bool:
         return self.status == "Saved here"
+
+    @property
+    def has_database(self) -> bool:
+        return "database" in self.parts
 
     @property
     def problem(self) -> str:
@@ -75,6 +80,7 @@ class BackupsView:
     note: str
     gated: bool = False
     interrupted: bool = False
+    restore: bool = False
 
     @property
     def reopen(self) -> bool:
@@ -108,6 +114,28 @@ def last_view(backup: ObservedBackup | None) -> LastBackupView | None:
     result = backup.last
     at = _when(result.at)
     scope = SCOPE_LABELS.get(result.scope, "Database only")
+    if result.reason.startswith("restore_"):
+        if result.result_class == "succeeded":
+            return LastBackupView(
+                "Database restored.",
+                "The recovery point's data was imported and the site answered again.",
+                _label(at),
+                result.result_class,
+            )
+        if result.reason == "restore_paused":
+            return LastBackupView(
+                "The restore stopped after pausing the site.",
+                "Visitors see a maintenance page until you reopen the site. Nothing after "
+                "the pause ran.",
+                _label(at),
+                result.result_class,
+            )
+        return LastBackupView(
+            "The restore did not finish.",
+            _result_reason(result.reason),
+            _label(at),
+            result.result_class,
+        )
     if result.result_class == "succeeded":
         detail = (
             "The database and the site's files finished and their recovery point is kept here."
@@ -169,6 +197,23 @@ def _result_reason(reason: str) -> str:
         "backup_repository": "The backup store could not be read, so nothing was saved.",
         "backup_verify": "Barectl could not confirm the recovery point afterwards.",
         "backup_partial": "Some data could not be read; the point may be incomplete.",
+        "restore_site": "The site's account could not be read, so nothing was restored.",
+        "restore_repository": "The backup store could not be read, so nothing was restored.",
+        "restore_evidence": "The site changed before the restore, so nothing was restored.",
+        "restore_lock": "The site was busy, so the restore was skipped.",
+        "restore_disk": "The server was short of free space, so nothing was restored.",
+        "restore_point": "The recovery point is missing or incomplete, so nothing was restored.",
+        "restore_engine": (
+            "The recovery point was made by a different database version, so nothing was restored."
+        ),
+        "restore_target": "The site's database changed, so nothing was restored.",
+        "restore_safety": "The safety backup failed, so nothing was overwritten.",
+        "restore_gate": "The maintenance page could not be published, so the data was not changed.",
+        "restore_idle": "The site was still busy, so the data was not changed.",
+        "restore_import": "The import did not finish, so the data may be partly replaced.",
+        "restore_data": "The import finished but its data checks did not pass.",
+        "restore_readiness": "The data was imported but the site did not answer its check.",
+        "restore_open": "The maintenance page could not be removed, so the site stays paused.",
     }.get(reason, "Barectl could not finish the backup. Check again or read the run's record.")
 
 
@@ -184,6 +229,7 @@ def points_view(listing: dict[str, object]) -> tuple[RecoveryPointView, ...]:
         complete = point.get("complete") is True
         missing = point.get("missing")
         incomplete = point.get("incomplete")
+        parts = point.get("parts")
         rows.append(
             RecoveryPointView(
                 _label(_when(str(when))) if isinstance(when, str) else "Time not recorded",
@@ -195,6 +241,7 @@ def points_view(listing: dict[str, object]) -> tuple[RecoveryPointView, ...]:
                 str(point.get("point", "")),
                 tuple(str(item) for item in missing) if isinstance(missing, list) else (),
                 tuple(str(item) for item in incomplete) if isinstance(incomplete, list) else (),
+                tuple(str(item) for item in parts) if isinstance(parts, list) else (),
             )
         )
     return tuple(rows)
@@ -211,7 +258,13 @@ def view(
 ) -> BackupsView:
     backup = backup_of(collected, identifier) if collected is not None else None
     enabled = backup is not None and backup.enabled
-    interrupted = bool(
+    restore = bool(
+        gated
+        and backup is not None
+        and backup.last is not None
+        and backup.last.reason.startswith("restore_")
+    )
+    interrupted = restore or bool(
         gated
         and backup is not None
         and backup.last is not None
@@ -261,6 +314,7 @@ def view(
         note,
         gated,
         interrupted,
+        restore,
     )
 
 
