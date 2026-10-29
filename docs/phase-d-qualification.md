@@ -69,8 +69,9 @@ the native stage; every other stage finishes inside it.
 stage with the native stage inflates the native stage: starting `controller-fast`,
 `fast-validators` and `browser` together and the native stage when the browser stage ended
 measured browser 79 s plus native 335 s, **414 s of wall time against 365 s** for the
-concurrent build. The native stage took 330 to 360 s alone in every run, so serializing the
-two heavy stages only adds the browser time. The concurrent schedule is kept, and
+concurrent build. The native stage took 330 to 360 s in every run, including the run in which
+the browser stage had already finished, so serializing the two heavy stages only adds the
+browser time. The concurrent schedule is kept, and
 `docker/disposable-server/build.sh` now names this measurement in its header comment and
 [the test time budget](quality.md#test-time-budget).
 
