@@ -78,6 +78,7 @@
     "disposable.test_target_race.TwoControllerNativeLock": 51.0,
     "disposable.test_target_reconstruction.FreshControllerReconstruction": 107.8,
     "disposable.test_target_shape.JudgeByShape": 47.4,
-    "disposable.test_wordpress_create.WordPressCreateMariaDB": 128.5
+    "disposable.test_wordpress_create.WordPressCreateMariaDB": 128.5,
+    "disposable.test_backups.Integrity": 5.0
   }
 }

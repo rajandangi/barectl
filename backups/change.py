@@ -79,10 +79,21 @@ def _packed(source: str, *, script_path: bool = False) -> bytes:
     )
 
 
-ENABLE_SOURCE: Final = importlib.resources.files("backups.bodies").joinpath("enable.py").read_text()
-ENABLE_BYTES: Final = _packed(ENABLE_SOURCE)
-ENABLE_SHA256: Final = hashlib.sha256(ENABLE_BYTES).hexdigest()
 NATIVE_SOURCE: Final = importlib.resources.files("backups.bodies").joinpath("native.py").read_text()
+INTEGRITY_CORE: Final = without_imports(
+    importlib.resources.files("backups.bodies").joinpath("integrity.py").read_text(),
+    ("automation.bodies.units", "backups.bodies.native"),
+)
+ENABLE_SOURCE: Final = (
+    importlib.resources.files("backups.bodies").joinpath("enable.py").read_text()
+    + "\n"
+    + NATIVE_SOURCE
+    + "\n"
+    + INTEGRITY_CORE
+    + '\nif __name__ == "__main__":\n    main()\n'
+)
+ENABLE_BYTES: Final = _packed(ENABLE_SOURCE, script_path=True)
+ENABLE_SHA256: Final = hashlib.sha256(ENABLE_BYTES).hexdigest()
 PAUSED_SOURCE: Final = without_imports(
     importlib.resources.files("backups.bodies").joinpath("paused.py").read_text(),
     (
@@ -261,6 +272,12 @@ def _details(evidence: BackupEvidence) -> list[dict[str, str]]:
                 f"At least {convention.HEADROOM_BYTES // (1024 * 1024)} MiB before it starts"
             ),
         },
+        {
+            "label": "Integrity check",
+            "value": (
+                "Barectl checks this site's copies every week and reads the newest point back."
+            ),
+        },
     ]
     if evidence.database:
         values.append({"label": "Database only", "value": "Available for this site."})
@@ -308,6 +325,8 @@ def review_enable(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     if not refusals and evidence.backup is not None and evidence.backup.enabled:
         document["note"] = "Backups are already enabled for this site. Nothing will change."
     elif not refusals:
+        from . import integrity
+
         document.update(
             {
                 "restic_path": evidence.restic_path,
@@ -321,6 +340,7 @@ def review_enable(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 "at": schedule_time(),
             }
         )
+        document.update(integrity.enable_document(inputs.identifier))
         effects = (
             DeclaredEffect(
                 Scope.SHARED,
@@ -852,6 +872,11 @@ def body_enable(document: dict[str, object], context: BodyContext) -> NativeBody
         "at": at,
         "secret_path": context.secret_path,
     }
+    from . import integrity
+
+    check = integrity.validate_enable(document)
+    if check is not None:
+        payload["check"] = check
     encoded = base64.b64encode(gzip.compress(json.dumps(payload).encode(), mtime=0)).decode()
     return NativeBody(ENABLE_BYTES, (encoded,))
 

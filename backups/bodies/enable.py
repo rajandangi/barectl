@@ -15,16 +15,22 @@ import pwd
 import secrets
 import subprocess
 import sys
+from typing import TYPE_CHECKING, NoReturn
 
 PROFILE_ROOT = "/nix/var/nix/profiles/barectl"
 RESTIC_PROFILE = PROFILE_ROOT + "/restic"
 RESTIC_BIN = RESTIC_PROFILE + "/bin/restic"
 REPOSITORY_ROOT = "/var/lib/barectl-backups"
 KEY_ROOT = "/etc/barectl/backups"
+INTEGRITY_ROOT = KEY_ROOT + "/integrity"
 CACHE_DIR = "/var/cache/barectl/restic"
 NIX_BIN = "/nix/var/nix/profiles/default/bin"
 REFUSED = 1
 PARTIAL = 2
+
+if TYPE_CHECKING:
+
+    def check_mode(payload: str, location: str) -> None: ...
 
 
 def emit(text: str) -> None:
@@ -48,17 +54,17 @@ def result(value: dict[str, object]) -> None:
     emit("barectl-result " + json.dumps(value, separators=(",", ":")))
 
 
-def refused(reason: str) -> None:
+def refused(reason: str) -> NoReturn:
     result({"class": "refused", "reason": reason})
     raise SystemExit(REFUSED)
 
 
-def failed(reason: str = "") -> None:
+def failed(reason: str = "") -> NoReturn:
     result({"class": "failed", "reason": reason} if reason else {"class": "failed"})
     raise SystemExit(REFUSED)
 
 
-def partial(reason: str) -> None:
+def partial(reason: str) -> NoReturn:
     result({"class": "partial", "reason": reason})
     raise SystemExit(PARTIAL)
 
@@ -184,8 +190,97 @@ def write_key(path: str) -> None:
         raise ValueError("The server key was not written safely.")
 
 
+def install_check(value: object, identifier: str) -> None:  # noqa: C901 - one reviewed install
+    """Publish the weekly integrity units reviewed with Enable backups (#405)."""
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) != {"version", "payload", "units"}:
+        partial("backup_check")
+    if value.get("version") != 1:
+        partial("backup_check")
+    payload_value = value.get("payload")
+    units = value.get("units")
+    if (
+        not isinstance(payload_value, dict)
+        or not isinstance(units, dict)
+        or payload_value.get("identifier") != identifier
+        or set(payload_value) != {"version", "identifier", "repository", "server_key", "filename"}
+    ):
+        partial("backup_check")
+    try:
+        script = pathlib.Path(sys.argv[1]).read_bytes()
+    except OSError:
+        partial("backup_check")
+    os.makedirs(INTEGRITY_ROOT, mode=0o700, exist_ok=True)
+    if not controlled(INTEGRITY_ROOT) or (os.stat(INTEGRITY_ROOT).st_mode & 0o777) != 0o700:
+        partial("backup_check")
+    write_private(f"{INTEGRITY_ROOT}/{identifier}.sh", script, mode=0o700)
+    write_private(
+        f"{INTEGRITY_ROOT}/{identifier}.json",
+        json.dumps(payload_value, sort_keys=True, separators=(",", ":")).encode(),
+        mode=0o600,
+    )
+    for key, text in units.items():
+        if not isinstance(key, str) or not isinstance(text, str):
+            partial("backup_check")
+        path = check_unit_path(identifier, key)
+        if path is None:
+            partial("backup_check")
+        if os.path.lexists(path) and (os.path.islink(path) or not safe(path, mode=0o644)):
+            partial("backup_check")
+        existing = pathlib.Path(path).read_text(encoding="utf-8") if os.path.exists(path) else None
+        if existing is not None and existing != text:
+            partial("backup_check")
+        if existing is None:
+            write_private(path, text.encode(), mode=0o644)
+    if subprocess.run(
+        ["/usr/bin/systemctl", "daemon-reload"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+        check=False,
+    ).returncode:
+        partial("backup_check")
+    for role in ("check", "checkoffsite"):
+        if subprocess.run(  # noqa: S603 - fixed native argv
+            ["/usr/bin/systemctl", "enable", "--now", f"barectl-site-{identifier}-{role}.timer"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        ).returncode:
+            partial("backup_check")
+
+
+def check_unit_path(identifier: str, key: str) -> str | None:
+    if key == "slice":
+        return f"/etc/systemd/system/barectl-site-{identifier}-backup.slice"
+    role, _, kind = key.partition(".")
+    if role not in ("check", "checkoffsite") or kind not in ("service", "timer"):
+        return None
+    return f"/etc/systemd/system/barectl-site-{identifier}-{role}.{kind}"
+
+
+def write_private(path: str, data: bytes, *, mode: int) -> None:
+    temporary = path + ".tmp"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+    try:
+        os.write(descriptor, data)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.replace(temporary, path)
+    if not safe(path, mode=mode):
+        raise ValueError("The integrity file was not written safely.")
+
+
 def main() -> None:  # noqa: C901 - one linear native sequence
-    raw = base64.b64decode(sys.argv[1])
+    if len(sys.argv) == 5 and sys.argv[2] == "check":
+        check_mode(sys.argv[3], sys.argv[4])
+        return
+    raw = base64.b64decode(sys.argv[2])
     document = json.loads(gzip.decompress(raw))
     identifier = str(document.get("identifier", ""))
     restic_path = str(document.get("restic_path", ""))
@@ -289,6 +384,10 @@ def main() -> None:  # noqa: C901 - one linear native sequence
         if created_key:
             pathlib.Path(key).unlink(missing_ok=True)
         refused("evidence")
+    try:
+        install_check(document.get("check"), identifier)
+    except OSError, ValueError:
+        partial("backup_check")
     stage("verify")
     result({"class": "succeeded"})
 
@@ -307,7 +406,3 @@ class _Key(Exception):
 
 class _Evidence(Exception):
     pass
-
-
-if __name__ == "__main__":
-    main()

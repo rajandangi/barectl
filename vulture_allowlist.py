@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from automation.apps import AutomationConfig
     from automation.presentation import ScheduleView
     from backups.apps import BackupsConfig
-    from backups.presentation import LastBackupView, RecoveryPointView
+    from backups.presentation import IntegrityFindingView, LastBackupView, RecoveryPointView
     from bootstrap.apps import BootstrapConfig
     from bootstrap.certificate_email_views import CertificateEmailForm
     from cache.apps import CacheConfig
@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror.serve import _Handler as MirrorHandler
     from disposable.test_backups import (
         BackupLifecycle,
+        Integrity,
         RebootedFullBackup,
         Retention,
     )
@@ -593,6 +594,7 @@ if TYPE_CHECKING:
     _backup_templates = (
         BackupsConfig,
         BackupLifecycle,
+        Integrity,
         RebootedFullBackup,
         Retention,
         LastBackupView("", "", "", "").headline,
@@ -602,4 +604,8 @@ if TYPE_CHECKING:
         RecoveryPointView("", "", "", False, False, "", "").restorable,
         RecoveryPointView("", "", "", False, False, "", "").has_database,
         RecoveryPointView("", "", "", False, False, "", "").has_files,
+        RecoveryPointView("", "", "", False, False, "", "").verified,
+        IntegrityFindingView("", "", "", "", "", False).headline,
+        IntegrityFindingView("", "", "", "", "", False).detail,
+        IntegrityFindingView("", "", "", "", "", False).time_label,
     )

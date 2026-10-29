@@ -13,7 +13,7 @@ from servers.models import Server
 from sites.bodies.common import SITE_GATED
 
 from .models import BackupCheck, BackupSchedule
-from .observation import BackupResult, ObservedBackup, OffsiteCopy, OffsiteStorage
+from .observation import BackupResult, IntegrityFinding, ObservedBackup, OffsiteCopy, OffsiteStorage
 
 
 def record_backups(
@@ -27,6 +27,7 @@ def record_backups(
     gated: bool = False,
     offsite: OffsiteStorage | None = None,
     copy: OffsiteCopy | None = None,
+    integrity: tuple[IntegrityFinding, ...] = (),
 ) -> None:
     """A target site whose stored snapshot carries the backup observation."""
     site = ObservedSite(
@@ -51,6 +52,7 @@ def record_backups(
         last,
         offsite,
         copy,
+        integrity,
     )
     collected = replace(
         COLLECTED,
@@ -119,6 +121,31 @@ def point(
         "keep": False,
         "complete": complete,
     }
+
+
+def integrity(
+    *,
+    location: str = "onsite",
+    result_class: str = "succeeded",
+    reason: str = "",
+    point: str = "0123456789abcdef",
+    checked: int = 1,
+    snapshots: int = 1,
+    size: int = 4096,
+    subset: str = "3/20",
+    at: str = "2026-10-30T05:15:00+00:00",
+) -> IntegrityFinding:
+    return IntegrityFinding(
+        location,
+        result_class,
+        reason,
+        at,
+        point,
+        checked,
+        snapshots,
+        size,
+        subset,
+    )
 
 
 def record_points(
