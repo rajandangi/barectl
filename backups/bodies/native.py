@@ -205,8 +205,11 @@ def restic(
     extra: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     environment = restic_environment(repository, password, extra)
+    # restic selects virtual-hosted URLs for Amazon endpoints; Barectl's templates are
+    # path-style. The extended option is accepted by every backend.
+    options = ["-o", "s3.bucket-lookup=path"] if repository.startswith("s3:") else []
     process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
-        [RESTIC_BIN, *argv],
+        [RESTIC_BIN, *options, *argv],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -279,6 +282,8 @@ def copy_point(  # noqa: C901 - one reviewed copy
         return "failed", "offsite_key"
     if not extra.get("AWS_ACCESS_KEY_ID") or not extra.get("AWS_SECRET_ACCESS_KEY"):
         return "failed", "offsite_key"
+    if isinstance(storage.get("region"), str):
+        extra["AWS_DEFAULT_REGION"] = storage["region"]
     try:
         lock = repository_lock(identifier)
     except OSError, ValueError:
