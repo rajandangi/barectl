@@ -4,6 +4,8 @@ The native suite proves the real stop/start; this layer proves the order, the re
 that restore starts exactly the reviewed set and proves it active.
 """
 
+import pathlib
+import tempfile
 from typing import override
 from unittest import mock
 
@@ -104,6 +106,22 @@ class FakeSystemd:
 
     def wait_slice_empty(self, name: str, budget: int) -> bool:
         return self.slice_empty
+
+
+class InstalledUnitsTests(SimpleTestCase):
+    def test_backup_integrity_units_are_not_automation_units(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            for name in (
+                "barectl-site-shop-check.timer",
+                "barectl-site-shop-checkoffsite.service",
+                "barectl-site-shop-queue1.service",
+            ):
+                pathlib.Path(directory, name).touch()
+            with mock.patch.object(units, "SYSTEMD_DIRECTORY", directory):
+                self.assertEqual(
+                    units.installed_units(SHOP),
+                    ([], ["barectl-site-shop-queue1.service"]),
+                )
 
 
 class FenceBodyTests(SimpleTestCase):

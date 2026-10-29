@@ -272,7 +272,7 @@ REMOVED_SCRIPT: Final = (
 
 
 def removed_command() -> str:
-    return "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + REMOVED_SCRIPT]))
+    return "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), REMOVED_SCRIPT]))
 
 
 def removed(shell: RemoteShell, current: Sequence[str]) -> tuple[str, ...] | None:

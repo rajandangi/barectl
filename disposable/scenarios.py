@@ -58,6 +58,8 @@ EGRESS_PROBE = "example.com"
 # ACME host through acme_ca/acme_ca_root.
 FIXTURE_ACME_HOST = "pebble"
 FIXTURE_ACME_DOMAIN = "site.fixture.test"
+# A second name the server answers, so a scenario may run two HTTPS sites on one lane.
+FIXTURE_SECOND_DOMAIN = "wordpress.fixture.test"
 FIXTURE_GIT_HOST = "git"
 RAN = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
 VERDICT = re.compile(r"^(OK|FAILED)\b.*$", re.MULTILINE)
@@ -478,7 +480,14 @@ class Lane:
         return docker("inspect", "-f", pattern, self.dns).strip()
 
     def boot_server(self, layer: str, memory_gib: int = 0) -> Machine:
-        extra = ["--dns", self._dns_address(), "--network-alias", FIXTURE_ACME_DOMAIN]
+        extra = [
+            "--dns",
+            self._dns_address(),
+            "--network-alias",
+            FIXTURE_ACME_DOMAIN,
+            "--network-alias",
+            FIXTURE_SECOND_DOMAIN,
+        ]
         if memory_gib:
             # A memory-cgroup-limited container, not a 1/2/4 GiB host: the kernel and the
             # page cache are shared with the Docker VM (docs/phase-c-qualification.md).
@@ -582,7 +591,7 @@ def unaliased(asked: Iterable[str], allowed: Iterable[str]) -> list[str]:
     """
     # The lane aliases the fixture ACME name on the server itself, so a search-suffixed
     # query for it is a known lane host rather than an escape.
-    names = (*allowed, FIXTURE_ACME_DOMAIN)
+    names = (*allowed, FIXTURE_ACME_DOMAIN, FIXTURE_SECOND_DOMAIN)
     return sorted({name for name in asked if not _mirror_host(name, names)})
 
 

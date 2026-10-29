@@ -722,8 +722,15 @@ def _wp_constant(line: str) -> tuple[str, str] | None:
     return (match[1], match[2]) if match is not None else None
 
 
-def _replace_tree(target: pathlib.Path, staged: pathlib.Path, owner: int, group: int) -> None:
-    """Replace one private directory or file as a whole, never overlaid."""
+def _replace_tree(  # noqa: C901 - one whole replacement with its rollback
+    target: pathlib.Path, staged: pathlib.Path, owner: int, group: int
+) -> None:
+    """Replace one private directory or file as a whole, never overlaid.
+
+    A directory on an overlayfs lower layer cannot be renamed within its parent (EXDEV),
+    so a directory is copied aside and removed before the new tree is renamed into place.
+    The copy is the rollback for a failed rename; a file keeps the atomic rename.
+    """
     temporary = target.parent / (".restore-" + target.name)
     previous = target.parent / (".replaced-" + target.name)
     for leftover in (temporary, previous):
@@ -731,25 +738,36 @@ def _replace_tree(target: pathlib.Path, staged: pathlib.Path, owner: int, group:
             leftover.unlink()
         elif leftover.exists():
             shutil.rmtree(leftover)
-    if staged.is_dir():
+    directory = staged.is_dir()
+    if directory:
         shutil.copytree(staged, temporary, symlinks=True)
         _place_private(temporary, owner, group)
     else:
         shutil.copyfile(staged, temporary, follow_symlinks=False)
         os.chown(temporary, owner, group)
         os.chmod(temporary, 0o600)
-    if target.is_symlink() or target.exists():
+    aside: pathlib.Path | None = None
+    if target.is_dir() and not target.is_symlink():
+        aside = previous
+        shutil.copytree(target, aside, symlinks=True)
+        shutil.rmtree(target)
+    elif target.is_symlink() or target.exists():
         os.replace(target, previous)
+        aside = previous
     try:
         os.replace(temporary, target)
     except OSError:
-        if previous.exists() or previous.is_symlink():
-            os.replace(previous, target)
+        if aside is not None:
+            if aside.is_dir():
+                shutil.copytree(aside, target, symlinks=True)
+            else:
+                os.replace(aside, target)
         raise
-    if previous.is_symlink() or previous.is_file():
-        previous.unlink()
-    elif previous.exists():
-        shutil.rmtree(previous)
+    if aside is not None:
+        if aside.is_symlink() or aside.is_file():
+            aside.unlink()
+        elif aside.exists():
+            shutil.rmtree(aside)
 
 
 def _replace_shared(

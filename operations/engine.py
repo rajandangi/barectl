@@ -983,6 +983,8 @@ RESULT_REASONS: Final = frozenset(
         "restore_import",
         "restore_data",
         "restore_readiness",
+        "restore_files",
+        "restore_config",
         "restore_open",
         "restore_done",
         "logrotate_missing",
