@@ -58,15 +58,23 @@ def key_value(value: object, name: str) -> str:
     return text
 
 
-def write_private(path: str, text: str) -> None:
+def write_file(path: str, text: str) -> None:
+    """Write a root-only file atomically: a complete sibling replaces the final name."""
     temporary = path + ".tmp"
+    payload = text.encode()
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        os.write(descriptor, text.encode())
+        written = 0
+        while written < len(payload):
+            written += os.write(descriptor, payload[written:])
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
     os.replace(temporary, path)
+
+
+def write_private(path: str, text: str) -> None:
+    write_file(path, text)
     if not locked_file(path, mode=0o600):
         raise ValueError("The offsite file was not written safely.")
 
