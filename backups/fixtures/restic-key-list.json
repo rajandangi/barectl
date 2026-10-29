@@ -1,0 +1,16 @@
+[
+  {
+    "current": true,
+    "id": "0d9e6a0b6a0a1d0e5a5e6e3a9d8b7c6f5e4d3c2b1a09182736455463728190ab",
+    "userName": "root",
+    "hostName": "server",
+    "created": "2026-10-29T05:00:00Z"
+  },
+  {
+    "current": false,
+    "id": "1f2e3d4c5b6a798807162534435261708f9e0a1b2c3d4e5f60718293a4b5c6d7",
+    "userName": "root",
+    "hostName": "server",
+    "created": "2026-10-29T05:01:00Z"
+  }
+]

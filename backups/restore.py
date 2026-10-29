@@ -155,10 +155,16 @@ class RestoreEvidence:
     current_sites: tuple[str, ...]
     boot_id: str
     uptime_centiseconds: int | None
-    # The site whose kept repository holds the point. Empty means this site's own (#407).
+    # The source site: a removed site's kept repository (#407) or a connected offsite
+    # source (#408). Empty means this site's own recovery point.
     source: str = ""
-    # The kind of site the point's files show, when they can prove it.
+    # The kind of site a removed site's point shows, when its files can prove it (#407).
     source_kind: str = ""
+    # A connected source's last point listing and repository, for a cross-server restore.
+    source_points: tuple[dict[str, object], ...] = ()
+    source_repository: str = ""
+    # The connected offsite configuration; empty for a removed site's kept onsite repository.
+    source_storage: dict[str, str] | None = None
 
 
 def point_listing_command(identifier: str) -> str:
@@ -340,22 +346,68 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RestoreEvidence:
     value = observation.read(shell, (inputs.identifier,), engine, architecture)
     if value is not None:
         backup = change._observed(value, inputs.identifier)
-    source = inputs.source or inputs.identifier
-    point, snapshots, size = _read_point(shell, source, inputs.point)
-    if point is not None:
-        point = {**point, "size": size}
-    point_version = _point_version(
-        shell,
-        source,
-        snapshots.get("database", ""),
-        convention.dump_filename(source),
-        engine,
+    source = inputs.source
+    source_points: tuple[dict[str, object], ...] = ()
+    source_repository = ""
+    source_storage: dict[str, str] | None = None
+    source_kind = ""
+    evidence_source = ""
+    offsite = observation.offsite_of(value)
+    config = (
+        {
+            "provider": offsite.provider,
+            "bucket": offsite.bucket,
+            "region": offsite.region,
+            "endpoint": offsite.endpoint,
+            "prefix": offsite.prefix,
+            "prune": "yes" if offsite.prune else "no",
+        }
+        if offsite is not None and offsite.configured
+        else None
     )
-    kind = (
-        str(record.get("application", "plain"))
-        if source == inputs.identifier and record is not None
-        else point_kind(shell, source, snapshots.get("files", ""))
+    connected = (
+        next((row for row in offsite.sources if row.identifier == source), None)
+        if source and offsite is not None
+        else None
     )
+    if source and connected is not None:
+        # A connected offsite source on another server (#408).
+        source_points = connected.points()
+        if config:
+            try:
+                source_repository = convention.offsite_repository(config, source)
+            except ValueError:
+                source_repository = ""
+            source_storage = config
+        point = next((row for row in source_points if row.get("point") == inputs.point), None)
+        raw_snapshots = point.get("snapshots") if isinstance(point, dict) else None
+        snapshots = (
+            {str(part): str(identifier) for part, identifier in raw_snapshots.items()}
+            if isinstance(raw_snapshots, dict)
+            else {}
+        )
+        size = _point_bytes(point)
+        point_version = ""
+        source_kind = str(point.get("application", "")) if isinstance(point, dict) else ""
+        evidence_source = source
+    else:
+        # This site's own point, or a removed site's kept repository on this server (#407).
+        taken_from = source or inputs.identifier
+        point, snapshots, size = _read_point(shell, taken_from, inputs.point)
+        if point is not None:
+            point = {**point, "size": size}
+        point_version = _point_version(
+            shell,
+            taken_from,
+            snapshots.get("database", ""),
+            convention.dump_filename(taken_from),
+            engine,
+        )
+        if taken_from == inputs.identifier:
+            source_kind = str(record.get("application", "plain")) if record is not None else ""
+        else:
+            source_kind = point_kind(shell, taken_from, snapshots.get("files", ""))
+            evidence_source = taken_from
     empty, target_problem = _target_empty(shell, engine, inputs.identifier)
     disk = observed.filesystem.value.avail_bytes if observed.filesystem.value else 0
     return RestoreEvidence(
@@ -377,8 +429,11 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RestoreEvidence:
         current_sites,
         boot_id,
         uptime,
-        source if source != inputs.identifier else "",
-        kind,
+        evidence_source,
+        source_kind,
+        source_points,
+        source_repository,
+        source_storage,
     )
 
 
@@ -390,7 +445,8 @@ def _refusals(  # noqa: C901 - one closed set of refusal checks
     evidence: RestoreEvidence, settings: SiteSettings | None, scope: str, application: str
 ) -> list[str]:
     refusals: list[str] = []
-    if evidence.source:
+    connected = bool(evidence.source_storage)
+    if evidence.source and not connected:
         if evidence.source in evidence.current_sites:
             refusals.append(
                 f"Site {evidence.source} still exists, so restore from its own Backups section "
@@ -421,8 +477,16 @@ def _refusals(  # noqa: C901 - one closed set of refusal checks
         refusals.append("The server's architecture is not supported.")
     if evidence.backup is None or not evidence.backup.enabled:
         refusals.append("Enable backups for this site first.")
+    if connected and not evidence.source_repository:
+        refusals.append("That connected source storage is not available on this server.")
+    if connected and not evidence.source_points:
+        refusals.append("Connect the existing backup storage again to read its recovery points.")
     if evidence.point is None:
-        refusals.append("That recovery point is no longer listed. Check backups and choose again.")
+        refusals.append(
+            "That recovery point is not in the connected source's last listing."
+            if connected
+            else "That recovery point is no longer listed. Check backups and choose again."
+        )
     elif evidence.point.get("complete") is not True and scope == "database":
         refusals.append("That recovery point has no complete database copy to restore.")
     elif evidence.point.get("complete") is not True and scope == "files":
@@ -440,7 +504,7 @@ def _refusals(  # noqa: C901 - one closed set of refusal checks
                     if evidence.backup is not None
                     else "This site has no site database."
                 )
-            if not evidence.point_version:
+            if not evidence.point_version and not connected:
                 refusals.append("The recovery point's database copy could not be read.")
         elif scope == "database":
             refusals.append("That recovery point has no complete database copy to restore.")
@@ -448,7 +512,12 @@ def _refusals(  # noqa: C901 - one closed set of refusal checks
         refusals.append("That recovery point has no complete files copy to restore.")
     if scope == "database" and evidence.target_problem:
         refusals.append(evidence.target_problem)
-    if scope in ("database", "full") and evidence.engine and evidence.point_version:
+    if (
+        scope in ("database", "full")
+        and evidence.engine
+        and evidence.point_version
+        and not connected
+    ):
         current = restore_body.engine_major(evidence.engine, evidence.engine_version)
         found = restore_body.engine_major(evidence.engine, evidence.point_version)
         if current and found and current != found:
@@ -456,6 +525,21 @@ def _refusals(  # noqa: C901 - one closed set of refusal checks
                 f"That recovery point was made by {evidence.engine_label} {found}, but this "
                 f"site now uses {evidence.engine_label} {current}. Restore needs the same "
                 "database version."
+            )
+    if connected and evidence.point is not None:
+        application = str((evidence.site or {}).get("application", ""))
+        source_application = evidence.point.get("application")
+        if source_application not in change.FULL_APPLICATIONS:
+            refusals.append(
+                "The source recovery point does not record its application kind, so Barectl "
+                "cannot prove it matches this site. Capture a new point on the source server."
+            )
+        elif source_application != application:
+            source_label = APPLICATION_LABELS.get(str(source_application), str(source_application))
+            target_label = APPLICATION_LABELS.get(application, application)
+            refusals.append(
+                f"That recovery point is a {source_label} site, but this site is "
+                f"{target_label}. Restore needs the same kind of site."
             )
     size = _point_bytes(evidence.point)
     if evidence.disk_available and evidence.disk_available < convention.HEADROOM_BYTES + size:
@@ -492,29 +576,57 @@ def _safety_scope(scope: str, parts: set[str]) -> str:
     return "files"
 
 
-def _safety_tags(identifier: str, scope: str, point: str) -> dict[str, list[str]]:
+def _safety_tags(
+    identifier: str, scope: str, point: str, application: str = ""
+) -> dict[str, list[str]]:
     """The reviewed safety capture's tags, one entry per part it writes."""
     if scope == "database":
         return {
             "database": list(
-                convention.tags(identifier, "database", origin="safety", live=True, point=point)
+                convention.tags(
+                    identifier,
+                    "database",
+                    origin="safety",
+                    live=True,
+                    point=point,
+                    application=application,
+                )
             )
         }
     if scope == "files":
         return {
             "files": list(
-                convention.tags(identifier, "files", origin="safety", live=False, point=point)
+                convention.tags(
+                    identifier,
+                    "files",
+                    origin="safety",
+                    live=False,
+                    point=point,
+                    application=application,
+                )
             )
         }
     return {
         "database": list(
             convention.tags(
-                identifier, "full", part="database", origin="safety", live=False, point=point
+                identifier,
+                "full",
+                part="database",
+                origin="safety",
+                live=False,
+                point=point,
+                application=application,
             )
         ),
         "files": list(
             convention.tags(
-                identifier, "full", part="files", origin="safety", live=False, point=point
+                identifier,
+                "full",
+                part="files",
+                origin="safety",
+                live=False,
+                point=point,
+                application=application,
             )
         ),
     }
@@ -572,12 +684,18 @@ def _details(
         "files": "files-only",
         "full": "full site",
     }.get(str(point.get("scope", "")), "database-only")
+    if evidence.source_storage:
+        location = f"From connected backup storage, source site {evidence.source}."
+    elif evidence.source:
+        location = f"From the kept backups of removed site {evidence.source}."
+    else:
+        location = "Saved on this server."
     rows = [
         {
             "label": "Recovery point",
             "value": (
                 f"{_scope_label(scope)} from a {point_scope} recovery point taken "
-                f"{_time_label(point.get('time'))}. Saved on this server."
+                f"{_time_label(point.get('time'))}. {location}"
             ),
         },
         {
@@ -588,11 +706,19 @@ def _details(
         {
             "label": "Compatibility",
             "value": (
-                f"Same site kind ({APPLICATION_LABELS.get(application, application)}) and "
-                f"{evidence.engine_label} {point_major or 'unknown'} as this site "
-                f"({evidence.engine_label} {current_major or 'unknown'})."
+                (
+                    f"Same site kind ({APPLICATION_LABELS.get(application, application)}) and "
+                    f"{evidence.engine_label} {point_major or 'unknown'} as this site "
+                    f"({evidence.engine_label} {current_major or 'unknown'})."
+                )
                 if scope in ("database", "full") and evidence.engine and "database" in parts
                 else f"Same site kind ({APPLICATION_LABELS.get(application, application)})."
+            )
+            + (
+                " Barectl checks the source's database version when it opens the repository, "
+                "before it changes the site."
+                if evidence.source_storage and scope in ("database", "full")
+                else ""
             ),
         },
         {
@@ -621,7 +747,7 @@ def _details(
             ),
         },
     ]
-    if evidence.source:
+    if evidence.source and not evidence.source_storage:
         rows.insert(
             1,
             {
@@ -678,6 +804,19 @@ def _details(
                 ),
             },
         )
+    if evidence.source_storage and evidence.source != inputs.identifier:
+        rows.insert(
+            3,
+            {
+                "label": "Source site and domain",
+                "value": (
+                    f"The recovery point came from source site {evidence.source}, which may "
+                    f"have served a different domain. This target keeps its own domain "
+                    f"({', '.join(names)}). Barectl never rewrites application data, so check "
+                    "the application's own domain setting after the restore."
+                ),
+            },
+        )
     return rows
 
 
@@ -707,7 +846,9 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     safety_scope = "database" if skipped else _safety_scope(scope, parts)
     safety_point = "" if skipped else secrets.token_hex(8)
     safety_at = "" if skipped else at
-    safety_tags = {} if skipped else _safety_tags(inputs.identifier, safety_scope, safety_point)
+    safety_tags = (
+        {} if skipped else _safety_tags(inputs.identifier, safety_scope, safety_point, application)
+    )
     release = f"restore-{inputs.point}-{secrets.token_hex(4)}"
     shared = list(SHARED_FILES[application])
     files = [
@@ -745,8 +886,13 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "point_engine_version": evidence.point_version,
         "point_major": point_major,
         "source": evidence.source,
-        "repository": convention.repository(evidence.source or inputs.identifier),
-        "server_key": convention.server_key(evidence.source or inputs.identifier),
+        "source_kind": evidence.source_kind,
+        "repository": convention.repository(
+            inputs.identifier if evidence.source_storage else (evidence.source or inputs.identifier)
+        ),
+        "server_key": convention.server_key(
+            inputs.identifier if evidence.source_storage else (evidence.source or inputs.identifier)
+        ),
         "safety_repository": convention.repository(inputs.identifier),
         "safety_key": convention.server_key(inputs.identifier),
         "point": inputs.point,
@@ -754,7 +900,17 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "point_scope": str(point.get("scope", "")),
         "snapshot": snapshot,
         "files_snapshot": files_snapshot,
-        "filename": convention.dump_filename(evidence.source or inputs.identifier),
+        "source_application": str(point.get("application", "")),
+        "source_repository": evidence.source_repository,
+        "source_storage": evidence.source_storage or {},
+        "source_snapshots": {
+            "database": snapshot,
+            "files": files_snapshot,
+        },
+        "secret_label": "Recovery passphrase for the connected source repository",
+        "filename": convention.dump_filename(
+            inputs.identifier if evidence.source_storage else (evidence.source or inputs.identifier)
+        ),
         "point_time": str(point.get("time", "")),
         "point_live": point.get("live") is True,
         "point_size": size,
@@ -847,6 +1003,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         sites_read=change.ALL_SITES_READ if effects else "",
         current_sites=evidence.current_sites if effects else None,
         document=document,
+        writes_secrets=bool(evidence.source_storage),
     )
 
 
@@ -907,21 +1064,48 @@ def _restore_document(document: dict[str, object]) -> None:  # noqa: C901 - one 
         parts.add("database")
     if files_snapshot:
         parts.add("files")
+    source = document.get("source")
+    source_storage = document.get("source_storage")
+    source_snapshots = document.get("source_snapshots")
+    source_repository = document.get("source_repository")
+    if (
+        not isinstance(source, str)
+        or (source and convention.SITE_IDENTIFIER.fullmatch(source) is None)
+        or not isinstance(source_storage, dict)
+        or not isinstance(source_repository, str)
+        or not isinstance(source_snapshots, dict)
+    ):
+        raise ValueError("The restore review has no supported source.")
+    connected = bool(source_storage)
+    if connected:
+        if not source:
+            raise ValueError("A connected source names its site.")
+        values = {str(name): str(value) for name, value in source_storage.items()}
+        convention.read_config(convention.render_config(values))
+        if source_repository != convention.offsite_repository(values, source):
+            raise ValueError("The restore review changed its connected source repository.")
+        if document.get("source_application") != document.get("application"):
+            raise ValueError("The restore review changed the source application.")
+        if source_snapshots != {"database": snapshot, "files": files_snapshot}:
+            raise ValueError("The restore review changed the source snapshots.")
+    elif source_repository or source_snapshots != {
+        "database": snapshot,
+        "files": files_snapshot,
+    }:
+        raise ValueError("A same-server restore names no connected source.")
+    expected = identifier if connected else str(source or identifier)
     if (
         engine not in ("", "mariadb", "postgresql")
         or scope not in SCOPES
         or safety_scope not in SCOPES
         or document.get("point_scope") not in convention.SCOPES
-        or document.get("repository")
-        != convention.repository(str(document.get("source") or identifier))
-        or document.get("server_key")
-        != convention.server_key(str(document.get("source") or identifier))
+        or document.get("repository") != convention.repository(expected)
+        or document.get("server_key") != convention.server_key(expected)
         or (document.get("safety_repository") or convention.repository(identifier))
         != convention.repository(identifier)
         or (document.get("safety_key") or convention.server_key(identifier))
         != convention.server_key(identifier)
-        or document.get("filename")
-        != convention.dump_filename(str(document.get("source") or identifier))
+        or document.get("filename") != convention.dump_filename(expected)
         or type(target_empty) is not bool
         or type(document.get("point_size")) is not int
         or not isinstance(release, str)
@@ -973,7 +1157,13 @@ def _restore_document(document: dict[str, object]) -> None:  # noqa: C901 - one 
             or convention.POINT.fullmatch(safety_point) is None
             or not isinstance(safety_at, str)
             or change.restic_time(safety_at) != document.get("safety_restic_time")
-            or tags != _safety_tags(identifier, str(safety_scope), safety_point)
+            or tags
+            != _safety_tags(
+                identifier,
+                str(safety_scope),
+                safety_point,
+                str(document.get("application", "")),
+            )
         ):
             raise ValueError("The restore safety backup is not the reviewed one.")
     if document.get("stages") != list(STAGES[str(scope)]):
@@ -1002,6 +1192,10 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
             "scope",
             "snapshot",
             "files_snapshot",
+            "source",
+            "source_application",
+            "source_repository",
+            "source_storage",
             "filename",
             "release",
             "shared",
@@ -1022,6 +1216,10 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
         )
     }
     value["automation_fence"] = checked(document)
+    if document.get("source_storage"):
+        if not context.secret_path:
+            raise ValueError("A cross-server restore needs the source repository passphrase.")
+        value["secret_path"] = context.secret_path
     encoded = base64.b64encode(gzip.compress(json.dumps(value).encode(), mtime=0)).decode()
     return NativeBody(RESTORE_BYTES, (encoded,))
 

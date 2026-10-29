@@ -52,7 +52,7 @@ def secret_keys(document: dict[str, object]) -> list[str]:
     return [str(field["key"]) for field in fields if isinstance(field, dict) and "key" in field]
 
 
-def storage(**values: object) -> observation.OffsiteStorage:
+def storage() -> observation.OffsiteStorage:
     return observation.OffsiteStorage(
         "s3",
         BUCKET,
@@ -61,7 +61,6 @@ def storage(**values: object) -> observation.OffsiteStorage:
         PREFIX,
         True,
         "",
-        **values,
     )
 
 

@@ -33,6 +33,7 @@ READ_SOURCE: Final = (
 )
 MAX_SITES: Final = 64
 MAX_PROBLEMS: Final = 8
+MAX_POINTS: Final = 500
 CLASSES: Final = frozenset({"succeeded", "partial", "failed", "refused", "lock_busy"})
 POINT: Final = re.compile(r"[0-9a-f]{16}")
 DIGEST: Final = re.compile(r"[0-9a-f]{64}")
@@ -69,6 +70,31 @@ class BackupResult:
 
 
 @dataclass(frozen=True)
+class ConnectedSource:
+    """One source site repository a connected offsite storage opened read-only (#408).
+
+    ``points`` is the bounded listing last read when the storage was connected. It is a
+    stale observation for the page, never authority: a restore re-lists the repository under
+    its lock before it changes anything.
+    """
+
+    identifier: str
+    rows: tuple[dict[str, object], ...] = ()
+    problem: str = ""
+
+    @property
+    def read(self) -> bool:
+        return not self.problem
+
+    def points(self) -> tuple[dict[str, object], ...]:
+        """The bounded recovery points in the last listing, grouped per part."""
+        from . import check
+
+        parsed = check.parse_listing(json.dumps(list(self.rows)))
+        return tuple(check.points(parsed)) if parsed is not None else ()
+
+
+@dataclass(frozen=True)
 class OffsiteStorage:
     """The server's non-secret offsite location and whether its files are supported."""
 
@@ -79,6 +105,8 @@ class OffsiteStorage:
     prefix: str = ""
     prune: bool = False
     problem: str = ""
+    # The source sites a Connect existing backup storage review opened read-only (#408).
+    sources: tuple[ConnectedSource, ...] = ()
 
     @property
     def configured(self) -> bool:
@@ -322,16 +350,28 @@ def _valid_site(value: object) -> bool:
     )
 
 
+_OFFSITE_KEYS = {
+    "provider",
+    "bucket",
+    "region",
+    "endpoint",
+    "prefix",
+    "prune",
+    "problem",
+}
+
+
 def _valid_offsite(value: object) -> bool:
-    if not isinstance(value, dict) or set(value) != {
-        "provider",
-        "bucket",
-        "region",
-        "endpoint",
-        "prefix",
-        "prune",
-        "problem",
-    }:
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        not in (
+            _OFFSITE_KEYS,
+            _OFFSITE_KEYS | {"sites"},
+            _OFFSITE_KEYS | {"sites", "sources"},
+        )
+        or not _valid_sources(value.get("sites"), value.get("sources"))
+    ):
         return False
     return bool(
         isinstance(value["provider"], str)
@@ -347,6 +387,39 @@ def _valid_offsite(value: object) -> bool:
         and type(value["prune"]) is bool
         and isinstance(value["problem"], str)
         and len(value["problem"]) <= 500
+    )
+
+
+def _valid_sources(sites: object, sources: object) -> bool:
+    if sites is None and sources is None:
+        return True
+    if (
+        not isinstance(sites, list)
+        or len(sites) > MAX_SITES
+        or not all(
+            isinstance(site, str) and convention.SITE_IDENTIFIER.fullmatch(site) for site in sites
+        )
+        or len(set(sites)) != len(sites)
+    ):
+        return False
+    if sources is None:
+        return True
+    return bool(
+        isinstance(sources, list)
+        and len(sources) <= MAX_SITES
+        and all(
+            isinstance(row, dict)
+            and set(row) == {"site", "rows", "problem"}
+            and isinstance(row["site"], str)
+            and row["site"] in sites
+            and isinstance(row["rows"], list)
+            and len(row["rows"]) <= MAX_POINTS
+            and all(isinstance(point, dict) for point in row["rows"])
+            and isinstance(row["problem"], str)
+            and len(row["problem"]) <= 500
+            for row in sources
+        )
+        and len({row["site"] for row in sources}) == len(sources)
     )
 
 
@@ -533,7 +606,29 @@ def offsite_of(value: dict[str, object] | None) -> OffsiteStorage | None:
         str(raw["prefix"]),
         raw["prune"] is True,
         str(raw["problem"]),
+        _sources_of(raw),
     )
+
+
+def _sources_of(raw: dict[str, object]) -> tuple[ConnectedSource, ...]:
+    rows = raw.get("sources")
+    if not isinstance(rows, list):
+        return ()
+    result: list[ConnectedSource] = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("site"), str):
+            continue
+        rows = row.get("rows")
+        result.append(
+            ConnectedSource(
+                str(row["site"]),
+                tuple(item for item in rows if isinstance(item, dict))
+                if isinstance(rows, list)
+                else (),
+                str(row.get("problem", "")),
+            )
+        )
+    return tuple(result)
 
 
 def _copy(value: dict[str, object]) -> OffsiteCopy:

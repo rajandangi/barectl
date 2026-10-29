@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 from unittest import mock
 
 from django.test import Client, SimpleTestCase
@@ -973,3 +973,92 @@ class RestorePageTests(ChangeTestCase):
             self.fail("The restore result was not shown.")
         self.assertEqual(last.headline, "Database restored.")
         self.assertFalse(last.failed)
+
+
+class ConnectedRestoreTests(SimpleTestCase):
+    SOURCE = "beta"
+    CONFIG: ClassVar[dict[str, str]] = {
+        "provider": "s3",
+        "bucket": "barectl-backups",
+        "region": "us-east-1",
+        "endpoint": "https://s3.us-east-1.amazonaws.com",
+        "prefix": "barectl/0123456789abcdef",
+        "prune": "yes",
+    }
+
+    def source_point(self) -> dict[str, object]:
+        parsed = check.parse_listing(fixture("restic-connected-snapshots.txt"))
+        if parsed is None:
+            self.fail("The recorded source listing was refused.")
+        return check.points(parsed)[0]
+
+    def connected(
+        self,
+        *,
+        application: str = "plain",
+        source: str = SOURCE,
+    ) -> restore.RestoreEvidence:
+        point = {**self.source_point(), "application": application}
+        return replace(
+            evidence(parts=("database", "files"), point_data=point),
+            source=source,
+            source_points=(point,),
+            source_repository=convention.offsite_repository(self.CONFIG, source),
+            source_storage=self.CONFIG,
+        )
+
+    def test_a_connected_restore_is_destructive_and_carries_the_source_passphrase(self) -> None:
+        draft = restore.review(
+            self.connected(),
+            PreparationInputs(
+                "",
+                IDENTIFIER,
+                point=str(self.source_point()["point"]),
+                scope="full",
+                source=self.SOURCE,
+            ),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(consent_of(draft.effects), Consent.DESTRUCTIVE)
+        self.assertTrue(draft.writes_secrets)
+        self.assertEqual(draft.document["source"], self.SOURCE)
+        self.assertEqual(
+            draft.document["source_repository"],
+            convention.offsite_repository(self.CONFIG, self.SOURCE),
+        )
+        values = "\n".join(
+            row["value"] for row in cast("list[dict[str, str]]", draft.document["details"])
+        )
+        self.assertIn("source site beta", values)
+        self.assertIn("never rewrites application data", values)
+        with self.assertRaises(ValueError):
+            restore.body(draft.document, BodyContext("unit", BOOT, 0))
+        restore.body(
+            draft.document,
+            BodyContext("unit", BOOT, 0, "/run/barectl/secrets/" + "a" * 32),
+        )
+
+    def test_a_connected_restore_refuses_a_different_site_kind(self) -> None:
+        draft = restore.review(
+            self.connected(application="wordpress"),
+            PreparationInputs(
+                "", IDENTIFIER, point="e1fa817d57ef0663", scope="full", source=self.SOURCE
+            ),
+        )
+        self.assertFalse(draft.eligible)
+        self.assertIn("same kind of site", " ".join(draft.refusals))
+
+    def test_a_connected_restore_refuses_a_forged_source_repository(self) -> None:
+        draft = restore.review(
+            self.connected(),
+            PreparationInputs(
+                "", IDENTIFIER, point="e1fa817d57ef0663", scope="full", source=self.SOURCE
+            ),
+        )
+        forged = dict(draft.document)
+        forged["source_repository"] = "s3:https://elsewhere/bucket/prefix/beta"
+        with self.assertRaises(ValueError):
+            restore.body(
+                forged,
+                BodyContext("unit", BOOT, 0, "/run/barectl/secrets/" + "a" * 32),
+            )

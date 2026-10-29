@@ -21,6 +21,8 @@ from .models import Server
 
 SETUP_KIND: Final = "set_up_offsite_storage"
 REMOVE_KIND: Final = "remove_offsite_storage"
+CONNECT_KIND: Final = "connect_existing_backup_storage"
+REPLACE_KIND: Final = "replace_recovery_passphrase"
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,7 @@ class BackupStoragePanel:
     prune: bool
     outside: tuple[str, ...]
     note: str
+    sources: tuple[str, ...] = ()
 
 
 def panel(storage: OffsiteStorage | None, observed: bool) -> BackupStoragePanel:
@@ -83,6 +86,7 @@ def panel(storage: OffsiteStorage | None, observed: bool) -> BackupStoragePanel:
         storage.prune,
         (),
         "Offsite copies are encrypted by restic and the keys stay only on this server.",
+        tuple(source.identifier for source in storage.sources),
     )
 
 
@@ -93,18 +97,27 @@ def context_for_server(
     observed = snapshot is not None and snapshot.collected.offsite.observed
     value = snapshot.collected.offsite.value if snapshot is not None else None
     polling = services.read_changes(server).polling
+    can_prepare = bool(
+        observed
+        and state.can_prepare_changes
+        and not polling
+        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES, MANAGE_SECRETS))
+    )
+    enabled = (
+        any(row.enabled for row in snapshot.collected.backups.value)
+        if snapshot is not None
+        else False
+    )
     return {
         "backup_storage_panel": panel(
             value if isinstance(value, OffsiteStorage) else None, observed
         ),
-        "backup_storage_can_prepare": bool(
-            observed
-            and state.can_prepare_changes
-            and not polling
-            and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES, MANAGE_SECRETS))
-        ),
+        "backup_storage_can_prepare": can_prepare,
+        "backup_storage_can_replace": can_prepare and enabled,
         "backup_storage_setup_kind": SETUP_KIND,
         "backup_storage_remove_kind": REMOVE_KIND,
+        "backup_storage_connect_kind": CONNECT_KIND,
+        "backup_storage_replace_kind": REPLACE_KIND,
         "backup_storage_providers": tuple(
             (provider, convention.PROVIDER_LABELS[provider]) for provider in convention.PROVIDERS
         ),

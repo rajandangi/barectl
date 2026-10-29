@@ -28,7 +28,11 @@ OFFSITE_ROOT: Final = f"{KEY_ROOT}/offsite"
 OFFSITE_CONFIG: Final = f"{OFFSITE_ROOT}/config"
 OFFSITE_CAPTURE: Final = f"{OFFSITE_ROOT}/capture.env"
 OFFSITE_PRUNE: Final = f"{OFFSITE_ROOT}/prune.env"
+# The source site identifiers a connected offsite storage was opened with (#408). It holds
+# no secret and never contains a repository path or snapshot listing.
+OFFSITE_SOURCES: Final = f"{OFFSITE_ROOT}/sources"
 OFFSITE_HEALTH: Final = "_health"
+APPLICATIONS: Final = ("plain", "wordpress", "laravel")
 REPOSITORY_LOCK_ROOT: Final = "/run/lock/barectl"
 PROVIDERS: Final = ("s3", "r2")
 PROVIDER_LABELS: Final = {"s3": "Amazon S3", "r2": "Cloudflare R2"}
@@ -220,8 +224,11 @@ def tags(
     live: bool,
     point: str,
     complete: bool = True,
+    application: str = "",
 ) -> tuple[str, ...]:
     if scope not in SCOPES or origin not in ORIGINS or POINT.fullmatch(point) is None:
+        raise ValueError("Not a reviewed capture.")
+    if application and application not in APPLICATIONS:
         raise ValueError("Not a reviewed capture.")
     selected = scope if part is None else part
     if (
@@ -238,6 +245,7 @@ def tags(
         f"origin:{origin}",
         "capture:live" if live else "capture:paused",
         POINT_TAG + point,
+        *((f"application:{application}",) if application else ()),
     )
     return (*values, "complete") if complete else values
 

@@ -95,8 +95,21 @@ def context_for_site(
         and not polling
         and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
     )
+    offsite = collected.offsite.value if collected is not None else None
+    sources = []
+    if offsite is not None and offsite.configured:
+        for source in offsite.sources:
+            points = presentation.connected_points_view(source) if source.read else ()
+            sources.append(
+                {
+                    "identifier": source.identifier,
+                    "points": points,
+                    "problem": source.problem,
+                }
+            )
     context = {
         "backups": view,
+        "backups_sources": sources,
         "backups_target": target,
         "backups_can_enable": can_prepare and managed and user.has_perm(MANAGE_SECRETS),
         "backups_can_back_up": can_prepare and managed and view.enabled and view.database,
@@ -317,12 +330,18 @@ def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpRespo
     if convention.POINT.fullmatch(point) is None or scope not in SCOPES:
         raise Http404
     if source:
-        # Only a repository the last explicit read listed as removed may be named.
-        if not valid_identifier(source) or source == identifier:
+        # A source is either a connected offsite source or a repository the last explicit
+        # read listed as removed (#407, #408). The site is never its own removed source.
+        if not valid_identifier(source):
             raise Http404
         server = get_object_or_404(Server, pk=pk)
         listed = {str(row.get("identifier")) for row in check.latest_removed(server)}
-        if source not in listed:
+        snapshot = server_state(server).snapshot
+        offsite = snapshot.collected.offsite.value if snapshot is not None else None
+        connected = {row.identifier for row in offsite.sources} if offsite is not None else set()
+        if source not in listed and source not in connected:
+            raise Http404
+        if source in listed and source == identifier:
             raise Http404
     return _prepare(
         request,

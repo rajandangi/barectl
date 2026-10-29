@@ -578,14 +578,41 @@ def _offsite_document(value: object | None) -> dict[str, object]:
         "prefix": value.prefix,
         "prune": value.prune,
         "problem": value.problem,
+        "sites": [source.identifier for source in value.sources],
+        "sources": [
+            {
+                "site": source.identifier,
+                "rows": list(source.rows),
+                "problem": source.problem,
+            }
+            for source in value.sources
+        ],
     }
 
 
+def _source_rows(value: object) -> tuple[dict[str, object], ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, dict))
+
+
 def _read_offsite(value: dict[str, object]) -> "OffsiteStorage | None":  # noqa: UP037
-    from backups.observation import OffsiteStorage
+    from backups.observation import ConnectedSource, OffsiteStorage
 
     if not value:
         return None
+    raw_sources = value.get("sources")
+    sources: tuple[ConnectedSource, ...] = ()
+    if isinstance(raw_sources, list):
+        sources = tuple(
+            ConnectedSource(
+                str(row.get("site", "")),
+                _source_rows(row.get("rows")),
+                str(row.get("problem", "")),
+            )
+            for row in raw_sources
+            if isinstance(row, dict)
+        )
     return OffsiteStorage(
         str(value.get("provider", "")),
         str(value.get("bucket", "")),
@@ -594,6 +621,7 @@ def _read_offsite(value: dict[str, object]) -> "OffsiteStorage | None":  # noqa:
         str(value.get("prefix", "")),
         value.get("prune") is True,
         str(value.get("problem", "")),
+        sources,
     )
 
 

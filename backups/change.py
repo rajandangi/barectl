@@ -385,6 +385,7 @@ def review_backup(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "version": 1,
         "body_sha256": BACKUP_SHA256,
         "identifier": inputs.identifier,
+        "application": str((evidence.site or {}).get("application", "")),
         "engine": evidence.engine,
         "repository": convention.repository(inputs.identifier),
         "server_key": convention.server_key(inputs.identifier),
@@ -392,7 +393,14 @@ def review_backup(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "at": at,
         "restic_time": restic_time(at),
         "tags": list(
-            convention.tags(inputs.identifier, "database", origin="manual", live=True, point=point)
+            convention.tags(
+                inputs.identifier,
+                "database",
+                origin="manual",
+                live=True,
+                point=point,
+                application=str((evidence.site or {}).get("application", "")),
+            )
         ),
         "dump": convention.dump_argv(inputs.identifier, evidence.engine)
         if evidence.engine in ("mariadb", "postgresql")
@@ -537,6 +545,7 @@ def review_full(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 live=False,
                 point=point,
                 complete=False,
+                application=application,
             )
         )
     }
@@ -550,6 +559,7 @@ def review_full(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 live=False,
                 point=point,
                 complete=False,
+                application=application,
             )
         )
     caddy = _full_open_file(settings, application) if settings is not None else ""
@@ -699,6 +709,7 @@ def _full_document(document: dict[str, object]) -> None:
         or document.get("filename") != convention.dump_filename(identifier)
     ):
         raise ValueError("The full backup review is not a supported capture.")
+    application = str(document.get("application", ""))
     expected = {
         "files": list(
             convention.tags(
@@ -709,6 +720,7 @@ def _full_document(document: dict[str, object]) -> None:
                 live=False,
                 point=point,
                 complete=False,
+                application=application,
             )
         )
     }
@@ -730,6 +742,7 @@ def _full_document(document: dict[str, object]) -> None:
                 live=False,
                 point=point,
                 complete=False,
+                application=application,
             )
         )
     if tags != expected or (scope == "files") != (not dump):
@@ -909,7 +922,16 @@ def body_backup(document: dict[str, object], context: BodyContext) -> NativeBody
         or document.get("restic_time") != restic_time(at)
         or not isinstance(tags, list)
         or tags
-        != list(convention.tags(identifier, "database", origin="manual", live=True, point=point))
+        != list(
+            convention.tags(
+                identifier,
+                "database",
+                origin="manual",
+                live=True,
+                point=point,
+                application=str(document.get("application", "")),
+            )
+        )
         or not isinstance(dump, list)
         or dump != convention.dump_argv(identifier, str(engine))
         or document.get("filename") != convention.dump_filename(identifier)

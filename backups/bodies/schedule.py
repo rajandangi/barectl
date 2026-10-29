@@ -56,6 +56,7 @@ from backups.bodies.native import (
     summary_size,
 )
 from backups.convention import (
+    APPLICATIONS,
     FREQUENCIES,
     SCHEDULE_LOCK_WAIT_SECONDS,
     SCHEDULE_ROOT,
@@ -350,6 +351,7 @@ def _run_checked(document: dict[str, object]) -> SimpleNamespace:
         or TIME.fullmatch(at) is None
         or scope not in SCHEDULE_SCOPES
         or document.get("origin") != "scheduled"
+        or document.get("application") not in ("", *APPLICATIONS)
         or document.get("repository") != f"{REPOSITORY_ROOT}/{identifier}/onsite"
         or not isinstance(document.get("server_key"), str)
         or not str(document["server_key"]).startswith("/etc/barectl/backups/")
@@ -551,6 +553,7 @@ def run_mode(argument: str) -> None:  # noqa: C901 - one bounded capture
                     live=True,
                     point=point,
                     complete=False,
+                    application=str(value.document.get("application", "")),
                 )
             )
             status, output = restic(

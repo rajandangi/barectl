@@ -143,14 +143,58 @@ class BackupsBrowserTests(BrowserTestCase):
         self.sign_in_operator()
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/settings/")
         expect(self.page.get_by_role("heading", name="Backup storage", level=2)).to_be_visible()
-        self.page.get_by_label("Bucket").first.fill("barectl-backups")
-        self.page.get_by_label("Region").fill("us-east-1")
+        self.page.locator("#backup-storage-s3-bucket").fill("barectl-backups")
+        self.page.locator("#backup-storage-s3-region").fill("us-east-1")
         self.page.get_by_role("button", name="Set up Amazon S3").click()
         expect(
             self.page.get_by_role("heading", name="Set up offsite backup storage")
         ).to_be_visible()
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "set_up_offsite_storage")
+        self.assert_no_native_terms()
+
+    def test_existing_backup_storage_is_connected_from_server_settings(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/settings/")
+        expect(
+            self.page.get_by_role("heading", name="Connect existing backup storage")
+        ).to_be_visible()
+        self.page.locator("#connect-s3-bucket").fill("barectl-backups")
+        self.page.locator("#connect-s3-region").fill("us-east-1")
+        self.page.locator("#connect-s3-prefix").fill("barectl/0123456789abcdef")
+        self.page.locator("#connect-s3-sites").fill("shop")
+        self.page.get_by_role("button", name="Connect existing backup storage").click()
+        expect(
+            self.page.get_by_role("heading", name="Connect existing backup storage")
+        ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "connect_existing_backup_storage")
+        self.assert_no_native_terms()
+
+    def test_the_recovery_passphrase_is_replaced_from_server_settings(self) -> None:
+        from backups.observation import OffsiteStorage
+
+        server = Server.objects.get(name="Production")
+        record_backups(
+            server,
+            enabled=True,
+            last=result(),
+            offsite=OffsiteStorage(
+                "s3",
+                "barectl-backups",
+                "us-east-1",
+                "https://s3.us-east-1.amazonaws.com",
+                "barectl/0123456789abcdef",
+            ),
+        )
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/settings/")
+        self.page.get_by_role("button", name="Replace recovery passphrase").click()
+        expect(self.page.get_by_role("heading", name="Replace recovery passphrase")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "replace_recovery_passphrase")
         self.assert_no_native_terms()
 
     def test_the_offsite_copy_result_is_shown_beside_the_onsite_point(self) -> None:

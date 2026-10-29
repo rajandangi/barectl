@@ -45,8 +45,10 @@ from backups.bodies.native import (
     controlled,
     document_result,
     emit_result,
+    environment_file,
     free_bytes,
     locked_file,
+    offsite_extra,
     restic,
     restic_environment,
     safe_config,
@@ -84,6 +86,7 @@ SHARED = {
     "plain": (),
 }
 STAGE_ROOT: Final = "/var/lib/barectl-restore"
+OFFSITE_CAPTURE: Final = "/etc/barectl/backups/offsite/capture.env"
 MARIADB_SOCKET: Final = "/run/mysqld/mysqld.sock"
 READY_SECONDS: Final = 30
 HEADER_BYTES: Final = 8192
@@ -263,13 +266,19 @@ def _quote(value: str) -> str:
     return shlex.quote(value)
 
 
-def header_bytes(repository: str, key: str, snapshot: str, filename: str) -> bytes | None:
+def header_bytes(
+    repository: str,
+    key: str,
+    snapshot: str,
+    filename: str,
+    extra: dict[str, str] | None = None,
+) -> bytes | None:
     process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
         dump_argv(snapshot, filename),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        env=restic_environment(repository, key),
+        env=restic_environment(repository, key, extra),
         start_new_session=True,
     )
     try:
@@ -289,6 +298,7 @@ def import_stream(
     filename: str,
     engine: str,
     identifier: str,
+    extra: dict[str, str] | None = None,
 ) -> tuple[bool, int]:
     """Stream the dump into the site's engine client, counting the tables it creates."""
     client = subprocess.Popen(  # noqa: S603 - fixed native argv and validated paths
@@ -303,7 +313,7 @@ def import_stream(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        env=restic_environment(repository, key),
+        env=restic_environment(repository, key, extra),
         start_new_session=True,
     )
     expected = 0
@@ -463,11 +473,16 @@ def _safety_backup(  # noqa: C901 - one reviewed safety capture
     return found == set(tags)
 
 
-def reviewed_point(document: dict[str, object], repository: str, key: str) -> bool:
+def reviewed_point(
+    document: dict[str, object],
+    repository: str,
+    key: str,
+    extra: dict[str, str] | None = None,
+) -> bool:
     """Re-list under the lock: each reviewed snapshot must still be complete and exact."""
     point = str(document.get("point", ""))
     parts = expected_parts(document)
-    rows = snapshots(repository, key, point)
+    rows = snapshots(repository, key, point, extra)
     found: dict[str, str] = {}
     for row in rows:
         tags = row.get("tags")
@@ -920,13 +935,18 @@ def _stage(identifier: str, point: str) -> pathlib.Path:
 
 
 def _restore_files(
-    document: dict[str, object], repository: str, key: str, target: pathlib.Path
+    document: dict[str, object],
+    repository: str,
+    key: str,
+    target: pathlib.Path,
+    extra: dict[str, str] | None = None,
 ) -> bool:
     snapshot = str(document.get("files_snapshot", ""))
     status, _output = restic(
         ["restore", "--no-lock", snapshot, "--target", str(target)],
         repository=repository,
         password=key,
+        extra=extra,
     )
     return status == 0
 
@@ -984,7 +1004,6 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
     encoded = sys.argv[1] if argument is None else argument
     document = json.loads(gzip.decompress(base64.b64decode(encoded)))
     identifier = str(document.get("identifier", ""))
-    source = str(document.get("source") or identifier)
     repository = str(document.get("repository", ""))
     key = str(document.get("server_key", ""))
     safety_repository = str(document.get("safety_repository") or repository)
@@ -1000,12 +1019,53 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
     at = str(document.get("at", ""))
     tags = document.get("safety_tags")
     safety_scope = str(document.get("safety_scope", ""))
+    source = str(document.get("source", ""))
+    source_storage = document.get("source_storage")
+    source_repository = str(document.get("source_repository", ""))
+    secret_path = str(document.get("secret_path", ""))
+    # A connected offsite source (#408) captures from the source repository with the typed
+    # passphrase; a removed site's kept repository (#407) names its own repository and key.
+    connected = bool(source) and isinstance(source_storage, dict) and bool(source_storage)
+    source_extra: dict[str, str] | None = None
+    if connected:
+        if (
+            IDENTIFIER.fullmatch(source) is None
+            or not source_repository.startswith("s3:https://")
+            or not isinstance(source_storage, dict)
+            or source_storage.get("provider") not in ("s3", "r2")
+            or source_repository
+            != f"s3:{source_storage.get('endpoint')}/{source_storage.get('bucket')}/"
+            f"{source_storage.get('prefix')}/{source}"
+            or not secret_path.startswith("/run/barectl/secrets/")
+            or not locked_file(secret_path, mode=0o600)
+            or document.get("source_application") != application
+        ):
+            emit_result({"class": "failed"})
+            raise SystemExit(FAILED)
+        try:
+            source_extra = offsite_extra(source_storage, environment_file(OFFSITE_CAPTURE))
+        except OSError, ValueError:
+            emit_result(
+                document_result(
+                    document,
+                    "refused",
+                    "restore_repository",
+                    point=point,
+                    snapshots=0,
+                    size=0,
+                    kind="restore",
+                )
+            )
+            raise SystemExit(REFUSED) from None
+    capture_repository = source_repository if connected else repository
+    capture_key = secret_path if connected else key
+    expected_source = identifier if connected else (source or identifier)
     parts = expected_parts(document)
     if (
         IDENTIFIER.fullmatch(identifier) is None
-        or IDENTIFIER.fullmatch(source) is None
-        or repository != f"{REPOSITORY_ROOT}/{source}/onsite"
-        or key != f"{KEY_ROOT}/{source}.key"
+        or (source and IDENTIFIER.fullmatch(source) is None)
+        or repository != f"{REPOSITORY_ROOT}/{expected_source}/onsite"
+        or key != f"{KEY_ROOT}/{expected_source}.key"
         or safety_repository != f"{REPOSITORY_ROOT}/{identifier}/onsite"
         or safety_key != f"{KEY_ROOT}/{identifier}.key"
         or POINT.fullmatch(point) is None
@@ -1028,6 +1088,7 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
         or type(document.get("target_empty")) is not bool
         or ("database" in parts and engine not in ("mariadb", "postgresql"))
         or ("database" in parts and not major)
+        or bool(source_repository) != connected
     ):
         emit_result({"class": "failed"})
         raise SystemExit(FAILED)
@@ -1144,7 +1205,7 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
             )
             raise SystemExit(REFUSED)
         stage("check")
-        if not reviewed_point(document, repository, key):
+        if not reviewed_point(document, capture_repository, capture_key, source_extra):
             emit_result(
                 document_result(
                     document,
@@ -1158,7 +1219,13 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
             )
             raise SystemExit(REFUSED)
         if "database" in parts:
-            header = header_bytes(repository, key, snapshot, str(document.get("filename", "")))
+            header = header_bytes(
+                capture_repository,
+                capture_key,
+                snapshot,
+                str(document.get("filename", "")),
+                source_extra,
+            )
             if (
                 header is None
                 or engine_major(engine, dump_version(engine, header.decode("utf-8", "replace")))
@@ -1254,7 +1321,7 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
         if "files" in parts:
             stage("stage")
             staging = _stage(identifier, point)
-            if not _restore_files(document, repository, key, staging):
+            if not _restore_files(document, capture_repository, capture_key, staging, source_extra):
                 emit_result(
                     document_result(
                         document,
@@ -1268,7 +1335,7 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
                 )
                 raise SystemExit(REFUSED)
             try:
-                staged = admitted(staging, source, application, identifier)
+                staged = admitted(staging, source or identifier, application, identifier)
             except ValueError:
                 emit_result(
                     document_result(
@@ -1300,7 +1367,13 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed rest
         if "database" in parts:
             stage("import")
             ok, imported = import_stream(
-                repository, key, snapshot, str(document.get("filename", "")), engine, identifier
+                capture_repository,
+                capture_key,
+                snapshot,
+                str(document.get("filename", "")),
+                engine,
+                identifier,
+                source_extra,
             )
             if not ok:
                 emit_result(

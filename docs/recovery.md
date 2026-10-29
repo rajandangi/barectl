@@ -28,21 +28,47 @@ way ([automation](automation.md#status)).
 
 A site's encrypted restic repository is `/var/lib/barectl-backups/<id>/onsite`. Its server
 key is `/etc/barectl/backups/<id>.key`, both root-only. The pinned restic profile is
-`/nix/var/nix/profiles/barectl/restic`.
+`/nix/var/nix/profiles/barectl/restic`. When offsite storage is set up, the same site also
+has an encrypted repository at
+`s3:<endpoint>/<bucket>/<prefix>/<id>`, and its storage keys are root-only files at
+`/etc/barectl/backups/offsite/capture.env` (and optionally `prune.env`).
 
-The operator's recovery passphrase opens the repository alone, so an onsite copy is readable
-without Barectl. Set `RESTIC_REPOSITORY` and `RESTIC_PASSWORD_FILE` to a file holding the
-passphrase, then use ordinary restic commands:
+The operator's recovery passphrase opens every site repository alone, so an onsite copy is
+readable without Barectl. Set `RESTIC_REPOSITORY` and `RESTIC_PASSWORD_FILE` to a file holding
+the passphrase, then use ordinary restic commands:
 
 ```sh
 RESTIC_REPOSITORY=/var/lib/barectl-backups/<id>/onsite \
 RESTIC_PASSWORD_FILE=/root/recovery-passphrase \
 /nix/var/nix/profiles/barectl/restic/bin/restic snapshots
+
+# Offsite, after loading the root-only storage keys (never paste them in a shell history).
+set -a
+. /etc/barectl/backups/offsite/capture.env
+set +a
+RESTIC_REPOSITORY='s3:https://<endpoint>/<bucket>/<prefix>/<id>' \
+RESTIC_PASSWORD_FILE=/root/recovery-passphrase \
+AWS_DEFAULT_REGION=<region> \
+/nix/var/nix/profiles/barectl/restic/bin/restic -o s3.bucket-lookup=path snapshots
 ```
 
-Barectl holds no catalog of recovery points; restic's snapshot list is the record. Barectl's
-own workers open the repository with the server key, never the passphrase. The recovery kit
-in the site's **Backups** section names the same paths and commands and holds no secret.
+A full point's files restore with `restic restore <snapshot> --target /tmp/recovered`; a
+database point dumps with `restic dump <snapshot> /s<id>.sql > database.sql`. Pass the snapshot
+ID or `latest`; the point's scope is in its tags. Barectl holds no catalog of recovery points;
+restic's snapshot list is the record. Barectl's own workers open the repository with the
+server key, never the passphrase. The recovery kit in the site's **Backups** section names the
+same paths and commands and holds no secret.
+
+**Lost server or controller.** A fresh Barectl installation uses **Settings > Backup storage >
+Connect existing backup storage** with the kit's provider, bucket, prefix and source site
+identifiers, the storage keys and the passphrase. Barectl opens those repositories read-only
+and lists their recovery points. Restore into an existing site of the same kind and database
+engine major on the new server; the review warns when the source site and domain differ and
+never rewrites application data. Every cross-server restore asks for the source passphrase
+again and re-lists the repository before it changes anything. Without Barectl, the commands
+above are the whole runbook: the kit, the passphrase and (for offsite) the storage keys are
+enough. Replacing the passphrase in **Settings** adds the new key, verifies every repository
+and only then removes the old key; it never rewrites a backup.
 
 
 ## Inspecting

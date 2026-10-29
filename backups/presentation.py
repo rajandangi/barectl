@@ -75,7 +75,7 @@ class RecoveryPointView:
 
     @property
     def restorable(self) -> bool:
-        return self.status == "Saved here"
+        return self.status in ("Saved here", "In connected storage")
 
     @property
     def has_database(self) -> bool:
@@ -395,6 +395,7 @@ def points_view(
     *,
     configured: bool = False,
     integrity: tuple[IntegrityFinding, ...] = (),
+    connected: bool = False,
 ) -> tuple[RecoveryPointView, ...]:
     raw = listing.get("points")
     if not isinstance(raw, list):
@@ -418,19 +419,34 @@ def points_view(
             RecoveryPointView(
                 _label(_when(str(when))) if isinstance(when, str) else "Time not recorded",
                 SCOPE_LABELS.get(str(point.get("scope", "")), "Database only"),
-                "Saved here" if complete else "Incomplete",
+                (
+                    ("In connected storage" if connected else "Saved here")
+                    if complete
+                    else "Incomplete"
+                ),
                 point.get("live") is True,
                 point.get("keep") is True,
                 str(point.get("short", "")),
                 point_id,
                 tuple(str(item) for item in missing) if isinstance(missing, list) else (),
                 tuple(str(item) for item in incomplete) if isinstance(incomplete, list) else (),
-                offsite_status=_point_offsite(point_id, copy, configured),
+                offsite_status=(
+                    "Connected offsite" if connected else _point_offsite(point_id, copy, configured)
+                ),
                 parts=tuple(str(item) for item in parts) if isinstance(parts, list) else (),
                 verified="; ".join(verified.get(point_id, [])) or "Not verified",
             )
         )
     return tuple(rows)
+
+
+def connected_points_view(source: object) -> tuple[RecoveryPointView, ...]:
+    """A connected source's last listing, marked as read-only connected storage."""
+    from .observation import ConnectedSource
+
+    if not isinstance(source, ConnectedSource):
+        return ()
+    return points_view({"points": list(source.points())}, configured=True, connected=True)
 
 
 def _point_offsite(point: str, copy: CopyView | None, configured: bool) -> str:

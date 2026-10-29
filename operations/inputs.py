@@ -41,6 +41,8 @@ class InputShape(StrEnum):
     SITE_BACKUP_POINT = "site_backup_point"
     BACKUP_RETENTION = "backup_retention"
     BACKUP_CAPTURE = "backup_capture"
+    CONNECT_OFFSITE_STORAGE = "connect_offsite_storage"
+    REPLACE_RECOVERY_PASSPHRASE = "replace_recovery_passphrase"  # noqa: S105 - a shape name
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,9 @@ class PreparationInputs:
     bucket: str = ""
     region: str = ""
     account: str = ""
+    # Connecting another server's offsite storage: the kit's prefix and source sites.
+    prefix: str = ""
+    sites: tuple[str, ...] = ()
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -178,6 +183,19 @@ class PreparationInputs:
                     offsite=self.offsite,
                 )
             return reviewed
+        if self.prefix or self.sites:
+            connect: dict[str, object] = {
+                "version": 1,
+                "provider": self.provider,
+                "bucket": self.bucket,
+                "prefix": self.prefix,
+                "sites": list(self.sites),
+            }
+            if self.provider == "s3":
+                connect["region"] = self.region
+            else:
+                connect["account"] = self.account
+            return connect
         if self.provider:
             if self.provider == "s3":
                 return {
@@ -662,7 +680,7 @@ def _recovery_point_inputs(
 ) -> PreparationInputs:
     """A restore names its site, one Barectl recovery point and what to restore."""
     from backups import convention
-    from sites.names import request, valid_identifier
+    from sites.names import request
 
     if set(value) not in (
         {"version", "identifier", "point"},
@@ -679,7 +697,7 @@ def _recovery_point_inputs(
         or not isinstance(scope, str)
         or scope not in ("", *convention.SCOPES)
         or not isinstance(source, str)
-        or (source and (source == identifier or not valid_identifier(source)))
+        or (source and convention.SITE_IDENTIFIER.fullmatch(source) is None)
     ):
         raise ValueError(INVALID_INPUTS)
     if convention.POINT.fullmatch(point) is None:
@@ -970,6 +988,63 @@ def _offsite_storage_inputs(
     return PreparationInputs(provider=provider, bucket=bucket, account=account)
 
 
+def _connect_offsite_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from backups import convention
+    from sites.names import valid_identifier
+
+    if value.get("version") != 1 or value.get("provider") not in ("s3", "r2"):
+        raise ValueError(INVALID_INPUTS)
+    provider = str(value["provider"])
+    bucket, prefix = value.get("bucket"), value.get("prefix")
+    sites = value.get("sites")
+    if (
+        not isinstance(bucket, str)
+        or convention.BUCKET.fullmatch(bucket) is None
+        or not isinstance(prefix, str)
+        or convention.PREFIX.fullmatch(prefix) is None
+        or not isinstance(sites, list)
+        or not 1 <= len(sites) <= 64
+        or not all(isinstance(site, str) and valid_identifier(site) for site in sites)
+        or len(set(sites)) != len(sites)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    if provider == "s3":
+        if set(value) != {"version", "provider", "bucket", "region", "prefix", "sites"}:
+            raise ValueError(INVALID_INPUTS)
+        region = value.get("region")
+        if not isinstance(region, str) or convention.REGION.fullmatch(region) is None:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs(
+            provider=provider,
+            bucket=bucket,
+            region=region,
+            prefix=prefix,
+            sites=tuple(str(site) for site in sites),
+        )
+    if set(value) != {"version", "provider", "bucket", "account", "prefix", "sites"}:
+        raise ValueError(INVALID_INPUTS)
+    account = value.get("account")
+    if not isinstance(account, str) or convention.ACCOUNT.fullmatch(account) is None:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(
+        provider=provider,
+        bucket=bucket,
+        account=account,
+        prefix=prefix,
+        sites=tuple(str(site) for site in sites),
+    )
+
+
+def _replace_passphrase_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    if set(value) != {"version"} or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs()
+
+
 def _site_backup_point_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -1073,4 +1148,6 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.SITE_BACKUP_POINT: _site_backup_point_inputs,
     InputShape.BACKUP_RETENTION: _backup_retention_inputs,
     InputShape.BACKUP_CAPTURE: _backup_capture_inputs,
+    InputShape.CONNECT_OFFSITE_STORAGE: _connect_offsite_inputs,
+    InputShape.REPLACE_RECOVERY_PASSPHRASE: _replace_passphrase_inputs,
 }

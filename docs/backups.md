@@ -1,4 +1,4 @@
-# Backups (implemented, #396, #399, #400, #401, #402, #403, #404, #405, #406 and #407)
+# Backups (implemented, #396, #399, #400, #401, #402, #403, #404, #405, #406, #407 and #408)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
@@ -31,6 +31,33 @@ bucket locks are configured, so offsite copies are not immutable.
 It removes the setting and its keys from the server and deletes no offsite copy: everything
 already in the bucket stays there, and the review says so.
 
+### Connect existing backup storage
+
+**Connect existing backup storage** recovers another server's storage on a new server. The
+operator copies the recovery kit's provider, endpoint, bucket, prefix and source site
+identifiers, then types the storage keys and the recovery passphrase. It is one reviewed
+Shared change that also needs **manage secrets**.
+
+Applying it opens every source repository with the passphrase alone and lists its Barectl
+recovery points read-only; it never initialises, copies, prunes or changes anything in the
+bucket. It writes only this server's root-only offsite config, keys and source-site list, and
+emits the bounded listing as one safe result line. Passive discovery reconstructs the
+connected source sites and their last listing from that evidence, so a fresh controller with
+no previous database sees the same recovery points after discovery. A listing older than the
+connection is a hint for the page, never authority: Restore re-lists the source under its
+lock before changing anything.
+
+### Replace recovery passphrase
+
+**Replace recovery passphrase** is one reviewed Shared change that also needs **manage
+secrets**. The old and new passphrases travel only through the confidential input channel and
+are never stored. For every enabled site's onsite repository and, when offsite storage is set
+up, its offsite repository, applying adds the new key, proves the new passphrase opens it,
+and only then removes the key the old passphrase used. It never re-encrypts data: restic key
+changes leave every pack and the server key in place. The review names each repository and
+the change reports refused if the old passphrase does not open one or the new one does not
+verify.
+
 ### Captures and copies
 
 A capture whose site has offsite storage copies its onsite point after the site has reopened
@@ -52,6 +79,7 @@ missing, and it is the repair action for a failed upload.
 | Offsite setting | `/etc/barectl/backups/offsite/config` | root `0600` |
 | Capture and copy keys | `/etc/barectl/backups/offsite/capture.env` | root `0600` |
 | Optional S3 pruning keys | `/etc/barectl/backups/offsite/prune.env` | root `0600` |
+| Connected source sites | `/etc/barectl/backups/offsite/sources` | root `0600` |
 
 The repository URL is `s3:<endpoint>/<bucket>/<prefix>/<site>` and the fixed prefix is stored
 in the setting, so a fresh controller reconstructs it. Discovery reads only the non-secret
@@ -263,8 +291,17 @@ site as the source and refuses unless the point holds files that prove the targe
 (Laravel's private environment, WordPress's private configuration, or neither for plain PHP)
 and the database copies share the same engine major. It restores from the kept repository
 and takes its safety backup in the target's own repository. A database-only point of a
-removed site cannot prove its kind, so it is not offered for this. Cross-server restores and
-exporting a point remain planned.
+removed site cannot prove its kind, so it is not offered for this.
+
+**Across servers.** On a server whose offsite storage was connected, the Backups section lists
+the source site's recovery points separately. The target is an existing Barectl-created site
+of the same kind and database engine major; the source site identifier may differ. The review
+warns that the target keeps its own domain and that Barectl never rewrites application data,
+and the source passphrase is typed again on apply because Barectl does not store it. Applying
+re-lists the source repository read-only before the safety backup and refuses a missing,
+incomplete, different-kind or different-engine-major point before touching the target. The
+source database version is checked when the repository is opened. Exporting a point remains
+planned.
 
 ## Retention
 
@@ -374,8 +411,10 @@ lists it, and passive discovery never invents one.
 
 The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
 a database-only capture, `backups/bodies/full.py` for a paused full capture,
-`backups/bodies/restore.py` for Database only, Files only and Full site restores, `backups/bodies/offsite.py` for offsite
-storage, `backups/bodies/copy.py` for Copy offsite again, `backups/bodies/reopen.py` for
+`backups/bodies/restore.py` for Database only, Files only and Full site restores, including
+from a connected source repository, `backups/bodies/offsite.py` for offsite storage,
+`backups/bodies/connect.py` for Connect existing backup storage, `backups/bodies/keys.py` for
+replacing the recovery passphrase, `backups/bodies/copy.py` for Copy offsite again, `backups/bodies/reopen.py` for
 reopening a paused site, `backups/bodies/schedule.py` for the schedule install and its live
 tick, `backups/bodies/retention.py` for retention cleanup, Keep and their unit templates, and
 `backups/bodies/integrity.py` for the weekly check; each prints its stages and a result line.
@@ -395,8 +434,13 @@ prepared Laravel site, each with a paused full capture, a full restore with its 
 and data, ownership, permission and readiness checks; the Laravel item also proves a restored
 release counts toward Deploy's retention. The #407 assertions add a real Deploy with pending migrations whose confirm screen offers
 **Back up first**, and a real Remove site that keeps its repository and lists it as removed.
-The #405, #406 and #407 items' hosted times are not yet measured: the shard record carries a 5 s placeholder until the orchestrator runs them on the
-integration tip. On the local ubuntu-26.04 lane the #401 scenario measured 62 to 65 s for the
+#408 adds the `DisasterRecovery` item there: one plain PHP site on the prepared L5 layer is
+captured full and copied offsite; a second server boots from the same layer, creates a
+matching site under another identifier and domain, connects the same local S3-compatible
+storage with the kit facts, passphrase and keys, and restores the point; a plain `restic`
+read of the kit's onsite path with the passphrase alone then recovers the source database.
+The #405, #406, #407 and #408 items' hosted times are not yet measured: the shard record
+carries a placeholder until the orchestrator runs them on the integration tip. On the local ubuntu-26.04 lane the #401 scenario measured 62 to 65 s for the
 `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured
