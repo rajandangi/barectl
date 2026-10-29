@@ -8,6 +8,7 @@ from backups.schedule import prepare_schedule as prepare_backup_schedule
 from backups.views import (
     check_now,
     prepare_backup,
+    prepare_copy,
     prepare_enable,
     prepare_reopen,
     prepare_restore,
@@ -32,6 +33,7 @@ from operations.views import (
     server_change_prepare,
 )
 from runtimes.defaults_views import prepare_default
+from servers.backup_storage_views import prepare_remove_storage, prepare_storage
 from servers.views import (
     activity,
     activity_rows,
@@ -158,6 +160,16 @@ urlpatterns = [
         "servers/<int:pk>/settings/certificate-email/prepare/",
         prepare_certificate_email,
         name="certificate_email_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/backup-storage/prepare/",
+        prepare_storage,
+        name="backup_storage_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/backup-storage/remove/prepare/",
+        prepare_remove_storage,
+        name="backup_storage_remove_prepare",
     ),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),
@@ -358,6 +370,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/backups/check/",
         check_now,
         name="site_backups_check",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/copy/prepare/",
+        prepare_copy,
+        name="site_backups_copy_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/backups/kit/",

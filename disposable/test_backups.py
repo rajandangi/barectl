@@ -39,6 +39,79 @@ class BackupCase(ScenarioTestCase):
     layer = "L1"
     exclusive = True
     prefix = "bk"
+    S3_HOST = "s3.local.amazonaws.com"
+    S3_BUCKET = "barectl-test"
+    S3_REGION = "local"
+    S3_ROOT = "/srv/barectl-test-s3"
+    S3_UNIT = "barectl-test-s3"
+
+    def start_s3(self) -> None:
+        """A local S3-compatible server on the lane, signed by the fixture CA."""
+        from pathlib import Path
+
+        from . import mirror
+
+        certificate, key = mirror.mirror_certificate([self.S3_HOST])
+        source = Path(__file__).resolve().parent.joinpath("native_mirror/s3.py").read_text()
+        with self.shell() as shell:
+            write(self, shell, "/usr/local/lib/barectl-test-s3.py", source)
+            self.assertEqual(
+                shell.run("chmod 0755 /usr/local/lib/barectl-test-s3.py").exit_status, 0
+            )
+            write(self, shell, "/etc/barectl-test-tls/cert.pem", certificate.read_text())
+            write(self, shell, "/etc/barectl-test-tls/key.pem", key.read_text())
+            self.native("install -d -m 700 " + self.S3_ROOT)
+            self.native(
+                f"grep -qx '{self.S3_HOST}' /etc/hosts || "
+                f"printf '127.0.0.1 {self.S3_HOST}\\n' >>/etc/hosts"
+            )
+            self.native("systemctl reset-failed " + self.S3_UNIT + " 2>/dev/null || true")
+            result = self.native(
+                "systemd-run --unit="
+                + self.S3_UNIT
+                + " --property=Type=simple --property=Restart=no "
+                + "python3 /usr/local/lib/barectl-test-s3.py "
+                + f"--root {self.S3_ROOT} --address 0.0.0.0:443 "
+                + "--certificate /etc/barectl-test-tls/cert.pem "
+                + "--key /etc/barectl-test-tls/key.pem"
+            )
+            self.assertIn("Running as unit", result)
+            self.native(
+                "timeout 30 sh -c 'until curl --silent --show-error "
+                f"--cacert /usr/local/share/ca-certificates/barectl-fixture-ca.crt "
+                f"https://{self.S3_HOST}/ -o /dev/null; do sleep 0.2; done'"
+            )
+        self.addCleanup(self.native, f"systemctl stop {self.S3_UNIT} 2>/dev/null || true")
+
+    def s3_files(self) -> list[str]:
+        return [
+            line
+            for line in self.native(f"find {self.S3_ROOT} -type f -printf '%P\\n'").splitlines()
+            if line and not line.startswith(".uploads/")
+        ]
+
+    def offsite_files(self) -> list[str]:
+        return [line for line in self.s3_files() if line.startswith(f"{self.S3_BUCKET}/")]
+
+    def offsite_setup(self) -> ChangeReview:
+        from backups import offsite
+
+        secret = json.dumps(
+            {
+                "values": {
+                    "access_key": "barectl-test-access",
+                    "secret_key": "barectl-test-secret",
+                    "passphrase": PASSPHRASE,
+                }
+            }
+        ).encode()
+        return apply_change(
+            self,
+            offsite.SET_UP,
+            PreparationInputs(provider="s3", bucket=self.S3_BUCKET, region=self.S3_REGION),
+            timeout=180,
+            secret=secret,
+        )
 
     def router(self, shell: RemoteShell) -> None:
         write(self, shell, "/etc/apt/sources.list.d/barectl-fixture.sources", mirror.apt_sources())
@@ -164,7 +237,8 @@ class BackupCase(ScenarioTestCase):
     def next_schedule_time(self) -> str:
         from datetime import UTC, datetime, timedelta
 
-        moment = datetime.now(UTC) + timedelta(minutes=2)
+        now = datetime.now(UTC)
+        moment = now + timedelta(minutes=3 if now.second >= 45 else 2)
         return moment.strftime("%H:%M")
 
     def site_status(self, path: str = "/") -> int:
@@ -204,6 +278,37 @@ class BackupCase(ScenarioTestCase):
     def backup_row(self, collected: CollectedSnapshot) -> ObservedBackup:
         return next(row for row in collected.backups.value if row.identifier == IDENTIFIER)
 
+    def offsite_points(self) -> list[dict[str, object]]:
+        from backups import check, convention
+        from discovery.root_read import run_root
+
+        repository = (
+            f"s3:https://{self.S3_HOST}/{self.S3_BUCKET}/{self.offsite_prefix()}/{IDENTIFIER}"
+        )
+        with self.shell() as shell:
+            listing = run_root(
+                shell,
+                "sh -c "
+                + shlex.quote(
+                    "set -a; . /etc/barectl/backups/offsite/capture.env; set +a; "
+                    f"RESTIC_REPOSITORY={repository} "
+                    f"RESTIC_PASSWORD_FILE={convention.server_key(IDENTIFIER)} "
+                    f"RESTIC_CACHE_DIR={convention.CACHE_DIR} "
+                    f"{convention.RESTIC_BIN} snapshots --json --no-lock"
+                ),
+            )
+        return check.points(check.parse_listing(listing.stdout) or [])
+
+    def offsite_prefix(self) -> str:
+        from backups import convention
+
+        text = self.native(f"cat {convention.OFFSITE_CONFIG}")
+        for line in text.splitlines():
+            name, _, value = line.partition("=")
+            if name == "prefix":
+                return value
+        raise AssertionError("The offsite config has no prefix.")
+
 
 @tag(SCENARIO_TAG)
 class BackupLifecycle(BackupCase):
@@ -213,6 +318,17 @@ class BackupLifecycle(BackupCase):
 
         self.prepare_site()
         enabled = self.enable()
+        # Offsite storage is checked against a local S3-compatible server, never the internet.
+        self.start_s3()
+        self.offsite_setup()
+        self.assertEqual(
+            self.native("stat -c '%u %a' /etc/barectl/backups/offsite/capture.env"),
+            "0 600",
+        )
+        self.assertNotIn(
+            "barectl-test-secret",
+            self.native("journalctl --no-pager -o cat --grep '^barectl-' | tail -n 40"),
+        )
         with self.shell() as shell:
             row = observation.read(
                 shell,
@@ -294,6 +410,44 @@ class BackupLifecycle(BackupCase):
             self.fail("No backup result was reconstructed.")
         self.assertIn(backup.last.result_class, ("succeeded", "partial"))
         self.assertEqual(backup.last.scope, "database")
+        self.assertEqual(backup.last.offsite, "copied")
+        offsite_points = self.offsite_points()
+        self.assertEqual(len(offsite_points), 1)
+        self.assertTrue(offsite_points[0]["complete"])
+        self.assertEqual(offsite_points[0]["point"], backup.last.point)
+        # A capture whose offsite copy fails keeps the onsite point and says so.
+        self.native("mv /etc/barectl/backups/offsite/capture.env /root/capture.env.saved")
+        try:
+            self.capture()
+        finally:
+            self.native("mv /root/capture.env.saved /etc/barectl/backups/offsite/capture.env")
+        failed = self.backup_row(self.observe()).last
+        if failed is None:
+            self.fail("No failed offsite result was reconstructed.")
+        self.assertEqual(failed.result_class, "succeeded")
+        self.assertEqual(failed.offsite, "failed")
+        self.assertIn(failed.point, {str(point["point"]) for point in self.points()})
+        # Copy offsite again repairs a failed copy without a new capture.
+        from backups import offsite
+
+        apply_change(
+            self,
+            offsite.COPY,
+            PreparationInputs("", IDENTIFIER, point=failed.point),
+            timeout=120,
+        )
+        self.assertTrue(any(str(point["point"]) == failed.point for point in self.offsite_points()))
+        # Removing offsite storage leaves every copy in the bucket.
+        before_files = self.offsite_files()
+        apply_change(
+            self,
+            offsite.REMOVE,
+            PreparationInputs(),
+            timeout=60,
+            secret=json.dumps({"values": {"bucket": self.S3_BUCKET}}).encode(),
+        )
+        self.assertEqual(self.native("test ! -e /etc/barectl/backups/offsite/config; echo $?"), "0")
+        self.assertEqual(self.offsite_files(), before_files)
         with self.shell() as shell:
             listing = run_root(shell, check.listing_command(IDENTIFIER))
         parsed = check.parse_listing(listing.stdout)

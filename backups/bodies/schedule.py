@@ -44,6 +44,7 @@ from backups.bodies.native import (
     REPOSITORY_ROOT,
     SUCCESS,
     controlled,
+    copy_point,
     document_result,
     emit_result,
     free_bytes,
@@ -106,8 +107,7 @@ def _runtime(document: dict[str, object]) -> dict[str, object]:
         "files": list(cast("list[object]", document.get("files", []))),
         "dump": list(cast("list[object]", document.get("dump", []))),
         "filename": str(document.get("filename", "")),
-        "offsite_repository": str(document.get("offsite_repository", "")),
-        "offsite_key": str(document.get("offsite_key", "")),
+        "offsite_plan": document.get("offsite_plan", {}),
         "origin": "scheduled",
         "lock_wait_seconds": SCHEDULE_LOCK_WAIT_SECONDS,
     }
@@ -374,14 +374,9 @@ def _run_checked(document: dict[str, object]) -> SimpleNamespace:
             and (engine not in ("mariadb", "postgresql") or dump != dump_argv(identifier, engine))
         )
         or (not dump and engine)
-        or (
-            str(document.get("offsite_repository", ""))
-            and not str(document["offsite_repository"]).startswith(f"{REPOSITORY_ROOT}/")
-        )
-        or (
-            str(document.get("offsite_key", ""))
-            and not str(document["offsite_key"]).startswith("/etc/barectl/backups/")
-        )
+        or (type(document.get("offsite")) is not bool)
+        or (document.get("offsite") is False and document.get("offsite_plan") != {})
+        or (document.get("offsite") is True and not isinstance(document.get("offsite_plan"), dict))
     ):
         raise ValueError("The backup schedule payload is not a supported capture.")
     return SimpleNamespace(
@@ -393,8 +388,7 @@ def _run_checked(document: dict[str, object]) -> SimpleNamespace:
         dump=dump,
         filename=str(document.get("filename", "")),
         offsite=document.get("offsite") is True,
-        offsite_repository=str(document.get("offsite_repository", "")),
-        offsite_key=str(document.get("offsite_key", "")),
+        offsite_plan=document.get("offsite_plan", {}),
         document=document,
     )
 
@@ -459,29 +453,23 @@ def _complete(value: SimpleNamespace, point: str) -> bool:
     )
 
 
-def _copy_offsite(value: SimpleNamespace, point: str) -> bool:
+def _copy_offsite(value: SimpleNamespace, point: str) -> tuple[str, str]:
     if not value.offsite:
-        return True
-    if not value.offsite_repository or not value.offsite_key:
-        # Offsite storage is reviewed separately; the onsite point is still complete.
-        return True
-    found = snapshots(value.repository, value.key, point)
-    ids = [str(row["id"]) for row in found if isinstance(row.get("id"), str)]
-    if not ids:
-        return False
-    status, _output = restic(
-        [
-            "copy",
-            "--from-repo",
-            value.repository,
-            "--from-password-file",
-            value.key,
-            *ids,
-        ],
-        repository=value.offsite_repository,
-        password=value.offsite_key,
+        return "", ""
+    plan = value.offsite_plan
+    if not isinstance(plan, dict) or not plan:
+        return "failed", "offsite_copy"
+    copy_class, copy_reason = copy_point(
+        value.identifier,
+        point,
+        value.repository,
+        value.key,
+        plan,
+        release=False,
     )
-    return status == 0
+    if copy_class == "succeeded":
+        return "copied", ""
+    return "failed", copy_reason or "offsite_copy"
 
 
 def run_mode(argument: str) -> None:  # noqa: C901 - one bounded capture
@@ -583,35 +571,33 @@ def run_mode(argument: str) -> None:  # noqa: C901 - one bounded capture
         stage("verify")
         if not _mark_complete(value, point) or not _complete(value, point):
             _fail("partial", "backup_verify")
-        offsite = _copy_offsite(value, point)
+        offsite_status = ""
+        copy_reason = ""
+        if value.offsite:
+            if site_lock_fd is not None:
+                os.close(site_lock_fd)
+                site_lock_fd = None
+            os.close(lock)
+            lock = -1
+            offsite_status, copy_reason = _copy_offsite(value, point)
         result_document = {**value.document, "at": now.isoformat()}
-        if not offsite:
-            emit_result(
-                document_result(
-                    result_document,
-                    "partial",
-                    "backup_offsite",
-                    point=point,
-                    snapshots=len(parts),
-                    size=size,
-                )
-            )
-            raise SystemExit(PARTIAL)
         emit_result(
             document_result(
                 result_document,
                 "succeeded",
-                "",
+                copy_reason,
                 point=point,
                 snapshots=len(parts),
                 size=size,
+                offsite=offsite_status,
             )
         )
         raise SystemExit(SUCCESS)
     finally:
         if site_lock_fd is not None:
             os.close(site_lock_fd)
-        os.close(lock)
+        if lock != -1:
+            os.close(lock)
 
 
 def main() -> None:

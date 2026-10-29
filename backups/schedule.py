@@ -85,8 +85,7 @@ RUNTIME_KEYS: Final = frozenset(
         "files",
         "dump",
         "filename",
-        "offsite_repository",
-        "offsite_key",
+        "offsite_plan",
         "origin",
         "lock_wait_seconds",
     }
@@ -407,8 +406,7 @@ def _runtime(value: object) -> dict[str, object] | None:
         or not isinstance(document.get("dump"), list)
         or not all(isinstance(item, str) for item in document["dump"])
         or not isinstance(document.get("filename"), str)
-        or not isinstance(document.get("offsite_repository"), str)
-        or not isinstance(document.get("offsite_key"), str)
+        or not isinstance(document.get("offsite_plan"), dict)
         or document.get("origin") != "scheduled"
         or document.get("lock_wait_seconds") != convention.SCHEDULE_LOCK_WAIT_SECONDS
     ):
@@ -530,6 +528,36 @@ def _site_problem(evidence: ScheduleEvidence) -> str:
     return ""
 
 
+def _offsite_plan(evidence: ScheduleEvidence, identifier: str) -> dict[str, object]:
+    storage = evidence.backup.offsite if evidence.backup is not None else None
+    if storage is None or not storage.configured:
+        return {}
+    config = {
+        "provider": storage.provider,
+        "bucket": storage.bucket,
+        "region": storage.region,
+        "endpoint": storage.endpoint,
+        "prefix": storage.prefix,
+        "prune": "yes" if storage.prune else "no",
+    }
+    try:
+        repository = convention.offsite_repository(config, identifier)
+    except ValueError:
+        return {}
+    return {
+        "storage": {
+            "provider": storage.provider,
+            "bucket": storage.bucket,
+            "region": storage.region,
+            "endpoint": storage.endpoint,
+            "prefix": storage.prefix,
+            "prune": config["prune"],
+        },
+        "repository": repository,
+        "capture_env": convention.OFFSITE_CAPTURE,
+    }
+
+
 def _files(identifier: str, application: str) -> list[str]:
     directory = f"/var/www/{identifier}"
     shared = {
@@ -602,6 +630,7 @@ def _refusals(  # noqa: C901 - one list of every refusal
     frequency: str,
     at: str,
     scope: str,
+    offsite: bool,
 ) -> list[str]:
     refusals: list[str] = []
     if evidence.standing != Standing.TARGET_STACK:
@@ -628,6 +657,8 @@ def _refusals(  # noqa: C901 - one list of every refusal
         refusals.append(evidence.database_problem or "This site has no site database.")
     if not evidence.engine and scope in ("database", "full"):
         refusals.append("This server has no managed database engine to dump.")
+    if offsite and not _offsite_plan(evidence, str(inputs.identifier)):
+        refusals.append("Set up offsite storage before scheduling an offsite copy.")
     account = evidence.site.get("account") if evidence.site is not None else None
     if not (isinstance(account, list) and len(account) >= 2 and type(account[0]) is int):
         refusals.append("The site's Linux account is not observed.")
@@ -679,8 +710,7 @@ def _details(
         {
             "label": "Offsite copy",
             "value": (
-                "Requested; the onsite copy is taken now and the offsite copy starts once "
-                "offsite storage is set up."
+                "Yes, after the onsite copy finishes."
                 if offsite
                 else "No. The recovery point stays on this server."
             ),
@@ -704,7 +734,8 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     at = inputs.at
     scope = _scope_choice(evidence, inputs.scope)
     offsite = bool(inputs.offsite)
-    refusals = _refusals(evidence, inputs, current, frequency, at, scope)
+    plan = _offsite_plan(evidence, str(inputs.identifier)) if offsite else {}
+    refusals = _refusals(evidence, inputs, current, frequency, at, scope, offsite)
     unchanged = (
         (inputs.schedule_state == "off" and not current.installed)
         or (inputs.schedule_state == "on" and current.same(frequency, at, scope, offsite))
@@ -726,15 +757,14 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "frequency": frequency,
         "at": at,
         "scope": scope,
-        "offsite": offsite,
         "engine": evidence.engine if dump else "",
         "repository": convention.repository(str(inputs.identifier)),
         "server_key": convention.server_key(str(inputs.identifier)),
         "files": files,
         "dump": dump,
         "filename": convention.dump_filename(str(inputs.identifier)),
-        "offsite_repository": "",
-        "offsite_key": "",
+        "offsite": offsite,
+        "offsite_plan": plan,
         "units": current.units or dict.fromkeys(KINDS, "absent"),
         "details": _details(evidence, inputs, current, frequency, at, scope, offsite),
     }
@@ -848,13 +878,10 @@ def _document(document: dict[str, object]) -> dict[str, object]:
         )
         or (dump and dump != convention.dump_argv(identifier, str(document.get("engine", ""))))
         or (
-            str(document.get("offsite_repository", ""))
-            and not str(document["offsite_repository"]).startswith(f"{convention.REPOSITORY_ROOT}/")
+            document["offsite"]
+            and not _valid_offsite_plan(document.get("offsite_plan"), identifier)
         )
-        or (
-            str(document.get("offsite_key", ""))
-            and not str(document["offsite_key"]).startswith(f"{convention.KEY_ROOT}/")
-        )
+        or (not document["offsite"] and document.get("offsite_plan") != {})
     ):
         raise ValueError("The backup schedule review is not a valid immutable selection.")
     return {
@@ -872,10 +899,46 @@ def _document(document: dict[str, object]) -> dict[str, object]:
         "files": list(cast("list[object]", files or [])),
         "dump": list(cast("list[object]", dump or [])),
         "filename": str(document.get("filename", "")),
-        "offsite_repository": str(document.get("offsite_repository", "")),
-        "offsite_key": str(document.get("offsite_key", "")),
+        "offsite_plan": document.get("offsite_plan", {}),
         "units": {kind: str(units[kind]) for kind in KINDS},
     }
+
+
+def _valid_offsite_plan(value: object, identifier: str) -> bool:
+    if not isinstance(value, dict) or set(value) != {"storage", "repository", "capture_env"}:
+        return False
+    storage = value.get("storage")
+    if not isinstance(storage, dict) or set(storage) != {
+        "provider",
+        "bucket",
+        "region",
+        "endpoint",
+        "prefix",
+        "prune",
+    }:
+        return False
+    if not (
+        isinstance(storage.get("provider"), str)
+        and isinstance(storage.get("bucket"), str)
+        and isinstance(storage.get("region"), str)
+        and isinstance(storage.get("endpoint"), str)
+        and isinstance(storage.get("prefix"), str)
+        and storage.get("prune") in ("yes", "no")
+        and value.get("capture_env") == convention.OFFSITE_CAPTURE
+    ):
+        return False
+    config = {
+        "provider": str(storage["provider"]),
+        "bucket": str(storage["bucket"]),
+        "region": str(storage["region"]),
+        "endpoint": str(storage["endpoint"]),
+        "prefix": str(storage["prefix"]),
+        "prune": str(storage["prune"]),
+    }
+    try:
+        return value.get("repository") == convention.offsite_repository(config, identifier)
+    except ValueError:
+        return False
 
 
 def body(document: dict[str, object], context: BodyContext) -> NativeBody:

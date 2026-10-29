@@ -80,7 +80,12 @@ def site_record(**values: object) -> dict[str, object]:
     }
 
 
-def backup_row(*, enabled: bool = True, database: bool = True) -> observation.ObservedBackup:
+def backup_row(
+    *,
+    enabled: bool = True,
+    database: bool = True,
+    offsite: observation.OffsiteStorage | None = None,
+) -> observation.ObservedBackup:
     return observation.ObservedBackup(
         IDENTIFIER,
         "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1" if enabled else "",
@@ -90,6 +95,7 @@ def backup_row(*, enabled: bool = True, database: bool = True) -> observation.Ob
         database,
         "" if database else "This site has no site database.",
         None,
+        offsite,
     )
 
 
@@ -99,11 +105,12 @@ def evidence(
     enabled: bool = True,
     database: bool = True,
     current: str = "alpha",
+    offsite: observation.OffsiteStorage | None = None,
 ) -> schedule.ScheduleEvidence:
     return schedule.ScheduleEvidence(
         standing=Standing.TARGET_STACK,
         site=site_record(),
-        backup=backup_row(enabled=enabled, database=database),
+        backup=backup_row(enabled=enabled, database=database, offsite=offsite),
         schedules=schedules,
         engine="mariadb",
         database=database,
@@ -319,6 +326,38 @@ class ReviewTests(ChangeTestCase):
                 forged[key] = value
                 with self.assertRaises(ValueError):
                     schedule.body(forged, BodyContext("unit", BOOT, 0))
+
+    def test_offsite_needs_storage_and_then_carries_its_reviewed_plan(self) -> None:
+        inputs = PreparationInputs(
+            "",
+            IDENTIFIER,
+            schedule_state="on",
+            backup_schedule=True,
+            frequency="daily",
+            at="03:00",
+            scope="full",
+            offsite=True,
+        )
+        refused = schedule.review(evidence(), inputs)
+        self.assertFalse(refused.eligible)
+        self.assertIn("Set up offsite storage", " ".join(refused.refusals))
+        storage = observation.OffsiteStorage(
+            "s3",
+            "barectl-backups",
+            "us-east-1",
+            "https://s3.us-east-1.amazonaws.com",
+            "barectl/0123456789abcdef",
+        )
+        draft = schedule.review(evidence(offsite=storage), inputs)
+        self.assertTrue(draft.eligible, draft.refusals)
+        plan = draft.document["offsite_plan"]
+        if not isinstance(plan, dict):
+            self.fail("The offsite plan was not reviewed.")
+        self.assertEqual(
+            plan["repository"],
+            "s3:https://s3.us-east-1.amazonaws.com/barectl-backups/barectl/0123456789abcdef/alpha",
+        )
+        self.assertEqual(plan["capture_env"], "/etc/barectl/backups/offsite/capture.env")
 
     def test_a_database_schedule_without_a_site_database_is_refused(self) -> None:
         draft = schedule.review(

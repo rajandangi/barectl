@@ -21,7 +21,7 @@ from servers.models import Server
 from sites.bodies.pool import SitePool
 
 if TYPE_CHECKING:
-    from backups.observation import ObservedBackup
+    from backups.observation import ObservedBackup, OffsiteStorage
     from cache.models import CacheObservation
 
 from .models import (
@@ -238,6 +238,10 @@ class CollectedSnapshot:
     backups: Observation[tuple[ObservedBackup, ...]] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
     )
+    # The server's offsite storage setting, from native evidence (Phase D #403).
+    offsite: Observation[OffsiteStorage | None] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", None)
+    )
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
     certificate_email: str = ""
     certificate_email_state: str = ""
@@ -314,6 +318,10 @@ def save_snapshot(
         backups_status=collected.backups.outcome,
         backups_source=_joined(collected.backups.source),
         backups_warning=collected.backups.warning,
+        offsite=_offsite_document(collected.offsite.value),
+        offsite_status=collected.offsite.outcome,
+        offsite_source=_joined(collected.offsite.source),
+        offsite_warning=collected.offsite.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -557,6 +565,38 @@ def _save_workers(snapshot: DiscoverySnapshot, workers: tuple[ObservedWorker, ..
     )
 
 
+def _offsite_document(value: object | None) -> dict[str, object]:
+    from backups.observation import OffsiteStorage
+
+    if not isinstance(value, OffsiteStorage):
+        return {}
+    return {
+        "provider": value.provider,
+        "bucket": value.bucket,
+        "region": value.region,
+        "endpoint": value.endpoint,
+        "prefix": value.prefix,
+        "prune": value.prune,
+        "problem": value.problem,
+    }
+
+
+def _read_offsite(value: dict[str, object]) -> "OffsiteStorage | None":  # noqa: UP037
+    from backups.observation import OffsiteStorage
+
+    if not value:
+        return None
+    return OffsiteStorage(
+        str(value.get("provider", "")),
+        str(value.get("bucket", "")),
+        str(value.get("region", "")),
+        str(value.get("endpoint", "")),
+        str(value.get("prefix", "")),
+        value.get("prune") is True,
+        str(value.get("problem", "")),
+    )
+
+
 def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ...]) -> None:
     from backups.models import BackupObservation
 
@@ -579,6 +619,18 @@ def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ..
             result_point=backup.last.point if backup.last else "",
             result_snapshots=backup.last.snapshots if backup.last else 0,
             result_bytes=backup.last.size if backup.last else 0,
+            result_offsite=backup.last.offsite if backup.last else "",
+            offsite=_offsite_document(backup.offsite),
+            copy=(
+                {
+                    "class": backup.copy.result_class,
+                    "reason": backup.copy.reason,
+                    "point": backup.copy.point,
+                    "at": backup.copy.at,
+                }
+                if backup.copy is not None
+                else {}
+            ),
         )
         for backup in backups
     )
@@ -736,6 +788,12 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             _reads(row.backups_source),
             row.backups_warning,
             tuple(_read_backup(backup) for backup in row.backups.all()),
+        ),
+        offsite=Observation(
+            ObservationOutcome(row.offsite_status),
+            _reads(row.offsite_source),
+            row.offsite_warning,
+            _read_offsite(row.offsite),
         ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
@@ -899,6 +957,8 @@ def _read_backup(row: object) -> ObservedBackup:
 
     if not isinstance(row, BackupObservation):
         raise TypeError("Not a backup observation.")
+    from backups.observation import OffsiteCopy
+
     last = (
         BackupResult(
             row.result_class,
@@ -909,8 +969,19 @@ def _read_backup(row: object) -> ObservedBackup:
             row.result_point,
             row.result_snapshots,
             row.result_bytes,
+            row.result_offsite,
         )
         if row.result_class
+        else None
+    )
+    copy = (
+        OffsiteCopy(
+            str(row.copy.get("class", "")),
+            str(row.copy.get("reason", "")),
+            str(row.copy.get("point", "")),
+            str(row.copy.get("at", "")),
+        )
+        if row.copy
         else None
     )
     return Current(
@@ -922,6 +993,8 @@ def _read_backup(row: object) -> ObservedBackup:
         row.database,
         row.database_problem,
         last,
+        _read_offsite(row.offsite),
+        copy,
     )
 
 

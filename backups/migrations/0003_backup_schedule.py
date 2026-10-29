@@ -6,7 +6,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("backups", "0001_initial"),
+        ("backups", "0002_backupobservation_copy_backupobservation_offsite_and_more"),
         ("servers", "0002_server_certificate_email"),
     ]
 

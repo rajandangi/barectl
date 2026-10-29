@@ -578,6 +578,27 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not publish or remove the maintenance page, so the site stays paused. "
         "Read the run's journal, then reopen the site."
     ),
+    "offsite_bucket": (
+        "The bucket did not answer a write and a listing with the reviewed keys, so Barectl "
+        "did not keep the offsite storage setting. Check the bucket and keys, then prepare a "
+        "new review."
+    ),
+    "offsite_repository": (
+        "An offsite repository could not be initialised or opened. The copies already in the "
+        "bucket are unchanged. Check the bucket and keys, then prepare a new review."
+    ),
+    "offsite_key": (
+        "The offsite access keys or recovery passphrase could not be used, so nothing was "
+        "copied. Prepare a new review and type the values again."
+    ),
+    "offsite_copy": (
+        "The offsite copy did not finish. The recovery point saved on this server is "
+        "unchanged; copy it offsite again when the storage is reachable."
+    ),
+    "offsite_remove": (
+        "Barectl could not remove the offsite setting from the server. The copies already in "
+        "the bucket are unchanged. Check the run's journal and prepare a new review."
+    ),
     "site_reopen": (
         "Barectl could not prove that the site serves its files again, so it may still show "
         "the maintenance page. Read the run's journal and prepare a new review."
@@ -941,6 +962,11 @@ RESULT_REASONS: Final = frozenset(
         "schedule_timer",
         "schedule_units",
         "schedule_install",
+        "offsite_bucket",
+        "offsite_repository",
+        "offsite_key",
+        "offsite_copy",
+        "offsite_remove",
         "site_reopen",
         "restore_site",
         "restore_repository",
@@ -958,6 +984,7 @@ RESULT_REASONS: Final = frozenset(
         "restore_data",
         "restore_readiness",
         "restore_open",
+        "restore_done",
         "logrotate_missing",
         "rotation_invalid",
     }
@@ -993,9 +1020,9 @@ def parse_result_line(text: str) -> ResultLine | None:
         reason = value.get("reason", "")
         if not isinstance(reason, str) or reason not in RESULT_REASONS:
             raise native.Unreadable("The result line is not in the engine's form.")
-        # A full capture records the pause before it starts copying so discovery can name an
-        # interrupted capture. It is not the run's outcome: the final result follows.
-        if reason == "backup_paused":
+        # A full capture or restore records the pause before it starts copying so discovery
+        # can name an interrupted run. It is not the run's outcome: the final result follows.
+        if reason in ("backup_paused", "restore_paused"):
             continue
         return ResultLine(result_class, reason)
     return None

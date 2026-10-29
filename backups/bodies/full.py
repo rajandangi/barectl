@@ -27,6 +27,7 @@ from backups.bodies.native import (
     RESTIC_TIME,
     SUCCESS,
     controlled,
+    copy_point,
     document_result,
     emit_result,
     free_bytes,
@@ -382,19 +383,31 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed capt
                 )
             )
             raise SystemExit(PARTIAL)
+        offsite = ""
+        reason = ""
+        plan = document.get("offsite")
+        if isinstance(plan, dict):
+            os.close(lock)
+            lock = -1
+            copy_class, copy_reason = copy_point(identifier, point, repository, key, plan)
+            offsite = "copied" if copy_class == "succeeded" else "failed"
+            if copy_class != "succeeded":
+                reason = copy_reason
         emit_result(
             document_result(
                 document,
                 "succeeded",
-                "",
+                reason,
                 point=point,
                 snapshots=len(expected),
                 size=size,
+                offsite=offsite,
             )
         )
         raise SystemExit(SUCCESS)
     finally:
-        os.close(lock)
+        if lock != -1:
+            os.close(lock)
 
 
 if __name__ == "__main__":

@@ -115,6 +115,13 @@ class DiscoverySnapshot(models.Model):
     )
     backups_source = models.TextField(blank=True, default="")
     backups_warning = models.TextField(blank=True, default="")
+    # The server's offsite storage setting, from native evidence (Phase D #403).
+    offsite = models.JSONField(default=dict, blank=True)
+    offsite_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    offsite_source = models.TextField(blank=True, default="")
+    offsite_warning = models.TextField(blank=True, default="")
     host_standing = models.CharField(max_length=32, blank=True)
     host_standing_reasons = models.TextField(blank=True)
     host_standing_warnings = models.TextField(blank=True)
