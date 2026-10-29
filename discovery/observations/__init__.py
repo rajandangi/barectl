@@ -10,7 +10,7 @@ from automation import worker_observation
 from automation.observation import ObservedSchedule
 from automation.worker_observation import ObservedWorker
 from backups import observation as backup_observation
-from backups.observation import ObservedBackup
+from backups.observation import ObservedBackup, OffsiteStorage
 from bootstrap.standing import HostJudgment, Standing
 from cache import instance as cache_instance
 from laravel import observation as laravel_observation
@@ -146,7 +146,8 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
     )
-    return replace(collected, backups=_hosting_backups(shell, collected, sites=sites))
+    backups, offsite = _hosting_backups(shell, collected, sites=sites)
+    return replace(collected, backups=backups, offsite=offsite)
 
 
 def _hosting_sites(
@@ -159,23 +160,32 @@ def _hosting_sites(
 
 def _hosting_backups(
     shell: RemoteShell, collected: CollectedSnapshot, *, sites: bool
-) -> Observation[tuple[ObservedBackup, ...]]:
-    """Each site's backups, read only on a fully observed Target stack host."""
+) -> tuple[Observation[tuple[ObservedBackup, ...]], Observation[OffsiteStorage | None]]:
+    """Each site's backups and the server's offsite setting, on a fully observed host."""
     from databases import observation as database_observation
 
+    absent = Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
     if not sites:
-        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+        return absent, Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, None)
     if collected.standing is None or collected.standing.standing != Standing.TARGET_STACK:
-        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+        return absent, Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, None)
     engines = database_observation.installed_engines(collected)
     engine = engines[0].engine if len(engines) == 1 and engines[0].managed else ""
     architecture = architecture_of(collected.architecture.value or "")
     reading = backup_observation.reading(shell, collected.sites.value, engine, architecture)
-    return Observation(
-        ObservationOutcome(reading.outcome),
-        reading.source,
-        reading.warning,
-        reading.observations,
+    return (
+        Observation(
+            ObservationOutcome(reading.outcome),
+            reading.source,
+            reading.warning,
+            reading.observations,
+        ),
+        Observation(
+            ObservationOutcome(reading.offsite_outcome),
+            reading.source,
+            reading.warning if reading.offsite is None else "",
+            reading.offsite,
+        ),
     )
 
 

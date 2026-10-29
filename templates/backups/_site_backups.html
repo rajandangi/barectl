@@ -67,6 +67,27 @@
       {% else %}
         <p>{{ backups.note }}</p>
       {% endif %}
+      {% if backups.offsite %}
+        <dl class="barectl-facts barectl-card">
+          <div>
+            <dt>Offsite storage</dt>
+            <dd>{{ backups.offsite.label }} · {{ backups.offsite.bucket }}</dd>
+          </div>
+          {% if backups.copy %}
+            <div>
+              <dt>Last offsite copy</dt>
+              <dd>
+                {{ backups.copy.headline }} {{ backups.copy.detail }}
+                <span class="barectl-note">{{ backups.copy.time_label }}</span>
+              </dd>
+            </div>
+          {% endif %}
+        </dl>
+      {% else %}
+        <p class="barectl-note">
+          Offsite storage is not set up for this server. <a href="{% url 'server_settings' server.pk %}">Set it up in Server Settings</a> to keep copies after the server is lost.
+        </p>
+      {% endif %}
       <div class="barectl-page-actions">
         {% if backups_can_back_up_full %}
           <form class="usa-form"
@@ -132,6 +153,7 @@
               <th scope="col">Taken</th>
               <th scope="col">Scope</th>
               <th scope="col">Kept here</th>
+              <th scope="col">Offsite</th>
               <th scope="col">Notes</th>
             </tr>
           </thead>
@@ -141,10 +163,19 @@
                 <td>{{ point.time_label }}</td>
                 <td>{{ point.scope }}</td>
                 <td>{{ point.status }}</td>
+                <td>{{ point.offsite_status }}</td>
                 <td>
                   {% if point.live %}Captured while the site ran.{% endif %}
                   {% if point.keep %}Kept.{% endif %}
                   {% if point.problem %}{{ point.problem }}{% endif %}
+                  {% if backups_can_copy and point.restorable and point.offsite_status != "Copied offsite" %}
+                    <form method="post"
+                          action="{% url 'site_backups_copy_prepare' server.pk identifier %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="point" value="{{ point.point }}">
+                      <button type="submit" class="usa-button usa-button--outline">Copy offsite again</button>
+                    </form>
+                  {% endif %}
                 </td>
               </tr>
             {% endfor %}

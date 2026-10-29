@@ -60,6 +60,10 @@ class BackupObservation(models.Model):
     result_point = models.CharField(max_length=16, blank=True)
     result_snapshots = models.PositiveSmallIntegerField(default=0)
     result_bytes = models.BigIntegerField(default=0)
+    result_offsite = models.CharField(max_length=8, blank=True)
+    # The non-secret offsite location and the newest copy result (#403).
+    offsite = models.JSONField(default=dict, blank=True)
+    copy = models.JSONField(default=dict, blank=True)
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()

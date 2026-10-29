@@ -1,10 +1,62 @@
-# Backups (implemented, #396 and #399)
+# Backups (implemented, #396, #399 and #403)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
-whether the site is backed up, its last safe result, and its recovery points. The planned
-Phase D behaviour, including schedules, retention, restores, offsite storage and export, is
-the [Phase D specification](https://github.com/rajandangi/barectl/issues/358); this page
+whether the site is backed up, its last safe result, its offsite copy result and its recovery
+points. The planned Phase D behaviour, including schedules, retention, restores and export,
+is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358); this page
 describes only what is built.
+
+## Offsite storage
+
+Server **Settings > Backup storage** connects one bucket on **Amazon S3** or **Cloudflare
+R2**. There is no free-form endpoint and no other provider. The setup review is one Shared
+change that also needs **manage secrets**. It checks the bucket can be written and listed
+before saving, and then:
+
+- writes the access keys to root-only environment files on the server, never to Barectl's
+  database;
+- initialises each backed-up site's offsite repository under one fixed server prefix with
+  restic's `--copy-chunker-params`, so a copy deduplicates;
+- adds the recovery passphrase as a key to each offsite repository, so the kit, the
+  passphrase and the provider keys open the copies after the server and controller are both
+  gone;
+- is idempotent: reviewing the same provider, bucket, region and endpoint again changes
+  nothing.
+
+On S3 an optional separate pruning key can be stored; captures and copies then use the other
+key, which cannot delete offsite history. On R2 the review says plainly that an Object Read &
+Write token can also delete objects. The review also says that neither S3 Object Lock nor R2
+bucket locks are configured, so offsite copies are not immutable.
+
+**Remove offsite storage** is one reviewed Shared change that also needs **manage secrets**.
+It removes the setting and its keys from the server and deletes no offsite copy: everything
+already in the bucket stays there, and the review says so.
+
+### Captures and copies
+
+A capture whose site has offsite storage copies its onsite point after the site has reopened
+(or, for Database only, after the onsite point is verified). The copy holds a per-repository
+native lock, so a slow upload never lengthens downtime and never races another copy. A failed
+copy keeps the onsite point unchanged and the Backups section says **Saved here, offsite copy
+failed.** Onsite and offsite results are shown separately.
+
+**Copy offsite again** on a recovery point is one reviewed Site change that copies that exact
+point without taking a new capture. It initialises the offsite repository first when it is
+missing, and it is the repair action for a failed upload.
+
+## Offsite paths
+
+| Part | Path | Owner and mode |
+| --- | --- | --- |
+| Offsite setting | `/etc/barectl/backups/offsite/config` | root `0600` |
+| Capture and copy keys | `/etc/barectl/backups/offsite/capture.env` | root `0600` |
+| Optional S3 pruning keys | `/etc/barectl/backups/offsite/prune.env` | root `0600` |
+
+The repository URL is `s3:<endpoint>/<bucket>/<prefix>/<site>` and the fixed prefix is stored
+in the setting, so a fresh controller reconstructs it. Discovery reads only the non-secret
+fields and whether each key file is present; it never reads a key value or contacts the
+bucket. A setting outside the supported template is reported once and blocks only backup
+changes for the sites.
 
 ## Enable backups
 
@@ -89,10 +141,12 @@ skipped run (lock failed), `12` refused (wrong password), and any other code fai
 failure is refused with `backup_dump` and leaves no snapshot.
 
 Every capture writes one final safe `barectl-result` line with its result class, counts,
-bytes and a short point identifier. A full capture first writes a `backup_paused` line so
-discovery can name a capture that was interrupted; the engine ignores that interim line and
-reads only the final outcome. Neither line carries a path, repository URL, credential or
-dump content.
+bytes, a short point identifier and its offsite outcome (`copied`, `failed`, or empty when
+offsite storage is not set up). `Copy offsite again` writes its own `kind:"copy"` line, so
+discovery keeps the copy result apart from the capture result. A full capture first writes a
+`backup_paused` line so discovery can name a capture that was interrupted; the engine ignores
+that interim line and reads only the final outcome. Neither line carries a path, repository
+URL, credential or dump content.
 
 ## Check backups
 
@@ -121,10 +175,13 @@ reconstructs that backups are enabled and the last result from this native evide
 ## Native evidence
 
 The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
-a database-only capture, `backups/bodies/full.py` for a paused full capture and
-`backups/bodies/reopen.py` for reopening a paused site; each prints its stages and a result
-line. The read is `backups/bodies/observe.py`, shared with the database binding's pure
-catalog reader. The first shared Phase D native scenario is `disposable/test_backups.py`.
+a database-only capture, `backups/bodies/full.py` for a paused full capture,
+`backups/bodies/offsite.py` for offsite storage, `backups/bodies/copy.py` for Copy offsite
+again and `backups/bodies/reopen.py` for reopening a paused site; each prints its stages and
+a result line. The read is `backups/bodies/observe.py`, shared with the database binding's
+pure catalog reader. The first shared Phase D native scenario is `disposable/test_backups.py`;
+its offsite checks use a local S3-compatible fixture (`disposable/native_mirror/s3.py`) on
+the lane and never the internet.
 On the local ubuntu-26.04 lane it measured 62 to 65 s for the `BackupLifecycle` test
 (69 to 72 s for the scenario including lane setup), including a full capture and a killed
 capture that stays gated until **Reopen site**; the breadth-only reboot proof measured

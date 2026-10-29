@@ -20,6 +20,16 @@ RESTIC_BIN: Final = f"{RESTIC_PROFILE}/bin/restic"
 REPOSITORY_ROOT: Final = "/var/lib/barectl-backups"
 KEY_ROOT: Final = "/etc/barectl/backups"
 CACHE_DIR: Final = "/var/cache/barectl/restic"
+# Server-wide offsite storage: non-secret location fields and root-only credential files
+# (docs/adr/0032-keep-secrets-in-private-native-files.md, Phase D #403).
+OFFSITE_ROOT: Final = f"{KEY_ROOT}/offsite"
+OFFSITE_CONFIG: Final = f"{OFFSITE_ROOT}/config"
+OFFSITE_CAPTURE: Final = f"{OFFSITE_ROOT}/capture.env"
+OFFSITE_PRUNE: Final = f"{OFFSITE_ROOT}/prune.env"
+OFFSITE_HEALTH: Final = "_health"
+REPOSITORY_LOCK_ROOT: Final = "/run/lock/barectl"
+PROVIDERS: Final = ("s3", "r2")
+PROVIDER_LABELS: Final = {"s3": "Amazon S3", "r2": "Cloudflare R2"}
 # Every capture keeps this much of the repository filesystem free. The review states it.
 HEADROOM_BYTES: Final = 1024 * 1024 * 1024
 
@@ -129,3 +139,94 @@ def expected_parts(scope: str) -> tuple[str, ...]:
     if scope == "files":
         return ("files",)
     return ("database",)
+
+
+BUCKET: Final = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")
+REGION: Final = re.compile(r"[a-z0-9-]{2,32}")
+ACCOUNT: Final = re.compile(r"[0-9a-f]{32}")
+PREFIX: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}(?:/[a-z0-9][a-z0-9._-]{0,63}){0,3}")
+
+
+def endpoint(provider: str, region: str = "", account: str = "") -> str:
+    """The one endpoint each supported template uses; there is no free-form endpoint."""
+    if provider == "s3" and REGION.fullmatch(region):
+        return f"https://s3.{region}.amazonaws.com"
+    if provider == "r2" and ACCOUNT.fullmatch(account):
+        return f"https://{account}.r2.cloudflarestorage.com"
+    raise ValueError("Not a supported offsite storage template.")
+
+
+def _expected_endpoint(config: dict[str, str]) -> str:
+    provider = config.get("provider", "")
+    url = config.get("endpoint", "")
+    if provider == "s3":
+        return endpoint(provider, config.get("region", ""))
+    return endpoint(
+        provider,
+        config.get("region", ""),
+        url.removeprefix("https://").split(".", 1)[0],
+    )
+
+
+def offsite_repository(config: dict[str, str], identifier: str) -> str:
+    """One site's repository under the server's fixed bucket prefix."""
+    if SITE_IDENTIFIER.fullmatch(identifier) is None:
+        raise ValueError("Not a site identifier.")
+    if (
+        config.get("provider", "") not in PROVIDERS
+        or BUCKET.fullmatch(config.get("bucket", "")) is None
+        or PREFIX.fullmatch(config.get("prefix", "")) is None
+        or (config.get("provider") == "r2" and config.get("region", "") != "auto")
+        or (config.get("provider") == "s3" and REGION.fullmatch(config.get("region", "")) is None)
+        or config.get("endpoint", "") != _expected_endpoint(config)
+    ):
+        raise ValueError("Not a supported offsite storage template.")
+    return f"s3:{config['endpoint']}/{config['bucket']}/{config['prefix']}/{identifier}"
+
+
+def health_repository(config: dict[str, str]) -> str:
+    """A fixed repository the setup proves writable and readable without a site."""
+    offsite_repository(config, "health")
+    return f"s3:{config['endpoint']}/{config['bucket']}/{config['prefix']}/{OFFSITE_HEALTH}"
+
+
+def read_config(text: str) -> dict[str, str]:
+    """Parse the non-secret offsite config file, refusing any line outside the template."""
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        name, separator, value = line.partition("=")
+        if (
+            not separator
+            or name in values
+            or name
+            not in {
+                "provider",
+                "bucket",
+                "region",
+                "endpoint",
+                "prefix",
+                "prune",
+            }
+        ):
+            raise ValueError("The offsite storage setting is outside the supported template.")
+        values[name] = value
+    if set(values) != {"provider", "bucket", "region", "endpoint", "prefix", "prune"}:
+        raise ValueError("The offsite storage setting is outside the supported template.")
+    provider = values["provider"]
+    if (
+        provider not in PROVIDERS
+        or BUCKET.fullmatch(values["bucket"]) is None
+        or PREFIX.fullmatch(values["prefix"]) is None
+        or values["prune"] not in ("yes", "no")
+        or (provider == "r2" and values["region"] != "auto")
+        or values["endpoint"] != _expected_endpoint(values)
+    ):
+        raise ValueError("The offsite storage setting is outside the supported template.")
+    return values
+
+
+def render_config(config: dict[str, str]) -> str:
+    return "".join(
+        f"{name}={config[name]}\n"
+        for name in ("provider", "bucket", "region", "endpoint", "prefix", "prune")
+    )

@@ -22,6 +22,7 @@ from backups.bodies.native import (
     RESTIC_TIME,
     classify,
     controlled,
+    copy_point,
     document_result,
     emit_result,
     free_bytes,
@@ -35,7 +36,7 @@ from backups.bodies.native import (
 )
 
 
-def main() -> None:
+def main() -> None:  # noqa: C901 - one reviewed capture
     document = json.loads(gzip.decompress(base64.b64decode(sys.argv[1])))
     identifier = str(document.get("identifier", ""))
     repository = str(document.get("repository", ""))
@@ -128,6 +129,14 @@ def main() -> None:
         found = snapshots(repository, key, point)
         saved = summary_size(output)
         result_class, reason, code = classify(status, bool(found))
+        offsite = ""
+        if result_class in ("succeeded", "partial"):
+            plan = document.get("offsite")
+            if isinstance(plan, dict):
+                copy_class, copy_reason = copy_point(identifier, point, repository, key, plan)
+                offsite = "copied" if copy_class == "succeeded" else "failed"
+                if copy_class != "succeeded" and result_class == "succeeded":
+                    reason = copy_reason
         emit_result(
             document_result(
                 document,
@@ -136,6 +145,7 @@ def main() -> None:
                 point=point,
                 snapshots=len(found) if found else 0,
                 size=saved,
+                offsite=offsite,
             )
         )
         raise SystemExit(code)

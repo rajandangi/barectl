@@ -23,8 +23,9 @@ from servers.models import Server
 from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 
-from . import check, presentation
+from . import check, convention, presentation
 from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
+from .offsite import COPY_SLUG
 from .reopen import SLUG as REOPEN_SLUG
 
 if TYPE_CHECKING:
@@ -91,6 +92,7 @@ def context_for_site(
         "backups_can_enable": can_prepare and managed and user.has_perm(MANAGE_SECRETS),
         "backups_can_back_up": can_prepare and managed and view.enabled and view.database,
         "backups_can_back_up_full": can_prepare and managed and view.enabled,
+        "backups_can_copy": can_prepare and managed and view.enabled and view.offsite is not None,
         "backups_can_reopen": can_prepare and view.reopen,
         "backups_can_check": bool(
             managed and user.has_perms((*check.READ_PERMISSIONS, VIEW_SITES))
@@ -145,6 +147,43 @@ def prepare_backup(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
 @permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
 def prepare_reopen(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     return _prepare(request, pk, identifier, REOPEN_SLUG, "site_backups")
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def prepare_copy(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """Copy one recovery point offsite again; the point is the one the operator chose."""
+    if not valid_identifier(identifier) or not isinstance(request.user, User):
+        raise Http404
+    point = request.POST.get("point", "")
+    if convention.POINT.fullmatch(point) is None:
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    context = context_for_site(server, identifier, request.user)
+    if not context["backups_can_copy"]:
+        messages.error(
+            request,
+            "Barectl cannot copy this recovery point yet. Set up offsite storage and wait "
+            "for the current operation.",
+        )
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    try:
+        queued = services.request_prepare(
+            server,
+            request.user,
+            COPY_SLUG,
+            inputs={"version": 1, "identifier": identifier, "point": point},
+        )
+    except OperationRefused, ValueError:
+        messages.error(request, "The saved connection changed. Refresh and prepare again.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if queued is None:
+        messages.error(request, "Wait for the current operation before preparing this review.")
+        return redirect("site_backups", pk=pk, identifier=identifier)
+    return redirect("change_detail", operation_id=queued.pk)
 
 
 def _prepare(

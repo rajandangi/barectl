@@ -7,6 +7,7 @@ safe result line in the journal; it never reads key contents or snapshot data.
 
 import json
 import os
+import pathlib
 import pwd
 import stat
 import subprocess
@@ -14,10 +15,16 @@ import sys
 
 REPOSITORY_ROOT = "/var/lib/barectl-backups"
 KEY_ROOT = "/etc/barectl/backups"
+OFFSITE_ROOT = KEY_ROOT + "/offsite"
+OFFSITE_CONFIG = OFFSITE_ROOT + "/config"
+OFFSITE_CAPTURE = OFFSITE_ROOT + "/capture.env"
+OFFSITE_PRUNE = OFFSITE_ROOT + "/prune.env"
+OFFSITE_HEALTH = "_health"
 PROFILE_ROOT = "/nix/var/nix/profiles/barectl"
 RESTIC_PROFILE = PROFILE_ROOT + "/restic"
 MAX_SITES = 64
 MAX_TEXT = 500
+PROVIDERS = ("s3", "r2")
 # The controller prepends databases/binding.py to this body; its names are our globals.
 binding = sys.modules[__name__]
 
@@ -103,7 +110,7 @@ def bounded(argv: list[str], *, limit: int = 32768) -> tuple[int, bytes]:
     return process.returncode, output
 
 
-def journal() -> dict[str, dict[str, object]]:
+def journal() -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:  # noqa: C901 - one journal read
     status, output = bounded(
         [
             "/usr/bin/journalctl",
@@ -119,8 +126,9 @@ def journal() -> dict[str, dict[str, object]]:
         limit=512 * 1024,
     )
     if status:
-        return {}
+        return {}, {}
     newest: dict[str, dict[str, object]] = {}
+    copies: dict[str, dict[str, object]] = {}
     for line in output.decode("utf-8", "replace").splitlines():
         if not line.startswith("barectl-result "):
             continue
@@ -128,13 +136,25 @@ def journal() -> dict[str, dict[str, object]]:
             value = json.loads(line[len("barectl-result ") :])
         except ValueError:
             continue
-        if not isinstance(value, dict) or value.get("kind") != "backup":
+        if not isinstance(value, dict) or value.get("kind") not in ("backup", "copy"):
             continue
         identifier = value.get("site")
-        if not isinstance(identifier, str) or not identifier or identifier in newest:
+        if not isinstance(identifier, str) or not identifier:
+            continue
+        if value.get("kind") == "copy":
+            if identifier in copies:
+                continue
+            copy: dict[str, object] = {}
+            for key in ("class", "reason", "at", "point"):
+                item = value.get(key)
+                copy[key] = item if isinstance(item, str) and len(item) <= MAX_TEXT else ""
+            if copy["class"] in ("succeeded", "partial", "failed", "refused", "lock_busy"):
+                copies[identifier] = copy
+            continue
+        if identifier in newest:
             continue
         row: dict[str, object] = {}
-        for key in ("class", "reason", "scope", "origin", "at", "point"):
+        for key in ("class", "reason", "scope", "origin", "at", "point", "offsite"):
             item = value.get(key)
             row[key] = item if isinstance(item, str) and len(item) <= MAX_TEXT else ""
         for key in ("snapshots", "bytes"):
@@ -142,8 +162,115 @@ def journal() -> dict[str, dict[str, object]]:
             row[key] = item if type(item) is int and item >= 0 else 0
         if row["class"] not in ("succeeded", "partial", "failed", "refused", "lock_busy"):
             continue
+        if row["offsite"] not in ("", "copied", "failed"):
+            row["offsite"] = ""
         newest[identifier] = row
-    return newest
+    return newest, copies
+
+
+def config_values(text: str) -> dict[str, object] | None:
+    """The non-secret offsite setting, or ``None`` when it is outside the template."""
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        name, separator, value = line.partition("=")
+        if (
+            not separator
+            or name in values
+            or name not in ("provider", "bucket", "region", "endpoint", "prefix", "prune")
+        ):
+            return None
+        values[name] = value
+    if set(values) != {"provider", "bucket", "region", "endpoint", "prefix", "prune"}:
+        return None
+    provider = values.get("provider", "")
+    endpoint = values.get("endpoint", "")
+    if (
+        provider not in PROVIDERS
+        or not values.get("bucket")
+        or len(values["bucket"]) > 63
+        or not values.get("region")
+        or len(values["region"]) > 32
+        or not endpoint.startswith("https://")
+        or len(endpoint) > 200
+        or not values.get("prefix")
+        or len(values["prefix"]) > 200
+        or ".." in values["prefix"].split("/")
+        or values.get("prune") not in ("yes", "no")
+    ):
+        return None
+    return {
+        "provider": provider,
+        "bucket": values["bucket"],
+        "region": values["region"],
+        "endpoint": endpoint,
+        "prefix": values["prefix"],
+        "prune": values["prune"] == "yes",
+        "problem": "",
+    }
+
+
+def offsite() -> dict[str, object] | None:
+    if not os.path.lexists(OFFSITE_ROOT):
+        return None
+    if not controlled(OFFSITE_ROOT):
+        return {
+            "provider": "",
+            "bucket": "",
+            "region": "",
+            "endpoint": "",
+            "prefix": "",
+            "prune": False,
+            "problem": "The offsite storage setting is outside supported settings.",
+        }
+    config = metadata(OFFSITE_CONFIG)
+    if config is None:
+        return None
+    safe = bool(
+        config.get("uid") == 0
+        and config.get("gid") == 0
+        and config.get("type") == stat.S_IFREG
+        and config.get("mode") == 0o600
+        and config.get("links") == 1
+    )
+    if not safe:
+        return {
+            "provider": "",
+            "bucket": "",
+            "region": "",
+            "endpoint": "",
+            "prefix": "",
+            "prune": False,
+            "problem": "The offsite storage setting is outside supported settings.",
+        }
+    try:
+        text = pathlib.Path(OFFSITE_CONFIG).read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    value = config_values(text)
+    if value is None:
+        return {
+            "provider": "",
+            "bucket": "",
+            "region": "",
+            "endpoint": "",
+            "prefix": "",
+            "prune": metadata(OFFSITE_PRUNE) is not None,
+            "problem": "The offsite storage setting is outside supported settings.",
+        }
+    value["prune"] = metadata(OFFSITE_PRUNE) is not None
+    for path in (OFFSITE_CAPTURE, OFFSITE_PRUNE):
+        found = metadata(path)
+        if found is not None and not (
+            found.get("uid") == 0
+            and found.get("gid") == 0
+            and found.get("type") == stat.S_IFREG
+            and found.get("mode") == 0o600
+            and found.get("links") == 1
+        ):
+            value["problem"] = "The offsite storage keys are outside supported settings."
+    if metadata(OFFSITE_CAPTURE) is None:
+        value["problem"] = "The offsite storage keys are missing."
+    return value
 
 
 def main() -> None:
@@ -163,7 +290,8 @@ def main() -> None:
     root_safe = (not os.path.lexists(REPOSITORY_ROOT) or controlled(REPOSITORY_ROOT)) and (
         not os.path.lexists(KEY_ROOT) or controlled(KEY_ROOT)
     )
-    latest = journal()
+    latest, copies = journal()
+    storage = offsite()
     rows = []
     for identifier in sites:
         problems = []
@@ -217,9 +345,12 @@ def main() -> None:
                 "database": found,
                 "database_problem": database_problem[:MAX_TEXT],
                 "last": latest.get(identifier),
+                "copy": copies.get(identifier),
             }
         )
-    sys.stdout.write(json.dumps({"version": 1, "sites": rows}, separators=(",", ":")))
+    sys.stdout.write(
+        json.dumps({"version": 1, "sites": rows, "offsite": storage}, separators=(",", ":"))
+    )
 
 
 if __name__ == "__main__":

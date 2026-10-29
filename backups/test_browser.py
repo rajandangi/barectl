@@ -99,6 +99,46 @@ class BackupsBrowserTests(BrowserTestCase):
         self.assertEqual(capture.kind_slug, "back_up_full_site")
         self.assert_no_native_terms()
 
+    def test_offsite_storage_is_set_up_from_server_settings(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/settings/")
+        expect(self.page.get_by_role("heading", name="Backup storage", level=2)).to_be_visible()
+        self.page.get_by_label("Bucket").first.fill("barectl-backups")
+        self.page.get_by_label("Region").fill("us-east-1")
+        self.page.get_by_role("button", name="Set up Amazon S3").click()
+        expect(
+            self.page.get_by_role("heading", name="Set up offsite backup storage")
+        ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "set_up_offsite_storage")
+        self.assert_no_native_terms()
+
+    def test_the_offsite_copy_result_is_shown_beside_the_onsite_point(self) -> None:
+        from backups.observation import OffsiteCopy, OffsiteStorage
+
+        server = Server.objects.get(name="Production")
+        storage = OffsiteStorage(
+            "s3",
+            "barectl-backups",
+            "us-east-1",
+            "https://s3.us-east-1.amazonaws.com",
+            "barectl/0123456789abcdef",
+        )
+        record_backups(
+            server,
+            enabled=True,
+            last=result(point="0123456789abcdef"),
+            offsite=storage,
+            copy=OffsiteCopy("failed", "offsite_copy", "0123456789abcdef", ""),
+        )
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_text("Saved here, offsite copy failed.")).to_be_visible()
+        expect(self.page.get_by_text("Offsite copy failed.", exact=False).first).to_be_visible()
+        self.assert_no_native_terms()
+
     def test_a_gated_site_offers_one_reopen_action(self) -> None:
         server = Server.objects.get(name="Production")
         record_backups(

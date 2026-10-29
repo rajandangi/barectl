@@ -51,6 +51,23 @@ that grammar is reported as unsupported and is never rewritten.
 
 A site's **Settings > Scheduled tasks** shows the same state line as its Overview, including **Paused by an unfinished change** and **Background work is off while the site is in maintenance**, with one next action: choosing the state the work should have (the change asks; it never restores a remembered set). A Laravel site's card turns its scheduler on or off and offers **Run now**. Turning on and Run now need a verified Deploy or Roll back outcome for the current release, with no maintenance gate and no pending migrations; turning off is always available. The review states the one-hour run limit, the no-catch-up behaviour and the sub-minute and `runInBackground` limits in plain words ([automation](automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).
 
+## Backup storage
+
+Server **Settings > Backup storage** shows the offsite provider, bucket and region or
+account endpoint read from the server, or offers the two supported templates: Amazon S3 and
+Cloudflare R2. Setting it up and removing it are reviewed Shared changes that also need
+`operations.manage_secrets`; the access keys and the recovery passphrase are typed on the
+confirmation screen and travel only through the confidential input channel. They are written
+to root-owned `0600` files on the server and never stored in Barectl's database. Opening the
+section makes no SSH connection. A setting outside the supported template is shown as
+**Outside supported settings** and blocks only backup changes for the server's sites.
+
+The setup review names the bucket, the region or account endpoint, whether a separate S3
+pruning key is used, and that object lock and immutability are not configured. The removal
+review says plainly that copies already in the bucket stay there. The storage and copy controls are described in
+[backups](backups.md#offsite-storage); replacing the recovery passphrase remains planned in
+the [Phase D specification](https://github.com/rajandangi/barectl/issues/358).
+
 ## Permissions and discovery
 
 Preparing either change needs the site-change permissions and the separate

@@ -35,6 +35,8 @@ class InputShape(StrEnum):
     AUTOMATION_SCHEDULE = "automation_schedule"
     LARAVEL_QUEUE_WORKERS = "laravel_queue_workers"
     SITE_LOG_ROTATION = "site_log_rotation"
+    OFFSITE_STORAGE = "offsite_storage"
+    SITE_BACKUP_POINT = "site_backup_point"
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,14 @@ class PreparationInputs:
     worker_queues: tuple[str, ...] = ()
     worker_processes: int = 0
     worker_timeout: int = 0
+    # Offsite storage: the one provider template and its non-secret location fields
+    # (Phase D #403). Keys travel only through the confidential input channel.
+    provider: str = ""
+    bucket: str = ""
+    region: str = ""
+    account: str = ""
+    # One existing recovery point chosen by Copy offsite again.
+    point: str = ""
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -130,6 +140,22 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
+        if self.provider:
+            if self.provider == "s3":
+                return {
+                    "version": 1,
+                    "provider": self.provider,
+                    "bucket": self.bucket,
+                    "region": self.region,
+                }
+            return {
+                "version": 1,
+                "provider": self.provider,
+                "bucket": self.bucket,
+                "account": self.account,
+            }
+        if self.point:
+            return {"version": 1, "identifier": self.identifier, "point": self.point}
         if self.worker_action:
             value: dict[str, object] = {
                 "version": 1,
@@ -781,6 +807,51 @@ def _site_log_rotation_inputs(
     return PreparationInputs("", identifier)
 
 
+def _offsite_storage_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from backups import convention
+
+    if value.get("version") != 1 or value.get("provider") not in ("s3", "r2"):
+        raise ValueError(INVALID_INPUTS)
+    provider = str(value["provider"])
+    bucket = value.get("bucket")
+    if not isinstance(bucket, str) or convention.BUCKET.fullmatch(bucket) is None:
+        raise ValueError(INVALID_INPUTS)
+    if provider == "s3":
+        if set(value) != {"version", "provider", "bucket", "region"}:
+            raise ValueError(INVALID_INPUTS)
+        region = value.get("region")
+        if not isinstance(region, str) or convention.REGION.fullmatch(region) is None:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs(provider=provider, bucket=bucket, region=region)
+    if set(value) != {"version", "provider", "bucket", "account"}:
+        raise ValueError(INVALID_INPUTS)
+    account = value.get("account")
+    if not isinstance(account, str) or convention.ACCOUNT.fullmatch(account) is None:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(provider=provider, bucket=bucket, account=account)
+
+
+def _site_backup_point_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from backups import convention
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier", "point"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, point = value["identifier"], value["point"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or not isinstance(point, str)
+        or convention.POINT.fullmatch(point) is None
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, point=point)
+
+
 def _certificate_email_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -818,4 +889,6 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.AUTOMATION_SCHEDULE: _schedule_inputs,
     InputShape.LARAVEL_QUEUE_WORKERS: _worker_inputs,
     InputShape.SITE_LOG_ROTATION: _site_log_rotation_inputs,
+    InputShape.OFFSITE_STORAGE: _offsite_storage_inputs,
+    InputShape.SITE_BACKUP_POINT: _site_backup_point_inputs,
 }
