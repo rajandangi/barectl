@@ -637,6 +637,61 @@ def _read_back(
     return True
 
 
+def offsite_read_back(lines: list[str], identifier: str, point: str) -> bool:
+    """Whether the newest offsite integrity finding read back this exact point.
+
+    Offsite cleanup consumes the weekly check's recorded read-back instead of paying for a
+    second S3 read itself. The finding must be the site's newest offsite integrity result
+    and must name the point cleanup is about to keep.
+    """
+    for line in lines:
+        if not line.startswith("barectl-result "):
+            continue
+        try:
+            row = json.loads(line[len("barectl-result ") :])
+        except ValueError:
+            continue
+        if (
+            not isinstance(row, dict)
+            or row.get("kind") != "integrity"
+            or row.get("site") != identifier
+            or row.get("location") != "offsite"
+        ):
+            continue
+        return row.get("class") == "succeeded" and row.get("point") == point
+    return False
+
+
+def recorded_offsite_read_back(identifier: str, point: str) -> bool:
+    try:
+        completed = subprocess.run(
+            [
+                "/usr/bin/journalctl",
+                "--no-pager",
+                "--reverse",
+                "-o",
+                "cat",
+                "-n",
+                "500",
+                "--grep",
+                "^barectl-result ",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={"PATH": "/usr/bin:/bin", "LANG": "C"},
+            timeout=20,
+            check=False,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return False
+    if completed.returncode:
+        return False
+    return offsite_read_back(
+        completed.stdout.decode("utf-8", "replace").splitlines(), identifier, point
+    )
+
+
 def _empty() -> dict[str, int]:
     return {"deleted": 0, "kept": 0, "skipped": 0, "failed": 0, "foreign": 0}
 
@@ -675,7 +730,14 @@ def cleanup_location(  # noqa: C901 - one reviewed cleanup of a location
             )
             continue
         newest = max(candidates, key=lambda point: str(point["time"]))
-        if not _read_back(repository, password, extra, newest, filename):
+        verified = (
+            recorded_offsite_read_back(str(value["identifier"]), str(newest["point"]))
+            if location == "offsite"
+            else _read_back(repository, password, extra, newest, filename)
+        )
+        if not verified:
+            # The newest point was not read back, so nothing in this scope is forgotten.
+            # Offsite cleanup never runs its own read-back: it uses the weekly check.
             counts["failed"] += 1
             kept.update(str(point["point"]) for point in candidates)
             continue

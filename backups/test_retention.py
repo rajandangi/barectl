@@ -181,6 +181,21 @@ class RecordedRetentionTests(SimpleTestCase):
         self.assertIn("done", fixture("restic-prune.txt"))
         self.assertNotIn("config", fixture("restic-prune.txt"))
 
+    def test_offsite_cleanup_uses_the_recorded_weekly_read_back(self) -> None:
+        lines = [
+            'barectl-result {"class":"succeeded","reason":"","kind":"integrity",'
+            '"site":"alpha","location":"offsite","point":"' + POINT + '","subset":"3/20"}',
+        ]
+        self.assertTrue(retention_body.offsite_read_back(lines, IDENTIFIER, POINT))
+        self.assertFalse(retention_body.offsite_read_back(lines, IDENTIFIER, "2222222222222222"))
+        failed = [
+            (
+                'barectl-result {"class":"failed","reason":"integrity_readback",'
+                '"kind":"integrity","site":"alpha","location":"offsite","point":""}'
+            ),
+        ]
+        self.assertFalse(retention_body.offsite_read_back(failed, IDENTIFIER, POINT))
+
 
 class RetentionReviewTests(SimpleTestCase):
     def test_a_policy_is_destructive_consent_and_lists_what_would_go_now(self) -> None:

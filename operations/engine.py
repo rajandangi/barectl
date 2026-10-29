@@ -603,6 +603,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not prove that the site serves its files again, so it may still show "
         "the maintenance page. Read the run's journal and prepare a new review."
     ),
+    "removed_backup": (
+        "Barectl could not delete the removed site's backups, so they stay where they are. "
+        "Read the run's journal on the server, then prepare a new review."
+    ),
     "restore_site": (
         "The site's Linux account could not be read, so the restore stopped before changing "
         "anything. Run discovery and prepare a new review."
@@ -634,6 +638,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
     "restore_target": (
         "The site's database changed since the review, so nothing was restored. Prepare a new "
         "review against the current site."
+    ),
+    "restore_dump": (
+        "The recovery point's database copy was truncated, so nothing was restored and the "
+        "site still serves. Prepare a new review from a complete point."
     ),
     "restore_safety": (
         "The safety backup could not be taken or checked, so nothing was overwritten. Read the "
@@ -967,6 +975,7 @@ RESULT_REASONS: Final = frozenset(
         "offsite_key",
         "offsite_copy",
         "offsite_remove",
+        "removed_backup",
         "site_reopen",
         "restore_site",
         "restore_repository",
@@ -975,6 +984,7 @@ RESULT_REASONS: Final = frozenset(
         "restore_disk",
         "restore_point",
         "restore_engine",
+        "restore_dump",
         "restore_target",
         "restore_safety",
         "restore_gate",

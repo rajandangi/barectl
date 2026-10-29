@@ -4,7 +4,7 @@ import importlib.resources
 from datetime import timedelta
 from typing import TYPE_CHECKING, override
 
-from django.test import Client
+from django.test import Client, SimpleTestCase
 from django.utils import timezone
 
 if TYPE_CHECKING:
@@ -19,7 +19,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consent
 from runtimes.catalog import Architecture, load
 
-from . import change, convention, observation, offsite
+from . import change, convention, kit, observation, offsite
 
 IDENTIFIER = "alpha"
 BOOT = "8f14e45f-ea6f-4c1c-9b7b-2f0f4c1c9b7b"
@@ -175,6 +175,7 @@ class SetupReviewTests(ChangeTestCase):
         self.assertIn("deletes no offsite backup", details["Existing offsite copies"])
         self.assertIn("keeps every copy", str(draft.document["acknowledgement"]))
         self.assertEqual(draft.effects[0].scope, Scope.SHARED)
+        self.assertEqual(draft.document["sites"], [IDENTIFIER])
 
 
 class CaptureAndCopyReviewTests(ChangeTestCase):
@@ -264,6 +265,40 @@ class RecordedOffsiteOutputTests(ChangeTestCase):
         self.assertEqual(result.exit_status, 10)
         self.assertIn("repository does not exist", result.stdout)
         self.assertIsNone(check.parse_listing(result.stdout))
+
+
+class RecoveryKitTests(SimpleTestCase):
+    def test_the_kit_names_the_offsite_commands_without_a_secret(self) -> None:
+        lines = kit.lines(
+            server_name="web",
+            identifier=IDENTIFIER,
+            restic_version="0.18.1",
+            provider="Amazon S3",
+            endpoint="https://s3.us-east-1.amazonaws.com",
+            bucket=BUCKET,
+            prefix=PREFIX,
+            region="us-east-1",
+        )
+        printed = "\n".join(lines)
+        expected = convention.offsite_repository(
+            {
+                "provider": "s3",
+                "bucket": BUCKET,
+                "region": "us-east-1",
+                "endpoint": "https://s3.us-east-1.amazonaws.com",
+                "prefix": PREFIX,
+                "prune": "no",
+            },
+            IDENTIFIER,
+        )
+        self.assertIn(f'export RESTIC_REPOSITORY="{expected}"', printed)
+        self.assertIn("restic -o s3.bucket-lookup=path snapshots", printed)
+        self.assertIn("restore latest --target /tmp/restored-site", printed)
+        self.assertIn("dump latest s<id>.sql > database.sql", printed)
+        self.assertIn("Offsite storage: Amazon S3", printed)
+        self.assertIn("Region: us-east-1", printed)
+        for secret in ("AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "RESTIC_PASSWORD"):
+            self.assertNotIn(secret, printed)
 
 
 class OffsitePresentationTests(ChangeTestCase):

@@ -16,6 +16,7 @@ class BackupsConfig(AppConfig):
         from .export import EXPORT
         from .keys import REPLACE
         from .offsite import COPY, REMOVE, SET_UP
+        from .removed import DELETE as DELETE_REMOVED_BACKUPS
         from .reopen import REOPEN_SITE
         from .restore import RESTORE
         from .retention import DISABLE, KEEP, SET
@@ -36,3 +37,4 @@ class BackupsConfig(AppConfig):
         register_kind(DISABLE)
         register_kind(KEEP)
         register_kind(SET_BACKUP_SCHEDULE)
+        register_kind(DELETE_REMOVED_BACKUPS)

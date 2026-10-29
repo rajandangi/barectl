@@ -12,6 +12,7 @@ from backups.views import (
     prepare_back_up_first,
     prepare_backup,
     prepare_copy,
+    prepare_delete_removed,
     prepare_disable_retention,
     prepare_enable,
     prepare_export,
@@ -387,6 +388,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/backups/restore/prepare/",
         prepare_restore,
         name="site_backups_restore_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/removed/delete/prepare/",
+        prepare_delete_removed,
+        name="site_backups_removed_delete_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/backups/retention/prepare/",

@@ -408,6 +408,15 @@ class ExportTransferTests(TestCase):
             any(command.startswith("/usr/bin/rm -rf -- ") for command in shell.commands)
         )
 
+    def test_a_read_only_local_stage_is_made_writable_and_removed(self) -> None:
+        directory = downloads.local_root(TOKEN)
+        nested = directory / "nested"
+        nested.mkdir(parents=True)
+        (nested / export_body.FILES_NAME).write_bytes(b"files")
+        nested.chmod(0o500)
+        downloads._remove_local(TOKEN)
+        self.assertFalse(directory.exists())
+
     def test_a_manifest_over_the_bound_is_refused(self) -> None:
         shell = StageShell(self.stage, b"files")
         shell.prepare()

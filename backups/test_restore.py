@@ -197,6 +197,56 @@ class RestorePointTests(SimpleTestCase):
                 InputShape.SITE_RECOVERY_POINT,
             )
 
+    def test_a_truncated_staged_dump_is_refused_and_a_complete_one_passes(self) -> None:
+        header = fixture("restic-dump-mariadb.txt")
+        directory = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        path = directory / "dump.sql"
+        path.write_text(header, encoding="utf-8")
+        self.assertEqual(restore_body.dump_problem("mariadb", path, "11.8"), "restore_dump")
+        path.write_text(header + "-- Dump completed on 2026-10-30 03:00:00\n", encoding="utf-8")
+        self.assertEqual(restore_body.dump_problem("mariadb", path, "11.8"), "")
+        path.write_text(
+            header.replace("11.8.2", "10.6.1") + "-- Dump completed on 2026-10-30 03:00:00\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(restore_body.dump_problem("mariadb", path, "11.8"), "restore_engine")
+
+    def test_a_conflicting_repository_lock_waits_a_bounded_time(self) -> None:
+        import fcntl
+        import time
+
+        from backups.bodies import native
+
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        lock_path = root / f"backup-{IDENTIFIER}.lock"
+        lock_path.write_bytes(b"")
+        lock_path.chmod(0o600)
+        held = os.open(lock_path, os.O_RDONLY)
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with (
+                mock.patch.object(native, "REPOSITORY_LOCK_ROOT", str(root)),
+                mock.patch.object(native, "controlled", return_value=True),
+                mock.patch.object(native, "locked_file", return_value=True),
+            ):
+                started = time.monotonic()
+                self.assertIsNone(native.repository_locks((IDENTIFIER, "beta"), wait_seconds=0.2))
+                self.assertGreaterEqual(time.monotonic() - started, 0.19)
+        finally:
+            fcntl.flock(held, fcntl.LOCK_UN)
+            os.close(held)
+        with (
+            mock.patch.object(native, "REPOSITORY_LOCK_ROOT", str(root)),
+            mock.patch.object(native, "controlled", return_value=True),
+            mock.patch.object(native, "locked_file", return_value=True),
+        ):
+            locks = native.repository_locks((IDENTIFIER, "beta", IDENTIFIER), wait_seconds=0.2)
+            if locks is None:
+                self.fail("A released repository lock was still busy.")
+            self.assertEqual(len(locks), 2)
+            for lock in locks:
+                os.close(lock)
+
     def test_the_restore_result_line_is_read_by_the_engine(self) -> None:
         from operations.engine import parse_result_line
 
@@ -328,6 +378,17 @@ class RestoreReviewTests(ChangeTestCase):
         self.assertNotIn(SNAPSHOT, values)
         self.assertEqual(draft.document["confirmation"], "alpha.test")
         restore.body(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_the_whole_dump_is_staged_before_the_gate(self) -> None:
+        database = restore.review(evidence(), PreparationInputs("", IDENTIFIER, point=POINT))
+        stages = cast(list[str], database.document["stages"])
+        self.assertLess(stages.index("dump"), stages.index("gate"))
+        full = restore.review(
+            evidence(parts=("database", "files")),
+            PreparationInputs("", IDENTIFIER, point=POINT, scope="full"),
+        )
+        full_stages = cast(list[str], full.document["stages"])
+        self.assertLess(full_stages.index("dump"), full_stages.index("gate"))
 
     def test_an_empty_target_skips_the_safety_backup_and_says_so(self) -> None:
         draft = restore.review(

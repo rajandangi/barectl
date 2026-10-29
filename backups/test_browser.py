@@ -2,18 +2,20 @@
 
 import pathlib
 import tempfile
+from datetime import timedelta
 from typing import override
 
 from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.test import override_settings, tag
+from django.utils import timezone
 from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
 from operations.models import ChangePreparation
 from servers.models import Server
 
-from . import check
+from . import check, observation
 from .testing import integrity as finding
 from .testing import point, record_backups, record_points, record_schedule, result
 
@@ -137,6 +139,51 @@ class BackupsBrowserTests(BrowserTestCase):
         preparation = ChangePreparation.objects.get(server=server)
         self.assertEqual(preparation.kind_slug, "set_backup_schedule")
         self.assertEqual(preparation.inputs, {"version": 1, "identifier": "shop", "state": "off"})
+
+    def test_a_missed_schedule_is_shown_as_skipped(self) -> None:
+        server = Server.objects.get(name="Production")
+        old = observation.BackupResult(
+            "succeeded",
+            "",
+            "database",
+            "scheduled",
+            (timezone.now() - timedelta(hours=48)).isoformat(),
+            "0123456789abcdef",
+            1,
+            4096,
+        )
+        record_backups(server, enabled=True, last=old)
+        record_schedule(
+            server,
+            next_elapse_us=int((timezone.now() - timedelta(hours=1)).timestamp() * 1_000_000),
+        )
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        expect(self.page.get_by_text("The scheduled backup was skipped.")).to_be_visible()
+        expect(self.page.get_by_text("Database only saved.")).to_have_count(0)
+        self.assert_no_native_terms()
+
+    def test_a_removed_repository_offers_delete(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result())
+        record_points(
+            server,
+            (),
+            removed=(
+                {
+                    "identifier": "gone",
+                    "points": [point(scope="full", parts=("database", "files"))],
+                    "problem": "",
+                },
+            ),
+        )
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        self.page.get_by_role("button", name="Delete these backups").click()
+        expect(self.page.get_by_role("heading", name="Delete removed-site backups")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "delete_removed_backups")
+        self.assert_no_native_terms()
 
     def test_offsite_storage_is_set_up_from_server_settings(self) -> None:
         server = Server.objects.get(name="Production")

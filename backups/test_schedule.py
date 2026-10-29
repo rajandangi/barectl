@@ -628,6 +628,28 @@ class SchedulePageTests(ChangeTestCase):
         self.assertContains(page, "Next run:")
         self.assertEqual(self.remote.commands, [])
 
+    def test_a_missed_run_is_shown_as_skipped_never_as_a_backup(self) -> None:
+        server = self.store()
+        old = observation.BackupResult(
+            "succeeded",
+            "",
+            "database",
+            "scheduled",
+            (timezone.now() - timedelta(hours=48)).isoformat(),
+            "0123456789abcdef",
+            1,
+            4096,
+        )
+        record_backups(server, identifier="shop", enabled=True, last=old)
+        record_schedule(
+            server,
+            identifier="shop",
+            next_elapse_us=int((timezone.now() - timedelta(hours=1)).timestamp() * 1_000_000),
+        )
+        response = self.client.get(f"/servers/{server.pk}/sites/shop/backups/")
+        self.assertContains(response, "The scheduled backup was skipped.")
+        self.assertNotContains(response, "Database only saved.")
+
     def test_preparing_a_schedule_queues_the_reviewed_kind(self) -> None:
         server = self.store()
         response = self.client.post(

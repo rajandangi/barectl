@@ -12,12 +12,18 @@ import re
 import shutil
 import subprocess
 import sys
+import time
+from collections.abc import Sequence
 
 REPOSITORY_ROOT = "/var/lib/barectl-backups"
 KEY_ROOT = "/etc/barectl/backups"
 CACHE_DIR = "/var/cache/barectl/restic"
 RESTIC_BIN = "/nix/var/nix/profiles/barectl/restic/bin/restic"
 REPOSITORY_LOCK_ROOT = "/run/lock/barectl"
+# The engine holds the shared mutation lock on descriptor 9 for every child body
+# (docs/adr/0006-use-native-bootstrap-execution.md). A capture may close it once its own
+# point is safe so a slow copy never blocks ordinary hosting changes.
+MUTATION_LOCK_FD = 9
 HEADROOM_BYTES = 1024 * 1024 * 1024
 SUCCESS = 0
 REFUSED = 1
@@ -134,29 +140,54 @@ def site_lock(identifier: str, gid: int) -> int | None:
         raise
 
 
-def repository_lock(identifier: str) -> int | None:
-    """The one native lock for a site's repositories, or ``None`` when a copy holds it."""
+def repository_lock(identifier: str, *, wait_seconds: float = 0.0) -> int | None:
+    """The one native lock for a site's repositories, or ``None`` when a copy holds it.
+
+    ``wait_seconds`` gives a bounded wait for a slow copy or cleanup to finish; the
+    default is the non-waiting admission every capture and copy uses.
+    """
     if not re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier):
         raise ValueError("Not a site identifier.")
     if not controlled(REPOSITORY_LOCK_ROOT):
         raise ValueError("The repository lock directory is outside the convention.")
     path = f"{REPOSITORY_LOCK_ROOT}/backup-{identifier}.lock"
     descriptor = os.open(path, os.O_RDONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    deadline = time.monotonic() + wait_seconds
     try:
         if not locked_file(path, mode=0o600):
             raise ValueError("The repository lock is outside the convention.")
         import fcntl
 
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    os.close(descriptor)
+                    return None
+                time.sleep(0.1)
+                continue
+            break
         if not locked_file(path, mode=0o600):
             raise ValueError("The repository lock changed.")
         return descriptor
-    except BlockingIOError:
-        os.close(descriptor)
-        return None
-    except OSError:
-        os.close(descriptor)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
         raise
+
+
+def repository_locks(identifiers: Sequence[str], *, wait_seconds: float = 0.0) -> list[int] | None:
+    """Every named repository lock, acquired in a fixed order or released together."""
+    locks: list[int] = []
+    for identifier in sorted(set(identifiers)):
+        lock = repository_lock(identifier, wait_seconds=wait_seconds)
+        if lock is None:
+            for held in locks:
+                os.close(held)
+            return None
+        locks.append(lock)
+    return locks
 
 
 def release_mutation_lock() -> None:
@@ -166,7 +197,7 @@ def release_mutation_lock() -> None:
     holds only its per-repository lock, so hosting changes are not blocked by an upload.
     """
     with contextlib.suppress(OSError):
-        os.close(9)
+        os.close(MUTATION_LOCK_FD)
 
 
 def environment_file(path: str) -> dict[str, str]:

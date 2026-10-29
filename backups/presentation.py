@@ -9,7 +9,7 @@ from django.utils import timezone
 from discovery.snapshot import CollectedSnapshot, ObservedSite
 
 from . import check, convention, kit
-from .models import BackupCheck
+from .models import BackupCheck, BackupSchedule
 from .observation import IntegrityFinding, ObservedBackup
 
 SCOPE_LABELS = {
@@ -275,6 +275,12 @@ def _result_reason(reason: str) -> str:
         "restore_engine": (
             "The recovery point was made by a different database version, so nothing was restored."
         ),
+        "restore_dump": (
+            "The database copy was truncated, so nothing was restored and the site still serves."
+        ),
+        "removed_backup": (
+            "Barectl could not delete the removed site's backups. Nothing else was changed."
+        ),
         "restore_target": "The site changed, so nothing was restored.",
         "restore_safety": "The safety backup failed, so nothing was overwritten.",
         "restore_files": (
@@ -516,7 +522,10 @@ def view(
     gated: bool = False,
     integrity: tuple[IntegrityFinding, ...] = (),
     removed: Sequence[Mapping[str, object]] = (),
+    schedule: BackupSchedule | None = None,
 ) -> BackupsView:
+    from . import schedule as backup_schedule
+
     backup = backup_of(collected, identifier) if collected is not None else None
     enabled = backup is not None and backup.enabled
     restore = bool(
@@ -566,9 +575,24 @@ def view(
         note = "This site is not backed up."
     elif backup is not None and backup.last is None:
         note = "Backups are enabled. No recovery point has been taken yet."
+    last = last_view(backup)
+    due = backup_schedule.missed_at(schedule)
+    if (
+        last is not None
+        and backup is not None
+        and backup_schedule.missed(schedule, backup.last)
+        and due is not None
+    ):
+        last = LastBackupView(
+            "The scheduled backup was skipped.",
+            "The timer's time passed without a backup result, and a missed run is never "
+            "caught up. The next run is shown below.",
+            _label(due),
+            "lock_busy",
+        )
     return BackupsView(
         enabled,
-        last_view(backup),
+        last,
         points,
         checked_at,
         stale,
@@ -600,6 +624,7 @@ def kit_lines(server_name: str, identifier: str, collected: CollectedSnapshot | 
         endpoint=offsite.endpoint if offsite is not None and offsite.configured else "",
         bucket=offsite.bucket if offsite is not None and offsite.configured else "",
         prefix=offsite.prefix if offsite is not None and offsite.configured else "",
+        region=offsite.region if offsite is not None and offsite.configured else "",
         sites=tuple(row.identifier for row in collected.backups.value)
         if collected is not None
         else (),

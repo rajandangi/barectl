@@ -74,10 +74,32 @@ def local_path(token: str, artifact: str) -> pathlib.Path:
 
 
 def _remove_local(token: str) -> None:
+    """Remove one controller stage, retrying after restoring write permission.
+
+    Both stages are private directories this process created. A failed first removal can
+    only be a mode left by an interrupted worker, so make the tree writable and retry once.
+    A stage that still cannot be removed is bounded and `_prune_orphans` retries it after an
+    hour; it is never served without its row.
+    """
+    root = local_root(token)
     try:
-        shutil.rmtree(local_root(token))
+        shutil.rmtree(root)
+        return
     except FileNotFoundError:
+        return
+    except OSError:
         pass
+    for directory, _children, files in os.walk(root):
+        try:
+            os.chmod(directory, 0o700)
+            for name in files:
+                os.chmod(os.path.join(directory, name), 0o600)
+        except OSError:
+            continue
+    try:
+        shutil.rmtree(root)
+    except FileNotFoundError:
+        return
     except OSError:
         pass
 

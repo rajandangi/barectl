@@ -171,8 +171,8 @@ schedules; results stay four separate findings: saved here, copied offsite, veri
 restored successfully. **Enable backups**, **Back up now** (Database only or Full site), the
 one schedule, **Keep backups for**, **Check backups**, **Restore** (Database only, Files only
 or Full site, also across servers and from a removed site), **Export**, **Copy offsite
-again**, **Keep**, offsite storage setup and removal, passphrase replacement and **Reopen
-site** are implemented ([backups](backups.md)). What is not qualified is listed in the
+again**, **Keep**, offsite storage setup and removal, passphrase replacement, **Reopen
+site**, and **Delete removed-site backups** are implemented ([backups](backups.md)). What is not qualified is listed in the
 [Phase D qualification record](phase-d-qualification.md). See ADRs
 [0031](adr/0031-back-up-with-restic.md), [0037](adr/0037-capture-scheduled-backups-live.md),
 [0022](adr/0022-review-destructive-restore-and-coordinated-capture.md) and
