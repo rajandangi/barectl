@@ -46,6 +46,7 @@ from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 
 from . import convention, observation
+from .change import ALL_SITES_READ
 from .models import BackupSchedule
 
 SLUG: Final = "set_backup_schedule"
@@ -451,6 +452,9 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> ScheduleEvidence:
     engines = database_observation.installed_engines(observed)
     engine = engines[0].engine if len(engines) == 1 and engines[0].managed else ""
     record, current_sites, boot_id, uptime = _site_record(shell, inputs.identifier)
+    listing = shell.run(ALL_SITES_READ)
+    if listing.exit_status == 0 and not listing.truncated:
+        current_sites = tuple(listing.stdout.splitlines())
     backup_value = observation.read(shell, (inputs.identifier,), engine, architecture)
     backup = _backup(backup_value, inputs.identifier) if backup_value is not None else None
     schedules = read(shell, current_sites) if current_sites else ()

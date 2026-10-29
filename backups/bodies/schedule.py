@@ -229,7 +229,12 @@ def _install_result(value: SimpleNamespace) -> None:
 
 
 def _remove_result(value: SimpleNamespace) -> None:
+    # A slice stays `loaded` in systemd after its file is removed, so prove removal by the
+    # files and by the timer and service leaving systemd. The slice is stopped by _stop.
     for kind in KINDS:
+        if pathlib.Path(schedule_unit_file(value.identifier, kind)).exists():
+            _fail("partial", "schedule_units")
+    for kind in ("service", "timer"):
         if load_state(schedule_unit_name(value.identifier, kind)) != "not-found":
             _fail("partial", "schedule_units")
     if (
