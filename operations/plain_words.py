@@ -369,6 +369,73 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to backups",
         after_home=Home.SITE_BACKUPS,
     ),
+    "set_up_offsite_storage": ChangeWords(
+        title="Set up offsite backup storage",
+        summary=(
+            (
+                "Barectl will connect this server's encrypted backups to a bucket on Amazon S3 "
+                "or Cloudflare R2 and check it can be written and listed before saving."
+            ),
+            (
+                "The access keys and the recovery passphrase live only in private files on "
+                "this server; Barectl never stores them."
+            ),
+            (
+                "Object lock and immutability are not configured. S3 Object Lock and bucket "
+                "locks are provider features outside Barectl."
+            ),
+        ),
+        action="Set up storage",
+        steps={
+            "preflight": "Checking the server",
+            "credentials": "Checking the keys",
+            "bucket": "Checking the bucket",
+            "repositories": "Preparing each site's offsite copy",
+            "verify": "Verifying",
+        },
+        home=Home.SERVER_SETTINGS,
+        after="Back to Server Settings",
+        after_home=Home.SERVER_SETTINGS,
+    ),
+    "remove_offsite_storage": ChangeWords(
+        title="Remove offsite backup storage",
+        summary=(
+            "Barectl will forget this server's offsite storage setting and its keys.",
+            (
+                "It deletes no offsite copy: everything already in the bucket stays there. "
+                "Existing recovery points on this server are unchanged."
+            ),
+        ),
+        action="Remove storage",
+        steps={
+            "preflight": "Checking the server",
+            "remove": "Removing the setting",
+            "verify": "Verifying",
+        },
+        home=Home.SERVER_SETTINGS,
+        after="Back to Server Settings",
+        after_home=Home.SERVER_SETTINGS,
+    ),
+    "copy_offsite_again": ChangeWords(
+        title="Copy a recovery point of {site} offsite again",
+        summary=(
+            "Barectl will copy one existing recovery point from this server to offsite storage.",
+            (
+                "The recovery point saved on this server is unchanged. If the copy fails, "
+                "copy it again when the storage is reachable."
+            ),
+        ),
+        action="Copy offsite again",
+        steps={
+            "preflight": "Checking the recovery point",
+            "lock": "Waiting for the copy lock",
+            "copy": "Copying offsite",
+            "verify": "Checking the offsite copy",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
     "back_up_now": ChangeWords(
         title="Back up the database of {site}",
         summary=(

@@ -154,6 +154,7 @@ class BackupEvidence:
     restic_version: str
     disk_available: int = 0
     current_sites: tuple[str, ...] = ()
+    offsite: observation.OffsiteStorage | None = None
 
 
 def _site_record(
@@ -205,7 +206,14 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> BackupEvidence:
         restic_version,
         disk,
         current_sites,
+        observation.offsite_of(value),
     )
+
+
+def _offsite_plan(identifier: str, evidence: BackupEvidence) -> dict[str, object] | None:
+    from . import offsite
+
+    return offsite.capture_plan(identifier, evidence.offsite)
 
 
 def _platform_refusals(evidence: BackupEvidence) -> list[str]:
@@ -222,6 +230,8 @@ def _platform_refusals(evidence: BackupEvidence) -> list[str]:
         refusals.append(evidence.problem)
     elif evidence.backup is None:
         refusals.append("The site's backups could not be read from the server.")
+    if evidence.offsite is not None and evidence.offsite.problem:
+        refusals.append(evidence.offsite.problem)
     if evidence.backup is not None:
         refusals.extend(evidence.backup.problems)
     return refusals
@@ -380,6 +390,7 @@ def review_backup(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             "Barectl streams the dump straight into the encrypted repository. A failed dump "
             "creates no recovery point."
         ),
+        "offsite": _offsite_plan(inputs.identifier, evidence),
     }
     postconditions = (
         "One complete Barectl-tagged database recovery point exists in the repository.",
@@ -572,6 +583,7 @@ def review_full(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             "A full copy pauses the site briefly. If it stops partway, the site stays paused "
             "until you reopen it."
         ),
+        "offsite": _offsite_plan(inputs.identifier, evidence),
     }
     postconditions = (
         "One complete Barectl-tagged full recovery point exists in the repository.",
@@ -622,6 +634,9 @@ def review_full(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
 
 def _full_document(document: dict[str, object]) -> None:
     _document(document, FULL_SHA256)
+    from . import offsite
+
+    offsite.validate_capture(document.get("offsite"))
     identifier = document.get("identifier")
     settings_values = document.get("names")
     application = document.get("application")
@@ -724,6 +739,7 @@ def body_full(document: dict[str, object], context: BodyContext) -> NativeBody:
             "dump",
             "filename",
             "tags",
+            "offsite",
         )
     }
     from automation import fence as automation_fence
@@ -841,6 +857,9 @@ def body_enable(document: dict[str, object], context: BodyContext) -> NativeBody
 
 def body_backup(document: dict[str, object], context: BodyContext) -> NativeBody:
     _document(document, BACKUP_SHA256)
+    from . import offsite
+
+    offsite.validate_capture(document.get("offsite"))
     identifier = document.get("identifier")
     engine = document.get("engine")
     point = document.get("point")
@@ -881,6 +900,7 @@ def body_backup(document: dict[str, object], context: BodyContext) -> NativeBody
             "tags",
             "dump",
             "filename",
+            "offsite",
         )
     }
     encoded = base64.b64encode(gzip.compress(json.dumps(payload).encode(), mtime=0)).decode()
@@ -925,9 +945,23 @@ def _observed(value: dict[str, object], identifier: str) -> observation.Observed
             str(last["point"]),
             int(str(last["snapshots"])),
             int(str(last["bytes"])),
+            str(last.get("offsite", "")),
         )
         if isinstance(last, dict)
         else None,
+        observation.offsite_of(value),
+        _copy(item.get("copy")),
+    )
+
+
+def _copy(value: object) -> observation.OffsiteCopy | None:
+    if not isinstance(value, dict):
+        return None
+    return observation.OffsiteCopy(
+        str(value["class"]),
+        str(value["reason"]),
+        str(value["point"]),
+        str(value["at"]),
     )
 
 

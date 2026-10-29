@@ -32,6 +32,22 @@ class LastBackupView:
 
 
 @dataclass(frozen=True)
+class OffsiteView:
+    label: str
+    bucket: str
+    prefix: str
+
+
+@dataclass(frozen=True)
+class CopyView:
+    headline: str
+    detail: str
+    time_label: str
+    failed: bool
+    point: str = ""
+
+
+@dataclass(frozen=True)
 class RecoveryPointView:
     time_label: str
     scope: str
@@ -42,6 +58,7 @@ class RecoveryPointView:
     point: str
     missing: tuple[str, ...] = ()
     incomplete: tuple[str, ...] = ()
+    offsite_status: str = "Offsite storage not set up"
     parts: tuple[str, ...] = ()
 
     @property
@@ -80,6 +97,8 @@ class BackupsView:
     note: str
     gated: bool = False
     interrupted: bool = False
+    offsite: OffsiteView | None = None
+    copy: CopyView | None = None
     restore: bool = False
 
     @property
@@ -108,7 +127,7 @@ def _label(value: datetime | None) -> str:
     return timezone.localtime(value).strftime("%-d %b %Y, %H:%M")
 
 
-def last_view(backup: ObservedBackup | None) -> LastBackupView | None:
+def last_view(backup: ObservedBackup | None) -> LastBackupView | None:  # noqa: C901 - one result
     if backup is None or backup.last is None:
         return None
     result = backup.last
@@ -142,6 +161,18 @@ def last_view(backup: ObservedBackup | None) -> LastBackupView | None:
             if result.scope in ("full", "files")
             else "The database dump finished and its recovery point is kept here."
         )
+        if result.offsite == "failed" or (
+            backup.copy is not None and backup.copy.point == result.point and not backup.copy.copied
+        ):
+            return LastBackupView(
+                "Saved here, offsite copy failed.",
+                "The recovery point is kept on this server. Its offsite copy did not finish, "
+                "so copy it offsite again when the storage is reachable.",
+                _label(at),
+                result.result_class,
+            )
+        if result.offsite == "copied":
+            detail += " It was also copied to offsite storage."
         return LastBackupView(
             f"{scope} saved.",
             detail,
@@ -217,7 +248,9 @@ def _result_reason(reason: str) -> str:
     }.get(reason, "Barectl could not finish the backup. Check again or read the run's record.")
 
 
-def points_view(listing: dict[str, object]) -> tuple[RecoveryPointView, ...]:
+def points_view(
+    listing: dict[str, object], copy: CopyView | None = None, *, configured: bool = False
+) -> tuple[RecoveryPointView, ...]:
     raw = listing.get("points")
     if not isinstance(raw, list):
         return ()
@@ -230,6 +263,7 @@ def points_view(listing: dict[str, object]) -> tuple[RecoveryPointView, ...]:
         missing = point.get("missing")
         incomplete = point.get("incomplete")
         parts = point.get("parts")
+        point_id = str(point.get("point", ""))
         rows.append(
             RecoveryPointView(
                 _label(_when(str(when))) if isinstance(when, str) else "Time not recorded",
@@ -238,13 +272,45 @@ def points_view(listing: dict[str, object]) -> tuple[RecoveryPointView, ...]:
                 point.get("live") is True,
                 point.get("keep") is True,
                 str(point.get("short", "")),
-                str(point.get("point", "")),
+                point_id,
                 tuple(str(item) for item in missing) if isinstance(missing, list) else (),
                 tuple(str(item) for item in incomplete) if isinstance(incomplete, list) else (),
-                tuple(str(item) for item in parts) if isinstance(parts, list) else (),
+                offsite_status=_point_offsite(point_id, copy, configured),
+                parts=tuple(str(item) for item in parts) if isinstance(parts, list) else (),
             )
         )
     return tuple(rows)
+
+
+def _point_offsite(point: str, copy: CopyView | None, configured: bool) -> str:
+    if not configured:
+        return "Offsite storage not set up"
+    if copy is None or not copy.point:
+        return "Not copied offsite"
+    if copy.point != point:
+        return "Not copied offsite"
+    return "Offsite copy failed" if copy.failed else "Copied offsite"
+
+
+def copy_view(copy: object | None) -> CopyView | None:
+    from .observation import OffsiteCopy
+
+    if not isinstance(copy, OffsiteCopy):
+        return None
+    at = _when(copy.at)
+    if copy.copied:
+        headline = "Offsite copy kept."
+        detail = "The offsite repository holds this recovery point as well."
+    elif copy.result_class == "lock_busy":
+        headline = "The offsite copy was skipped."
+        detail = "Another copy held the repository lock, so nothing was uploaded."
+    else:
+        headline = "Offsite copy failed."
+        detail = (
+            "The recovery point saved on this server is unchanged. Copy it offsite again when "
+            "the storage is reachable."
+        )
+    return CopyView(headline, detail, _label(at), not copy.copied, copy.point)
 
 
 def view(
@@ -285,12 +351,18 @@ def view(
     checked_at: datetime | None = None
     stale = False
     check_problem = ""
+    copy = copy_view(backup.copy if backup is not None else None)
+    offsite = (
+        OffsiteView(backup.offsite.label, backup.offsite.bucket, backup.offsite.prefix)
+        if backup is not None and backup.offsite is not None and backup.offsite.configured
+        else None
+    )
     if latest_check is not None:
         listing = latest_check.listing
         checked_at = latest_check.checked_at
         outcome = listing.get("outcome") if isinstance(listing, dict) else None
         if outcome == "observed":
-            points = points_view(listing)
+            points = points_view(listing, copy, configured=offsite is not None)
         else:
             check_problem = str(listing.get("problem", "")) if isinstance(listing, dict) else ""
         stale = check.stale(latest_check)
@@ -314,14 +386,24 @@ def view(
         note,
         gated,
         interrupted,
+        offsite,
+        copy,
         restore,
     )
 
 
 def kit_lines(server_name: str, identifier: str, collected: CollectedSnapshot | None) -> list[str]:
     backup = backup_of(collected, identifier) if collected is not None else None
+    offsite = backup.offsite if backup is not None else None
     return kit.lines(
         server_name=server_name,
         identifier=identifier,
         restic_version=backup.restic_version if backup is not None else "",
+        provider=offsite.label if offsite is not None and offsite.configured else "",
+        endpoint=offsite.endpoint if offsite is not None and offsite.configured else "",
+        bucket=offsite.bucket if offsite is not None and offsite.configured else "",
+        prefix=offsite.prefix if offsite is not None and offsite.configured else "",
+        sites=tuple(row.identifier for row in collected.backups.value)
+        if collected is not None
+        else (),
     )

@@ -13,7 +13,7 @@ from servers.models import Server
 from sites.bodies.common import SITE_GATED
 
 from .models import BackupCheck
-from .observation import BackupResult, ObservedBackup
+from .observation import BackupResult, ObservedBackup, OffsiteCopy, OffsiteStorage
 
 
 def record_backups(
@@ -25,6 +25,8 @@ def record_backups(
     last: BackupResult | None = None,
     checked_at: datetime | None = None,
     gated: bool = False,
+    offsite: OffsiteStorage | None = None,
+    copy: OffsiteCopy | None = None,
 ) -> None:
     """A target site whose stored snapshot carries the backup observation."""
     site = ObservedSite(
@@ -47,6 +49,8 @@ def record_backups(
         database,
         "" if database else "This site has no site database.",
         last,
+        offsite,
+        copy,
     )
     collected = replace(
         COLLECTED,
@@ -55,9 +59,15 @@ def record_backups(
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
         backups=Observation(
             ObservationOutcome.OBSERVED,
-            ("/var/lib/barectl-backups",),
+            ("/var/lib/barectl-backups", "/etc/barectl/backups"),
             "",
             (backup,),
+        ),
+        offsite=Observation(
+            ObservationOutcome.OBSERVED,
+            ("/etc/barectl/backups",),
+            "",
+            offsite,
         ),
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)

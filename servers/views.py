@@ -399,6 +399,9 @@ def server_page(
             (*PREPARE_PERMISSIONS, CHANGE_SHARED)
         )
         context["object_cache_kind"] = cache_engine.SLUG
+        from servers.backup_storage import context_for_server as backup_storage_context
+
+        context.update(backup_storage_context(server, request.user, state))
     if section == "activity":
         context.update(
             _activity_context(

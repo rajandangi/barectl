@@ -12,6 +12,7 @@ class BackupsConfig(AppConfig):
 
         from . import check  # noqa: F401 - registers the backup check step
         from .change import BACK_UP_FULL, BACK_UP_NOW, ENABLE
+        from .offsite import COPY, REMOVE, SET_UP
         from .reopen import REOPEN_SITE
         from .restore import RESTORE
 
@@ -19,4 +20,7 @@ class BackupsConfig(AppConfig):
         register_kind(BACK_UP_NOW)
         register_kind(BACK_UP_FULL)
         register_kind(REOPEN_SITE)
+        register_kind(SET_UP)
+        register_kind(REMOVE)
+        register_kind(COPY)
         register_kind(RESTORE)
