@@ -43,6 +43,7 @@ if TYPE_CHECKING:
         OfflineRecovery,
         RebootedFullBackup,
         Retention,
+        ScheduledCapture,
         WordPressFullRestore,
     )
     from disposable.test_cache import LaravelObjectCache, SiteObjectCache, ValkeyInstall
@@ -605,6 +606,7 @@ if TYPE_CHECKING:
         LaravelFullRestore,
         OfflineRecovery,
         RebootedFullBackup,
+        ScheduledCapture,
         Retention,
         WordPressFullRestore,
         LastBackupView("", "", "", "").headline,

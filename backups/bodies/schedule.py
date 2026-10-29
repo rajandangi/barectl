@@ -101,6 +101,7 @@ def _runtime(document: dict[str, object]) -> dict[str, object]:
         "frequency": str(document["frequency"]),
         "at": str(document["at"]),
         "scope": str(document["scope"]),
+        "application": str(document.get("application", "")),
         "offsite": document.get("offsite") is True,
         "engine": str(document.get("engine", "")),
         "repository": str(document["repository"]),
