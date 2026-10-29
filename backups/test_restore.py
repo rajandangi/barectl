@@ -122,6 +122,8 @@ class RestorePointTests(SimpleTestCase):
         )
         self.assertEqual(restore_body.dump_version("mariadb", "not a dump"), "")
         self.assertEqual(restore_body.engine_major("mariadb", "not a version"), "")
+        self.assertEqual(restore_body.engine_major("mariadb", "1:11.8.6-5ubuntu0.1"), "11.8")
+        self.assertEqual(restore_body.engine_major("postgresql", "1:18.0-1"), "18")
 
     def test_a_recorded_dump_header_replays_at_the_remote_shell_seam(self) -> None:
         command = restore.header_command(IDENTIFIER, SNAPSHOT, "salpha.sql")
@@ -169,6 +171,20 @@ class RestorePointTests(SimpleTestCase):
                 (),
                 InputShape.SITE_RECOVERY_POINT,
             )
+
+    def test_the_restore_result_line_is_read_by_the_engine(self) -> None:
+        from operations.engine import parse_result_line
+
+        line = (
+            'barectl-result {"class":"succeeded","reason":"restore_done","kind":"restore",'
+            '"site":"alpha","scope":"database","origin":"","at":"2026-10-30T01:00:00+00:00",'
+            '"point":"0123456789abcdef","snapshots":1,"bytes":4096}'
+        )
+        parsed = parse_result_line(line)
+        if parsed is None:
+            self.fail("The engine ignored the final restore result.")
+        self.assertEqual(parsed.result_class, "succeeded")
+        self.assertEqual(parsed.reason, "restore_done")
 
     def test_the_import_replaces_only_the_sites_own_database(self) -> None:
         preamble = restore_body.import_preamble("mariadb", IDENTIFIER).decode()
