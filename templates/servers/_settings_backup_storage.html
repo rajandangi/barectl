@@ -1,148 +1,135 @@
 {# Server Settings: offsite backup storage (Phase D #403, #179 Journey 4). #}
-<section class="margin-top-4" aria-labelledby="settings-backup-storage-heading">
+<section class="margin-top-4"
+         aria-labelledby="settings-backup-storage-heading">
   <h2 id="settings-backup-storage-heading">Backup storage</h2>
-  {% with panel=backup_storage_panel %} {% if not panel.observed %}
-  <p>{{ panel.note }}</p>
-  {% else %} {% if panel.outside %}
-  <div class="usa-alert usa-alert--warning usa-alert--slim">
-    <div class="usa-alert__body">
-      <p class="usa-alert__text">
-        Outside supported settings for backup changes:
-      </p>
-      <ul>
-        {% for reason in panel.outside %}
-        <li>{{ reason }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-  </div>
-  {% endif %} {% if panel.configured %}
-  <dl class="barectl-facts barectl-card">
-    <div>
-      <dt>Offsite provider</dt>
-      <dd>{{ panel.provider_label }}</dd>
-    </div>
-    <div>
-      <dt>Bucket</dt>
-      <dd>{{ panel.bucket }}</dd>
-    </div>
-    <div>
-      <dt>
-        {% if panel.provider == "s3" %}Region{% else %}Account endpoint{% endif
-        %}
-      </dt>
-      <dd>
-        {% if panel.provider == "s3" %}{{ panel.region }}{% else %}{{
-        panel.endpoint }}{% endif %}
-      </dd>
-    </div>
-    <div>
-      <dt>Pruning key</dt>
-      <dd>
-        {% if panel.provider == "r2" %} Not available. An R2 Object Read &amp;
-        Write token can also delete objects. {% elif panel.prune %} A separate
-        pruning key is stored on the server. {% else %} Not set. Captures use
-        the same key for now. {% endif %}
-      </dd>
-    </div>
-  </dl>
-  <p class="barectl-note">{{ panel.note }}</p>
-  <p class="barectl-note">
-    Object lock and immutability are not configured. S3 Object Lock and R2
-    bucket locks are provider features outside Barectl.
-  </p>
-  <details class="barectl-advanced">
-    <summary>Advanced</summary>
-    <ul>
-      <li>Endpoint: {{ panel.endpoint }}</li>
-      <li>Prefix: {{ panel.prefix }}</li>
-    </ul>
-  </details>
-  {% if backup_storage_can_prepare %}
-  <form
-    method="post"
-    action="{% url 'backup_storage_remove_prepare' server.pk %}"
-    class="usa-form"
-  >
-    {% csrf_token %}
-    <button type="submit" class="usa-button usa-button--outline">
-      Remove offsite storage
-    </button>
-    <span class="usa-hint">Copies already in the bucket stay there.</span>
-  </form>
-  {% endif %} {% else %}
-  <p>{{ panel.note }}</p>
-  <p>
-    Offsite copies survive the loss of this server. Barectl supports Amazon S3
-    and Cloudflare R2, checks the bucket before saving, and keeps the access
-    keys only in private files on this server.
-  </p>
-  {% if backup_storage_can_prepare %}
-  <h3>Amazon S3</h3>
-  <form
-    method="post"
-    action="{% url 'backup_storage_prepare' server.pk %}"
-    class="usa-form"
-  >
-    {% csrf_token %}
-    <input type="hidden" name="provider" value="s3" />
-    <label class="usa-label" for="backup-storage-s3-bucket">Bucket</label>
-    <input
-      class="usa-input"
-      id="backup-storage-s3-bucket"
-      name="bucket"
-      autocomplete="off"
-      required
-    />
-    <label class="usa-label" for="backup-storage-s3-region">Region</label>
-    <input
-      class="usa-input"
-      id="backup-storage-s3-region"
-      name="region"
-      autocomplete="off"
-      placeholder="us-east-1"
-      required
-    />
-    <button type="submit" class="usa-button usa-button--outline">
-      Set up Amazon S3
-    </button>
-  </form>
-  <h3>Cloudflare R2</h3>
-  <form
-    method="post"
-    action="{% url 'backup_storage_prepare' server.pk %}"
-    class="usa-form"
-  >
-    {% csrf_token %}
-    <input type="hidden" name="provider" value="r2" />
-    <label class="usa-label" for="backup-storage-r2-bucket">Bucket</label>
-    <input
-      class="usa-input"
-      id="backup-storage-r2-bucket"
-      name="bucket"
-      autocomplete="off"
-      required
-    />
-    <label class="usa-label" for="backup-storage-r2-account">Account ID</label>
-    <div class="usa-hint" id="backup-storage-r2-account-hint">
-      The 32-character account ID in your R2 endpoint.
-    </div>
-    <input
-      class="usa-input"
-      id="backup-storage-r2-account"
-      name="account"
-      autocomplete="off"
-      aria-describedby="backup-storage-r2-account-hint"
-      required
-    />
-    <button type="submit" class="usa-button usa-button--outline">
-      Set up Cloudflare R2
-    </button>
-  </form>
-  {% else %}
-  <p class="barectl-note">
-    Setting up backup storage needs a ready server, permission to prepare
-    changes and permission to manage secrets.
-  </p>
-  {% endif %} {% endif %} {% endif %} {% endwith %}
+  {% with panel=backup_storage_panel %}
+    {% if not panel.observed %}
+      <p>{{ panel.note }}</p>
+    {% else %}
+      {% if panel.outside %}
+        <div class="usa-alert usa-alert--warning usa-alert--slim">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">Outside supported settings for backup changes:</p>
+            <ul>
+              {% for reason in panel.outside %}<li>{{ reason }}</li>{% endfor %}
+            </ul>
+          </div>
+        </div>
+      {% endif %}
+      {% if panel.configured %}
+        <dl class="barectl-facts barectl-card">
+          <div>
+            <dt>Offsite provider</dt>
+            <dd>
+              {{ panel.provider_label }}
+            </dd>
+          </div>
+          <div>
+            <dt>Bucket</dt>
+            <dd>
+              {{ panel.bucket }}
+            </dd>
+          </div>
+          <div>
+            <dt>{% if panel.provider == "s3" %}Region{% else %}Account endpoint{% endif %}</dt>
+            <dd>{% if panel.provider == "s3" %}{{ panel.region }}{% else %}{{ panel.endpoint }}{% endif %}</dd>
+          </div>
+          <div>
+            <dt>Pruning key</dt>
+            <dd>
+              {% if panel.provider == "r2" %}
+                Not available. An R2 Object Read &amp; Write token can also delete objects.
+              {% elif panel.prune %}
+                A separate pruning key is stored on the server.
+              {% else %}
+                Not set. Captures use the same key for now.
+              {% endif %}
+            </dd>
+          </div>
+        </dl>
+        <p class="barectl-note">{{ panel.note }}</p>
+        <p class="barectl-note">
+          Object lock and immutability are not configured. S3 Object Lock and R2 bucket locks
+          are provider features outside Barectl.
+        </p>
+        <details class="barectl-advanced">
+          <summary>Advanced</summary>
+          <ul>
+            <li>Endpoint: {{ panel.endpoint }}</li>
+            <li>Prefix: {{ panel.prefix }}</li>
+          </ul>
+        </details>
+        {% if backup_storage_can_prepare %}
+          <form method="post"
+                action="{% url 'backup_storage_remove_prepare' server.pk %}"
+                class="usa-form">
+            {% csrf_token %}
+            <button type="submit"
+                    class="usa-button usa-button--outline">Remove offsite storage</button>
+            <span class="usa-hint">Copies already in the bucket stay there.</span>
+          </form>
+        {% endif %}
+      {% else %}
+        <p>{{ panel.note }}</p>
+        <p>
+          Offsite copies survive the loss of this server. Barectl supports Amazon S3 and
+          Cloudflare R2, checks the bucket before saving, and keeps the access keys only in
+          private files on this server.
+        </p>
+        {% if backup_storage_can_prepare %}
+          <h3>Amazon S3</h3>
+          <form method="post"
+                action="{% url 'backup_storage_prepare' server.pk %}"
+                class="usa-form">
+            {% csrf_token %}
+            <input type="hidden" name="provider" value="s3">
+            <label class="usa-label" for="backup-storage-s3-bucket">Bucket</label>
+            <input class="usa-input"
+                   id="backup-storage-s3-bucket"
+                   name="bucket"
+                   autocomplete="off"
+                   required>
+            <label class="usa-label" for="backup-storage-s3-region">Region</label>
+            <input class="usa-input"
+                   id="backup-storage-s3-region"
+                   name="region"
+                   autocomplete="off"
+                   placeholder="us-east-1"
+                   required>
+            <button type="submit" class="usa-button usa-button--outline">Set up Amazon S3</button>
+          </form>
+          <h3>Cloudflare R2</h3>
+          <form method="post"
+                action="{% url 'backup_storage_prepare' server.pk %}"
+                class="usa-form">
+            {% csrf_token %}
+            <input type="hidden" name="provider" value="r2">
+            <label class="usa-label" for="backup-storage-r2-bucket">Bucket</label>
+            <input class="usa-input"
+                   id="backup-storage-r2-bucket"
+                   name="bucket"
+                   autocomplete="off"
+                   required>
+            <label class="usa-label" for="backup-storage-r2-account">Account ID</label>
+            <div class="usa-hint" id="backup-storage-r2-account-hint">
+              The 32-character account ID in your R2 endpoint.
+            </div>
+            <input class="usa-input"
+                   id="backup-storage-r2-account"
+                   name="account"
+                   autocomplete="off"
+                   aria-describedby="backup-storage-r2-account-hint"
+                   required>
+            <button type="submit"
+                    class="usa-button usa-button--outline">Set up Cloudflare R2</button>
+          </form>
+        {% else %}
+          <p class="barectl-note">
+            Setting up backup storage needs a ready server, permission to prepare changes and
+            permission to manage secrets.
+          </p>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  {% endwith %}
 </section>
