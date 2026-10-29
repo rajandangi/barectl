@@ -359,8 +359,7 @@
                             action="{% url 'site_backups_export_prepare' server.pk identifier %}">
                         {% csrf_token %}
                         <input type="hidden" name="point" value="{{ point.point }}">
-                        <button type="submit"
-                                class="usa-button usa-button--outline">Export</button>
+                        <button type="submit" class="usa-button usa-button--outline">Export</button>
                       </form>
                     {% endif %}
                   </td>
