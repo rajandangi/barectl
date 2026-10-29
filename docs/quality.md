@@ -208,7 +208,7 @@ docker/disposable-server/run-scenarios.sh --env-file .env -- --validators
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-`-- --help` lists the runner's options (`--validators`, `--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`. `docker/disposable-server/build.sh` runs one full build: controller-fast with `--parallel`, fast snapshot validators, browser tests and native lifecycle scenarios concurrently, and reports each time and the wall time against the target and limit.
+`-- --help` lists the runner's options (`--validators`, `--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`. `docker/disposable-server/build.sh` runs one full build: controller-fast with `--parallel`, fast snapshot validators, browser tests and native lifecycle scenarios concurrently, and reports each stage's own time, the joint fast stage and the wall time against the target and limit. The wall is the native stage; running the browser stage first and starting the native stage when it ends was measured at Phase D and made the build slower ([build budget](phase-d-qualification.md#build-budget)).
 
 ### The required check
 

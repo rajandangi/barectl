@@ -4,6 +4,7 @@ import shlex
 import time
 from dataclasses import dataclass
 
+from discovery.ssh import RemoteShell
 from operations import engine, native
 from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
@@ -103,6 +104,20 @@ def wait_result(
                 f"{result.result_class} {result.reason}: "
                 + test.native(f"journalctl -u {submitted.unit} -n 40")
             )
+        # The result line is printed before the unit exits and releases the native lock. The
+        # worker closes a run from the ended unit's evidence, so the harness waits for the
+        # same end; a read taken while the unit still holds the lock reports "could not read"
+        # instead of the postcondition.
+        wait_inactive(shell, submitted.unit)
+
+
+def wait_inactive(shell: RemoteShell, unit: str, timeout: float = 30) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = shell.run(f"systemctl is-active {shlex.quote(unit)}").stdout.strip()
+        if state in ("", "inactive", "failed"):
+            return
+        time.sleep(0.1)
 
 
 def apply_change(
@@ -120,5 +135,11 @@ def apply_change(
         wait_result(test, submitted, timeout=timeout, expected=expected, reason=reason)
     if expected == "succeeded":
         with test.shell() as shell:
-            test.assertTrue(kind.verify(shell, submitted.review))
+            verified = kind.verify(shell, submitted.review)
+            if verified is None:
+                # Verification is a fresh read, and a read the server did not answer is not
+                # evidence about the postcondition: retry it once. A false answer still fails.
+                time.sleep(0.5)
+                verified = kind.verify(shell, submitted.review)
+            test.assertTrue(verified)
     return submitted.review

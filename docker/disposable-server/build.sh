@@ -1,9 +1,16 @@
 #!/bin/sh
 # docs/quality.md#native-layer
 #
-# One full local build. The fast gate, the browser tests and the native scenarios run
-# concurrently; each is timed and the wall time is reported against the 10-minute target
-# and the 15-minute limit (docs/adr/0033-prove-real-behavior-in-two-test-layers.md).
+# One full local build. The fast gate, the fast validators, the browser tests and the native
+# scenarios run concurrently; each is timed and the wall time is reported against the
+# 5-minute target and the 15-minute limit
+# (docs/adr/0033-prove-real-behavior-in-two-test-layers.md).
+#
+# The wall is the native stage, the longest one. Running the browser stage first and starting
+# the native stage when it ends was measured at Phase D and made the build slower: browser
+# 79 s plus native 335 s, 414 s against 365 s for the concurrent build, because the native
+# stage takes almost the same time alone as it does beside the browser stage. The stage times
+# are recorded in docs/phase-d-qualification.md#build-budget.
 #
 # Usage: build.sh [--env-file FILE]   (default .env)
 set -eu

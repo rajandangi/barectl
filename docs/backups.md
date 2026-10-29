@@ -2,8 +2,9 @@
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
 whether the site is backed up, its last safe result, its offsite copy result and its recovery
-points. The planned Phase D behaviour is the [Phase D specification](https://github.com/rajandangi/barectl/issues/358);
-this page describes only what is built.
+points. Phase D is implemented; the [Phase D qualification record](phase-d-qualification.md)
+names the tested revision, the measured scenarios, the provider evidence and what is not
+qualified. This page describes only what is built.
 
 ## Offsite storage
 
@@ -467,17 +468,18 @@ captured full and copied offsite; a second server boots from the same layer, cre
 matching site under another identifier and domain, connects the same local S3-compatible
 storage with the kit facts, passphrase and keys, and restores the point; a plain `restic`
 read of the kit's onsite path with the passphrase alone then recovers the source database.
-The #405 and #408 items' hosted times are not yet measured: the shard record carries their
-local measurements until the orchestrator runs them on the integration tip. On the local
-ubuntu-26.04 lane `Integrity` measured 81.2 s, `DisasterRecovery` 83.5 s and
-`OfflineRecovery` 33.4 s; the two #406 items measured 52 s each, and the #407 assertions run
-inside `LaravelFullRestore`. On the local ubuntu-26.04 lane the #401 scenario measured
-62 to 65 s for the
-`BackupLifecycle` test
-(69 to 72 s for the scenario including lane setup), including a full capture and a killed
-capture that stays gated until **Reopen site**; the breadth-only reboot proof measured
-65.3 s for the test and 70 s for its scenario. The local full build measured 294 s against the 300 s target and
-900 s limit (controller-fast 46 s, browser 94 s, native 294 s). The same build's
-fast-validator stage measured 79 s against the 60 s joint-fast target, a validator-stage
-miss already named in the [Phase C qualification record](phase-c-qualification.md), not a
-new native item from this slice.
+The #405 and #408 items have no hosted measurement; the [Phase D qualification
+record](phase-d-qualification.md#scenarios) carries the measured local times. On the local
+arm64 lane the nine backup items measured `BackupLifecycle` 108.7 s, `FullSiteRestore` 71.0 s,
+`WordPressFullRestore` 54.0 s, `LaravelFullRestore` 58.8 s, `ScheduledCapture` 84.3 s,
+`Retention` 127.9 s, `Integrity` 88.8 s, `DisasterRecovery` 93.0 s and `OfflineRecovery`
+38.7 s, with 135 s for the module. The #407 assertions run inside `LaravelFullRestore`. #410
+adds `BackupFailure` to the same module: a dump failure leaves no point, a short disk refuses
+the capture and deletes nothing, and a killed capture stays gated with one sentence and
+**Reopen site**; it measured 55.4 s. The breadth-only reboot proof measured 65.3 s for the
+test and 70 s for its scenario.
+
+The local full build at the #410 head measured 360 s against the 300 s target and 900 s limit
+(controller-fast 40 s, fast validators 68 s, browser 93 s, native 360 s). The joint fast stage
+measured 68 s against its 60 s target. Both misses are named as defects with their next actions
+in the qualification record, not raised targets.

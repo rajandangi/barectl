@@ -1,6 +1,6 @@
 # Target architecture
 
-The one stack Barectl manages, tracked in [#323](https://github.com/rajandangi/barectl/issues/323). Phase A implements the saved connections, host standing, host foundation, runtimes, server defaults, plain PHP sites over HTTP with per-site HAProxy and PHP-FPM, discovery and the change engine described below; Phase B adds WordPress, Laravel, HTTPS, databases and settings; Phase C adds background work, the per-site object cache and logs. The remaining sections on backups record the accepted direction for later phases ([rollout](#rollout)). The Nginx, Certbot, APT-PHP and rclone stack this replaces was deleted at the Phase A exit. The PHP serving design was amended on 2026-10-15 by [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md). Source evidence below is dated.
+The one stack Barectl manages, tracked in [#323](https://github.com/rajandangi/barectl/issues/323). Phase A implements the saved connections, host standing, host foundation, runtimes, server defaults, plain PHP sites over HTTP with per-site HAProxy and PHP-FPM, discovery and the change engine described below; Phase B adds WordPress, Laravel, HTTPS, databases and settings; Phase C adds background work, the per-site object cache and logs; Phase D adds restic backups, recovery points, retention, integrity, restore, export and disaster recovery ([backups](backups.md), [Phase D qualification record](phase-d-qualification.md)). The remaining sections record the accepted direction for later phases ([rollout](#rollout)). The Nginx, Certbot, APT-PHP and rclone stack this replaces was deleted at the Phase A exit. The PHP serving design was amended on 2026-10-15 by [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md). Source evidence below is dated.
 
 Barectl is a portable, local-first, agentless control plane for fresh Ubuntu 26.04 LTS servers. Ubuntu 24.04 is not supported on the target stack; a later LTS is added only by its own reviewed release policy and qualification. Mature native components own hosting mechanics. Barectl owns the operator experience, review, admission, reconciliation and recovery, through the existing pyinfra SSH connection and the detached native execution of [ADR 0006](adr/0006-use-native-bootstrap-execution.md). The [core philosophy](../README.md#core-philosophy) is unchanged: the server is the source of truth, and a new controller with authorized SSH access reconstructs supported state without the previous controller's database.
 
@@ -163,13 +163,20 @@ decision, and the [Phase C qualification record](phase-c-qualification.md) the e
 
 ## Backups
 
-Restic 0.18.1 is supplied from the catalog lock, and each site can have an encrypted onsite
-repository with a random server key and the operator's recovery passphrase. **Enable
-backups**, **Back up now** for a database-only point, and **Check backups** are implemented;
-schedules, retention, restores, offsite storage and export remain planned in the [Phase D
-specification](https://github.com/rajandangi/barectl/issues/358) ([backups](backups.md)). See
-ADRs [0031](adr/0031-back-up-with-restic.md), [0037](adr/0037-capture-scheduled-backups-live.md)
-and [0022](adr/0022-review-destructive-restore-and-coordinated-capture.md).
+Restic 0.18.1 is supplied from the catalog lock. Each site has an encrypted onsite
+repository with a random server key and the operator's recovery passphrase, and a server may
+connect one Amazon S3 or Cloudflare R2 bucket as offsite storage. Every backup, copy, check,
+cleanup, restore and export is a change on the one engine, or a fixed native unit for the
+schedules; results stay four separate findings: saved here, copied offsite, verified, and
+restored successfully. **Enable backups**, **Back up now** (Database only or Full site), the
+one schedule, **Keep backups for**, **Check backups**, **Restore** (Database only, Files only
+or Full site, also across servers and from a removed site), **Export**, **Copy offsite
+again**, **Keep**, offsite storage setup and removal, passphrase replacement and **Reopen
+site** are implemented ([backups](backups.md)). What is not qualified is listed in the
+[Phase D qualification record](phase-d-qualification.md). See ADRs
+[0031](adr/0031-back-up-with-restic.md), [0037](adr/0037-capture-scheduled-backups-live.md),
+[0022](adr/0022-review-destructive-restore-and-coordinated-capture.md) and
+[0032](adr/0032-keep-secrets-in-private-native-files.md).
 
 ## Logs
 

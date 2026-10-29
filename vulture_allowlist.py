@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
     from disposable.test_backups import (
+        BackupFailure,
         BackupLifecycle,
         DisasterRecovery,
         FullSiteRestore,
@@ -599,6 +600,7 @@ if TYPE_CHECKING:
     # The Backups section is rendered by Django templates, which read these fields by name.
     _backup_templates = (
         BackupsConfig,
+        BackupFailure,
         BackupLifecycle,
         DisasterRecovery,
         FullSiteRestore,

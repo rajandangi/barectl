@@ -14,6 +14,14 @@ _Avoid_: Backup file, dump, snapshot
 A Full site recovery point taken while the site's maintenance page, stopped background work and drained requests gave an exact point. It stays paused if it stops partway, with **Reopen site** as the one action.
 _Avoid_: Downtime backup, offline copy
 
+**Live recovery point**:
+A Full site recovery point whose database part and files part were captured in turn while the site kept serving, so the two parts may differ by the capture window. A schedule takes live points; a manual or safety capture pauses the site instead.
+_Avoid_: Hot backup, zero-downtime point, consistent snapshot
+
+**Safety backup**:
+The recovery point Barectl takes of the target site in the restore's own scope and verifies before the restore overwrites anything. A mistaken restore can then be undone by restoring it in turn.
+_Avoid_: Pre-restore copy, rollback point
+
 **Recovery passphrase**:
 The secret the operator chooses once per server and keeps away from the server and Barectl. It opens every site's backups, alone or with the printed kit.
 _Avoid_: Backup password, storage key
@@ -25,6 +33,10 @@ _Avoid_: Backup manifest, credentials sheet
 **Onsite repository**:
 A site's encrypted backup store on the server itself, outside every site's files.
 _Avoid_: Local backup folder
+
+**Offsite storage**:
+The one Amazon S3 or Cloudflare R2 bucket a server connects in Server Settings > Backup storage, with a fixed per-server prefix, so each backed-up site's point is also copied outside the server. Its access keys live only in root-only files on the server.
+_Avoid_: Remote backup, cloud drive, S3 account
 
 **Server key**:
 A random root-only key Barectl's units use to open a site's onsite repository. The operator's recovery passphrase opens the same repository independently.
@@ -446,7 +458,7 @@ _Avoid_: Log download, log export, log tail
 
 ### Later phases
 
-Terms for planned backups and Phase E operations are defined in the Phase D ([#358](https://github.com/rajandangi/barectl/issues/358)) specification and the [ROADMAP](../ROADMAP.md). Delivered Phase B and Phase C terms are defined in the [Phase B qualification record](docs/phase-b-qualification.md) and the [Phase C qualification record](docs/phase-c-qualification.md).
+Terms for planned Phase E operations are defined in the [ROADMAP](../ROADMAP.md). Delivered Phase B, Phase C and Phase D terms are defined in the [Phase B qualification record](docs/phase-b-qualification.md), the [Phase C qualification record](docs/phase-c-qualification.md) and the [Phase D qualification record](docs/phase-d-qualification.md).
 
 **Security review** (planned):
 A server's plain-language findings about its firewall, SSH sign-in, automatic security updates, pending updates and restart requirement, reconstructed from native evidence with its collection time. It reports what Barectl could read; it is not a score or a statement that the server is secure.

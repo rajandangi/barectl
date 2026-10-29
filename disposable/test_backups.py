@@ -1,8 +1,9 @@
 """Backups lifecycle: enable, capture, restore and reconstruct from native evidence.
 
-docs/quality.md#native-layer. This is the first shared Phase D scenario; later slices extend
-it with retention and disaster recovery. Each check is an operator-visible outcome on a real
-Ubuntu 26.04 host.
+docs/quality.md#native-layer. This is the shared Phase D native suite: the backup and restore
+lifecycle, full-site, WordPress, Laravel, schedule, retention, integrity, disaster and offline
+recovery items, and the safe-failure proof #410 adds. Each check is an operator-visible
+outcome or a safe failure on a real Ubuntu 26.04 host.
 """
 
 import json
@@ -12,8 +13,10 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
+from django.template.loader import render_to_string
 from django.test import tag
 
 from backups.observation import ObservedBackup
@@ -24,7 +27,6 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture
 
-from . import mirror
 from .change_testing import apply_change, submit_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
@@ -43,7 +45,10 @@ def write(test: ScenarioTestCase, shell: RemoteShell, path: str, content: str) -
 class BackupCase(ScenarioTestCase):
     identifier = IDENTIFIER
     domain = DOMAIN
-    layer = "L1"
+    # The prepared L5 snapshot carries the foundation, both runtimes and the managed MariaDB
+    # engine, so a backup item creates only the site and database it proves (#410). Repeating
+    # the APT refresh and the engine install in every backup item cost more than it proved.
+    layer = "L5"
     exclusive = True
     prefix = "bk"
     S3_HOST = "s3.us-east-1.amazonaws.com"
@@ -141,27 +146,10 @@ class BackupCase(ScenarioTestCase):
             secret=secret,
         )
 
-    def router(self, shell: RemoteShell) -> None:
-        write(self, shell, "/etc/apt/sources.list.d/barectl-fixture.sources", mirror.apt_sources())
-        write(
-            self,
-            shell,
-            "/etc/apt/apt.conf.d/99barectl-fixture",
-            'Acquire::By-Hash "no";\nAcquire::Languages "none";\n',
-        )
-        self.assertEqual(shell.run("rm -f /etc/apt/sources.list.d/ubuntu.sources").exit_status, 0)
-        update = shell.run("apt-get update 2>&1")
-        self.assertEqual(update.exit_status, 0, update.stdout)
-
     def prepare_site(self) -> ChangeReview:
-        from databases import engine as database_engine
         from databases import site as database_site
         from sites import change as sites_change
 
-        with self.shell() as shell:
-            self.router(shell)
-            apply_change(self, database_engine.INSTALL, PreparationInputs("mariadb"), timeout=150)
-        self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
         apply_change(
             self,
             sites_change.CREATE_SITE,
@@ -1465,6 +1453,150 @@ class RebootedFullBackup(BackupCase):
             timeout=60,
         )
         self.assertEqual(self.site_status("/"), 200)
+
+
+@tag(SCENARIO_TAG)
+class BackupFailure(BackupCase):
+    """A failed dump, a full disk and a killed capture fail safely (#410, #358).
+
+    One prepared L5 server carries the foundation and the managed MariaDB engine; this item
+    creates its own site and proves three operator-visible failures: a failed dump leaves no
+    recovery point, a server short of the reserved headroom refuses the capture and deletes
+    nothing, and a capture killed after the pause stays gated with Journey 7's one sentence
+    and one action.
+    """
+
+    identifier = "bkfail"
+    domain = "bkfail.example.com"
+    prefix = "bkfail"
+
+    @contextmanager
+    def short_of_disk(self) -> Iterator[None]:
+        """Cap the repository's filesystem below the capture's 1 GiB headroom.
+
+        The capture body measures free space on the repository root, so a bounded tmpfs
+        there refuses the capture while the site's own filesystem keeps its space. The mount
+        is removed and the repository restored in ``finally``; the moved original is never
+        touched by a step inside the mount.
+        """
+        root = "/var/lib/barectl-backups"
+        whole = root + ".full"
+        self.native(f"rm -rf {whole}")
+        self.native(f"mv {root} {whole}")
+        try:
+            self.native(f"install -d -m 0700 {root}")
+            self.native(f"mount -t tmpfs -o size=700m,mode=0700 tmpfs {root}")
+            self.native(f"cp -a {whole}/. {root}/")
+            yield
+        finally:
+            self.native(f"umount {root} || true")
+            self.native(f"rm -rf {root}")
+            self.native(f"mv {whole} {root}")
+
+    def kill(self, unit: str) -> None:
+        """End a running capture the way a killed unit does, then wait for it to stop."""
+        self.native(f"systemctl kill --signal=SIGKILL {unit}")
+        self.native(
+            f"timeout 30 sh -c 'while systemctl is-active --quiet {unit}; do sleep 0.2; done'"
+        )
+
+    def point_ids(self) -> set[str]:
+        return {str(row["point"]) for row in self.points()}
+
+    def test_failures_leave_no_point_keep_the_gate_and_one_action(self) -> None:
+        from backups import change, presentation, reopen
+
+        self.prepare_site()
+        self.enable()
+        self.assertEqual(self.points(), [], "Enabling backups left a recovery point.")
+        # A failed dump creates no recovery point and says so, with nothing to keep.
+        self.native("mv /usr/bin/mariadb-dump /usr/bin/mariadb-dump.barectl-test")
+        try:
+            apply_change(
+                self,
+                change.BACK_UP_NOW,
+                PreparationInputs("", self.identifier),
+                timeout=60,
+                expected="refused",
+                reason="backup_dump",
+            )
+        finally:
+            self.native("mv /usr/bin/mariadb-dump.barectl-test /usr/bin/mariadb-dump")
+        self.assertEqual(self.points(), [], "A failed dump left a recovery point.")
+        # One real point, so the disk refusal has something it could have deleted.
+        self.capture()
+        held = self.point_ids()
+        self.assertEqual(len(held), 1, "The fixture capture did not save one point.")
+        with self.short_of_disk():
+            apply_change(
+                self,
+                change.BACK_UP_NOW,
+                PreparationInputs("", self.identifier),
+                timeout=60,
+                expected="refused",
+                reason="backup_disk",
+            )
+            self.assertEqual(self.point_ids(), held, "A disk refusal changed the repository.")
+        self.assertEqual(self.point_ids(), held, "A disk refusal removed the saved point.")
+        # A capture killed after the pause leaves the gate up with one sentence and one action.
+        self.large_file()
+        submitted = submit_change(
+            self,
+            change.BACK_UP_FULL,
+            PreparationInputs("", self.identifier),
+        )
+        self.wait_stage(submitted.unit, "backup-files")
+        self.kill(submitted.unit)
+        self.assertEqual(self.site_status("/"), 503)
+        self.assertIn("respond 503", self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy"))
+        observed = self.observe()
+        row = self.backup_row(observed)
+        if row.last is None:
+            self.fail("No interrupted capture was reconstructed.")
+        self.assertEqual(row.last.result_class, "partial")
+        self.assertEqual(row.last.reason, "backup_paused")
+        state = presentation.view(
+            None,
+            observed,
+            self.identifier,
+            None,
+            checking=False,
+            gated=True,
+        )
+        self.assertTrue(state.reopen)
+        self.assertEqual(
+            state.last.headline if state.last else "",
+            "The full backup stopped after pausing the site.",
+        )
+        page = render_to_string(
+            "backups/_site_backups.html",
+            {
+                "backups_target": True,
+                "backups": state,
+                "backups_can_reopen": True,
+                "server": SimpleNamespace(pk=1),
+                "identifier": self.identifier,
+                "csrf_token": "",
+            },
+        )
+        self.assertEqual(
+            page.count(
+                "This stopped after pausing the site for a full backup. Nothing after it ran."
+            ),
+            1,
+        )
+        self.assertEqual(page.count("Reopen site"), 1)
+        self.native(f"systemctl reset-failed {submitted.unit} || true")
+        apply_change(
+            self,
+            reopen.REOPEN_SITE,
+            PreparationInputs("", self.identifier),
+            timeout=60,
+        )
+        self.assertEqual(self.site_status("/"), 200)
+        self.assertNotIn(
+            "respond 503", self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy")
+        )
 
 
 @tag(SCENARIO_TAG)
