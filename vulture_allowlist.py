@@ -36,8 +36,10 @@ if TYPE_CHECKING:
     from disposable.native_mirror.serve import _Handler as MirrorHandler
     from disposable.test_backups import (
         BackupLifecycle,
+        LaravelFullRestore,
         RebootedFullBackup,
         Retention,
+        WordPressFullRestore,
     )
     from disposable.test_cache import LaravelObjectCache, SiteObjectCache, ValkeyInstall
     from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
@@ -593,8 +595,10 @@ if TYPE_CHECKING:
     _backup_templates = (
         BackupsConfig,
         BackupLifecycle,
+        LaravelFullRestore,
         RebootedFullBackup,
         Retention,
+        WordPressFullRestore,
         LastBackupView("", "", "", "").headline,
         LastBackupView("", "", "", "").time_label,
         RecoveryPointView("", "", "", False, False, "", "").time_label,

@@ -750,11 +750,9 @@ def body_full(document: dict[str, object], context: BodyContext) -> NativeBody:
     return NativeBody(FULL_BYTES, (encoded,))
 
 
-def verify_full(shell: RemoteShell, review: ChangeReview) -> bool | None:
-    body_full(review.document, BodyContext("", "", 0))
-    point = str(review.document["point"])
-    identifier = str(review.document["identifier"])
-    command = shlex.join(
+def point_snapshots_command(identifier: str, point: str) -> str:
+    """The fixed read of one point's snapshots, shared by the verification and its test."""
+    return shlex.join(
         [
             "/usr/bin/env",
             f"RESTIC_REPOSITORY={convention.repository(identifier)}",
@@ -768,7 +766,13 @@ def verify_full(shell: RemoteShell, review: ChangeReview) -> bool | None:
             "point:" + point,
         ]
     )
-    result = run_root(shell, command)
+
+
+def verify_full(shell: RemoteShell, review: ChangeReview) -> bool | None:
+    body_full(review.document, BodyContext("", "", 0))
+    point = str(review.document["point"])
+    identifier = str(review.document["identifier"])
+    result = run_root(shell, point_snapshots_command(identifier, point))
     if result.exit_status or result.truncated:
         return None
     try:
@@ -978,21 +982,7 @@ def verify_backup(shell: RemoteShell, review: ChangeReview) -> bool | None:
     body_backup(review.document, BodyContext("", "", 0))
     point = str(review.document["point"])
     identifier = str(review.document["identifier"])
-    command = shlex.join(
-        [
-            "/usr/bin/env",
-            f"RESTIC_REPOSITORY={convention.repository(identifier)}",
-            f"RESTIC_PASSWORD_FILE={convention.server_key(identifier)}",
-            f"RESTIC_CACHE_DIR={convention.CACHE_DIR}",
-            convention.RESTIC_BIN,
-            "snapshots",
-            "--json",
-            "--no-lock",
-            "--tag",
-            "point:" + point,
-        ]
-    )
-    result = run_root(shell, command)
+    result = run_root(shell, point_snapshots_command(identifier, point))
     if result.exit_status or result.truncated:
         return None
     try:

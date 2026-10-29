@@ -135,6 +135,27 @@ class DeployReviewTests(SimpleTestCase):
         compile(observation.READ_SOURCE, "read.py", "exec")
 
 
+class ReleaseRetentionTests(SimpleTestCase):
+    def test_a_restored_release_counts_toward_current_plus_five(self) -> None:
+        row = laravel_row(count=7)
+        releases = releases_in(row)
+        restored = {
+            "name": "restore-0123456789abcdef-a1b2c3d4",
+            "commit": "",
+            "created": 2000,
+            "state": "complete",
+            "repository": REPOSITORY,
+            "branch": "main",
+        }
+        row["releases"] = [restored, *releases]
+        row["current"] = restored["name"]
+        pruned = change.prune_names(row)
+        self.assertNotIn(restored["name"], pruned)
+        self.assertNotIn(str(releases[0]["name"]), pruned)
+        self.assertEqual({str(releases[5]["name"]), str(releases[6]["name"])}, set(pruned))
+        self.assertIn(restored["name"], [str(item["name"]) for item in change.releases_of(row)])
+
+
 class RollbackReviewTests(SimpleTestCase):
     def evidence(self, *, row: dict[str, object] | None = None) -> rollback.RollbackEvidence:
         return rollback.RollbackEvidence(

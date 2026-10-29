@@ -266,6 +266,44 @@ class BackupsBrowserTests(BrowserTestCase):
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
 
+    def test_a_wordpress_full_point_restores_through_its_review(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result(scope="full"), application="wordpress")
+        record_points(server, (point(scope="full", parts=("database", "files")),))
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        self.page.get_by_label("What to restore").select_option("full")
+        self.page.get_by_role("button", name="Restore", exact=True).click()
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "restore_database")
+        self.assertEqual(preparation.inputs["scope"], "full")
+        self.assert_no_native_terms()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+    def test_a_laravel_full_point_restores_through_its_review(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_backups(server, enabled=True, last=result(scope="full"), application="laravel")
+        record_points(server, (point(scope="full", parts=("database", "files")),))
+        self.sign_in_operator()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/backups/")
+        self.page.get_by_label("What to restore").select_option("full")
+        self.page.get_by_role("button", name="Restore", exact=True).click()
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.kind_slug, "restore_database")
+        self.assertEqual(preparation.inputs["scope"], "full")
+        self.assert_no_native_terms()
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        expect(self.page.get_by_role("heading", name="Restore shop")).to_be_visible()
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
     def test_retention_is_chosen_and_its_destructive_review_is_shown(self) -> None:
         server = Server.objects.get(name="Production")
         record_backups(server, enabled=True, last=result())

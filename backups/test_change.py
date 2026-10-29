@@ -1,12 +1,18 @@
 """Enable backups and Back up now: reviews, bodies, consent and the secret canary (#396)."""
 
 import hashlib
+import importlib.resources
 import json
 from datetime import timedelta
-from typing import TYPE_CHECKING, override
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast, override
+from unittest import mock
 
 from django.test import Client
 from django.utils import timezone
+
+from discovery import ssh
+from discovery.recorded import Recorded, ReplayShell, Transcript
 
 if TYPE_CHECKING:
     from django.test.client import _MonkeyPatchedWSGIResponse
@@ -604,6 +610,91 @@ class FullReviewTests(ChangeTestCase):
             self.fail("The review named no tags.")
         self.assertNotIn("database", tags)
         change.body_full(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_a_wordpress_full_capture_copies_the_release_and_private_file(self) -> None:
+        draft = change.review_full(
+            evidence(
+                enabled=True,
+                profile=RESTIC.path,
+                repository=True,
+                key=True,
+                application="wordpress",
+            ),
+            PreparationInputs("", IDENTIFIER),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(
+            draft.document["files"],
+            [f"/var/www/{IDENTIFIER}/current", f"/var/www/{IDENTIFIER}/private/wp-config.php"],
+        )
+        self.assertEqual(draft.document["application"], "wordpress")
+        change.body_full(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_a_laravel_full_capture_copies_the_release_and_shared_state(self) -> None:
+        draft = change.review_full(
+            evidence(
+                enabled=True,
+                profile=RESTIC.path,
+                repository=True,
+                key=True,
+                application="laravel",
+            ),
+            PreparationInputs("", IDENTIFIER),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(
+            draft.document["files"],
+            [
+                f"/var/www/{IDENTIFIER}/current",
+                f"/var/www/{IDENTIFIER}/private/laravel.env",
+                f"/var/www/{IDENTIFIER}/private/storage",
+                f"/var/www/{IDENTIFIER}/private/cache",
+            ],
+        )
+        self.assertEqual(draft.document["application"], "laravel")
+        change.body_full(draft.document, BodyContext("unit", BOOT, 0))
+
+    def test_recorded_full_listings_verify_each_site_kinds_capture(self) -> None:
+        point = "e1fa817d57ef0663"
+        command = change.point_snapshots_command(IDENTIFIER, point)
+        shell = ReplayShell(
+            Transcript(
+                "backups",
+                {},
+                "26.04",
+                "x86_64",
+                "ssh-ed25519 SHA256:x",
+                (
+                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
+                    (
+                        command,
+                        Recorded(
+                            ssh.CommandResult(
+                                0,
+                                importlib.resources.files("backups.fixtures")
+                                .joinpath("restic-full-snapshots.txt")
+                                .read_text(encoding="utf-8"),
+                            )
+                        ),
+                    ),
+                ),
+            )
+        )
+        for application in ("wordpress", "laravel"):
+            with self.subTest(application=application):
+                with mock.patch("backups.change.secrets.token_hex", return_value=point):
+                    draft = change.review_full(
+                        evidence(
+                            enabled=True,
+                            profile=RESTIC.path,
+                            repository=True,
+                            key=True,
+                            application=application,
+                        ),
+                        PreparationInputs("", IDENTIFIER),
+                    )
+                review = cast(ChangeReview, SimpleNamespace(document=draft.document))
+                self.assertTrue(change.verify_full(shell, review))
 
     def test_a_shortage_of_free_space_refuses_the_review(self) -> None:
         draft = change.review_full(
