@@ -1,6 +1,8 @@
 from typing import override
 from unittest import mock
 
+from django.test import Client
+
 from operations.models import ChangePreparation
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
@@ -82,6 +84,65 @@ class SiteDeployPageTests(ControllerConfigTestCase):
     def test_a_viewer_cannot_prepare_a_deploy(self) -> None:
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
         response = self.client.post(self.deploy_url)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self._rows(), [])
+
+    def _rows(self) -> list[ChangePreparation]:
+        from operations.services import read_changes
+
+        return [row.preparation for row in read_changes(self.server).rows]
+
+
+class DeployBackUpFirstRequestTests(ControllerConfigTestCase):
+    """The Deploy confirm screen's Back up first is one guarded preparation (#407)."""
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.grant("view_server", "view_siteobservation", "view_changes", "change_site")
+        self.client.force_login(self.user)
+        self.server = Server.objects.create(name="Laravel", ssh_alias="laravel.example.com")
+        record_laravel_releases(self.server)
+        self.url = f"/servers/{self.server.pk}/sites/alpha/backups/back-up-first/prepare/"
+
+    def enable_backups(self) -> None:
+        from backups.testing import record_backups
+
+        record_backups(self.server, identifier="alpha", enabled=True)
+
+    def test_a_post_prepares_a_full_capture_that_returns_to_deploy(self) -> None:
+        self.enable_backups()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):
+            response = self.client.post(self.url)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].kind_slug, "back_up_full_site")
+        self.assertEqual(rows[0].inputs, {"version": 1, "identifier": "alpha", "from_deploy": True})
+        self.assertRedirects(response, f"/changes/{rows[0].pk}/")
+
+    def test_without_backups_nothing_is_queued(self) -> None:
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):
+            response = self.client.post(self.url)
+        self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/deployments/")
+        self.assertEqual(self._rows(), [])
+
+    def test_a_get_is_refused_and_uses_no_ssh(self) -> None:
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):
+            response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 405)
+
+    def test_a_viewer_cannot_prepare_a_backup(self) -> None:
+        self.enable_backups()
+        self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
+        response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self._rows(), [])
+
+    def test_a_post_without_its_csrf_token_is_refused(self) -> None:
+        self.enable_backups()
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        response = client.post(self.url)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self._rows(), [])
 

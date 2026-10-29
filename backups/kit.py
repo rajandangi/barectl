@@ -17,6 +17,7 @@ def lines(
     endpoint: str = "",
     bucket: str = "",
     prefix: str = "",
+    region: str = "",
     sites: tuple[str, ...] = (),
 ) -> list[str]:
     """The kit's exact lines for one installation, without any secret."""
@@ -31,7 +32,23 @@ def lines(
             f"Onsite repository: {repository}",
         )
     )
+    offsite_repository = ""
     if provider:
+        config = {
+            "provider": {
+                "Amazon S3": "s3",
+                "Cloudflare R2": "r2",
+            }.get(provider, provider),
+            "bucket": bucket,
+            "region": region,
+            "endpoint": endpoint,
+            "prefix": prefix,
+            "prune": "no",
+        }
+        try:
+            offsite_repository = convention.offsite_repository(config, identifier)
+        except ValueError:
+            offsite_repository = ""
         rows.extend(
             (
                 f"Offsite storage: {provider}",
@@ -40,6 +57,8 @@ def lines(
                 f"Prefix: {prefix}",
             )
         )
+        if region:
+            rows.append(f"Region: {region}")
     else:
         rows.append("Offsite storage: not configured")
     if len(sites) > 1:
@@ -55,8 +74,28 @@ def lines(
             "",
             "A database-only recovery point restores to a .sql file:",
             "  restic dump latest s<id>.sql > database.sql",
+        )
+    )
+    if offsite_repository:
+        rows.extend(
+            (
+                "",
+                "Open the offsite copy with restic, the recovery passphrase and the storage",
+                "keys you stored, and the same commands:",
+                f'  export RESTIC_REPOSITORY="{offsite_repository}"',
+                *((f'  export AWS_DEFAULT_REGION="{region}"',) if region else ()),
+                "  restic -o s3.bucket-lookup=path snapshots",
+                "  restic -o s3.bucket-lookup=path restore latest --target /tmp/restored-site",
+                "  restic -o s3.bucket-lookup=path dump latest s<id>.sql > database.sql",
+            )
+        )
+    rows.extend(
+        (
             "",
-            "The recovery passphrase is not in this kit. Keep it somewhere else.",
+            (
+                "The recovery passphrase and the storage keys are not in this kit. Keep them "
+                "somewhere else."
+            ),
         )
     )
     return rows

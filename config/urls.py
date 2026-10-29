@@ -4,10 +4,22 @@ from django.views.generic import RedirectView
 
 from automation.views import prepare_schedule
 from automation.worker_views import prepare_workers
+from backups.schedule import prepare_schedule as prepare_backup_schedule
 from backups.views import (
+    cancel_export,
     check_now,
+    download_export,
+    prepare_back_up_first,
     prepare_backup,
+    prepare_copy,
+    prepare_delete_removed,
+    prepare_disable_retention,
     prepare_enable,
+    prepare_export,
+    prepare_keep,
+    prepare_reopen,
+    prepare_restore,
+    prepare_retention,
     recovery_kit,
 )
 from bootstrap.certificate_email_views import prepare_certificate_email
@@ -29,6 +41,12 @@ from operations.views import (
     server_change_prepare,
 )
 from runtimes.defaults_views import prepare_default
+from servers.backup_storage_views import (
+    prepare_connect,
+    prepare_remove_storage,
+    prepare_replace_passphrase,
+    prepare_storage,
+)
 from servers.views import (
     activity,
     activity_rows,
@@ -155,6 +173,26 @@ urlpatterns = [
         "servers/<int:pk>/settings/certificate-email/prepare/",
         prepare_certificate_email,
         name="certificate_email_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/backup-storage/prepare/",
+        prepare_storage,
+        name="backup_storage_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/backup-storage/remove/prepare/",
+        prepare_remove_storage,
+        name="backup_storage_remove_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/backup-storage/connect/prepare/",
+        prepare_connect,
+        name="backup_storage_connect_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/backup-storage/passphrase/prepare/",
+        prepare_replace_passphrase,
+        name="backup_storage_replace_prepare",
     ),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),
@@ -337,9 +375,69 @@ urlpatterns = [
         name="site_backups_backup_prepare",
     ),
     path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/back-up-first/prepare/",
+        prepare_back_up_first,
+        name="site_backups_before_deploy_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/reopen/prepare/",
+        prepare_reopen,
+        name="site_backups_reopen_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/restore/prepare/",
+        prepare_restore,
+        name="site_backups_restore_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/removed/delete/prepare/",
+        prepare_delete_removed,
+        name="site_backups_removed_delete_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/retention/prepare/",
+        prepare_retention,
+        name="site_backups_retention_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/retention/disable/prepare/",
+        prepare_disable_retention,
+        name="site_backups_retention_disable_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/keep/prepare/",
+        prepare_keep,
+        name="site_backups_keep_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/schedule/prepare/",
+        prepare_backup_schedule,
+        name="site_backups_schedule_prepare",
+    ),
+    path(
         "servers/<int:pk>/sites/<str:identifier>/backups/check/",
         check_now,
         name="site_backups_check",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/export/prepare/",
+        prepare_export,
+        name="site_backups_export_prepare",
+    ),
+    path(
+        "servers/<int:pk>/backups/exports/<str:token>/cancel/",
+        cancel_export,
+        name="site_backups_export_cancel",
+    ),
+    path(
+        "servers/<int:pk>/backups/exports/<str:token>/<str:artifact>/",
+        download_export,
+        name="site_backups_export_download",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/backups/copy/prepare/",
+        prepare_copy,
+        name="site_backups_copy_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/backups/kit/",

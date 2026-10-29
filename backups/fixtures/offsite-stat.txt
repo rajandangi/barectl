@@ -1,0 +1,7 @@
+good-root	0 0 700 41c0 2
+good-config	0 0 600 8180 1
+empty-config	0 0 600 8180 0
+wrong-mode	0 0 644 81a4 1
+wrong-type	0 0 777 a1ff 26
+wrong-owner	1 1 600 8180 1
+wrong-group	0 1 600 8180 1

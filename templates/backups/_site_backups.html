@@ -6,6 +6,29 @@
 {% else %}
   <section class="barectl-card" aria-labelledby="backups-heading">
     <h2 id="backups-heading">Backups</h2>
+    {% if backups.reopen %}
+      <div class="usa-alert usa-alert--warning">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            {% if backups.restore %}
+              This stopped after pausing the site to restore it. Nothing after it ran.
+            {% else %}
+              This stopped after pausing the site for a full backup. Nothing after it ran.
+            {% endif %}
+          </p>
+          {% if backups_can_reopen %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_reopen_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <button type="submit" class="usa-button">Reopen site</button>
+            </form>
+          {% else %}
+            <p class="barectl-note">Wait for the current operation before reopening the site.</p>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
     {% if backups.problems %}
       <div class="usa-alert usa-alert--warning">
         <div class="usa-alert__body">
@@ -48,19 +71,107 @@
       {% else %}
         <p>{{ backups.note }}</p>
       {% endif %}
-      <div class="barectl-page-actions">
-        {% if backups.database %}
-          {% if backups_can_back_up %}
-            <form class="usa-form"
-                  method="post"
-                  action="{% url 'site_backups_backup_prepare' server.pk identifier %}">
-              {% csrf_token %}
-              <button type="submit" class="usa-button">Back up now</button>
-            </form>
-          {% else %}
-            <p class="barectl-note">Barectl cannot take a backup while another operation runs.</p>
+      {% if backups.offsite %}
+        <dl class="barectl-facts barectl-card">
+          <div>
+            <dt>Offsite storage</dt>
+            <dd>
+              {{ backups.offsite.label }} · {{ backups.offsite.bucket }}
+            </dd>
+          </div>
+          {% if backups.copy %}
+            <div>
+              <dt>Last offsite copy</dt>
+              <dd>
+                {{ backups.copy.headline }} {{ backups.copy.detail }}
+                <span class="barectl-note">{{ backups.copy.time_label }}</span>
+              </dd>
+            </div>
           {% endif %}
+        </dl>
+      {% else %}
+        <p class="barectl-note">
+          Offsite storage is not set up for this server. <a href="{% url 'server_settings' server.pk %}">Set it up in Server Settings</a> to keep copies after the server is lost.
+        </p>
+      {% endif %}
+      <div class="barectl-card__summary">
+        <h3>Integrity</h3>
+        <p class="usa-hint">
+          A separate weekly check reads each backup store and the newest recovery point back.
+          Saved, copied offsite and verified are different findings.
+        </p>
+        <dl class="barectl-facts">
+          {% for finding in backups.integrity %}
+            <div>
+              <dt>{{ finding.location }}</dt>
+              <dd>
+                <strong>{{ finding.headline }}</strong> {{ finding.detail }}
+                {% if finding.time_label %}<span class="barectl-note">{{ finding.time_label }}</span>{% endif %}
+              </dd>
+            </div>
+          {% endfor %}
+        </dl>
+      </div>
+      <div class="barectl-card__summary">
+        <h3>Keep backups for</h3>
+        <p>{{ backups_retention_label }}</p>
+        {% if backups_retention_problem %}
+          <p class="usa-alert usa-alert--warning">{{ backups_retention_problem }}</p>
+        {% endif %}
+        {% if backups_can_set_retention %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_retention_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <label class="usa-label" for="retention-days">How long to keep recovery points</label>
+            <select class="usa-select" id="retention-days" name="days">
+              <option value="7"
+                      {% if backups_retention_days == 7 or not backups_retention_days %}selected{% endif %}>1 week</option>
+              <option value="14"
+                      {% if backups_retention_days == 14 %}selected{% endif %}>2 weeks</option>
+              <option value="21"
+                      {% if backups_retention_days == 21 %}selected{% endif %}>3 weeks</option>
+              <option value="30"
+                      {% if backups_retention_days == 30 %}selected{% endif %}>1 month</option>
+              <option value="182"
+                      {% if backups_retention_days == 182 %}selected{% endif %}>6 months</option>
+            </select>
+            <button type="submit" class="usa-button usa-button--outline">Set retention</button>
+          </form>
+        {% endif %}
+        {% if backups_can_disable_retention %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_retention_disable_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <button type="submit" class="usa-button usa-button--outline">Turn retention off</button>
+          </form>
+        {% endif %}
+        <p class="usa-hint">
+          Cleanup deletes older copies only after it checks the newest one still restores.
+        </p>
+      </div>
+      <div class="barectl-page-actions">
+        {% if backups_can_back_up_full %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_backup_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            {% if backups.database %}
+              <label class="usa-label" for="backup-scope">What to copy</label>
+              <select class="usa-select" id="backup-scope" name="scope">
+                <option value="database">Database only (the site stays online)</option>
+                <option value="full">Full site (pauses the site briefly)</option>
+              </select>
+            {% else %}
+              <input type="hidden" name="scope" value="full">
+            {% endif %}
+            <button type="submit" class="usa-button">Back up now</button>
+          </form>
         {% else %}
+          <p class="barectl-note">Barectl cannot take a backup while another operation runs.</p>
+        {% endif %}
+        {% if not backups.database %}
           <p class="barectl-note">
             <strong>Database only is unavailable.</strong> {{ backups_database_reason }}
           </p>
@@ -79,6 +190,79 @@
            href="{% url 'site_backups_kit' server.pk identifier %}">Recovery kit</a>
       </div>
       <p class="usa-hint">Backing up runs on the server and carries on if this computer disconnects.</p>
+      <section class="barectl-card" aria-labelledby="backup-schedule-heading">
+        <h3 id="backup-schedule-heading">Schedule</h3>
+        <p>{{ backup_schedule_state }}</p>
+        {% if backup_schedule_next %}
+          <p class="barectl-note">Next run: {{ backup_schedule_next }}</p>
+        {% elif backup_schedule.installed %}
+          <p class="barectl-note">Systemd has not reported the next run yet.</p>
+        {% endif %}
+        {% if backup_schedule_problem %}
+          <div class="usa-alert usa-alert--warning">
+            <div class="usa-alert__body">
+              <p class="usa-alert__text">{{ backup_schedule_problem }}</p>
+            </div>
+          </div>
+        {% endif %}
+        {% if backups_can_schedule %}
+          {% if backup_schedule.installed %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_schedule_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <input type="hidden" name="state" value="off">
+              <div class="barectl-page-actions">
+                <button type="submit"
+                        class="usa-button usa-button--outline">Turn off backup schedule</button>
+              </div>
+            </form>
+          {% else %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_schedule_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <input type="hidden" name="state" value="on">
+              <label class="usa-label" for="backup-frequency">How often</label>
+              <select class="usa-select" id="backup-frequency" name="frequency">
+                <option value="daily"
+                        {% if backup_schedule.frequency == "daily" %}selected{% endif %}>Daily</option>
+                <option value="weekly"
+                        {% if backup_schedule.frequency == "weekly" %}selected{% endif %}>Weekly (Monday)</option>
+              </select>
+              <label class="usa-label" for="backup-at">UTC time</label>
+              <input class="usa-input"
+                     id="backup-at"
+                     name="at"
+                     type="time"
+                     value="{{ backup_schedule.at|default:"03:00" }}"
+                     required>
+              <label class="usa-label" for="backup-schedule-scope">What the schedule copies</label>
+              <select class="usa-select" id="backup-schedule-scope" name="scope">
+                <option value="full"
+                        {% if backup_schedule.scope != "database" %}selected{% endif %}>Full site (the site stays online)</option>
+                {% if backups.database %}
+                  <option value="database"
+                          {% if backup_schedule.scope == "database" %}selected{% endif %}>Database only</option>
+                {% endif %}
+              </select>
+              <div class="usa-checkbox">
+                <input class="usa-checkbox__input"
+                       id="backup-offsite"
+                       name="offsite"
+                       type="checkbox"
+                       value="on"
+                       {% if backup_schedule.offsite %}checked{% endif %}>
+                <label class="usa-checkbox__label"
+                       for="backup-offsite">Copy offsite when it is set up</label>
+              </div>
+              <div class="barectl-page-actions">
+                <button type="submit" class="usa-button">Set backup schedule</button>
+              </div>
+            </form>
+          {% endif %}
+        {% endif %}
+      </section>
     {% endif %}
   </section>
   {% if backups.enabled %}
@@ -98,31 +282,92 @@
         <p>Choose <strong>Check backups</strong> to list recovery points.</p>
       {% endif %}
       {% if backups.points %}
-        <table class="usa-table usa-table--borderless">
-          <caption class="usa-sr-only">Recovery points for this site</caption>
-          <thead>
-            <tr>
-              <th scope="col">Taken</th>
-              <th scope="col">Scope</th>
-              <th scope="col">Kept here</th>
-              <th scope="col">Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for point in backups.points %}
+        <div class="usa-table-container--scrollable" tabindex="0">
+          <table class="usa-table usa-table--borderless">
+            <caption class="usa-sr-only">Recovery points for this site</caption>
+            <thead>
               <tr>
-                <td>{{ point.time_label }}</td>
-                <td>{{ point.scope }}</td>
-                <td>{{ point.status }}</td>
-                <td>
-                  {% if point.live %}Captured while the site ran.{% endif %}
-                  {% if point.keep %}Kept.{% endif %}
-                  {% if not point.restorable %}This point is not complete.{% endif %}
-                </td>
+                <th scope="col">Taken</th>
+                <th scope="col">Scope</th>
+                <th scope="col">Kept here</th>
+                <th scope="col">Offsite</th>
+                <th scope="col">Verified</th>
+                <th scope="col">Notes</th>
+                <th scope="col"><span class="usa-sr-only">Actions</span></th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {% for point in backups.points %}
+                <tr>
+                  <td>{{ point.time_label }}</td>
+                  <td>{{ point.scope }}</td>
+                  <td>{{ point.status }}</td>
+                  <td>{{ point.offsite_status }}</td>
+                  <td>{{ point.verified }}</td>
+                  <td>
+                    {% if point.live %}Captured while the site ran.{% endif %}
+                    {% if point.keep %}Kept.{% endif %}
+                    {% if point.problem %}{{ point.problem }}{% endif %}
+                    {% if backups_can_copy and point.restorable and point.offsite_status != "Copied offsite" %}
+                      <form method="post"
+                            action="{% url 'site_backups_copy_prepare' server.pk identifier %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="point" value="{{ point.point }}">
+                        <button type="submit"
+                                class="usa-button usa-button--outline">Copy offsite again</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if backups_can_keep and point.restorable %}
+                      <form class="usa-form"
+                            method="post"
+                            action="{% url 'site_backups_keep_prepare' server.pk identifier %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="point" value="{{ point.point }}">
+                        <button type="submit" class="usa-button usa-button--outline">
+                          {% if point.keep %}Stop keeping{% else %}Keep{% endif %}
+                        </button>
+                      </form>
+                    {% endif %}
+                    {% if backups_can_restore and point.restorable and point.has_files or backups_can_restore and point.restorable and backups.database and point.has_database %}
+                      <form class="usa-form"
+                            method="post"
+                            action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="point" value="{{ point.point }}">
+                        <label class="usa-label"
+                               for="restore-scope-{{ point.point }}">What to restore</label>
+                        <select class="usa-select"
+                                id="restore-scope-{{ point.point }}"
+                                name="scope">
+                          {% if backups.database and point.has_database %}
+                            <option value="database">Database only (the site stays online)</option>
+                          {% endif %}
+                          {% if point.has_files %}
+                            <option value="files">Files only (the database stays as it is now)</option>
+                            <option value="full">Full site (pauses the site briefly)</option>
+                          {% endif %}
+                        </select>
+                        <button type="submit"
+                                class="usa-button usa-button--outline">Restore</button>
+                      </form>
+                    {% endif %}
+                    {% if backups_can_export and point.restorable %}
+                      <form class="usa-form"
+                            method="post"
+                            action="{% url 'site_backups_export_prepare' server.pk identifier %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="point" value="{{ point.point }}">
+                        <button type="submit" class="usa-button usa-button--outline">Export</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
         <details class="barectl-advanced">
           <summary>Advanced</summary>
           <ul>
@@ -133,6 +378,185 @@
           </ul>
         </details>
       {% endif %}
+    </section>
+    {% if backups_sources %}
+      <section class="barectl-card" aria-labelledby="connected-sources-heading">
+        <h2 id="connected-sources-heading">From connected backup storage</h2>
+        <p class="barectl-note">
+          These recovery points belong to another server's site. Barectl opens the source
+          repository read-only when you restore; the target keeps its own domain and
+          application data is never rewritten.
+        </p>
+        {% for source in backups_sources %}
+          <h3>{{ source.identifier }}</h3>
+          {% if source.problem %}
+            <p>{{ source.problem }}</p>
+          {% elif source.points %}
+            <div class="usa-table-container--scrollable" tabindex="0">
+              <table class="usa-table usa-table--borderless">
+                <caption class="usa-sr-only">Recovery points in connected storage for {{ source.identifier }}</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Taken</th>
+                    <th scope="col">Scope</th>
+                    <th scope="col">Location</th>
+                    <th scope="col">Notes</th>
+                    <th scope="col"><span class="usa-sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for point in source.points %}
+                    <tr>
+                      <td>{{ point.time_label }}</td>
+                      <td>{{ point.scope }}</td>
+                      <td>{{ point.offsite_status }}</td>
+                      <td>
+                        {% if point.live %}Captured while the source site ran.{% endif %}
+                        {% if point.problem %}{{ point.problem }}{% endif %}
+                      </td>
+                      <td>
+                        {% if backups_can_restore and point.restorable and point.has_files or backups_can_restore and point.restorable and backups.database and point.has_database %}
+                          <form class="usa-form"
+                                method="post"
+                                action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="point" value="{{ point.point }}">
+                            <input type="hidden" name="source" value="{{ source.identifier }}">
+                            <label class="usa-label"
+                                   for="source-restore-scope-{{ source.identifier }}-{{ point.point }}">What to restore</label>
+                            <select class="usa-select"
+                                    id="source-restore-scope-{{ source.identifier }}-{{ point.point }}"
+                                    name="scope">
+                              {% if backups.database and point.has_database %}
+                                <option value="database">Database only (the site stays online)</option>
+                              {% endif %}
+                              {% if point.has_files %}
+                                <option value="files">Files only (the database stays as it is now)</option>
+                                <option value="full">Full site (pauses the site briefly)</option>
+                              {% endif %}
+                            </select>
+                            <button type="submit"
+                                    class="usa-button usa-button--outline">Restore</button>
+                          </form>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <details class="barectl-advanced">
+              <summary>Advanced</summary>
+              <ul>
+                {% for point in source.points %}
+                  <li>{{ point.time_label }}: {{ point.short_id }}{% if point.point %} ({{ point.point }}){% endif %}</li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% else %}
+            <p>Connect the storage again to read this source's recovery points.</p>
+          {% endif %}
+        {% endfor %}
+      </section>
+    {% endif %}
+  {% endif %}
+  {% if backups.removed and backups_can_restore %}
+    <section class="barectl-card" aria-labelledby="removed-backups-heading">
+      <h2 id="removed-backups-heading">Backups of a removed site</h2>
+      <p>
+        These backup repositories belonged to sites that are no longer on this server.
+        Barectl keeps them; restoring one into this site replaces this site's data.
+      </p>
+      {% for repository in backups.removed %}
+        <h3>{{ repository.identifier }}</h3>
+        {% if repository.problem %}<p class="usa-alert usa-alert--warning">{{ repository.problem }}</p>{% endif %}
+        {% for point in repository.points %}
+          <p>
+            {{ point.time_label }} · {{ point.scope }} · {{ point.status }}
+            {% if point.live %}(captured while the site ran){% endif %}
+          </p>
+          {% if point.restorable_elsewhere %}
+            <form class="usa-form"
+                  method="post"
+                  action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
+              {% csrf_token %}
+              <input type="hidden" name="point" value="{{ point.point }}">
+              <input type="hidden" name="source" value="{{ repository.identifier }}">
+              <label class="usa-label"
+                     for="removed-restore-scope-{{ repository.identifier }}-{{ point.point }}">What to restore</label>
+              <select class="usa-select"
+                      id="removed-restore-scope-{{ repository.identifier }}-{{ point.point }}"
+                      name="scope">
+                <option value="files">Files only (the database stays as it is now)</option>
+                <option value="full">Full site (pauses the site briefly)</option>
+              </select>
+              <button type="submit"
+                      class="usa-button usa-button--outline">Restore into this site</button>
+            </form>
+          {% elif not point.has_files %}
+            <p class="usa-hint">Database only, so Barectl cannot confirm which kind of site it came from.</p>
+          {% endif %}
+        {% empty %}
+          <p>No recovery points were listed in this repository.</p>
+        {% endfor %}
+        {% if backups_can_delete_removed %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_removed_delete_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <input type="hidden" name="source" value="{{ repository.identifier }}">
+            <button type="submit"
+                    class="usa-button usa-button--outline">Delete these backups</button>
+            <p class="usa-hint">
+              Deletes the kept onsite repository and its offsite recovery points permanently.
+              It does not recreate the removed site.
+            </p>
+          </form>
+        {% endif %}
+      {% endfor %}
+      <p class="usa-hint">
+        Check backups lists these repositories again; the list holds no repository path.
+      </p>
+    </section>
+  {% endif %}
+  {% if backups.enabled and backups_exports and backups_can_download %}
+    <section class="barectl-card" aria-labelledby="backups-exports-heading">
+      <h2 id="backups-exports-heading">Exports</h2>
+      <p class="usa-hint">
+        These copies are on this computer only. The download needs your account, expires,
+        and Barectl removes the copy after it is downloaded or cancelled.
+      </p>
+      <ul class="usa-list usa-list--unstyled">
+        {% for export in backups_exports %}
+          <li>
+            <p>
+              <strong>{{ export.created_at|date:"j M Y, H:i" }}</strong>
+              <span class="barectl-note">· expires {{ export.expires_at|date:"j M Y, H:i" }}</span>
+            </p>
+            {% if export.status == "ready" and not export.expired %}
+              {% if export.complete %}
+                <p class="barectl-note">Downloaded.</p>
+              {% endif %}
+              {% if export.has_files and not export.files_served %}
+                <a class="usa-button usa-button--outline"
+                   href="{% url 'site_backups_export_download' server.pk export.token 'files' %}">Download files</a>
+              {% endif %}
+              {% if export.has_database and not export.database_served %}
+                <a class="usa-button usa-button--outline"
+                   href="{% url 'site_backups_export_download' server.pk export.token 'database' %}">Download database</a>
+              {% endif %}
+              <form class="usa-form"
+                    method="post"
+                    action="{% url 'site_backups_export_cancel' server.pk export.token %}">
+                {% csrf_token %}
+                <button type="submit" class="usa-button usa-button--outline">Cancel export</button>
+              </form>
+            {% else %}
+              <p class="barectl-note">This export is no longer available.</p>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
     </section>
   {% endif %}
 {% endif %}

@@ -1,5 +1,28 @@
 {% if site %}
   {% include "sites/_site_switch_banner.html" %}
+  {% if site_reopen %}
+    <div class="usa-alert usa-alert--warning">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          {% if site_reopen_restore %}
+            This stopped after pausing the site to restore it. Nothing after it ran.
+          {% else %}
+            This stopped after pausing the site for a full backup. Nothing after it ran.
+          {% endif %}
+        </p>
+        {% if site_reopen_can_prepare %}
+          <form class="usa-form"
+                method="post"
+                action="{% url 'site_backups_reopen_prepare' server.pk identifier %}">
+            {% csrf_token %}
+            <button type="submit" class="usa-button">Reopen site</button>
+          </form>
+        {% else %}
+          <p class="barectl-note">Wait for the current operation before reopening the site.</p>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
   <section class="barectl-card" aria-labelledby="site-overview-heading">
     <h2 id="site-overview-heading">Site</h2>
     {% if site_address and site.complete and not has_wordpress and not has_laravel %}

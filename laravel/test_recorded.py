@@ -10,11 +10,81 @@ from typing import cast
 
 from django.test import SimpleTestCase
 
-from discovery.recorded import ReplayShell, load
+from discovery import ssh
+from discovery.recorded import Recorded, ReplayShell, Transcript, load
 from laravel import observation
 
 IDENTIFIER = "slcalpha"
 REPOSITORY = "git@git:fixture.git"
+
+
+class LaravelPendingMigrationTests(SimpleTestCase):
+    """The Deploy review names pending migrations from the release and the table (#407)."""
+
+    IDENTIFIER = "slcalpha"
+    MIGRATION = "2026_10_19_000001_create_fixture_widgets"
+
+    def test_the_pending_read_is_valid_python(self) -> None:
+        compile(observation.PENDING_SOURCE, "pending.py", "exec")
+        with self.assertRaises(ValueError):
+            observation.pending_command("../escape")
+
+    def test_a_recorded_pending_answer_binds_its_names(self) -> None:
+        shell = ReplayShell(
+            Transcript(
+                "pending",
+                {},
+                "26.04",
+                "x86_64",
+                "ssh-ed25519 SHA256:x",
+                (
+                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
+                    (
+                        observation.pending_command(self.IDENTIFIER),
+                        Recorded(
+                            ssh.CommandResult(0, '["' + self.MIGRATION + '"]'),
+                        ),
+                    ),
+                ),
+            )
+        )
+        self.assertEqual(observation.pending(shell, self.IDENTIFIER), (self.MIGRATION,))
+
+    def test_an_unreadable_answer_is_unknown_not_pending(self) -> None:
+        shell = ReplayShell(
+            Transcript(
+                "pending",
+                {},
+                "26.04",
+                "x86_64",
+                "ssh-ed25519 SHA256:x",
+                (
+                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
+                    (
+                        observation.pending_command(self.IDENTIFIER),
+                        Recorded(ssh.CommandResult(0, "null")),
+                    ),
+                ),
+            )
+        )
+        self.assertIsNone(observation.pending(shell, self.IDENTIFIER))
+        shell = ReplayShell(
+            Transcript(
+                "pending",
+                {},
+                "26.04",
+                "x86_64",
+                "ssh-ed25519 SHA256:x",
+                (
+                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
+                    (
+                        observation.pending_command(self.IDENTIFIER),
+                        Recorded(ssh.CommandResult(0, '["..\\u0000bad"]')),
+                    ),
+                ),
+            )
+        )
+        self.assertIsNone(observation.pending(shell, self.IDENTIFIER))
 
 
 class LaravelCreateReconstructionTests(SimpleTestCase):

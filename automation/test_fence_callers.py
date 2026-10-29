@@ -12,6 +12,7 @@ import hashlib
 import importlib.resources
 import json
 import os
+import pathlib
 from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 from typing import ClassVar, cast
@@ -21,6 +22,10 @@ from django.test import SimpleTestCase
 
 from automation import fence, presentation
 from automation.status import STATUS_SENTENCE, ScheduleStatus
+from backups import change as backups_change
+from backups import restore as backups_restore
+from backups.bodies import full as full_body
+from backups.bodies import restore as restore_body
 from cache import instance as cache_instance
 from cache.bodies import instance as cache_body
 from laravel import change as laravel_change
@@ -52,6 +57,8 @@ SOURCES = {
     "remove_site": remove.BODY_SOURCE,
     "update_catalog": catalog_update.BODY_SOURCE,
     "set_site_object_cache": cache_instance.BODY_SOURCE,
+    "back_up_full_site": backups_change.FULL_SOURCE,
+    "restore_database": backups_restore.RESTORE_SOURCE,
 }
 
 
@@ -324,6 +331,114 @@ def _cache_patches() -> dict[str, object]:
     }
 
 
+def _full_args() -> tuple[object, ...]:
+    document = {
+        "identifier": "shop",
+        "repository": "/var/lib/barectl-backups/shop/onsite",
+        "server_key": "/etc/barectl/backups/shop.key",
+        "point": "0123456789abcdef",
+        "at": "2026-10-29T04:00:00+00:00",
+        "restic_time": "2026-10-29 04:00:00",
+        "scope": "files",
+        "application": "plain",
+        "names": ["shop.example.com"],
+        "runtime": "php84",
+        "https": True,
+        "readiness": "/",
+        "caddy": "open",
+        "gate": "gate",
+        "files": [],
+        "dump": [],
+        "filename": "sshop.sql",
+        "tags": {},
+        "automation_fence": {"version": 1, "sites": []},
+    }
+    encoded = base64.b64encode(gzip.compress(json.dumps(document).encode(), mtime=0)).decode()
+    return (encoded,)
+
+
+def _restore_args() -> tuple[object, ...]:
+    document = {
+        "identifier": "shop",
+        "repository": "/var/lib/barectl-backups/shop/onsite",
+        "server_key": "/etc/barectl/backups/shop.key",
+        "point": "0123456789abcdef",
+        "scope": "database",
+        "snapshot": "a" * 64,
+        "files_snapshot": "",
+        "filename": "sshop.sql",
+        "engine": "mariadb",
+        "engine_major": "11.8",
+        "application": "plain",
+        "release": "restore-0123456789abcdef-abcd1234",
+        "shared": [],
+        "files": ["/var/www/shop/current"],
+        "at": "2026-10-30T04:00:00+00:00",
+        "restic_time": "2026-10-30 04:00:00",
+        "names": ["shop.example.com"],
+        "runtime": "php84",
+        "https": True,
+        "readiness": "/",
+        "caddy": "open",
+        "gate": "gate",
+        "target_empty": True,
+        "safety_scope": "database",
+        "safety_tags": {},
+        "dump": ["dump"],
+        "point_size": 0,
+        "automation_fence": {"version": 1, "sites": []},
+    }
+    encoded = base64.b64encode(gzip.compress(json.dumps(document).encode(), mtime=0)).decode()
+    return (encoded,)
+
+
+def _restore_patches() -> dict[str, object]:
+    return {
+        "site_settings": lambda document: SimpleNamespace(identifier="shop"),
+        "open_file": lambda settings, application: "open",
+        "site_lock": lambda identifier, gid: os.open(os.devnull, os.O_RDONLY),
+        "free_bytes": lambda: 4 * 1024 * 1024 * 1024,
+        "os": SimpleNamespace(
+            path=SimpleNamespace(isfile=lambda path: True, join=os.path.join),
+            open=os.open,
+            close=os.close,
+            access=lambda path, mode: True,
+            X_OK=os.X_OK,
+        ),
+        "safe_config": lambda path: True,
+        "locked_file": lambda path, mode: True,
+        "controlled": lambda path: True,
+        "pwd": SimpleNamespace(getpwnam=lambda account: SimpleNamespace(pw_uid=1001, pw_gid=1001)),
+        "reviewed_point": lambda document, repository, key, extra=None: True,
+        "reviewed_files": lambda settings, application: ["/var/www/shop/current"],
+        "repository_locks": lambda identifiers, wait_seconds=0.0: [],
+        "_stage": lambda identifier, point, suffix="": pathlib.Path("/nonexistent/barectl-stage"),
+        "write_dump": lambda *args, **kwargs: True,
+        "dump_problem": lambda engine, path, major: "",
+        "count_tables": lambda engine, identifier: 0,
+    }
+
+
+def _full_patches() -> dict[str, object]:
+    return {
+        "site_settings": lambda document: SimpleNamespace(identifier="shop"),
+        "reviewed_files": lambda settings, application: [],
+        "open_file": lambda settings, application: "open",
+        "maintenance_file": lambda settings: "gate",
+        "site_lock": lambda identifier, gid: os.open(os.devnull, os.O_RDONLY),
+        "free_bytes": lambda: 4 * 1024 * 1024 * 1024,
+        "os": SimpleNamespace(
+            path=SimpleNamespace(isfile=lambda path: True, join=os.path.join),
+            open=os.open,
+            close=os.close,
+        ),
+        "safe_config": lambda path: True,
+        "locked_file": lambda path, mode: True,
+        "controlled": lambda path: True,
+        "pwd": SimpleNamespace(getpwnam=lambda account: SimpleNamespace(pw_uid=1001, pw_gid=1001)),
+    }
+
+
 CALLERS: tuple[
     tuple[
         str,
@@ -361,6 +476,8 @@ CALLERS: tuple[
     ),
     ("update_catalog", catalog_update_body, "move_site", _update_args, _update_patches),
     ("set_site_object_cache", cache_body, "_apply_laravel", _cache_args, _cache_patches),
+    ("back_up_full_site", full_body, "main", _full_args, _full_patches),
+    ("restore_database", restore_body, "main", _restore_args, _restore_patches),
 )
 
 

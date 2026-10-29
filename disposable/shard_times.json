@@ -1,5 +1,5 @@
 {
-  "recorded": "hosted Native amd64, run 40211383746 at 98aee59",
+  "recorded": "hosted Native amd64, run 40211383746 at 98aee59; Phase D item times measured on the local arm64 full build at 41ade30 with #410",
   "stages": {
     "egress control": 7.0,
     "validators": 132.0
@@ -7,7 +7,12 @@
   "scenarios": {
     "disposable.test_automation.LaravelQueueWorkers": 118.5,
     "disposable.test_automation.WordPressServerCron": 109.7,
-    "disposable.test_backups.BackupLifecycle": 47.0,
+    "disposable.test_backups.BackupLifecycle": 115.3,
+    "disposable.test_backups.ScheduledCapture": 94.9,
+    "disposable.test_backups.FullSiteRestore": 67.3,
+    "disposable.test_backups.LaravelFullRestore": 61.4,
+    "disposable.test_backups.Retention": 109.5,
+    "disposable.test_backups.WordPressFullRestore": 57.6,
     "disposable.test_cache.LaravelObjectCache": 47.0,
     "disposable.test_cache.SiteObjectCache": 135.4,
     "disposable.test_cache.ValkeyInstall": 59.7,
@@ -77,6 +82,10 @@
     "disposable.test_target_race.TwoControllerNativeLock": 51.0,
     "disposable.test_target_reconstruction.FreshControllerReconstruction": 107.8,
     "disposable.test_target_shape.JudgeByShape": 47.4,
-    "disposable.test_wordpress_create.WordPressCreateMariaDB": 128.5
+    "disposable.test_wordpress_create.WordPressCreateMariaDB": 128.5,
+    "disposable.test_backups.Integrity": 79.3,
+    "disposable.test_backups.DisasterRecovery": 98.8,
+    "disposable.test_backups.OfflineRecovery": 36.4,
+    "disposable.test_backups.BackupFailure": 55.4
   }
 }

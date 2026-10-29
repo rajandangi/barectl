@@ -205,7 +205,12 @@ def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str,
     if request.user.has_perm(VIEW_SITES):
         context["show_sites"] = True
         if state.snapshot is not None:
-            context["sites"] = present_sites(state.snapshot.collected.sites)
+            from backups.schedule import recent_missing
+
+            context["sites"] = present_sites(
+                state.snapshot.collected.sites,
+                recent_missing(state.snapshot.collected),
+            )
     return context
 
 
@@ -399,6 +404,9 @@ def server_page(
             (*PREPARE_PERMISSIONS, CHANGE_SHARED)
         )
         context["object_cache_kind"] = cache_engine.SLUG
+        from servers.backup_storage import context_for_server as backup_storage_context
+
+        context.update(backup_storage_context(server, request.user, state))
     if section == "activity":
         context.update(
             _activity_context(
@@ -523,6 +531,9 @@ def _site_backups_context(
     from backups.views import context_for_site as backups_context_for_site
 
     context.update(backups_context_for_site(server, identifier, user))
+    from backups import schedule as backup_schedule
+
+    backup_schedule.context_for_site(server, identifier, context)
     backups = context.get("backups")
     context["backups_repository"] = (
         backup_convention.repository(identifier)
@@ -552,6 +563,18 @@ def _site_overview_context(
     context["site_upload_path"] = f"/var/www/{site.identifier}/current/public"
     context["site_user"] = f"s{site.identifier}"
     context["site_checked_at"] = state.snapshot.collected_at if state.snapshot else None
+    from backups.views import context_for_site as backups_context_for_site
+
+    backup_context = backups_context_for_site(server, identifier, request.user)
+    context["site_reopen"] = bool(
+        backup_context.get("backups") is not None
+        and getattr(backup_context["backups"], "reopen", False)
+    )
+    context["site_reopen_can_prepare"] = backup_context.get("backups_can_reopen", False)
+    context["site_reopen_restore"] = bool(
+        backup_context.get("backups") is not None
+        and getattr(backup_context["backups"], "restore", False)
+    )
     if state.snapshot is not None and any(
         row.identifier == site.identifier for row in state.snapshot.collected.automation.value
     ):

@@ -17,15 +17,15 @@ from django.utils import timezone
 from databases import observation as database_observation
 from discovery.presentation import VIEW_SITES
 from discovery.root_read import run_root
-from discovery.snapshot import current_snapshot
-from discovery.ssh import connect_operation
+from discovery.snapshot import Snapshot, current_snapshot
+from discovery.ssh import RemoteShell, connect_operation
 from operations import lifecycle
 from operations.lifecycle import OperationRefused, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
 from sites.names import valid_identifier
 
-from . import convention, observation
+from . import convention, integrity, observation
 from .models import BackupCheck
 
 READ_PERMISSIONS: Final = ("servers.view_server", VIEW_SITES)
@@ -88,44 +88,97 @@ def _barectl_point(value: object) -> bool:
 
 
 def points(value: list[dict[str, object]]) -> list[dict[str, object]]:
-    rows = []
+    groups: dict[str, list[dict[str, object]]] = {}
     for snapshot in value:
         tags = snapshot.get("tags")
         if not isinstance(tags, list):
             continue
-        lookup = {tag: True for tag in tags if isinstance(tag, str)}
-        point = next(
-            (
-                tag.removeprefix(convention.POINT_TAG)
-                for tag in tags
-                if isinstance(tag, str) and tag.startswith(convention.POINT_TAG)
-            ),
-            "",
-        )
-        identifier = snapshot.get("id")
-        when = snapshot.get("time")
-        if (
-            not isinstance(identifier, str)
-            or len(identifier) != 64
-            or not isinstance(when, str)
-            or len(when) > 40
-            or (point and POINT.fullmatch(point) is None)
-        ):
-            continue
-        rows.append(
-            {
-                "id": identifier,
-                "short": identifier[:8],
-                "time": when,
-                "point": point,
-                "scope": _tag(tags, "scope:"),
-                "origin": _tag(tags, "origin:"),
-                "live": lookup.get("capture:live", False),
-                "keep": lookup.get("keep", False),
-                "complete": lookup.get("complete", False),
-            }
-        )
+        row = _point_row(snapshot, tags)
+        if row is not None:
+            groups.setdefault(str(row["point"]), []).append(row)
+    rows = [_combined(group) for group in groups.values()]
     return sorted(rows, key=lambda row: str(row["time"]), reverse=True)
+
+
+def _point_row(snapshot: dict[str, object], tags: list[object]) -> dict[str, object] | None:
+    lookup = {tag: True for tag in tags if isinstance(tag, str)}
+    point = _tag(tags, convention.POINT_TAG)
+    identifier = snapshot.get("id")
+    when = snapshot.get("time")
+    if (
+        not isinstance(identifier, str)
+        or len(identifier) != 64
+        or not isinstance(when, str)
+        or len(when) > 40
+        or (point and POINT.fullmatch(point) is None)
+    ):
+        return None
+    scope = _tag(tags, "scope:")
+    part = _tag(tags, "part:") or (scope if scope in convention.PARTS else "")
+    application = _tag(tags, "application:")
+    return {
+        "id": identifier,
+        "short": identifier[:8],
+        "time": when,
+        "point": point or identifier,
+        "scope": scope,
+        "part": part,
+        "origin": _tag(tags, "origin:"),
+        "application": application if application in convention.APPLICATIONS else "",
+        "live": lookup.get("capture:live", False),
+        "keep": lookup.get("keep", False),
+        "complete_part": lookup.get("complete", False),
+        "size": _processed_bytes(snapshot),
+    }
+
+
+def _combined(parts: list[dict[str, object]]) -> dict[str, object]:
+    """One recovery point from its snapshots, restorable only when every part is complete."""
+    scopes = {str(part["scope"]) for part in parts}
+    scope = scopes.pop() if len(scopes) == 1 else ""
+    present = {str(part["part"]) for part in parts if str(part["part"])}
+    expected = set(convention.expected_parts(scope)) if scope else present
+    missing = sorted(expected - present)
+    incomplete = sorted(
+        part
+        for part in expected
+        if not any(str(item["part"]) == part and item["complete_part"] is True for item in parts)
+    )
+    restorable = bool(expected) and not missing and not incomplete
+    first = parts[0]
+    application = next(
+        (str(part["application"]) for part in parts if str(part.get("application", ""))),
+        "",
+    )
+    return {
+        "id": str(first["id"]),
+        "short": str(first["short"]),
+        "time": min(str(part["time"]) for part in parts),
+        "point": str(first["point"]),
+        "scope": scope,
+        "parts": sorted(present),
+        "snapshots": {
+            str(part["part"]): str(part["id"])
+            for part in parts
+            if str(part["part"]) and part["complete_part"] is True
+        },
+        "application": application,
+        "missing": missing,
+        "incomplete": incomplete,
+        "origin": str(first["origin"]),
+        "live": all(part["live"] is True for part in parts),
+        "keep": any(part["keep"] is True for part in parts),
+        "size": sum(int(str(part.get("size", 0))) for part in parts),
+        "complete": restorable,
+    }
+
+
+def _processed_bytes(snapshot: dict[str, object]) -> int:
+    summary = snapshot.get("summary")
+    if not isinstance(summary, dict):
+        return 0
+    value = summary.get("total_bytes_processed", summary.get("data_added", 0))
+    return value if type(value) is int and value >= 0 else 0
 
 
 def _tag(tags: list[object], prefix: str) -> str:
@@ -137,6 +190,33 @@ def _tag(tags: list[object], prefix: str) -> str:
         ),
         "",
     )
+
+
+def removed_points(shell: RemoteShell, snapshot: Snapshot) -> list[dict[str, object]]:
+    """Every removed site's recovery points, from one more bounded listing per repository.
+
+    A removed site's repository is kept by Remove site (#407). Its points are listed here so
+    the Backups section can offer them to a matching site; the read changes nothing.
+    """
+    current = tuple(site.identifier for site in snapshot.collected.sites.value)
+    names = observation.removed(shell, current)
+    result: list[dict[str, object]] = []
+    for identifier in names or ():
+        listing = run_root(shell, listing_command(identifier))
+        text = listing.stdout
+        parsed = (
+            None
+            if listing.exit_status or listing.truncated or len(text) > MAX_BYTES
+            else parse_listing(text)
+        )
+        result.append(
+            {
+                "identifier": identifier,
+                "points": points(parsed) if parsed is not None else [],
+                "problem": "" if parsed is not None else "The recovery points could not be read.",
+            }
+        )
+    return result
 
 
 def _engine(server: Server) -> str:
@@ -156,6 +236,7 @@ def _authorized(check: BackupCheck) -> None:
 def _read(check: BackupCheck) -> None:
     _authorized(check)
     snapshot = current_snapshot(check.server)
+    removed: list[dict[str, object]] = []
     if snapshot is None:
         value: dict[str, object] = {
             "version": 1,
@@ -163,6 +244,7 @@ def _read(check: BackupCheck) -> None:
             "outcome": "unreadable",
             "problem": "The site has not been observed yet.",
             "points": [],
+            "schedule": {},
         }
     else:
         from runtimes.catalog import architecture_of
@@ -174,7 +256,16 @@ def _read(check: BackupCheck) -> None:
         )
         engine = _engine(check.server)
         with connect_operation(check) as shell:
+            removed = removed_points(shell, snapshot)
             native = observation.read(shell, (check.identifier,), engine, architecture)
+            from . import retention
+
+            retention.record(
+                check.server, check.identifier, retention.read_policy(shell, check.identifier)
+            )
+            findings = integrity.read_results(shell, check.identifier)
+            if findings is not None:
+                integrity.record(check.server, check.identifier, findings)
             row = _row(native, check.identifier)
             if row is None or not _enabled(row):
                 value = {
@@ -183,6 +274,7 @@ def _read(check: BackupCheck) -> None:
                     "outcome": "missing",
                     "problem": "Backups are not enabled for this site.",
                     "points": [],
+                    "schedule": {},
                 }
             else:
                 result = run_root(shell, listing_command(check.identifier))
@@ -192,6 +284,12 @@ def _read(check: BackupCheck) -> None:
                     if result.exit_status or result.truncated or len(text) > MAX_BYTES
                     else parse_listing(text)
                 )
+                from . import schedule
+
+                observed_schedule = schedule.read(shell, (check.identifier,))
+                if observed_schedule is not None:
+                    for observed_row in observed_schedule:
+                        schedule.record(check.server, observed_row)
                 value = (
                     {
                         "version": 1,
@@ -199,6 +297,7 @@ def _read(check: BackupCheck) -> None:
                         "outcome": "unreadable",
                         "problem": "The recovery points could not be read.",
                         "points": [],
+                        "schedule": {},
                     }
                     if parsed is None
                     else {
@@ -207,8 +306,12 @@ def _read(check: BackupCheck) -> None:
                         "outcome": "observed",
                         "problem": "",
                         "points": points(parsed),
+                        "schedule": schedule.listing(
+                            observed_schedule[0] if observed_schedule else None
+                        ),
                     }
                 )
+    value["removed"] = removed
     now = timezone.now()
     with transaction.atomic():
         if not lifecycle.succeed(check.pk, now):
@@ -266,6 +369,24 @@ def latest_check(server: Server, identifier: str) -> BackupCheck | None:
         .order_by("-finished_at", "-pk")
         .first()
     )
+
+
+def latest_removed(server: Server) -> list[dict[str, object]]:
+    """Every removed site's points from this server's newest successful explicit read.
+
+    One Check backups on any site refreshes the server-wide set; the page then shows it
+    without another SSH connection (Phase D #407).
+    """
+    row = (
+        BackupCheck.objects.filter(server=server, status=RemoteOperation.Status.SUCCEEDED)
+        .exclude(listing={})
+        .order_by("-finished_at", "-pk")
+        .first()
+    )
+    if row is None:
+        return []
+    removed = row.listing.get("removed") if isinstance(row.listing, dict) else None
+    return [item for item in removed if isinstance(item, dict)] if isinstance(removed, list) else []
 
 
 def active(server: Server, identifier: str) -> BackupCheck | None:

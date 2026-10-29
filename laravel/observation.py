@@ -55,6 +55,12 @@ LARAVEL_SOURCE: Final = (
 )
 READ_SOURCE: Final = LARAVEL_SOURCE + "\nlaravel_read()\n"
 READ_COMMAND: Final = site_observation.python_command(READ_SOURCE, ())
+PENDING_SOURCE: Final = (
+    LARAVEL_SOURCE
+    + "\n"
+    + importlib.resources.files("laravel.bodies").joinpath("pending.py").read_text()
+)
+MIGRATION: Final = re.compile(r"[0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{6}_[a-z0-9_]{1,120}")
 
 _INVENTORY_KEYS: Final = {
     "version",
@@ -99,6 +105,43 @@ def read(shell: RemoteShell) -> dict[str, object] | None:
     if not isinstance(value, dict) or not valid_inventory(value):
         return None
     return value
+
+
+def pending_command(identifier: str) -> str:
+    """A fixed read that names the current release's pending migrations, without Artisan.
+
+    It compares the release's migration files with the site's migrations table through the
+    site's database principal, as Deploy does at apply time (#407). Applying still proves
+    the fetched commit's own migrations; this read names the ones already visible.
+    """
+    from sites.names import valid_identifier
+
+    if not valid_identifier(identifier):
+        raise ValueError("Not a site identifier.")
+    command = site_observation.python_command(PENDING_SOURCE, (identifier,))
+    return "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + command]))
+
+
+def pending(shell: RemoteShell, identifier: str) -> tuple[str, ...] | None:
+    """The current release's pending migration names, or None when they cannot be read."""
+    result = run_root(shell, pending_command(identifier))
+    if result.exit_status or result.truncated:
+        return None
+    try:
+        value: object = json.loads(result.stdout)
+    except ValueError:
+        return None
+    if value is None:
+        return None
+    if (
+        not isinstance(value, list)
+        or len(value) > 64
+        or not all(
+            isinstance(name, str) and MIGRATION.fullmatch(name) is not None for name in value
+        )
+    ):
+        return None
+    return tuple(str(name) for name in value)
 
 
 def valid_inventory(value: dict[str, object]) -> bool:

@@ -15,14 +15,22 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
 
+from backups.observation import BackupResult
 from bootstrap.standing import Standing
 from laravel import change, observation, rollback
 from laravel.bodies import common as native
 from laravel.configuration import ROLLBACK_ACKNOWLEDGEMENT
-from laravel.review_testing import BOOT, REPOSITORY, laravel_row, releases_in, site_record
+from laravel.review_testing import (
+    BOOT,
+    REPOSITORY,
+    backup,
+    laravel_row,
+    releases_in,
+    site_record,
+)
 from operations import lifecycle, services
 from operations.consent import Scope
-from operations.engine import BodyContext
+from operations.engine import BodyContext, ReviewDraft
 from operations.forms import ChangeApplyForm
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from operations.models import ChangeReview, Consent
@@ -133,6 +141,126 @@ class DeployReviewTests(SimpleTestCase):
         compile(change.BODY_SOURCE, "deploy.py", "exec")
         compile(rollback.BODY_SOURCE, "rollback.py", "exec")
         compile(observation.READ_SOURCE, "read.py", "exec")
+
+
+class DeployBackUpFirstTests(SimpleTestCase):
+    """The Deploy confirm offers a recovery point only when it sees real migration work."""
+
+    MIGRATION = "2026_10_19_000001_create_fixture_widgets"
+
+    def draft(
+        self, *, pending: tuple[str, ...] | None, enabled: bool, result: BackupResult | None = None
+    ) -> ReviewDraft:
+        return change.review(
+            change.DeployEvidence(
+                Standing.TARGET_STACK,
+                Architecture.X86_64,
+                10 * 1024 * 1024 * 1024,
+                BOOT,
+                500,
+                site_record(),
+                laravel_row(),
+                "b" * 40,
+                True,
+                "",
+                pending,
+                backup(identifier="s4alpha", enabled=enabled, result=result),
+            ),
+            PreparationInputs("", "s4alpha"),
+        )
+
+    def test_pending_migrations_and_backups_offer_a_backup_first(self) -> None:
+        draft = self.draft(pending=(self.MIGRATION,), enabled=True)
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertTrue(draft.document["back_up_first"])
+        self.assertEqual(draft.document["pending_migrations"], [self.MIGRATION])
+        acknowledgement = str(draft.document["acknowledgement"])
+        self.assertIn("Back up first", acknowledgement)
+        self.assertNotIn("no automatic backup", acknowledgement)
+        change.body(draft.document, BodyContext("", "", 0))
+
+    def test_pending_migrations_without_backups_keep_todays_acknowledgement(self) -> None:
+        draft = self.draft(pending=(self.MIGRATION,), enabled=False)
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertFalse(draft.document["back_up_first"])
+        self.assertEqual(draft.document["acknowledgement"], change.MIGRATION_ACKNOWLEDGEMENT)
+
+    def test_no_pending_migrations_offer_no_backup_first(self) -> None:
+        draft = self.draft(pending=(), enabled=True)
+        self.assertFalse(draft.document["back_up_first"])
+        self.assertNotIn("Back up first", str(draft.document["acknowledgement"]))
+
+    def test_an_unreadable_table_never_claims_pending_migrations(self) -> None:
+        draft = self.draft(pending=None, enabled=True)
+        self.assertEqual(draft.document["pending_migrations"], [])
+        self.assertFalse(draft.document["back_up_first"])
+
+    def test_the_acknowledgement_names_the_newest_recovery_point(self) -> None:
+        result = BackupResult(
+            "succeeded",
+            "",
+            "full",
+            "manual",
+            "2026-10-27T11:00:00+00:00",
+            "0123456789abcdef",
+            2,
+            4096,
+        )
+        draft = self.draft(pending=(self.MIGRATION,), enabled=True, result=result)
+        acknowledgement = str(draft.document["acknowledgement"])
+        self.assertIn("27 Oct 2026, 11:00", acknowledgement)
+        self.assertIn("01234567", acknowledgement)
+        self.assertIn("restore it if the migration goes wrong", acknowledgement)
+        self.assertEqual(draft.document["recovery_point"], "0123456789abcdef")
+        change.body(draft.document, BodyContext("", "", 0))
+
+    def test_a_forged_acknowledgement_cannot_build_a_body(self) -> None:
+        draft = self.draft(pending=(self.MIGRATION,), enabled=True)
+        forged = {**draft.document, "acknowledgement": "I accept."}
+        with self.assertRaises(ValueError):
+            change.body(forged, BodyContext("", "", 0))
+        forged = {**draft.document, "back_up_first": False}
+        with self.assertRaises(ValueError):
+            change.body(forged, BodyContext("", "", 0))
+
+    def test_a_review_prepared_before_backups_named_the_gap_still_applies(self) -> None:
+        draft = self.draft(pending=(), enabled=False)
+        legacy = {
+            key: value
+            for key, value in draft.document.items()
+            if key
+            not in (
+                "pending_migrations",
+                "backups_enabled",
+                "recovery_point",
+                "recovery_at",
+                "back_up_first",
+            )
+        }
+        change.body(legacy, BodyContext("", "", 0))
+        with self.assertRaises(ValueError):
+            change.body({**legacy, "acknowledgement": "I accept."}, BodyContext("", "", 0))
+
+
+class ReleaseRetentionTests(SimpleTestCase):
+    def test_a_restored_release_counts_toward_current_plus_five(self) -> None:
+        row = laravel_row(count=7)
+        releases = releases_in(row)
+        restored = {
+            "name": "restore-0123456789abcdef-a1b2c3d4",
+            "commit": "",
+            "created": 2000,
+            "state": "complete",
+            "repository": REPOSITORY,
+            "branch": "main",
+        }
+        row["releases"] = [restored, *releases]
+        row["current"] = restored["name"]
+        pruned = change.prune_names(row)
+        self.assertNotIn(restored["name"], pruned)
+        self.assertNotIn(str(releases[0]["name"]), pruned)
+        self.assertEqual({str(releases[5]["name"]), str(releases[6]["name"])}, set(pruned))
+        self.assertIn(restored["name"], [str(item["name"]) for item in change.releases_of(row)])
 
 
 class RollbackReviewTests(SimpleTestCase):

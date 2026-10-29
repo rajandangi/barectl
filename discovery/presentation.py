@@ -4,7 +4,7 @@ The server page and the warnings Activity lists agree because both come from her
 kind of observation is presented here, and templates only lay it out.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -219,6 +219,8 @@ class ShownSite:
     https: bool = False
     readiness: str = "/"
     application: str = "plain"
+    # Whether the site has a complete recovery point in the fixed 48-hour window (#402).
+    recent_backup: bool = True
 
 
 @dataclass(frozen=True)
@@ -230,11 +232,17 @@ class ShownSites:
     note: str = SITES_NOTE
 
 
-def present_sites(sites: Observation[tuple[ObservedSite, ...]]) -> ShownSites:
-    return ShownSites(_shown("Sites", sites, ()), tuple(_site(site) for site in sites.value))
+def present_sites(
+    sites: Observation[tuple[ObservedSite, ...]],
+    recent_missing: Collection[str] | None = None,
+) -> ShownSites:
+    return ShownSites(
+        _shown("Sites", sites, ()),
+        tuple(_site(site, recent_missing) for site in sites.value),
+    )
 
 
-def _site(site: ObservedSite) -> ShownSite:
+def _site(site: ObservedSite, recent_missing: Collection[str] | None = None) -> ShownSite:
     unread = site.outcome in UNINSPECTED
     verdict = site.outcome.label if unread else site.state.label
     return ShownSite(
@@ -252,6 +260,7 @@ def _site(site: ObservedSite) -> ShownSite:
         https=site.https,
         readiness=site.readiness,
         application=site.application,
+        recent_backup=recent_missing is None or site.identifier not in recent_missing,
     )
 
 

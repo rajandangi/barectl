@@ -1,0 +1,9 @@
+using temporary cache in /var/folders/64/9bmxj8cn3mx00_vdnl9j0zmm0000gn/T/restic-check-cache-3439686922
+create exclusive lock for repository
+load indexes
+check all packs
+pack 8f2dabe00000000000000000000000000000000000000000000000000000000: not referenced in any index
+1 additional file(s) in the repository
+check snapshots, trees and blobs
+[0:00] 100.00%  1 / 1 snapshots
+Fatal: repository contains errors

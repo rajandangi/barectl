@@ -114,6 +114,11 @@ SSH_CONFIG_PATH = os.environ.get("BARECTL_SSH_CONFIG", "").strip() or "~/.ssh/co
 CONFIDENTIAL_KEY_PATH = os.environ.get("BARECTL_CONFIDENTIAL_KEY", "").strip() or str(
     BASE_DIR / "confidential.key"
 )
+# docs/backups.md#export: one export's private controller staging. The worker writes here
+# and the authenticated download reads it; nothing here is a public path or a database blob.
+EXPORT_STAGING_PATH = os.environ.get("BARECTL_EXPORT_STAGING", "").strip() or str(
+    BASE_DIR / "exports"
+)
 # docs/ssh-connections.md#running-the-worker
 TASKS = {"default": {"BACKEND": "django_tasks_db.DatabaseBackend"}}
 LOGGING = {

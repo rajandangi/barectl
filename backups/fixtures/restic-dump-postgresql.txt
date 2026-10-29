@@ -1,0 +1,23 @@
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 18.0 (Ubuntu 18.0-1.pgdg24.04+1)
+-- Dumped by pg_dump version 18.0
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+
+--
+-- Name: recovery_check; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.recovery_check (
+    id integer NOT NULL,
+    note character varying(40) NOT NULL
+);
+
+COPY public.recovery_check (id, note) FROM stdin;
+7	before-the-backup
+\.

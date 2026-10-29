@@ -1,0 +1,1 @@
+barectl-result {"class":"failed","reason":"integrity_pack","kind":"integrity","site":"alpha","location":"onsite","at":"2026-10-30T05:15:00+00:00","point":"","checked":0,"snapshots":0,"bytes":0,"subset":"7/20"}

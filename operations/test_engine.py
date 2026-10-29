@@ -740,6 +740,14 @@ class ResultLineTests(SimpleTestCase):
                 engine.ResultLine("refused", "affected_sites"),
             ),
             ("no line here\n", None),
+            (
+                (
+                    'barectl-result {"class": "partial", "reason": "backup_paused"}\n'
+                    'barectl-result {"class": "succeeded"}\n'
+                ),
+                engine.ResultLine("succeeded", ""),
+            ),
+            ('barectl-result {"class": "partial", "reason": "backup_paused"}\n', None),
         ):
             with self.subTest(text=text):
                 self.assertEqual(engine.parse_result_line(text), expected)

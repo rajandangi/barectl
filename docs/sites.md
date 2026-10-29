@@ -69,23 +69,27 @@ A site's Settings also holds its **PHP settings**. The form edits the pool tunab
 ## Removing a site
 
 Open the site's **Settings** section and use **Remove site**. The page states plainly that
-the site's files and database data are destroyed and that no backup exists before Phase D.
-**Prepare removal review** queues a preparation and changes nothing on the server.
+the site's files and database data are destroyed, and either that it has no backup or that
+its backups are kept. **Prepare removal review** queues a preparation and changes nothing
+on the server.
 
 The review lists everything that will be deleted: the Caddy site file, the site's HAProxy
 and PHP-FPM configuration and runtime directories, its `haproxy-site@` and
 `php-fpm-site-<runtime>@` services, its database and principal, Caddy's stored certificate
-for its names, the site directory with every release and private file, and the site and
-proxy Linux accounts. It also names the other sites that keep serving while Caddy reloads
+for its names, the site directory with every release and private file, the site and proxy
+Linux accounts, and its own backup units — the backup slice, capture timer and service,
+check and offsite check units and cleanup units with their payloads. It also names what it
+keeps: the site's onsite repository and its offsite copy, both restorable into a matching
+site. A removal never deletes a repository. It also names the other sites that keep serving while Caddy reloads
 its whole configuration. It is Destructive consent, and applying it requires typing the
 site's primary domain exactly; a request without that value changes nothing.
 
-Applying is one run: it rechecks the reviewed inventory under the native lock, publishes
-the maintenance gate, validates the remaining Caddy tree, removes the site file and reloads
-Caddy, stops and disables the site's services, removes its FPM and HAProxy configuration,
-drops the database and principal, removes the stored certificate, deletes the site
-directory and its accounts, and verifies that nothing remains while the remaining sites
-serve. A failure reports **partly applied**; a fresh review names only what remains and
+Applying is one run: it rechecks the reviewed inventory under the native lock, first
+disables and removes the site's backup units, publishes the maintenance gate, validates the
+remaining Caddy tree, removes the site file and reloads Caddy, stops and disables the
+site's services, removes its FPM and HAProxy configuration, drops the database and
+principal, removes the stored certificate, deletes the site directory and its accounts,
+and verifies that nothing remains while the remaining sites serve. A failure reports **partly applied**; a fresh review names only what remains and
 finishes it. The database and all application data are not recoverable after the run.
 
 ## Site pages
@@ -127,7 +131,7 @@ A review of a site that already exists in this form proposes no changes. A fresh
 
 **Deployments** shows a site's current release and its retained releases, each with its commit, creation time, state and whether it is serving. The list comes from the server's own release layout: a release directory under `releases/`, the `current` link, and each release's Git metadata. A release created by CI in the same layout under the same site lock is listed like Barectl's own. Nothing is read from a Barectl marker, and reading releases never runs PHP, Composer, Git hooks or Artisan.
 
-**Deploy** is one reviewed change. Its read-only review resolves the branch to an exact commit as the site user, states the commit, the free disk the build needs, the releases it will remove and whether pending migrations will run. Pending migrations are computed at apply time by comparing the release's migration files with the migrations table through the site's database principal, without Artisan. The apply fetches exactly the reviewed commit, installs from the committed lock with the site's own Composer and PHP, links the shared environment, storage and cache, builds Laravel's caches, classifies the release so Caddy reads only its public root ([ADR 0040](adr/0040-classify-laravel-release-permissions.md)), and switches `current` under the maintenance page. The run then sends the site's own PHP-FPM master a graceful reload, so every worker resolves the new release before readiness is measured; requests already running finish under the master's `process_control_timeout` and the master is never replaced. While the gate answers visitors, the readiness check goes to the site's private HAProxy socket; the gate is lifted only when `/up` answers 200, and a failed check restores the gate and reports which release is serving. Until a native scenario proves code pickup, every Deploy that switches code runs inside the maintenance window. The review removes releases beyond `current` plus the newest five and names them. A `composer.json` requiring a PHP version the site's runtime does not meet is refused at review, naming the requirement.
+**Deploy** is one reviewed change. Its read-only review resolves the branch to an exact commit as the site user, states the commit, the free disk the build needs, the releases it will remove and whether pending migrations will run. When it finds pending migrations on the server and the site has backups enabled, its confirm screen also offers **Back up first**: one paused Full site capture, reviewed on its own, whose run page then offers **Continue to Deploy** ([backups](backups.md#back-up-first-on-deploy)). The migration acknowledgement names the newest recovery point when there is one, and never claims the site has no backup while backups are on. Pending migrations are computed at apply time by comparing the release's migration files with the migrations table through the site's database principal, without Artisan. The apply fetches exactly the reviewed commit, installs from the committed lock with the site's own Composer and PHP, links the shared environment, storage and cache, builds Laravel's caches, classifies the release so Caddy reads only its public root ([ADR 0040](adr/0040-classify-laravel-release-permissions.md)), and switches `current` under the maintenance page. The run then sends the site's own PHP-FPM master a graceful reload, so every worker resolves the new release before readiness is measured; requests already running finish under the master's `process_control_timeout` and the master is never replaced. While the gate answers visitors, the readiness check goes to the site's private HAProxy socket; the gate is lifted only when `/up` answers 200, and a failed check restores the gate and reports which release is serving. Until a native scenario proves code pickup, every Deploy that switches code runs inside the maintenance window. The review removes releases beyond `current` plus the newest five and names them. A `composer.json` requiring a PHP version the site's runtime does not meet is refused at review, naming the requirement.
 
 **Roll back** reactivates a retained release: no fetch, no build, no migrations. Its review states plainly that schema, data, storage, settings and jobs are not reversed, and an apply without that acknowledgement changes nothing.
 

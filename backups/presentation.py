@@ -1,5 +1,6 @@
 """The Backups section's wording, from stored rows only (#396, #179)."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -7,11 +8,16 @@ from django.utils import timezone
 
 from discovery.snapshot import CollectedSnapshot, ObservedSite
 
-from . import check, kit
-from .models import BackupCheck
-from .observation import ObservedBackup
+from . import check, convention, kit
+from .models import BackupCheck, BackupSchedule
+from .observation import IntegrityFinding, ObservedBackup
 
-SCOPE_LABELS = {"database": "Database only", "files": "Files", "": "Database only"}
+SCOPE_LABELS = {
+    "database": "Database only",
+    "files": "Full site",
+    "full": "Full site",
+    "": "Database only",
+}
 
 
 @dataclass(frozen=True)
@@ -27,6 +33,32 @@ class LastBackupView:
 
 
 @dataclass(frozen=True)
+class OffsiteView:
+    label: str
+    bucket: str
+    prefix: str
+
+
+@dataclass(frozen=True)
+class CopyView:
+    headline: str
+    detail: str
+    time_label: str
+    failed: bool
+    point: str = ""
+
+
+@dataclass(frozen=True)
+class IntegrityFindingView:
+    location: str
+    headline: str
+    detail: str
+    time_label: str
+    result_class: str
+    verified: bool
+
+
+@dataclass(frozen=True)
 class RecoveryPointView:
     time_label: str
     scope: str
@@ -35,10 +67,49 @@ class RecoveryPointView:
     keep: bool
     short_id: str
     point: str
+    missing: tuple[str, ...] = ()
+    incomplete: tuple[str, ...] = ()
+    offsite_status: str = "Offsite storage not set up"
+    parts: tuple[str, ...] = ()
+    verified: str = ""
 
     @property
     def restorable(self) -> bool:
-        return self.status == "Saved here"
+        return self.status in ("Saved here", "In connected storage")
+
+    @property
+    def has_database(self) -> bool:
+        return "database" in self.parts
+
+    @property
+    def has_files(self) -> bool:
+        return "files" in self.parts
+
+    @property
+    def restorable_elsewhere(self) -> bool:
+        """A removed site's kind is only provable from a point that holds files (#407)."""
+        return self.restorable and self.has_files
+
+    @property
+    def problem(self) -> str:
+        if self.missing:
+            return (
+                "The "
+                + " and ".join(self.missing)
+                + " part is missing, so this point is incomplete."
+            )
+        if self.incomplete:
+            return "This point is not complete."
+        return ""
+
+
+@dataclass(frozen=True)
+class RemovedRepositoryView:
+    """One removed site's repository, from the last explicit read (#407)."""
+
+    identifier: str
+    points: tuple[RecoveryPointView, ...] = ()
+    problem: str = ""
 
 
 @dataclass(frozen=True)
@@ -54,6 +125,17 @@ class BackupsView:
     database_reason: str
     problems: tuple[str, ...]
     note: str
+    gated: bool = False
+    interrupted: bool = False
+    offsite: OffsiteView | None = None
+    copy: CopyView | None = None
+    restore: bool = False
+    integrity: tuple[IntegrityFindingView, ...] = ()
+    removed: tuple[RemovedRepositoryView, ...] = ()
+
+    @property
+    def reopen(self) -> bool:
+        return self.gated and self.interrupted
 
 
 def backup_of(collected: CollectedSnapshot, identifier: str) -> ObservedBackup | None:
@@ -77,16 +159,63 @@ def _label(value: datetime | None) -> str:
     return timezone.localtime(value).strftime("%-d %b %Y, %H:%M")
 
 
-def last_view(backup: ObservedBackup | None) -> LastBackupView | None:
+def last_view(backup: ObservedBackup | None) -> LastBackupView | None:  # noqa: C901 - one result
     if backup is None or backup.last is None:
         return None
     result = backup.last
     at = _when(result.at)
     scope = SCOPE_LABELS.get(result.scope, "Database only")
+    if result.reason.startswith("restore_"):
+        if result.result_class == "succeeded":
+            return LastBackupView(
+                "Database restored.",
+                "The recovery point's data was imported and the site answered again.",
+                _label(at),
+                result.result_class,
+            )
+        if result.reason == "restore_paused":
+            return LastBackupView(
+                "The restore stopped after pausing the site.",
+                "Visitors see a maintenance page until you reopen the site. Nothing after "
+                "the pause ran.",
+                _label(at),
+                result.result_class,
+            )
+        return LastBackupView(
+            "The restore did not finish.",
+            _result_reason(result.reason),
+            _label(at),
+            result.result_class,
+        )
     if result.result_class == "succeeded":
+        detail = (
+            "The database and the site's files finished and their recovery point is kept here."
+            if result.scope in ("full", "files")
+            else "The database dump finished and its recovery point is kept here."
+        )
+        if result.offsite == "failed" or (
+            backup.copy is not None and backup.copy.point == result.point and not backup.copy.copied
+        ):
+            return LastBackupView(
+                "Saved here, offsite copy failed.",
+                "The recovery point is kept on this server. Its offsite copy did not finish, "
+                "so copy it offsite again when the storage is reachable.",
+                _label(at),
+                result.result_class,
+            )
+        if result.offsite == "copied":
+            detail += " It was also copied to offsite storage."
         return LastBackupView(
             f"{scope} saved.",
-            "The database dump finished and its recovery point is kept here.",
+            detail,
+            _label(at),
+            result.result_class,
+        )
+    if result.result_class == "partial" and result.reason == "backup_paused":
+        return LastBackupView(
+            "The full backup stopped after pausing the site.",
+            "Visitors see a maintenance page until you reopen the site. Nothing after "
+            "the pause ran.",
             _label(at),
             result.result_class,
         )
@@ -122,37 +251,265 @@ def last_view(backup: ObservedBackup | None) -> LastBackupView | None:
 def _result_reason(reason: str) -> str:
     return {
         "backup_dump": "The database dump failed, so nothing was saved.",
+        "backup_files": "The site's files could not be copied, so the point is incomplete.",
+        "backup_idle": "The site was still busy, so the full copy stopped before its files.",
+        "backup_paused": "The site is paused because the full copy stopped partway.",
         "backup_disk": "The server was short of free space, so nothing was saved.",
         "backup_lock": "The site was busy, so the backup was skipped.",
         "backup_password": "The stored key did not open the backup, so nothing was saved.",
         "backup_repository": "The backup store could not be read, so nothing was saved.",
         "backup_verify": "Barectl could not confirm the recovery point afterwards.",
         "backup_partial": "Some data could not be read; the point may be incomplete.",
+        "backup_offsite": (
+            "The onsite recovery point is saved, but the offsite copy did not finish."
+        ),
+        "schedule_timer": "Systemd did not report the new backup timer as active.",
+        "schedule_units": "The backup schedule's units are not in the reviewed state.",
+        "schedule_install": "The backup schedule could not be installed on the server.",
+        "restore_site": "The site's account could not be read, so nothing was restored.",
+        "restore_repository": "The backup store could not be read, so nothing was restored.",
+        "restore_evidence": "The site changed before the restore, so nothing was restored.",
+        "restore_lock": "The site was busy, so the restore was skipped.",
+        "restore_disk": "The server was short of free space, so nothing was restored.",
+        "restore_point": "The recovery point is missing or incomplete, so nothing was restored.",
+        "restore_engine": (
+            "The recovery point was made by a different database version, so nothing was restored."
+        ),
+        "restore_dump": (
+            "The database copy was truncated, so nothing was restored and the site still serves."
+        ),
+        "removed_backup": (
+            "Barectl could not delete the removed site's backups. Nothing else was changed."
+        ),
+        "restore_target": "The site changed, so nothing was restored.",
+        "restore_safety": "The safety backup failed, so nothing was overwritten.",
+        "restore_files": (
+            "The recovery point's files could not be staged safely, so nothing was replaced."
+        ),
+        "restore_config": (
+            "The server configuration could not be re-created, so the site stays paused."
+        ),
+        "restore_gate": "The maintenance page could not be published, so the data was not changed.",
+        "restore_idle": "The site was still busy, so the data was not changed.",
+        "restore_import": "The import did not finish, so the data may be partly replaced.",
+        "restore_data": "The import finished but its data checks did not pass.",
+        "restore_readiness": "The data was imported but the site did not answer its check.",
+        "restore_open": "The maintenance page could not be removed, so the site stays paused.",
     }.get(reason, "Barectl could not finish the backup. Check again or read the run's record.")
 
 
-def points_view(listing: dict[str, object]) -> tuple[RecoveryPointView, ...]:
+def integrity_views(
+    findings: tuple[IntegrityFinding, ...],
+) -> tuple[IntegrityFindingView, ...]:
+    """The two locations' findings, separate from every capture or copy result."""
+    by_location = {finding.location: finding for finding in findings}
+    return tuple(
+        _integrity_view(location, by_location.get(location)) for location in ("onsite", "offsite")
+    )
+
+
+def _integrity_view(location: str, finding: IntegrityFinding | None) -> IntegrityFindingView:
+    label = "On this server" if location == "onsite" else "Offsite storage"
+    if finding is None:
+        return IntegrityFindingView(
+            label,
+            "Not checked yet.",
+            "Barectl checks this backup store every week and reads the newest point back.",
+            "",
+            "",
+            False,
+        )
+    at = _label(finding.time)
+    if finding.result_class == "succeeded" and finding.point:
+        return IntegrityFindingView(
+            label,
+            "The newest recovery point was read back.",
+            "Barectl opened the newest point itself, so it is verified here.",
+            at,
+            finding.result_class,
+            True,
+        )
+    if finding.result_class == "succeeded":
+        return IntegrityFindingView(
+            label,
+            "The backup store is healthy.",
+            "There is no complete recovery point to read back yet.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.result_class == "lock_busy":
+        return IntegrityFindingView(
+            label,
+            "The last check was skipped.",
+            "Another backup task was using this store. Nothing was marked verified.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.reason == "integrity_offsite":
+        return IntegrityFindingView(
+            label,
+            "Offsite checks wait for offsite storage.",
+            "Set up offsite storage and the next weekly check will read this store back.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.result_class == "failed" and finding.reason == "integrity_pack":
+        return IntegrityFindingView(
+            label,
+            "The last check found damaged data.",
+            "A stored data file could not be read. Recovery points were not changed, but "
+            "do not rely on one until the next check passes.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.result_class == "failed" and finding.reason == "integrity_readback":
+        return IntegrityFindingView(
+            label,
+            "The newest recovery point could not be read back.",
+            "The backup store is readable but its newest point did not open, so it is not "
+            "verified.",
+            at,
+            finding.result_class,
+            False,
+        )
+    if finding.result_class == "refused":
+        return IntegrityFindingView(
+            label,
+            "The last check did not run.",
+            "Barectl could not open this backup store. Nothing was marked verified.",
+            at,
+            finding.result_class,
+            False,
+        )
+    return IntegrityFindingView(
+        label,
+        "The last check failed.",
+        "Barectl could not finish reading this backup store. Nothing was marked verified.",
+        at,
+        finding.result_class,
+        False,
+    )
+
+
+def points_view(
+    listing: dict[str, object],
+    copy: CopyView | None = None,
+    *,
+    configured: bool = False,
+    integrity: tuple[IntegrityFinding, ...] = (),
+    connected: bool = False,
+) -> tuple[RecoveryPointView, ...]:
     raw = listing.get("points")
     if not isinstance(raw, list):
         return ()
+    verified: dict[str, list[str]] = {}
+    for finding in integrity:
+        if finding.verified:
+            label = "On this server, " if finding.location == "onsite" else "Offsite, "
+            verified.setdefault(finding.point, []).append(label + _label(finding.time))
     rows = []
     for point in raw:
         if not isinstance(point, dict):
             continue
         when = point.get("time")
         complete = point.get("complete") is True
+        missing = point.get("missing")
+        incomplete = point.get("incomplete")
+        parts = point.get("parts")
+        point_id = str(point.get("point", ""))
         rows.append(
             RecoveryPointView(
                 _label(_when(str(when))) if isinstance(when, str) else "Time not recorded",
                 SCOPE_LABELS.get(str(point.get("scope", "")), "Database only"),
-                "Saved here" if complete else "Incomplete",
+                (
+                    ("In connected storage" if connected else "Saved here")
+                    if complete
+                    else "Incomplete"
+                ),
                 point.get("live") is True,
                 point.get("keep") is True,
                 str(point.get("short", "")),
-                str(point.get("point", "")),
+                point_id,
+                tuple(str(item) for item in missing) if isinstance(missing, list) else (),
+                tuple(str(item) for item in incomplete) if isinstance(incomplete, list) else (),
+                offsite_status=(
+                    "Connected offsite" if connected else _point_offsite(point_id, copy, configured)
+                ),
+                parts=tuple(str(item) for item in parts) if isinstance(parts, list) else (),
+                verified="; ".join(verified.get(point_id, [])) or "Not verified",
             )
         )
     return tuple(rows)
+
+
+def connected_points_view(source: object) -> tuple[RecoveryPointView, ...]:
+    """A connected source's last listing, marked as read-only connected storage."""
+    from .observation import ConnectedSource
+
+    if not isinstance(source, ConnectedSource):
+        return ()
+    return points_view({"points": list(source.points())}, configured=True, connected=True)
+
+
+def _point_offsite(point: str, copy: CopyView | None, configured: bool) -> str:
+    if not configured:
+        return "Offsite storage not set up"
+    if copy is None or not copy.point:
+        return "Not copied offsite"
+    if copy.point != point:
+        return "Not copied offsite"
+    return "Offsite copy failed" if copy.failed else "Copied offsite"
+
+
+def removed_views(rows: Sequence[Mapping[str, object]]) -> tuple[RemovedRepositoryView, ...]:
+    """Every removed site's listed points, from one explicit read's bounded answer."""
+    result: list[RemovedRepositoryView] = []
+    for row in rows[:8]:
+        identifier = row.get("identifier")
+        if (
+            not isinstance(identifier, str)
+            or convention.SITE_IDENTIFIER.fullmatch(identifier) is None
+        ):
+            continue
+        raw = row.get("points")
+        listed = (
+            points_view({"points": [item for item in raw if isinstance(item, dict)]})
+            if isinstance(raw, list)
+            else ()
+        )
+        result.append(
+            RemovedRepositoryView(
+                identifier,
+                listed,
+                str(row.get("problem", "")) if isinstance(row.get("problem"), str) else "",
+            )
+        )
+    return tuple(result)
+
+
+def copy_view(copy: object | None) -> CopyView | None:
+    from .observation import OffsiteCopy
+
+    if not isinstance(copy, OffsiteCopy):
+        return None
+    at = _when(copy.at)
+    if copy.copied:
+        headline = "Offsite copy kept."
+        detail = "The offsite repository holds this recovery point as well."
+    elif copy.result_class == "lock_busy":
+        headline = "The offsite copy was skipped."
+        detail = "Another copy held the repository lock, so nothing was uploaded."
+    else:
+        headline = "Offsite copy failed."
+        detail = (
+            "The recovery point saved on this server is unchanged. Copy it offsite again when "
+            "the storage is reachable."
+        )
+    return CopyView(headline, detail, _label(at), not copy.copied, copy.point)
 
 
 def view(
@@ -162,19 +519,54 @@ def view(
     latest_check: BackupCheck | None,
     *,
     checking: bool,
+    gated: bool = False,
+    integrity: tuple[IntegrityFinding, ...] = (),
+    removed: Sequence[Mapping[str, object]] = (),
+    schedule: BackupSchedule | None = None,
 ) -> BackupsView:
+    from . import schedule as backup_schedule
+
     backup = backup_of(collected, identifier) if collected is not None else None
     enabled = backup is not None and backup.enabled
+    restore = bool(
+        gated
+        and backup is not None
+        and backup.last is not None
+        and backup.last.reason.startswith("restore_")
+    )
+    interrupted = restore or bool(
+        gated
+        and backup is not None
+        and backup.last is not None
+        and backup.last.scope in ("full", "files")
+        and backup.last.reason
+        in {
+            "backup_paused",
+            "backup_dump",
+            "backup_files",
+            "backup_idle",
+            "backup_gate",
+            "backup_verify",
+            "backup_partial",
+            "automation_restore",
+        }
+    )
     points: tuple[RecoveryPointView, ...] = ()
     checked_at: datetime | None = None
     stale = False
     check_problem = ""
+    copy = copy_view(backup.copy if backup is not None else None)
+    offsite = (
+        OffsiteView(backup.offsite.label, backup.offsite.bucket, backup.offsite.prefix)
+        if backup is not None and backup.offsite is not None and backup.offsite.configured
+        else None
+    )
     if latest_check is not None:
         listing = latest_check.listing
         checked_at = latest_check.checked_at
         outcome = listing.get("outcome") if isinstance(listing, dict) else None
         if outcome == "observed":
-            points = points_view(listing)
+            points = points_view(listing, copy, configured=offsite is not None, integrity=integrity)
         else:
             check_problem = str(listing.get("problem", "")) if isinstance(listing, dict) else ""
         stale = check.stale(latest_check)
@@ -183,9 +575,24 @@ def view(
         note = "This site is not backed up."
     elif backup is not None and backup.last is None:
         note = "Backups are enabled. No recovery point has been taken yet."
+    last = last_view(backup)
+    due = backup_schedule.missed_at(schedule)
+    if (
+        last is not None
+        and backup is not None
+        and backup_schedule.missed(schedule, backup.last)
+        and due is not None
+    ):
+        last = LastBackupView(
+            "The scheduled backup was skipped.",
+            "The timer's time passed without a backup result, and a missed run is never "
+            "caught up. The next run is shown below.",
+            _label(due),
+            "lock_busy",
+        )
     return BackupsView(
         enabled,
-        last_view(backup),
+        last,
         points,
         checked_at,
         stale,
@@ -196,13 +603,29 @@ def view(
         or "This site has no site database.",
         backup.problems if backup is not None else (),
         note,
+        gated,
+        interrupted,
+        offsite,
+        copy,
+        restore,
+        integrity_views(integrity),
+        removed_views(removed),
     )
 
 
 def kit_lines(server_name: str, identifier: str, collected: CollectedSnapshot | None) -> list[str]:
     backup = backup_of(collected, identifier) if collected is not None else None
+    offsite = backup.offsite if backup is not None else None
     return kit.lines(
         server_name=server_name,
         identifier=identifier,
         restic_version=backup.restic_version if backup is not None else "",
+        provider=offsite.label if offsite is not None and offsite.configured else "",
+        endpoint=offsite.endpoint if offsite is not None and offsite.configured else "",
+        bucket=offsite.bucket if offsite is not None and offsite.configured else "",
+        prefix=offsite.prefix if offsite is not None and offsite.configured else "",
+        region=offsite.region if offsite is not None and offsite.configured else "",
+        sites=tuple(row.identifier for row in collected.backups.value)
+        if collected is not None
+        else (),
     )

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from automation.apps import AutomationConfig
     from automation.presentation import ScheduleView
     from backups.apps import BackupsConfig
-    from backups.presentation import LastBackupView, RecoveryPointView
+    from backups.presentation import IntegrityFindingView, LastBackupView, RecoveryPointView
     from bootstrap.apps import BootstrapConfig
     from bootstrap.certificate_email_views import CertificateEmailForm
     from cache.apps import CacheConfig
@@ -31,10 +31,23 @@ if TYPE_CHECKING:
     from disposable.native_mirror import dns as mirror_dns
     from disposable.native_mirror import forward as mirror_forward
     from disposable.native_mirror import git_http as mirror_git
+    from disposable.native_mirror import s3 as mirror_s3
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
-    from disposable.test_backups import BackupLifecycle
+    from disposable.test_backups import (
+        BackupFailure,
+        BackupLifecycle,
+        DisasterRecovery,
+        FullSiteRestore,
+        Integrity,
+        LaravelFullRestore,
+        OfflineRecovery,
+        RebootedFullBackup,
+        Retention,
+        ScheduledCapture,
+        WordPressFullRestore,
+    )
     from disposable.test_cache import LaravelObjectCache, SiteObjectCache, ValkeyInstall
     from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
     from disposable.test_confidential_channel import ConfidentialChannelLifecycle
@@ -151,6 +164,7 @@ if TYPE_CHECKING:
         ShownPhpVersion,
     )
     from servers.apps import ServersConfig
+    from servers.backup_storage import BackupStoragePanel
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import ConnectionDefinition, Server
@@ -272,6 +286,7 @@ if TYPE_CHECKING:
         GitHandler.protocol_version,
         mirror_dns._Server.daemon_threads,
         mirror_forward._Server.daemon_threads,
+        mirror_s3.Handler.server_version,
     )
     # Django selects the guarded immutable preparation queryset through this Meta option.
     _preparation_manager = ChangePreparation.Meta.base_manager_name
@@ -387,6 +402,7 @@ if TYPE_CHECKING:
         _site.facts,
         _site.complete,
         _site.unread,
+        _site.recent_backup,
     )
     # Django's template engine reads this to compare with Status members instead of calling it.
     _template_enum = Status.do_not_call_in_templates
@@ -588,10 +604,29 @@ if TYPE_CHECKING:
     # The Backups section is rendered by Django templates, which read these fields by name.
     _backup_templates = (
         BackupsConfig,
+        BackupFailure,
         BackupLifecycle,
+        DisasterRecovery,
+        FullSiteRestore,
+        Integrity,
+        LaravelFullRestore,
+        OfflineRecovery,
+        RebootedFullBackup,
+        ScheduledCapture,
+        Retention,
+        WordPressFullRestore,
         LastBackupView("", "", "", "").headline,
         LastBackupView("", "", "", "").time_label,
         RecoveryPointView("", "", "", False, False, "", "").time_label,
         RecoveryPointView("", "", "", False, False, "", "").short_id,
         RecoveryPointView("", "", "", False, False, "", "").restorable,
+        RecoveryPointView("", "", "", False, False, "", "").has_database,
+        RecoveryPointView("", "", "", False, False, "", "").has_files,
+        RecoveryPointView("", "", "", False, False, "", "").verified,
+        IntegrityFindingView("", "", "", "", "", False).headline,
+        IntegrityFindingView("", "", "", "", "", False).detail,
+        IntegrityFindingView("", "", "", "", "", False).time_label,
     )
+    # Server Settings > Backup storage renders the panel's provider label in its template.
+    _backup_storage_panel = BackupStoragePanel(False, False, "", "", "", "", "", "", False, (), "")
+    _backup_storage_label = _backup_storage_panel.provider_label

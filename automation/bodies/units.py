@@ -15,6 +15,7 @@ from typing import cast
 
 from automation.convention import (
     ENABLED_STATES,
+    ROLES,
     SYSTEMD_DIRECTORY,
     checked_fence_plan,
     digest,
@@ -324,7 +325,8 @@ def installed_units(identifier: str) -> tuple[list[str], list[str]]:
     timers: list[str] = []
     services: list[str] = []
     for entry in entries:
-        if not entry.is_file() or role_of(entry.name, identifier) is None:
+        role = role_of(entry.name, identifier)
+        if not entry.is_file() or role is None or role not in ROLES:
             continue
         if entry.name.endswith(".timer"):
             timers.append(entry.name)

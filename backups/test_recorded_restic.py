@@ -9,7 +9,7 @@ from discovery import ssh
 from discovery.recorded import Recorded, ReplayShell, Transcript
 
 from . import check
-from .bodies import backup as backup_body
+from .bodies import native as backup_native
 
 
 def fixture(name: str) -> str:
@@ -17,6 +17,17 @@ def fixture(name: str) -> str:
 
 
 class RecordedResticTests(SimpleTestCase):
+    def test_a_recorded_full_listing_lists_one_restorable_point(self) -> None:
+        parsed = check.parse_listing(fixture("restic-full-snapshots.txt"))
+        if parsed is None:
+            self.fail("The recorded full listing was refused.")
+        points = check.points(parsed)
+        self.assertEqual(len(points), 1)
+        self.assertEqual(points[0]["scope"], "full")
+        self.assertEqual(points[0]["parts"], ["database", "files"])
+        self.assertTrue(points[0]["complete"])
+        self.assertFalse(points[0]["live"])
+
     def test_a_recorded_snapshot_listing_lists_its_recovery_point(self) -> None:
         parsed = check.parse_listing(fixture("restic-snapshots.txt"))
         if parsed is None:
@@ -29,7 +40,7 @@ class RecordedResticTests(SimpleTestCase):
         self.assertTrue(points[0]["live"])
 
     def test_a_recorded_backup_summary_names_its_snapshot_and_bytes(self) -> None:
-        summary = backup_body.summary(fixture("restic-backup-summary.txt"))
+        summary = backup_native.summary(fixture("restic-backup-summary.txt"))
         if summary is None:
             self.fail("The recorded summary was not found.")
         self.assertEqual(len(str(summary["snapshot_id"])), 64)
@@ -39,7 +50,7 @@ class RecordedResticTests(SimpleTestCase):
         error = fixture("restic-backup-failed-error.txt")
         self.assertIn("command failed: exit status 7", error)
         self.assertEqual(fixture("restic-backup-failed.txt"), "")
-        self.assertEqual(backup_body.classify(1, False), ("refused", "backup_dump", 1))
+        self.assertEqual(backup_native.classify(1, False), ("refused", "backup_dump", 1))
 
     def test_the_recorded_listing_replays_at_the_remote_shell_seam(self) -> None:
         command = check.listing_command("alpha")

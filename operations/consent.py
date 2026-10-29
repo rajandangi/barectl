@@ -37,6 +37,9 @@ class DeclaredEffect:
     # The sites the effect reaches, by identifier; a SITE effect names exactly one.
     sites: tuple[str, ...] = ()
     destroys_data: bool = False
+    # The effect copies a site's data away from the server, so it needs Shared consent even
+    # though it names one site (Phase D #409).
+    leaves_server: bool = False
 
 
 def affected_sites_of(effects: Sequence[DeclaredEffect]) -> tuple[str, ...]:
@@ -49,6 +52,8 @@ def consent_of(effects: Sequence[DeclaredEffect]) -> Consent:
         return Consent.READ
     if any(effect.destroys_data for effect in effects):
         return Consent.DESTRUCTIVE
+    if any(effect.leaves_server for effect in effects):
+        return Consent.SHARED
     if any(effect.scope is Scope.SERVER for effect in effects):
         return Consent.SHARED
     if (

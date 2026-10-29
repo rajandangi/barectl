@@ -1,10 +1,94 @@
-# Backups (implemented, #396)
+# Backups (implemented, #396, #399, #400, #401, #402, #403, #404, #405, #406, #407, #408 and #409)
 
 Each managed site gains a **Backups** section between Overview and Activity. It shows
-whether the site is backed up, its last safe result, and its recovery points. The planned
-Phase D behaviour, including schedules, retention, restores, offsite storage and export, is
-the [Phase D specification](https://github.com/rajandangi/barectl/issues/358); this page
-describes only what is built.
+whether the site is backed up, its last safe result, its offsite copy result and its recovery
+points. Phase D is implemented; the [Phase D qualification record](phase-d-qualification.md)
+names the tested revision, the measured scenarios, the provider evidence and what is not
+qualified. This page describes only what is built.
+
+## Offsite storage
+
+Server **Settings > Backup storage** connects one bucket on **Amazon S3** or **Cloudflare
+R2**. There is no free-form endpoint and no other provider. The setup review is one Shared
+change that also needs **manage secrets**. It checks the bucket can be written and listed
+before saving, and then:
+
+- writes the access keys to root-only environment files on the server, never to Barectl's
+  database;
+- initialises each backed-up site's offsite repository under one fixed server prefix with
+  restic's `--copy-chunker-params`, so a copy deduplicates;
+- adds the recovery passphrase as a key to each offsite repository, so the kit, the
+  passphrase and the provider keys open the copies after the server and controller are both
+  gone;
+- is idempotent: reviewing the same provider, bucket, region and endpoint again changes
+  nothing.
+
+On S3 an optional separate pruning key can be stored; captures and copies then use the other
+key, which cannot delete offsite history. On R2 the review says plainly that an Object Read &
+Write token can also delete objects. The review also says that neither S3 Object Lock nor R2
+bucket locks are configured, so offsite copies are not immutable.
+
+**Remove offsite storage** is one reviewed Shared change that also needs **manage secrets**.
+It waits, with a bounded wait, for every site's per-repository lock before it removes the
+setting and its keys, so it never pulls the credentials out from under a running copy or
+cleanup; a held lock is a skip and the setting stays. It deletes no offsite copy: everything
+already in the bucket stays there, and the review says so.
+
+### Connect existing backup storage
+
+**Connect existing backup storage** recovers another server's storage on a new server. The
+operator copies the recovery kit's provider, endpoint, bucket, prefix and source site
+identifiers, then types the storage keys and the recovery passphrase. It is one reviewed
+Shared change that also needs **manage secrets**.
+
+Applying it opens every source repository with the passphrase alone and lists its Barectl
+recovery points read-only; it never initialises, copies, prunes or changes anything in the
+bucket. It writes only this server's root-only offsite config, keys and source-site list, and
+emits the bounded listing as one safe result line. Passive discovery reconstructs the
+connected source sites and their last listing from that evidence, so a fresh controller with
+no previous database sees the same recovery points after discovery. A listing older than the
+connection is a hint for the page, never authority: Restore re-lists the source under its
+lock before changing anything.
+
+### Replace recovery passphrase
+
+**Replace recovery passphrase** is one reviewed Shared change that also needs **manage
+secrets**. The old and new passphrases travel only through the confidential input channel and
+are never stored. For every enabled site's onsite repository and, when offsite storage is set
+up, its offsite repository, applying adds the new key, proves the new passphrase opens it,
+and only then removes the key the old passphrase used. It never re-encrypts data: restic key
+changes leave every pack and the server key in place. The review names each repository and
+the change reports refused if the old passphrase does not open one or the new one does not
+verify.
+
+### Captures and copies
+
+A capture whose site has offsite storage copies its onsite point after the site has reopened
+(or, for Database only, after the onsite point is verified). The copy holds a per-repository
+native lock and releases the shared mutation and site locks once the onsite point is safe, so
+a slow upload never lengthens downtime, never races another copy and never blocks hosting
+changes. A failed
+copy keeps the onsite point unchanged and the Backups section says **Saved here, offsite copy
+failed.** Onsite and offsite results are shown separately.
+
+**Copy offsite again** on a recovery point is one reviewed Site change that copies that exact
+point without taking a new capture. It initialises the offsite repository first when it is
+missing, and it is the repair action for a failed upload.
+
+## Offsite paths
+
+| Part | Path | Owner and mode |
+| --- | --- | --- |
+| Offsite setting | `/etc/barectl/backups/offsite/config` | root `0600` |
+| Capture and copy keys | `/etc/barectl/backups/offsite/capture.env` | root `0600` |
+| Optional S3 pruning keys | `/etc/barectl/backups/offsite/prune.env` | root `0600` |
+| Connected source sites | `/etc/barectl/backups/offsite/sources` | root `0600` |
+
+The repository URL is `s3:<endpoint>/<bucket>/<prefix>/<site>` and the fixed prefix is stored
+in the setting, so a fresh controller reconstructs it. Discovery reads only the non-secret
+fields and whether each key file is present; it never reads a key value or contacts the
+bucket. A setting outside the supported template is reported once and blocks only backup
+changes for the sites.
 
 ## Enable backups
 
@@ -17,21 +101,27 @@ describes only what is built.
 - initialises the repository with the operator's **recovery passphrase**, then adds a random
   **server key** in `/etc/barectl/backups/<id>.key`, so both the passphrase and the key open
   it and plain `restic` needs only the passphrase;
-- shows the printable **recovery kit**, which names the server, the repository and the plain
-  restic commands and holds no secret.
+- shows the printable **recovery kit**, which names the server, the onsite repository, the
+  offsite provider, endpoint, bucket, prefix and region, and the exact onsite and offsite
+  restic commands to list, restore and dump, and holds no secret.
 
 The passphrase is typed on the confirmation screen and travels only through the confidential
 input channel ([ADR 0032](adr/0032-keep-secrets-in-private-native-files.md)). It is never
 stored and never shown again. Barectl refuses to apply the review until the operator also
 ticks that they stored the passphrase and the kit away from the server and Barectl.
 
-A site without a site database cannot be enabled yet: this slice captures databases only.
+A site without a site database can be enabled now: **Database only** stays unavailable with
+its reason, and **Back up now** copies the site's files as a full point without a database
+part.
 
-## Back up now, Database only
+## Back up now
 
-**Back up now** is one reviewed Site change. It streams the site's dump straight into the
-encrypted repository with restic's `--stdin-from-command`, run as the site's own Linux user
-over the local socket:
+**Back up now** is one reviewed Site change with two choices.
+
+### Database only
+
+The dump streams straight into the encrypted repository with restic's
+`--stdin-from-command`, run as the site's own Linux user over the local socket:
 
 - MariaDB: `mariadb-dump --single-transaction --quick --no-tablespaces --routines --events
   --triggers s<id>`;
@@ -39,25 +129,314 @@ over the local socket:
 
 A failed dump makes restic cancel the backup and create no snapshot, so nothing is listed as
 a recovery point. No plain-text dump is written to disk. The capture never pauses the site,
-holds the site's `.deploy.lock`, and checks that at least 1 GiB is free on the repository filesystem before it starts;
-shortage refuses the capture and deletes nothing.
+holds the site's `.deploy.lock`, and checks that at least 1 GiB is free on the repository filesystem before it starts.
+
+### Full site
+
+A full capture pauses only the site for an exact point. It holds `.deploy.lock`, fences the
+site's background work, publishes the site's maintenance gate, drains the site's private
+HAProxy admission and waits for every FPM worker to be Idle, then writes two snapshots that
+share one `--time` and point identifier:
+
+- the database stream, when the site has a site database;
+- the site's current release and its private state, exactly per the site convention:
+  - **WordPress:** the release `current` points to, including uploads, and the private
+    configuration file outside the public root;
+  - **Laravel:** the release `current` points to, including its installed `vendor/`, and the
+    shared `.env`, `storage/` and private `bootstrap/cache` outside every release;
+  - **Plain PHP:** the release `current` points to.
+
+Both parts are tagged `complete` only after both are verified present. The gate opens only
+then, and the site's background work starts again only after the reviewed open site
+configuration is published and verified. **Excluded** are the object cache's (Valkey) data,
+logs, sockets, sessions, temporary files, other retained releases, runtime builds, the deploy
+key and known-hosts, and web server, proxy, PHP and TLS state.
+
+The review names the pause, the copy and the exclusions, and its consent follows the gate:
+Site when this is the server's only site, Shared when Caddy reloads for other sites. Free
+disk below the reserved headroom refuses the capture; a capture that runs out while copying
+stops with a warning and never deletes an older point. A half point, such as a database
+snapshot whose files part failed, is listed as **Incomplete**, names the missing part and is
+never restorable.
+
+### When a full capture stops
+
+A capture killed after the gate, or interrupted by a reboot, leaves the gate in place. The
+Backups section and the site's Overview show **"This stopped after pausing the site for a
+full backup. Nothing after it ran."** with one action, **Reopen site**. Reopening is one
+reviewed Site change (Shared when other sites exist) that publishes the site's reviewed open
+Caddy file. It never starts background work: Scheduled tasks or Queue workers ask what should
+run again, so a half-migrated or half-copied site is never served with its work resumed
+unreviewed.
+
+## Back up first on Deploy
+
+A Laravel **Deploy** whose confirm screen finds pending migrations, on a site whose backups
+are enabled, offers **Back up first** beside its apply button. It prepares one ordinary
+paused **Full site** capture and changes nothing else. The engine has no chain: the capture
+is its own review, and when it succeeds its run page offers **Continue to Deploy**, which
+prepares a fresh Deploy review. That review reads the newest safe recovery point from the
+site's journal and names it in the migration acknowledgement instead of the "no backup" gap
+(#358), for example *the newest recovery point is 27 Oct 2026, 11:00 (01234567)*. A site
+without backups keeps today's acknowledgement, and a Deploy with no pending migrations
+offers no **Back up first**.
+
+The confirm screen sees the migrations already on the server: the current release's
+migration files that the site's migrations table does not record, read through the site's
+own database principal without Artisan. A Deploy learns the fetched commit's own migrations
+only at apply time, where it proves and runs them as before; the review never claims to know
+them earlier, and an unreadable table is reported as no pending migrations rather than as
+"everything is pending".
+
+## Remove site keeps backups
+
+**Remove site** (#356, Destructive) now first disables and removes the site's own backup
+units: its backup slice, capture timer and service, check and offsite check units, cleanup
+units and their schedule, integrity and retention payloads. It never deletes a repository.
+The site's onsite repository (`/var/lib/barectl-backups/<id>/onsite`), its server key and
+its offsite copy in the bucket stay where they are, and the review names every path it keeps
+as well as the units it removes. A site with no backups says so.
+
+**Check backups** also lists the repositories of sites that are no longer on the server.
+Each is bounded, read-only and names only its points, times, scopes and short identifiers;
+the page shows them as **Backups of a removed site** after a check and makes no SSH
+connection of its own. The list is stored on the check's own row, never in the repository.
+
+**Delete removed-site backups** is the only way to delete them, and it is one reviewed
+**Destructive** change. Its review names the removed site, the onsite repository, the server
+key and, when offsite storage is set up, the offsite repository, and says that deletion is
+permanent. Applying first waits for that repository's lock, removes every Barectl offsite
+recovery point with a filtered remove-all and prune, and only then removes the onsite
+repository and server key. It never removes the offsite setting or another site's repository
+and does not recreate the removed site.
+
+## Schedule
+
+Each site has at most one **schedule**, created and turned off only through a reviewed
+Site change. It chooses **daily** or **weekly** (Monday) at an explicit `HH:MM` in UTC, a
+scope (**Database only** or **Full site**) and whether to copy the point offsite. An offsite
+schedule is refused until offsite storage is set up; the copy then runs after the onsite
+point is complete and holds only the repository lock. New sites start with no schedule;
+enabling backups does not create one.
+
+The schedule is a fixed native timer in the site's own backup slice, separate from its
+automation slice:
+
+- `barectl-site-<id>-backup.slice`, `.service` and `.timer`;
+- the service is a oneshot with a finite two-hour run window and no restart;
+- the timer sets `Persistent=false` (no catch-up), `AccuracySec=1s`,
+  `RandomizedDelaySec=0` and `DeferReactivation=yes`, and names its UTC calendar explicitly.
+
+A tick runs a fixed rendered body, not a change-engine run. It takes the global native lock
+with a bounded wait, then the site's `.deploy.lock`; when either is held it records a
+**skipped** run and exits, and a skip is never shown as a saved point. The capture is
+**live**: the database first, then the files, tagged `capture:live` and `origin:scheduled`,
+and never pauses the site. A full point is tagged complete only after both parts are
+verified present. The same body does not catch up: a missed window is missed. Because the
+timer sets `Persistent=false`, a missed window leaves no result line; the Backups section
+compares the last scheduled time with the last result and reports the gap as
+**The scheduled backup was skipped.**, never as a new or still-current backup.
+
+The review refuses a window that overlaps another site's window on the same server (a
+window is the hour the run starts in) and names the next free hour. The next run is shown
+only when systemd reports it; the page never invents a schedule. A fresh controller
+reconstructs the schedule and its next run from the units, the runtime payload and systemd
+during **Check backups** and every schedule review. An installed unit whose settings differ
+from the fixed template is **Outside supported settings**, is reported once, and blocks only
+that site's backup changes.
+
+Every change that names a site treats that site's running backup unit as busy, so a Deploy,
+PHP switch or restore never races a capture. Turning the schedule off stops and disables the
+timer, stops the service and slice, and removes the unit files and runtime payload.
+
+## Restore
+
+Each listed recovery point offers **Restore** with the scopes its point supports: **Database
+only**, **Files only** (from a full point) and **Full site**. It is one reviewed
+**Destructive** change with a typed confirmation of the site's primary domain. The review
+names the exact recovery point and target site, what is replaced, the matching site kind and
+database engine major, the free disk it keeps, and the expected downtime. A live recovery
+point's review says its files and database may differ by the capture window. **Files only**
+warns that the database is left as it is now, so files and database then come from different
+points.
+
+The safety backup matches the restore's scope: Database only, Files only or Full site. An
+empty target database skips it for a Database only restore and the review says so; a files or
+full restore always takes a paused safety point first.
+
+Applying takes the site's `.deploy.lock` and, with a bounded wait, the per-repository lock of
+the repository it reads and of the target's own safety repository; a held lock is a skip and
+nothing is touched. It re-lists the point under those locks and refuses a missing, incomplete
+or different-engine-major copy before the site is touched. Files are downloaded into a private
+root-only staging directory and admitted there: absolute or traversing paths, links outside
+the convention's own, device files, FIFOs, sockets, setuid and setgid files are all refused
+while the site still runs. The whole database dump is also downloaded into that private stage
+and checked there: it must carry its engine's completion marker and the reviewed database
+major, so a truncated or different-version dump is refused while the site still serves. The
+stage is removed on every exit path, and only the private stage ever holds a plain-text dump.
+The site is then paused and drained exactly as a full capture does, and the import reads the
+validated private file rather than streaming the repository again.
+
+- **Files** become a new release directory in #356's site-owned release form, owned by the
+  target site user whatever the archive recorded. Root performs only the `current` switch,
+  as Deploy does. The release that was serving stays
+  retained, and the restored release counts toward Deploy's retention of `current` plus five. Laravel's shared `.env`, `storage/` and
+  `bootstrap/cache` are replaced as a whole, not overlaid. WordPress's private configuration
+  file is replaced but the target's own database settings in it are kept, because the site
+  database is always `s<id>`. The review names each site kind's own replacement.
+- **Permissions** are re-applied from the convention, never taken from the archive. For
+  Laravel and plain PHP only `current/public` is readable by `caddy`, and PHP source stays the
+  site user's. For WordPress the files are group-readable by `caddy` and never world-readable,
+  and the private configuration file is 0600.
+- **The database** is imported by streaming `restic dump` into the site's own engine client as
+  the site's Linux user over the local socket, as the `s<id>` principal, never a superuser.
+- **Native configuration** (the Caddy site file, HAProxy and PHP-FPM) is re-rendered from the
+  convention, never from the archive. Restore never runs application code, Artisan, WP-CLI,
+  migrations, key generation or dependency downloads, and needs no network when the point is
+  onsite.
+
+Verification keeps three findings apart:
+
+- the restore finished (the files are the current release and the import completed);
+- the data checks passed (the database holds the tables the point contained and the restored
+  release is complete);
+- the site answered its readiness check through its private admission path: for WordPress
+  the HTTPS home page and login page, and for Laravel Deploy's `/up` path
+  (`/index.php/up`) through Caddy answering 200 with no redirect, using the same path
+  Deploy verifies before it removes the gate.
+
+Only after all three does the gate open and the site's background work resume. A restore that
+stops partway stays gated with one sentence and **Reopen site**, exactly like an interrupted
+full capture; **Check what happened** inspects the original run and never submits it again.
+A recovery point from the kept backups of a removed site can be restored into a matching
+site (**Backups of a removed site** on its Backups section). The review names the removed
+site as the source and refuses unless the point holds files that prove the target's own kind
+(Laravel's private environment, WordPress's private configuration, or neither for plain PHP)
+and the database copies share the same engine major. It restores from the kept repository
+and takes its safety backup in the target's own repository. A database-only point of a
+removed site cannot prove its kind, so it is not offered for this.
+
+**Across servers.** On a server whose offsite storage was connected, the Backups section lists
+the source site's recovery points separately. The target is an existing Barectl-created site
+of the same kind and database engine major; the source site identifier may differ. The review
+warns that the target keeps its own domain and that Barectl never rewrites application data,
+and the source passphrase is typed again on apply because Barectl does not store it. Applying
+re-lists the source repository read-only before the safety backup and refuses a missing,
+incomplete, different-kind or different-engine-major point before touching the target. The
+source database version is checked when the repository is opened.
+
+## Export
+
+**Export** on a recovery point copies it to this computer for local development. It is one
+reviewed change that declares the new **site data leaves the server** effect, so its consent is
+**Shared** even though it names one site; a Site operator can prepare it but cannot apply it.
+There is no new permission name and no public URL.
+
+The server restores the point's files snapshot into a private root-only stage and admits it
+with the restore rules. It builds one `files.tar` archive of the release (and, for Laravel,
+the shared `storage/` directory) and one `database.sql` dump when the point has a database
+part. It never adds the site's private configuration: WordPress's `wp-config.php`, Laravel's
+`.env` and its cached configuration. A canary over the archive refuses the export if a private
+file's bytes or name are present. One export is capped at 48 MiB in total (32 MiB for each
+artifact); a larger point is refused rather than moved.
+
+The worker moves the archive and dump through the same `RemoteShell` connection it already
+uses, in bounded 32 KiB reads, and keeps them in private controller staging. Each read is one
+fixed `dd`/`base64` command, so the existing command timeout and 64 KiB output bound apply;
+there is no second SSH connection or transfer service. The transfer checks the size and
+SHA-256 of each artifact and removes the server stage on every path. A stage left by a killed
+worker is bounded and pruned by the next export of that site.
+
+The Backups section lists the export with **Download files** and **Download database**. Each
+download needs `operations.change_shared`, is marked no-store and attachment, and expires
+after 30 minutes. A completed download removes its file; **Cancel export** removes the copy
+immediately; expiry removes it without connecting to the server. Nothing is stored in the
+database as a blob.
+
+## Retention
+
+**Keep backups for** offers 1 week, 2 weeks, 3 weeks, 1 month or 6 months. No policy exists
+until an operator reviews one; 1 week is preselected only when the site has no policy yet.
+**Set retention** is one reviewed **Destructive** change. Its review runs
+`restic forget --dry-run --json` against fresh onsite and offsite listings and lists every
+recovery point the policy would delete now, with its time, scope and location, and says that
+deletion is permanent. Applying installs the site's cleanup units and deletes nothing itself.
+
+Cleanup runs daily onsite and weekly offsite as fixed native units in the site's backup slice.
+Each run first requires a synchronized clock from `timedatectl`; otherwise it skips with that
+reason. For each location, scope and part it runs `restic forget` filtered by the Barectl
+marker and `complete` tag, with `--group-by ''`, `--keep-within <period>d`, `--keep-last 1` and
+`--keep-tag keep`, and then `prune`. Because full points share one capture time, their parts
+expire together. Untagged or hand-made snapshots are reported and never touched, and onsite
+and offsite results are computed independently.
+
+Before forgetting in a scope, onsite cleanup restore-reads the newest complete point there.
+Offsite cleanup performs no read-back of its own, so it pays no second S3 egress: it consumes
+the newest weekly offsite integrity finding and requires that finding to have read back the
+newest complete offsite point. If no such finding exists, or it names a different point such
+as when a newer capture landed after the check, everything in that scope is kept and reported
+until the next weekly check. The newest readable point per scope and
+location is always kept. A held per-repository lock is a skip, never a success; restic's own
+stale-lock rule applies and Barectl never runs `unlock --remove-all`.
+
+Every cleanup run writes one `barectl-result` line with `deleted`, `kept`, `skipped` and
+`failed` point counts per location, plus the `foreign` snapshots it left alone. It carries no
+path, repository URL, credential or dump content.
+
+**Turn retention off** is one reviewed Site change. It removes the cleanup units and stops
+them; it deletes no recovery point.
+
+## Integrity
+
+Enabling backups installs one weekly integrity unit per repository, onsite and offsite, in
+the site's backup slice. Each run holds the per-repository native lock, runs `restic check`
+with a rotating `--read-data-subset`, and reads the newest complete recovery point back with
+`restic dump` through a private staging directory. The subset advances on every recorded run and
+covers the whole repository over twenty weeks; the result line names the subset that ran.
+
+The integrity finding is its own row per site and location, with its time. It is shown apart
+from the capture result, the offsite copy result and the recovery-point list. **Verified**
+means Barectl itself opened the newest point: a successful `restic snapshots` listing, or
+exit status 0 from the repository check alone, never marks a point verified. A corrupted pack
+is reported as an integrity failure. It changes no snapshot or capture, and the capture
+result stays as it was.
+
+A held per-repository lock or an offsite store that is not set up yet is a skip, never a
+success. Every run writes one `barectl-result` line with its class, location, counts, bytes,
+short point identifier and subset. It carries no path, repository URL, credential or dump
+content.
+
+## Keep
+
+**Keep** on a recovery point is one reviewed Site change that toggles the point's `keep` tag
+and changes no other tag. It never deletes a snapshot. Retention's `--keep-tag keep` then
+preserves the point until it is unkept. Keeping a point uses only the onsite repository, so it
+never needs offsite credentials.
+
+## Restic results
 
 Restic's exit codes map to the engine's result classes: `0` succeeded, `3` partial (a
 snapshot was saved, some data was unreadable), `10` refused (repository missing), `11` a
 skipped run (lock failed), `12` refused (wrong password), and any other code failed. A dump
 failure is refused with `backup_dump` and leaves no snapshot.
 
-Every capture writes one safe `barectl-result` line with its result class, counts, bytes and
-a short point identifier. It never carries a path, repository URL, credential or dump
-content.
+Every capture writes one final safe `barectl-result` line with its result class, counts,
+bytes, a short point identifier and its offsite outcome (`copied`, `failed`, or empty when
+offsite storage is not set up). `Copy offsite again` writes its own `kind:"copy"` line, so
+discovery keeps the copy result apart from the capture result. A full capture first writes a
+`backup_paused` line so discovery can name a capture that was interrupted; the engine ignores
+that interim line and reads only the final outcome. Neither line carries a path, repository URL, credential or
+dump content.
 
 ## Check backups
 
 **Check backups** is an explicit authorized read through the worker. It runs
 `restic snapshots --json --no-lock` with the site's server key and stores the bounded,
 Barectl-tagged listing on its request row with the time it was read. It never changes the
-repository and never authorizes a restore. Opening the Backups section makes no SSH
-connection. A listing older than 15 minutes is labelled as possibly out of date.
+repository and never authorizes a restore. The same read lists each repository a removed
+site kept, one bounded listing per repository, and stores those points on the same row, so
+any site's Backups section shows them after a check and opening the section still makes no
+SSH connection. A listing older than 15 minutes is labelled as possibly out of date.
 
 ## Discovery
 
@@ -65,6 +444,8 @@ Passive discovery reads the restic profile, each site's root-only repository and
 whether the site database exists, and the newest safe `barectl-result` line in the journal.
 It runs no restic command, lists no snapshots and contacts no storage. A fresh controller
 reconstructs that backups are enabled and the last result from this native evidence alone.
+A removed site's kept repository is a fact only an explicit read names: **Check backups**
+lists it, and passive discovery never invents one.
 
 ## Paths
 
@@ -74,13 +455,69 @@ reconstructs that backups are enabled and the last result from this native evide
 | Server key | `/etc/barectl/backups/<id>.key` | root `0600` |
 | restic profile | `/nix/var/nix/profiles/barectl/restic` | root, the pinned catalog build |
 | restic cache | `/var/cache/barectl/restic` | root `0700` |
+| Retention body and payload | `/etc/barectl/backups/retention/<id>.sh`, `<id>.json` | root `0600`, directory `0700` |
+| Cleanup units | `/etc/systemd/system/barectl-site-<id>-cleanup.service` and `.timer`, plus `-cleanupoffsite.service` and `.timer` | root-owned fixed templates |
+| Integrity units | `/etc/systemd/system/barectl-site-<id>-check.service` and `.timer`, plus `-checkoffsite.service` and `.timer` | root-owned fixed templates |
+| Integrity body and payload | `/etc/barectl/backups/integrity/<id>.sh`, `<id>.json` | root `0700` script, `0600` payload |
 
 ## Native evidence
 
-The checked-in body is `backups/bodies/enable.py` for setup and
-`backups/bodies/backup.py` for a capture; both print their stages and one result line. The
-read is `backups/bodies/observe.py`, shared with the database binding's pure catalog reader.
-The first shared Phase D native scenario is `disposable/test_backups.py`. On the local
-ubuntu-26.04 lane it measured 40.1 s for the one test and 47 s for the scenario including
-lane setup, inside the 180 s item limit. The local full build measured 264 s against the
-300 s target and 900 s limit.
+The checked-in body is `backups/bodies/enable.py` for setup, `backups/bodies/backup.py` for
+a database-only capture, `backups/bodies/full.py` for a paused full capture,
+`backups/bodies/restore.py` for Database only, Files only and Full site restores, including
+from a connected source repository, `backups/bodies/offsite.py` for offsite storage,
+`backups/bodies/connect.py` for Connect existing backup storage, `backups/bodies/keys.py` for
+replacing the recovery passphrase, `backups/bodies/copy.py` for Copy offsite again, `backups/bodies/removed.py`
+for Delete removed-site backups, `backups/bodies/reopen.py` for
+reopening a paused site, `backups/bodies/schedule.py` for the schedule install and its live
+tick, `backups/bodies/retention.py` for retention cleanup, Keep and their unit templates, and
+`backups/bodies/integrity.py` for the weekly check; each prints its stages and a result line.
+The integrity run is appended to the Enable backups body, so the check script is the reviewed
+body itself. The schedule read is
+`backups/bodies/observe_schedule.py`. Passive discovery reads the newest integrity result
+lines for each location and stores them as typed `BackupIntegrity` rows; Check backups
+refreshes them with one bounded journal read. The pause helpers shared by
+the full capture and the restore are `backups/bodies/paused.py`. The read is
+`backups/bodies/observe.py`, shared with the database binding's pure catalog reader. The first
+shared Phase D native scenario is `disposable/test_backups.py`; its offsite checks use a
+local S3-compatible fixture (`disposable/native_mirror/s3.py`) in its own lane container and
+never the internet. The #401 files-only and full-site restore assertions and the #405 integrity
+assertions extend the same scenario, and #406 adds `WordPressFullRestore` and
+`LaravelFullRestore` there: one WordPress site created on the prepared L5 layer and the
+prepared Laravel site, each with a paused full capture, a full restore with its safety backup,
+and data, ownership, permission and readiness checks; the Laravel item also proves a restored
+release counts toward Deploy's retention. The #407 assertions add a real Deploy with pending migrations whose confirm screen offers
+**Back up first**, and a real Remove site that keeps its repository and lists it as removed.
+#408 adds the `DisasterRecovery` item there: one plain PHP site on the prepared L5 layer is
+captured full and copied offsite; a second server boots from the same layer, creates a
+matching site under another identifier and domain, connects the same local S3-compatible
+storage with the kit facts, passphrase and keys, and restores the point; a plain `restic`
+read of the kit's onsite path with the passphrase alone then recovers the source database.
+The #405 and #408 items have no hosted measurement; the [Phase D qualification
+record](phase-d-qualification.md#scenarios) carries the measured local times. On the local
+arm64 lane the nine backup items measured `BackupLifecycle` 108.7 s, `FullSiteRestore` 71.0 s,
+`WordPressFullRestore` 54.0 s, `LaravelFullRestore` 58.8 s, `ScheduledCapture` 84.3 s,
+`Retention` 127.9 s, `Integrity` 88.8 s, `DisasterRecovery` 93.0 s and `OfflineRecovery`
+38.7 s, with 135 s for the module. The #407 assertions run inside `LaravelFullRestore`. #410
+adds `BackupFailure` to the same module: a dump failure leaves no point, a short disk refuses
+the capture and deletes nothing, and a killed capture stays gated with one sentence and
+**Reopen site**; it measured 55.4 s. The breadth-only reboot proof measured 65.3 s for the
+test and 70 s for its scenario.
+
+The #410 review pass adds assertions to the existing items without a new class: `FullSiteRestore`
+holds a repository lock and expects the restore to skip with `restore_lock` (never race), then
+captures a point whose dump has a valid header but no completion marker and expects
+`restore_dump` while the site still answers 200 and no plain-text `.sql` survives in
+`/var/lib/barectl-restore`; `BackupLifecycle` holds the repository lock while **Remove offsite
+storage** runs and expects a skip; `LaravelFullRestore` deletes the removed site's kept
+repository through **Delete removed-site backups** and proves the repository, key and removed
+listing are gone; `Retention` runs the weekly offsite check before offsite cleanup so cleanup
+consumes its recorded read-back. The full integration run at `601a738` proved the offsite
+lock, removed-repository deletion and offsite-cleanup assertions; the held-lock restore and
+truncated-dump assertions were corrected and rerun together on the review branch, where both
+items passed in 83 s (`LaravelFullRestore` 52.8 s, `FullSiteRestore` 76.6 s).
+
+The local full build at the #410 head measured 360 s against the 300 s target and 900 s limit
+(controller-fast 40 s, fast validators 68 s, browser 93 s, native 360 s). The joint fast stage
+measured 68 s against its 60 s target. Both misses are named as defects with their next actions
+in the qualification record, not raised targets.

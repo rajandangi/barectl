@@ -19,6 +19,9 @@ class Home(StrEnum):
     SERVER_SITE_CREATE = "server_site_create"
     SITE = "site"
     SITE_BACKUPS = "site_backups"
+    SITE_DEPLOYMENTS = "site_deployments"
+    # A POST endpoint, used only as a run's completion action.
+    SITE_DEPLOY_PREPARE = "site_deploy_prepare"
 
 
 @dataclass(frozen=True)
@@ -35,9 +38,72 @@ class ChangeWords:
     after: str = ""
     after_home: Home = Home.SERVER
     after_permission: str = ""
+    # A completion action that starts the next review itself is a CSRF-protected POST.
+    after_post: bool = False
+    # Wording for the same kind when it runs as one step before a Deploy (#407).
+    before_deploy: ChangeWords | None = None
 
 
 _ENGINE_LABELS: Final[dict[str, str]] = {"mariadb": "MariaDB", "postgresql": "PostgreSQL"}
+
+_BACK_UP_STEPS: Final = {
+    "preflight": "Checking the site",
+    "gate": "Pausing the site",
+    "drain": "Finishing requests already running",
+    "backup-database": "Copying the database",
+    "backup-files": "Copying the files",
+    "verify": "Checking the recovery point",
+    "open": "Reopening the site",
+}
+_BACK_UP_FULL_SITE: Final = ChangeWords(
+    title="Back up all of {site}",
+    summary=(
+        (
+            "Barectl copies this site's database and files into one encrypted recovery "
+            "point on the server."
+        ),
+        (
+            "Visitors see a short maintenance page while the copy is taken. The site's "
+            "scheduled tasks and queue workers are stopped first and started again when "
+            "the copy finishes."
+        ),
+        (
+            "Logs, caches, sessions, temporary files, other releases and server settings are "
+            "left out."
+        ),
+        (
+            "If the copy stops partway, the site stays paused until you reopen it. "
+            "Barectl never deletes older copies to make room."
+        ),
+    ),
+    action="Back up now",
+    steps=_BACK_UP_STEPS,
+    home=Home.SITE_BACKUPS,
+    after="Back to backups",
+    after_home=Home.SITE_BACKUPS,
+    # Prepared from a Deploy confirm screen: the same capture, then back to Deploy (#407).
+    before_deploy=ChangeWords(
+        title="Back up {site} before deploying",
+        summary=(
+            "Barectl takes one full recovery point before the deploy changes this site's data.",
+            (
+                "Visitors see a short maintenance page while the copy is taken. The site's "
+                "scheduled tasks and queue workers are stopped first and started again when "
+                "the copy finishes."
+            ),
+            (
+                "The deploy is its own step. When the copy finishes, Barectl offers "
+                "Continue to Deploy."
+            ),
+        ),
+        action="Back up first",
+        steps=_BACK_UP_STEPS,
+        home=Home.SITE_DEPLOYMENTS,
+        after="Continue to Deploy",
+        after_home=Home.SITE_DEPLOY_PREPARE,
+        after_post=True,
+    ),
+)
 
 
 def selection_label(selection: str) -> str:
@@ -369,6 +435,73 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to backups",
         after_home=Home.SITE_BACKUPS,
     ),
+    "set_up_offsite_storage": ChangeWords(
+        title="Set up offsite backup storage",
+        summary=(
+            (
+                "Barectl will connect this server's encrypted backups to a bucket on Amazon S3 "
+                "or Cloudflare R2 and check it can be written and listed before saving."
+            ),
+            (
+                "The access keys and the recovery passphrase live only in private files on "
+                "this server; Barectl never stores them."
+            ),
+            (
+                "Object lock and immutability are not configured. S3 Object Lock and bucket "
+                "locks are provider features outside Barectl."
+            ),
+        ),
+        action="Set up storage",
+        steps={
+            "preflight": "Checking the server",
+            "credentials": "Checking the keys",
+            "bucket": "Checking the bucket",
+            "repositories": "Preparing each site's offsite copy",
+            "verify": "Verifying",
+        },
+        home=Home.SERVER_SETTINGS,
+        after="Back to Server Settings",
+        after_home=Home.SERVER_SETTINGS,
+    ),
+    "remove_offsite_storage": ChangeWords(
+        title="Remove offsite backup storage",
+        summary=(
+            "Barectl will forget this server's offsite storage setting and its keys.",
+            (
+                "It deletes no offsite copy: everything already in the bucket stays there. "
+                "Existing recovery points on this server are unchanged."
+            ),
+        ),
+        action="Remove storage",
+        steps={
+            "preflight": "Checking the server",
+            "remove": "Removing the setting",
+            "verify": "Verifying",
+        },
+        home=Home.SERVER_SETTINGS,
+        after="Back to Server Settings",
+        after_home=Home.SERVER_SETTINGS,
+    ),
+    "copy_offsite_again": ChangeWords(
+        title="Copy a recovery point of {site} offsite again",
+        summary=(
+            "Barectl will copy one existing recovery point from this server to offsite storage.",
+            (
+                "The recovery point saved on this server is unchanged. If the copy fails, "
+                "copy it again when the storage is reachable."
+            ),
+        ),
+        action="Copy offsite again",
+        steps={
+            "preflight": "Checking the recovery point",
+            "lock": "Waiting for the copy lock",
+            "copy": "Copying offsite",
+            "verify": "Checking the offsite copy",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
     "back_up_now": ChangeWords(
         title="Back up the database of {site}",
         summary=(
@@ -384,6 +517,83 @@ _WORDS: Final[dict[str, ChangeWords]] = {
             "preflight": "Checking the site",
             "backup": "Copying the database",
             "verify": "Checking the recovery point",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
+    "back_up_full_site": _BACK_UP_FULL_SITE,
+    "set_backup_schedule": ChangeWords(
+        title="Change the backup schedule of {site}",
+        summary=(
+            (
+                "Barectl runs one backup on the server at the time you choose, in UTC, even "
+                "while this computer is closed."
+            ),
+            (
+                "The backup is taken while the site keeps serving: the database first, then "
+                "the files. A missed run is skipped, never caught up later."
+            ),
+            (
+                "A window that overlaps another site's backup is refused, and Barectl names "
+                "the next free hour."
+            ),
+        ),
+        action="Change schedule",
+        steps={
+            "preflight": "Checking the site",
+            "install": "Installing the schedule",
+            "verify": "Reading the next run",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
+    "restore_database": ChangeWords(
+        title="Restore {site}",
+        summary=(
+            (
+                "Barectl replaces what you chose with the recovery point you selected. The "
+                "review says exactly what is replaced; other sites are not touched."
+            ),
+            (
+                "The site shows a maintenance page while the data is restored and checked. If "
+                "the restore stops partway, the site stays paused until you reopen it."
+            ),
+        ),
+        action="Restore",
+        steps={
+            "preflight": "Checking the site",
+            "check": "Checking the recovery point",
+            "safety": "Taking a safety backup",
+            "stage": "Preparing the files privately",
+            "gate": "Pausing the site",
+            "drain": "Letting requests finish",
+            "import": "Restoring the database",
+            "files": "Restoring the files",
+            "config": "Re-creating the server configuration",
+            "checks": "Checking the data",
+            "readiness": "Checking the site answers",
+            "open": "Reopening the site",
+        },
+        home=Home.SITE_BACKUPS,
+        after="Back to backups",
+        after_home=Home.SITE_BACKUPS,
+    ),
+    "reopen_site": ChangeWords(
+        title="Reopen {site}",
+        summary=(
+            "Barectl removes the maintenance page so visitors reach the site again.",
+            (
+                "The site's background work stays off. Open Scheduled tasks or Queue workers "
+                "to choose what runs again."
+            ),
+        ),
+        action="Reopen site",
+        steps={
+            "preflight": "Checking the site",
+            "publish": "Reopening the site",
+            "verify": "Verifying",
         },
         home=Home.SITE_BACKUPS,
         after="Back to backups",

@@ -212,6 +212,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Another barectl run still had processes on the server, so this run stopped before "
         "changing anything. Prepare a new review after it finishes."
     ),
+    "active_backup": (
+        "This site's scheduled backup still had processes on the server, so this run stopped "
+        "before changing anything. Prepare a new review after it finishes."
+    ),
     "capacity": (
         "The server kept too many finished barectl runs when this run held the lock, so it "
         "stopped before changing anything. Clear finished runs with a reviewed cleanup, "
@@ -558,6 +562,119 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The backup tool reported an error Barectl does not recognize, so nothing is recorded "
         "as saved. Read the run's journal on the server and prepare a new review."
     ),
+    "backup_files": (
+        "The site's files could not be copied, so the point is incomplete and the site stays "
+        "paused. Read the run's journal, then reopen the site and prepare a new review."
+    ),
+    "backup_idle": (
+        "The site's running work did not finish within the reviewed wait, so the files were "
+        "not copied and the site stays paused. Read the run's journal, then reopen the site."
+    ),
+    "backup_paused": (
+        "The full backup stopped after pausing the site. Nothing after that ran. Reopen the "
+        "site, then prepare a new review."
+    ),
+    "backup_gate": (
+        "Barectl could not publish or remove the maintenance page, so the site stays paused. "
+        "Read the run's journal, then reopen the site."
+    ),
+    "offsite_bucket": (
+        "The bucket did not answer a write and a listing with the reviewed keys, so Barectl "
+        "did not keep the offsite storage setting. Check the bucket and keys, then prepare a "
+        "new review."
+    ),
+    "offsite_repository": (
+        "An offsite repository could not be initialised or opened. The copies already in the "
+        "bucket are unchanged. Check the bucket and keys, then prepare a new review."
+    ),
+    "offsite_key": (
+        "The offsite access keys or recovery passphrase could not be used, so nothing was "
+        "copied. Prepare a new review and type the values again."
+    ),
+    "offsite_copy": (
+        "The offsite copy did not finish. The recovery point saved on this server is "
+        "unchanged; copy it offsite again when the storage is reachable."
+    ),
+    "offsite_remove": (
+        "Barectl could not remove the offsite setting from the server. The copies already in "
+        "the bucket are unchanged. Check the run's journal and prepare a new review."
+    ),
+    "site_reopen": (
+        "Barectl could not prove that the site serves its files again, so it may still show "
+        "the maintenance page. Read the run's journal and prepare a new review."
+    ),
+    "removed_backup": (
+        "Barectl could not delete the removed site's backups, so they stay where they are. "
+        "Read the run's journal on the server, then prepare a new review."
+    ),
+    "restore_site": (
+        "The site's Linux account could not be read, so the restore stopped before changing "
+        "anything. Run discovery and prepare a new review."
+    ),
+    "restore_repository": (
+        "The site's backup repository could not be read, so nothing was restored. Read the "
+        "run's journal on the server, then prepare a new review."
+    ),
+    "restore_evidence": (
+        "The site's reviewed files changed before the run started, so nothing was restored. "
+        "Run discovery and prepare a new review."
+    ),
+    "restore_lock": (
+        "The site was busy with another change, so the restore was skipped. Prepare a new "
+        "review after that change finishes."
+    ),
+    "restore_disk": (
+        "The server does not have the free space the review keeps in reserve, so nothing was "
+        "restored. Free space, then prepare a new review."
+    ),
+    "restore_point": (
+        "The recovery point is missing or incomplete, so nothing was restored. Check backups "
+        "and prepare a new review."
+    ),
+    "restore_engine": (
+        "The recovery point was made by a different database version than this site uses, so "
+        "nothing was restored. Prepare a new review from a matching point."
+    ),
+    "restore_target": (
+        "The site's database changed since the review, so nothing was restored. Prepare a new "
+        "review against the current site."
+    ),
+    "restore_dump": (
+        "The recovery point's database copy was truncated, so nothing was restored and the "
+        "site still serves. Prepare a new review from a complete point."
+    ),
+    "restore_safety": (
+        "The safety backup could not be taken or checked, so nothing was overwritten. Read the "
+        "run's journal and prepare a new review."
+    ),
+    "restore_gate": (
+        "Barectl could not publish the maintenance page, so the site's database was not "
+        "changed. Read the run's journal, then prepare a new review."
+    ),
+    "restore_paused": (
+        "The restore stopped after pausing the site. Nothing after that ran. Reopen the site, "
+        "then prepare a new review."
+    ),
+    "restore_idle": (
+        "The site's running requests or background work did not finish within the reviewed "
+        "wait, so the database was not changed and the site stays paused. Reopen the site."
+    ),
+    "restore_import": (
+        "The database import did not finish, so the site stays paused and the data may be "
+        "partly replaced. Read the run's journal, then reopen the site and check what remained."
+    ),
+    "restore_data": (
+        "The import finished but its data checks did not pass, so the site stays paused. Read "
+        "the run's journal, then reopen the site and check the data."
+    ),
+    "restore_readiness": (
+        "The data was imported but the site did not answer its readiness check, so it stays "
+        "paused. Read the run's journal, then reopen the site and check the application."
+    ),
+    "restore_open": (
+        "Barectl could not remove the maintenance page, so the site stays paused. Read the "
+        "run's journal and prepare a new review."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -845,6 +962,41 @@ RESULT_REASONS: Final = frozenset(
         "backup_verify",
         "backup_unknown",
         "backup_partial",
+        "backup_files",
+        "backup_idle",
+        "backup_paused",
+        "backup_gate",
+        "backup_offsite",
+        "schedule_timer",
+        "schedule_units",
+        "schedule_install",
+        "offsite_bucket",
+        "offsite_repository",
+        "offsite_key",
+        "offsite_copy",
+        "offsite_remove",
+        "removed_backup",
+        "site_reopen",
+        "restore_site",
+        "restore_repository",
+        "restore_evidence",
+        "restore_lock",
+        "restore_disk",
+        "restore_point",
+        "restore_engine",
+        "restore_dump",
+        "restore_target",
+        "restore_safety",
+        "restore_gate",
+        "restore_paused",
+        "restore_idle",
+        "restore_import",
+        "restore_data",
+        "restore_readiness",
+        "restore_files",
+        "restore_config",
+        "restore_open",
+        "restore_done",
         "logrotate_missing",
         "rotation_invalid",
     }
@@ -880,6 +1032,10 @@ def parse_result_line(text: str) -> ResultLine | None:
         reason = value.get("reason", "")
         if not isinstance(reason, str) or reason not in RESULT_REASONS:
             raise native.Unreadable("The result line is not in the engine's form.")
+        # A full capture or restore records the pause before it starts copying so discovery
+        # can name an interrupted run. It is not the run's outcome: the final result follows.
+        if reason in ("backup_paused", "restore_paused"):
+            continue
         return ResultLine(result_class, reason)
     return None
 
@@ -981,6 +1137,27 @@ def _refused(reason: str) -> str:
 
 def _lock_busy() -> str:
     return f'{{ r \'{{"class":"lock_busy"}}\'; exit {native.Code.LOCK_BUSY}; }}'
+
+
+def _backup_step(review: ChangeReview) -> list[str]:
+    """A running scheduled backup is busy for every change that names its site (#402)."""
+    sites = [
+        site
+        for site in review.affected_sites
+        if isinstance(site, str) and re.fullmatch(r"[a-z][a-z0-9]{2,23}", site)
+    ]
+    if not sites:
+        return []
+    paths = " ".join(
+        f"/sys/fs/cgroup/system.slice/barectl-site-{site}-backup.service/cgroup.events"
+        for site in sites
+    )
+    return [
+        (
+            f'for e in {paths}; do [ -e "$e" ] || continue; '
+            f"grep -qx 'populated 1' \"$e\" && {_refused('active_backup')}; done"
+        )
+    ]
 
 
 def _sites_step(review: ChangeReview) -> list[str]:
@@ -1120,6 +1297,7 @@ def payload(
             f'[ "$e" = {own} ] && continue; [ -e "$e" ] || continue; '
             f"grep -qx 'populated 1' \"$e\" && {_refused('active_run')}; done"
         ),
+        *_backup_step(review),
         (f"n=$({native.RETAINED_UNITS} | grep -c .)"),
         f'[ "$((n - 1))" -lt {kind.capacity} ] || {_refused("capacity")}',
         *_sites_step(review),

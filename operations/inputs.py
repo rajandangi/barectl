@@ -23,6 +23,7 @@ class InputShape(StrEnum):
     SITE_OBJECT_CACHE = "site_object_cache"
     SITE = "site"
     SITE_DATABASE = "site_database"
+    SITE_RECOVERY_POINT = "site_recovery_point"
     SITE_REMOVE = "site_remove"
     LARAVEL_DEPLOY = "laravel_deploy"
     LARAVEL_ROLLBACK = "laravel_rollback"
@@ -33,8 +34,16 @@ class InputShape(StrEnum):
     WORDPRESS_SETTINGS = "wordpress_settings"
     CERTIFICATE_EMAIL = "certificate_email"
     AUTOMATION_SCHEDULE = "automation_schedule"
+    BACKUP_SCHEDULE = "backup_schedule"
     LARAVEL_QUEUE_WORKERS = "laravel_queue_workers"
     SITE_LOG_ROTATION = "site_log_rotation"
+    OFFSITE_STORAGE = "offsite_storage"
+    SITE_BACKUP_POINT = "site_backup_point"
+    BACKUP_RETENTION = "backup_retention"
+    BACKUP_CAPTURE = "backup_capture"
+    CONNECT_OFFSITE_STORAGE = "connect_offsite_storage"
+    REPLACE_RECOVERY_PASSPHRASE = "replace_recovery_passphrase"  # noqa: S105 - a shape name
+    REMOVED_BACKUP = "removed_backup"
 
 
 @dataclass(frozen=True)
@@ -44,8 +53,17 @@ class PreparationInputs:
     names: tuple[str, ...] = ()
     # The retained release a Roll back selects; empty for every other kind.
     release: str = ""
+    # The recovery point a restore selects; empty for every other kind.
+    point: str = ""
+    # A restore from the kept backups of a removed site names that site; empty otherwise.
+    source: str = ""
+    # A reviewed backup retention period in days; 0 for every other kind.
+    days: int = 0
     # The site's Deploy switch: pending migrations run only when this is true.
     migrations: bool = True
+    # A full capture prepared from a Deploy confirm screen offers its completion link back
+    # to Deploy (#407); the engine gains no chain of its own.
+    from_deploy: bool = False
     # Whether a created site is served over HTTPS. The dashboard passes True; the native
     # scenarios and the change kind's own default keep sites HTTP-only unless asked.
     https: bool = False
@@ -89,12 +107,28 @@ class PreparationInputs:
     certificate_email: str | None = None
     # A site's scheduled-task change: "on", "off" or "run" (Phase C #357).
     schedule_state: str = ""
+    # A site's one backup schedule (#402): its state plus the reviewed window.
+    backup_schedule: bool = False
+    frequency: str = ""
+    at: str = ""
+    # A backup schedule's scope or a restore's scope (database, files or the full site).
+    scope: str = ""
+    offsite: bool = False
     # A Laravel site's queue-worker action ("start", "stop", "restart") and, for a start,
     # the reviewed definition (Phase C #266).
     worker_action: str = ""
     worker_queues: tuple[str, ...] = ()
     worker_processes: int = 0
     worker_timeout: int = 0
+    # Offsite storage: the one provider template and its non-secret location fields
+    # (Phase D #403). Keys travel only through the confidential input channel.
+    provider: str = ""
+    bucket: str = ""
+    region: str = ""
+    account: str = ""
+    # Connecting another server's offsite storage: the kit's prefix and source sites.
+    prefix: str = ""
+    sites: tuple[str, ...] = ()
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -130,6 +164,53 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
+        if self.days:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "days": self.days,
+            }
+        if self.backup_schedule:
+            reviewed: dict[str, object] = {
+                "version": 1,
+                "identifier": self.identifier,
+                "state": self.schedule_state,
+            }
+            if self.schedule_state == "on":
+                reviewed.update(
+                    frequency=self.frequency,
+                    at=self.at,
+                    scope=self.scope,
+                    offsite=self.offsite,
+                )
+            return reviewed
+        if self.prefix or self.sites:
+            connect: dict[str, object] = {
+                "version": 1,
+                "provider": self.provider,
+                "bucket": self.bucket,
+                "prefix": self.prefix,
+                "sites": list(self.sites),
+            }
+            if self.provider == "s3":
+                connect["region"] = self.region
+            else:
+                connect["account"] = self.account
+            return connect
+        if self.provider:
+            if self.provider == "s3":
+                return {
+                    "version": 1,
+                    "provider": self.provider,
+                    "bucket": self.bucket,
+                    "region": self.region,
+                }
+            return {
+                "version": 1,
+                "provider": self.provider,
+                "bucket": self.bucket,
+                "account": self.account,
+            }
         if self.worker_action:
             value: dict[str, object] = {
                 "version": 1,
@@ -195,6 +276,17 @@ class PreparationInputs:
             }
         if self.release:
             return {"version": 1, "identifier": self.identifier, "release": self.release}
+        if self.point:
+            selected: dict[str, object] = {
+                "version": 1,
+                "identifier": self.identifier,
+                "point": self.point,
+            }
+            if self.scope:
+                selected["scope"] = self.scope
+            if self.source:
+                selected["source"] = self.source
+            return selected
         if self.readiness:
             return {
                 "version": 1,
@@ -214,6 +306,8 @@ class PreparationInputs:
                     value["primary"] = self.primary
                 if not self.migrations:
                     value["migrations"] = False
+                if self.from_deploy:
+                    value["from_deploy"] = True
                 return value
             return {"version": 1, "selection": self.selection, "identifier": self.identifier}
         if self.identifier:
@@ -582,6 +676,42 @@ def _identifier_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Pr
     return PreparationInputs("", identifier)
 
 
+def _recovery_point_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    """A restore names its site, one Barectl recovery point and what to restore."""
+    from backups import convention
+    from sites.names import request
+
+    if set(value) not in (
+        {"version", "identifier", "point"},
+        {"version", "identifier", "point", "scope"},
+        {"version", "identifier", "point", "source"},
+        {"version", "identifier", "point", "scope", "source"},
+    ):
+        raise ValueError(INVALID_INPUTS)
+    identifier, point, scope = value["identifier"], value["point"], value.get("scope", "")
+    source = value.get("source", "")
+    if (
+        not isinstance(identifier, str)
+        or not isinstance(point, str)
+        or not isinstance(scope, str)
+        or scope not in ("", *convention.SCOPES)
+        or not isinstance(source, str)
+        or (source and convention.SITE_IDENTIFIER.fullmatch(source) is None)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    if convention.POINT.fullmatch(point) is None:
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, point=point, scope=scope, source=source)
+
+
 def _site_remove_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
     """A site removal names its identifier and, when known, its primary domain fallback."""
     from sites.names import canonical_name, valid_identifier
@@ -724,6 +854,58 @@ def _schedule_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> Pre
     return PreparationInputs("", identifier, schedule_state=str(state))
 
 
+def _backup_schedule_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    """One site's backup schedule: on with a daily or weekly UTC window, or off."""
+    from backups import convention
+    from sites.names import valid_identifier
+
+    if "version" not in value or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    if set(value) not in (
+        {"version", "identifier", "state"},
+        {"version", "identifier", "state", "frequency", "at", "scope", "offsite"},
+    ):
+        raise ValueError(INVALID_INPUTS)
+    identifier, state = value["identifier"], value["state"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or state not in ("on", "off")
+        or not isinstance(state, str)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    if state == "off":
+        if set(value) != {"version", "identifier", "state"}:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs("", identifier, schedule_state="off", backup_schedule=True)
+    frequency, at, scope, offsite = (
+        value["frequency"],
+        value["at"],
+        value["scope"],
+        value["offsite"],
+    )
+    if (
+        frequency not in convention.FREQUENCIES
+        or not isinstance(at, str)
+        or convention.TIME.fullmatch(at) is None
+        or scope not in ("database", "full")
+        or type(offsite) is not bool
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(
+        "",
+        identifier,
+        schedule_state="on",
+        backup_schedule=True,
+        frequency=str(frequency),
+        at=at,
+        scope=str(scope),
+        offsite=offsite,
+    )
+
+
 def _worker_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
     from automation import workers
     from sites.names import valid_identifier
@@ -781,6 +963,127 @@ def _site_log_rotation_inputs(
     return PreparationInputs("", identifier)
 
 
+def _offsite_storage_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from backups import convention
+
+    if value.get("version") != 1 or value.get("provider") not in ("s3", "r2"):
+        raise ValueError(INVALID_INPUTS)
+    provider = str(value["provider"])
+    bucket = value.get("bucket")
+    if not isinstance(bucket, str) or convention.BUCKET.fullmatch(bucket) is None:
+        raise ValueError(INVALID_INPUTS)
+    if provider == "s3":
+        if set(value) != {"version", "provider", "bucket", "region"}:
+            raise ValueError(INVALID_INPUTS)
+        region = value.get("region")
+        if not isinstance(region, str) or convention.REGION.fullmatch(region) is None:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs(provider=provider, bucket=bucket, region=region)
+    if set(value) != {"version", "provider", "bucket", "account"}:
+        raise ValueError(INVALID_INPUTS)
+    account = value.get("account")
+    if not isinstance(account, str) or convention.ACCOUNT.fullmatch(account) is None:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(provider=provider, bucket=bucket, account=account)
+
+
+def _connect_offsite_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from backups import convention
+    from sites.names import valid_identifier
+
+    if value.get("version") != 1 or value.get("provider") not in ("s3", "r2"):
+        raise ValueError(INVALID_INPUTS)
+    provider = str(value["provider"])
+    bucket, prefix = value.get("bucket"), value.get("prefix")
+    sites = value.get("sites")
+    if (
+        not isinstance(bucket, str)
+        or convention.BUCKET.fullmatch(bucket) is None
+        or not isinstance(prefix, str)
+        or convention.PREFIX.fullmatch(prefix) is None
+        or not isinstance(sites, list)
+        or not 1 <= len(sites) <= 64
+        or not all(isinstance(site, str) and valid_identifier(site) for site in sites)
+        or len(set(sites)) != len(sites)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    if provider == "s3":
+        if set(value) != {"version", "provider", "bucket", "region", "prefix", "sites"}:
+            raise ValueError(INVALID_INPUTS)
+        region = value.get("region")
+        if not isinstance(region, str) or convention.REGION.fullmatch(region) is None:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs(
+            provider=provider,
+            bucket=bucket,
+            region=region,
+            prefix=prefix,
+            sites=tuple(str(site) for site in sites),
+        )
+    if set(value) != {"version", "provider", "bucket", "account", "prefix", "sites"}:
+        raise ValueError(INVALID_INPUTS)
+    account = value.get("account")
+    if not isinstance(account, str) or convention.ACCOUNT.fullmatch(account) is None:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(
+        provider=provider,
+        bucket=bucket,
+        account=account,
+        prefix=prefix,
+        sites=tuple(str(site) for site in sites),
+    )
+
+
+def _replace_passphrase_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    if set(value) != {"version"} or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs()
+
+
+def _site_backup_point_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from backups import convention
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier", "point"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, point = value["identifier"], value["point"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or not isinstance(point, str)
+        or convention.POINT.fullmatch(point) is None
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, point=point)
+
+
+def _backup_retention_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from backups import convention
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier", "days"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, days = value["identifier"], value["days"]
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or type(days) is not int
+        or days not in convention.RETENTION_DAYS
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, days=days)
+
+
 def _certificate_email_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -792,6 +1095,28 @@ def _certificate_email_inputs(
     if not isinstance(email, str) or not valid_email(email):
         raise ValueError(INVALID_INPUTS)
     return PreparationInputs(certificate_email=email)
+
+
+def _backup_capture_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    """A full capture, and whether it was prepared from a Deploy's confirm screen (#407)."""
+    from sites.names import valid_identifier
+
+    if set(value) not in (
+        {"version", "identifier"},
+        {"version", "identifier", "from_deploy"},
+    ):
+        raise ValueError(INVALID_INPUTS)
+    identifier = value["identifier"]
+    from_deploy = value.get("from_deploy", False)
+    if (
+        not isinstance(identifier, str)
+        or not valid_identifier(identifier)
+        or type(from_deploy) is not bool
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, from_deploy=from_deploy)
 
 
 _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], PreparationInputs]] = {
@@ -806,6 +1131,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.SITE_OBJECT_CACHE: _site_object_cache_inputs,
     InputShape.SITE: _identifier_inputs,
     InputShape.SITE_DATABASE: _identifier_inputs,
+    InputShape.SITE_RECOVERY_POINT: _recovery_point_inputs,
     InputShape.SITE_REMOVE: _site_remove_inputs,
     InputShape.DATABASE_ENGINE: _database_engine_inputs,
     InputShape.LARAVEL_DEPLOY: lambda value, _choices: _laravel_deploy_inputs(value),
@@ -816,6 +1142,14 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.WORDPRESS_SETTINGS: _settings_inputs,
     InputShape.CERTIFICATE_EMAIL: _certificate_email_inputs,
     InputShape.AUTOMATION_SCHEDULE: _schedule_inputs,
+    InputShape.BACKUP_SCHEDULE: _backup_schedule_inputs,
     InputShape.LARAVEL_QUEUE_WORKERS: _worker_inputs,
     InputShape.SITE_LOG_ROTATION: _site_log_rotation_inputs,
+    InputShape.OFFSITE_STORAGE: _offsite_storage_inputs,
+    InputShape.SITE_BACKUP_POINT: _site_backup_point_inputs,
+    InputShape.BACKUP_RETENTION: _backup_retention_inputs,
+    InputShape.BACKUP_CAPTURE: _backup_capture_inputs,
+    InputShape.CONNECT_OFFSITE_STORAGE: _connect_offsite_inputs,
+    InputShape.REPLACE_RECOVERY_PASSPHRASE: _replace_passphrase_inputs,
+    InputShape.REMOVED_BACKUP: _identifier_inputs,
 }
