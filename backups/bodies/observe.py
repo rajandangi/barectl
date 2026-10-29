@@ -316,7 +316,7 @@ def offsite(  # noqa: C901 - one closed offsite read
             "endpoint": "",
             "prefix": "",
             "prune": False,
-            "problem": "The offsite storage setting is outside supported settings.",
+            "problem": "The storage setting's directory has unexpected ownership or permissions.",
         }
     config = metadata(OFFSITE_CONFIG)
     if config is None:
@@ -336,7 +336,7 @@ def offsite(  # noqa: C901 - one closed offsite read
             "endpoint": "",
             "prefix": "",
             "prune": False,
-            "problem": "The offsite storage setting is outside supported settings.",
+            "problem": "The storage setting's files have unexpected ownership or permissions.",
         }
     try:
         text = pathlib.Path(OFFSITE_CONFIG).read_text(encoding="utf-8")
@@ -351,7 +351,7 @@ def offsite(  # noqa: C901 - one closed offsite read
             "endpoint": "",
             "prefix": "",
             "prune": metadata(OFFSITE_PRUNE) is not None,
-            "problem": "The offsite storage setting is outside supported settings.",
+            "problem": "The storage setting is empty or incomplete.",
         }
     value["prune"] = metadata(OFFSITE_PRUNE) is not None
     for path in (OFFSITE_CAPTURE, OFFSITE_PRUNE):
@@ -363,9 +363,11 @@ def offsite(  # noqa: C901 - one closed offsite read
             and found.get("mode") == 0o600
             and found.get("links") == 1
         ):
-            value["problem"] = "The offsite storage keys are outside supported settings."
+            value["problem"] = (
+                "The storage setting's key files have unexpected ownership or permissions."
+            )
     if metadata(OFFSITE_CAPTURE) is None:
-        value["problem"] = "The offsite storage keys are missing."
+        value["problem"] = "The storage setting's key files are missing."
     sites, safe_sources = source_sites()
     value["sites"] = sites
     if not safe_sources:
