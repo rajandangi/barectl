@@ -668,9 +668,6 @@ def _save_security(
             protocol=row_listener.protocol,
             process=row_listener.process,
             public=row_listener.public,
-            expected=_expected_listener(
-                row_listener, state.ssh.value.ports if state.ssh.value else ()
-            ),
         )
         for row_listener in (state.listeners.value or ())
     )
@@ -685,19 +682,6 @@ def _save_security(
         )
         for update in (state.updates.value.pending if state.updates.value else ())
     )
-
-
-def _expected_listener(listener: object, ssh_ports: tuple[int, ...]) -> bool:
-    from security.observation import Listener
-
-    if not isinstance(listener, Listener) or not listener.public:
-        return False
-    return (listener.protocol, listener.port) in {
-        ("tcp", 80),
-        ("tcp", 443),
-        ("udp", 443),
-        *{("tcp", port) for port in ssh_ports},
-    }
 
 
 def _offsite_document(value: object | None) -> dict[str, object]:

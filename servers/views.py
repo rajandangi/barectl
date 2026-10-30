@@ -354,19 +354,10 @@ def _advanced_section(
             checked=snapshot is not None,
             machine=snapshot.collected.architecture.value if snapshot is not None else None,
         )
+        from security.presentation import check_reads
+
         security = snapshot.collected.security.value if snapshot is not None else None
-        context["security_reads"] = (
-            (
-                ("Firewall", security.firewall),
-                ("Public ports", security.listeners),
-                ("SSH sign-in", security.ssh),
-                ("Automatic security updates", security.auto_updates),
-                ("Ubuntu updates", security.updates),
-                ("Restart needed", security.restart),
-            )
-            if security is not None
-            else ()
-        )
+        context["security_reads"] = check_reads(security)
 
 
 def server_page(
@@ -437,7 +428,11 @@ def server_page(
         from security.presentation import present as present_security
 
         context["security_checks"] = (
-            present_security(state.snapshot.collected, state.snapshot.collected_at)
+            present_security(
+                state.snapshot.collected,
+                state.snapshot.collected_at,
+                advanced_url=reverse("server_advanced", args=[server.pk]),
+            )
             if state.snapshot is not None
             else ()
         )

@@ -465,7 +465,7 @@ A server's plain-language, read-only findings about its firewall, public ports, 
 _Avoid_: Security score, audit, compliance check
 
 **Security check** (implemented):
-One of the six findings in the Security checks with its state, why it matters, when it was read and at most one next action. Unreadable evidence is "Could not check", never a passing result.
+One of the seven findings in the Security checks with its state, why it matters, when it was read and at most one next action. Unreadable evidence is "Could not check", never a passing result.
 _Avoid_: Vulnerability, alert
 
 **Firewall standard** (planned):

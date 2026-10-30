@@ -2,8 +2,8 @@
 
 docs/quality.md#native-layer, docs/security.md. The scenario makes ordinary ``ufw`` changes
 on the disposable target server and proves a fresh controller, with no local database,
-reconstructs the same checks: an operator-added rule in the supported shape is adopted and
-a rule outside it is reported as outside supported settings.
+reconstructs the same checks: an operator-added rule in the supported shape is reported as
+an adopted operator rule, and a rule outside it as outside supported settings.
 """
 
 from django.test import tag

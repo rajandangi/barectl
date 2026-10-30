@@ -6,34 +6,45 @@ was read and the one next action. Engine detail stays under Advanced.
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
 from discovery.snapshot import CollectedSnapshot
+from runtimes.catalog import architecture_of
 from runtimes.presentation import shown_runtimes, shown_updates
 
 from .observation import (
+    STANDARD_PUBLIC_PORTS,
     AutoUpdatesState,
     Check,
     FirewallState,
     Listener,
     RestartState,
+    SecurityState,
     SshState,
     UpdatesState,
 )
 
-OK = "ok"
-ATTENTION = "attention"
-UNKNOWN = "unknown"
-OUTSIDE = "outside"
+
+class CheckState(StrEnum):
+    OK = "ok"
+    ATTENTION = "attention"
+    UNKNOWN = "unknown"
+    OUTSIDE = "outside"
+
+
+OK = CheckState.OK
+ATTENTION = CheckState.ATTENTION
+UNKNOWN = CheckState.UNKNOWN
+OUTSIDE = CheckState.OUTSIDE
 _NOT_AVAILABLE = "Not available yet"
 _RUNTIME_CHECK_SETTING = "Web runtime fixes arrive through Barectl releases, not Ubuntu updates."
 _CLOUD_FIREWALL = "A firewall at your cloud provider is outside what Barectl can see."
-_STANDARD_PORTS = {("tcp", 80), ("tcp", 443), ("udp", 443)}
 
 
 @dataclass(frozen=True)
 class ShownCheck:
     name: str
-    state: str
+    state: CheckState
     what: str
     why: str
     read_at: datetime
@@ -43,8 +54,10 @@ class ShownCheck:
     note: str = ""
 
 
-def present(collected: CollectedSnapshot, read_at: datetime) -> tuple[ShownCheck, ...]:
-    """The six checks, in the section's fixed order."""
+def present(
+    collected: CollectedSnapshot, read_at: datetime, *, advanced_url: str = ""
+) -> tuple[ShownCheck, ...]:
+    """The checks, in the section's fixed order."""
     state = collected.security.value if collected.security.observed else None
     if state is None:
         names = (
@@ -55,7 +68,10 @@ def present(collected: CollectedSnapshot, read_at: datetime) -> tuple[ShownCheck
             "Ubuntu updates",
             "Restart needed",
         )
-        return (*(_unknown(name, read_at) for name in names), _runtimes(collected, read_at))
+        return (
+            *(_unknown(name, read_at) for name in names),
+            _runtimes(collected, read_at, advanced_url),
+        )
     return (
         _firewall(state.firewall, read_at),
         _listeners(state.listeners, state.ssh, read_at),
@@ -63,7 +79,23 @@ def present(collected: CollectedSnapshot, read_at: datetime) -> tuple[ShownCheck
         _auto_updates(state.auto_updates, read_at),
         _updates(state.updates, read_at),
         _restart(state.restart, read_at),
-        _runtimes(collected, read_at),
+        _runtimes(collected, read_at, advanced_url),
+    )
+
+
+def check_reads(
+    state: SecurityState | None,
+) -> tuple[tuple[str, Check[object]], ...]:
+    """The named check evidence, for the Advanced reads behind the section."""
+    if state is None:
+        return ()
+    return (
+        ("Firewall", state.firewall),
+        ("Public ports", state.listeners),
+        ("SSH sign-in", state.ssh),
+        ("Automatic security updates", state.auto_updates),
+        ("Ubuntu updates", state.updates),
+        ("Restart needed", state.restart),
     )
 
 
@@ -162,7 +194,7 @@ def _listeners(
     if not check.observed or check.value is None:
         return _could_not("Public ports", check, why, read_at)
     ssh_ports = ssh.value.ports if ssh.observed and ssh.value else (22,)
-    expected = _STANDARD_PORTS | {("tcp", port) for port in ssh_ports}
+    expected = set(STANDARD_PUBLIC_PORTS) | {("tcp", port) for port in ssh_ports}
     public = [row for row in check.value if row.public]
     unexpected = [row for row in public if (row.protocol, row.port) not in expected]
     if not public:
@@ -176,7 +208,8 @@ def _listeners(
         )
     if unexpected:
         named = ", ".join(
-            f"{row.process or 'Another program'} on {row.port}/{row.protocol}" for row in unexpected
+            f"{_plain_process(row.process) or 'Another program'} on {row.port}/{row.protocol}"
+            for row in unexpected
         )
         return ShownCheck(
             "Public ports",
@@ -186,7 +219,8 @@ def _listeners(
             read_at,
             _NOT_AVAILABLE,
             details=tuple(
-                f"{row.process or 'Unknown program'}: {row.address}:{row.port}/{row.protocol}"
+                f"{_plain_process(row.process) or 'Unknown program'}: "
+                f"{row.address}:{row.port}/{row.protocol}"
                 for row in unexpected
             ),
         )
@@ -210,7 +244,7 @@ def _ssh(check: Check[SshState], read_at: datetime) -> ShownCheck:
         state.password_authentication == "yes"  # noqa: S105 - a setting name, not a secret
         or state.keyboard_interactive == "yes"
     )
-    root_password = state.permit_root_login in {"yes", "without-password"}
+    root_password = state.permit_root_login == "yes"
     if passwords or root_password:
         parts = []
         if passwords:
@@ -282,19 +316,9 @@ def _auto_updates(check: Check[AutoUpdatesState], read_at: datetime) -> ShownChe
             read_at,
             _NOT_AVAILABLE,
         )
-    if state.automatic_reboot:
-        return ShownCheck(
-            "Automatic security updates",
-            ATTENTION,
-            "Ubuntu installs security updates by itself, and restarts the server when it "
-            "decides to.",
-            why,
-            read_at,
-            _NOT_AVAILABLE,
-        )
     details = []
-    if state.last_upgrade:
-        details.append(f"Last automatic run: {state.last_upgrade}")
+    if state.newest_log_age is not None:
+        details.append(f"The last automatic run was {_age(state.newest_log_age)}.")
     return ShownCheck(
         "Automatic security updates",
         ATTENTION if state.list_update_timer == "" or state.upgrade_timer == "" else OK,
@@ -395,7 +419,7 @@ def _restart(check: Check[RestartState], read_at: datetime) -> ShownCheck:
     )
 
 
-def _runtimes(collected: CollectedSnapshot, read_at: datetime) -> ShownCheck:
+def _runtimes(collected: CollectedSnapshot, read_at: datetime, advanced_url: str) -> ShownCheck:
     why = _RUNTIME_CHECK_SETTING
     if not collected.runtimes:
         return ShownCheck(
@@ -406,11 +430,41 @@ def _runtimes(collected: CollectedSnapshot, read_at: datetime) -> ShownCheck:
             read_at,
             _NOT_AVAILABLE,
         )
+    if architecture_of(collected.architecture.value or "") is None:
+        return ShownCheck(
+            "Web runtimes",
+            UNKNOWN,
+            "Could not check. The server's architecture was not read, so Barectl cannot "
+            "compare the web runtimes with this release.",
+            why,
+            read_at,
+            _NOT_AVAILABLE,
+        )
     rows = shown_runtimes(collected)
     pending = shown_updates(collected, rows)
-    details = tuple(
-        f"{_runtime_name(row.entry)}: build {row.generation or 'unknown'}" for row in rows
+    problems = tuple(row.entry for row in rows if row.problem)
+    details = (
+        *(f"{_runtime_name(row.entry)}: build {row.generation or 'unknown'}" for row in rows),
+        *(
+            f"{_runtime_name(entry)}: its live settings do not match what Barectl installed."
+            for entry in problems
+        ),
+        (
+            "Advanced shows the web server's private admin endpoint, the absence of a "
+            "public admin port and the build service's account limits."
+        ),
     )
+    if problems:
+        return ShownCheck(
+            "Web runtimes",
+            ATTENTION,
+            "A web runtime's live settings do not match what Barectl installed.",
+            why,
+            read_at,
+            _NOT_AVAILABLE,
+            details=details,
+        )
+    update_url = f"{advanced_url}?tab=catalog#catalog-updates-heading" if advanced_url else ""
     if pending:
         return ShownCheck(
             "Web runtimes",
@@ -418,8 +472,8 @@ def _runtimes(collected: CollectedSnapshot, read_at: datetime) -> ShownCheck:
             "A newer build of the web runtimes is available in this Barectl release.",
             why,
             read_at,
-            "See the update in Advanced",
-            action_url="?tab=catalog#catalog-updates-heading",
+            "See the update in Advanced" if update_url else _NOT_AVAILABLE,
+            action_url=update_url,
             details=details,
         )
     return ShownCheck(
@@ -431,6 +485,24 @@ def _runtimes(collected: CollectedSnapshot, read_at: datetime) -> ShownCheck:
         _NOT_AVAILABLE,
         details=details,
     )
+
+
+def _plain_process(name: str) -> str:
+    if name == "caddy":
+        return "Web server"
+    if name == "haproxy":
+        return "Site proxy"
+    if name in {"sshd", "ssh"}:
+        return "SSH"
+    if name.startswith("php-fpm") or name == "php":
+        return "PHP"
+    if name in {"postgres", "mariadbd", "mysqld"}:
+        return "Database"
+    if name in {"valkey-server", "redis-server"}:
+        return "Object cache"
+    if name == "dockerd":
+        return "Docker"
+    return name
 
 
 def _runtime_name(entry: str) -> str:

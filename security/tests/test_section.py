@@ -7,34 +7,10 @@ from django.utils import timezone
 from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.snapshot import Observation, save_snapshot
-from security.observation import (
-    AutoUpdatesState,
-    Check,
-    FirewallState,
-    RestartState,
-    SecurityState,
-    SshState,
-    UpdatesState,
-)
+from security.observation import FirewallState, SecurityState
+from security.testing import blocked, check, ok_state
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
-
-
-def _check[T](value: T) -> Check[T]:
-    return Check(ObservationOutcome.OBSERVED, ("a fixed read",), "", value)
-
-
-def _ok_state() -> SecurityState:
-    return SecurityState(
-        firewall=_check(
-            FirewallState(True, True, "deny", "allow", "deny", True, "on (low)", (), (), True)
-        ),
-        listeners=_check(()),
-        ssh=_check(SshState("no", "no", "prohibit-password", (22,), (22,), (), "yes")),
-        auto_updates=_check(AutoUpdatesState(True, "active", "active", False, (), True, "", None)),
-        updates=_check(UpdatesState(3600, ())),
-        restart=_check(RestartState(False, ())),
-    )
 
 
 class SecuritySectionTests(ControllerConfigTestCase):
@@ -64,8 +40,8 @@ class SecuritySectionTests(ControllerConfigTestCase):
 
     def test_outside_supported_settings_is_reported_without_blocking_other_checks(self) -> None:
         state = replace(
-            _ok_state(),
-            firewall=_check(
+            ok_state(),
+            firewall=check(
                 FirewallState(
                     True,
                     True,
@@ -87,25 +63,19 @@ class SecuritySectionTests(ControllerConfigTestCase):
         self.assertContains(response, "Only key sign-in is allowed")
 
     def test_could_not_check_keeps_the_reason(self) -> None:
-        blocked: Check[FirewallState] = Check(
-            ObservationOutcome.INACCESSIBLE,
-            ("id -u",),
-            "Barectl needs root or the authorized passwordless sudo.",
-            None,
-        )
-        self.store(replace(_ok_state(), firewall=blocked))
+        self.store(replace(ok_state(), firewall=blocked()))
         response = self.client.get(f"/servers/{self.server.pk}/security/")
         self.assertContains(response, "Could not check")
         self.assertContains(response, "needs root or the authorized passwordless sudo")
 
     def test_advanced_shows_the_reads_behind_the_checks(self) -> None:
-        self.store(_ok_state())
+        self.store(ok_state())
         response = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(response, "Security reads")
         self.assertContains(response, "a fixed read")
 
     def test_a_failed_later_check_marks_the_checks_stale(self) -> None:
-        self.store(_ok_state())
+        self.store(ok_state())
         record_attempt(
             self.server, DiscoveryAttempt.Status.FAILED, failure="The connection failed."
         )

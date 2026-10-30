@@ -57,6 +57,7 @@ _LOGIN_SHELLS = frozenset({"/bin/sh", "/bin/bash", "/bin/dash", "/bin/zsh", "/us
 _MAX_LISTENERS = 500
 _MAX_UPDATES = 500
 _MAX_PACKAGES = 200
+STANDARD_PUBLIC_PORTS = frozenset({("tcp", 80), ("tcp", 443), ("udp", 443)})
 
 
 @dataclass(frozen=True)
@@ -262,7 +263,9 @@ def _read_ssh(shell: RemoteShell, listeners: Check[tuple[Listener, ...]]) -> Che
     source = (SSHD_COMMAND, SSH_SOCKET_COMMAND, ACCOUNTS_COMMAND, AUTHORIZED_KEYS_COMMAND)
     ports = settings.ports
     if listeners.observed and listeners.value:
-        ports = tuple(sorted(set(ports) | {row.port for row in listeners.value if _ssh_port(row)}))
+        ports = tuple(
+            sorted(set(ports) | {row.port for row in listeners.value if is_ssh_listener(row)})
+        )
     return Check(
         ObservationOutcome.OBSERVED,
         source,
@@ -279,7 +282,7 @@ def _read_ssh(shell: RemoteShell, listeners: Check[tuple[Listener, ...]]) -> Che
     )
 
 
-def _ssh_port(listener: Listener) -> bool:
+def is_ssh_listener(listener: Listener) -> bool:
     return listener.protocol == "tcp" and listener.process == "sshd"
 
 
@@ -622,7 +625,6 @@ def parse_sshd(text: str) -> SshSettings | None:
             settings[key] = value
     if "passwordauthentication" not in settings:
         return None
-    settings["ports"] = tuple(sorted(set(ports))) or (22,)
     return SshSettings(
         password_authentication=str(settings.get("passwordauthentication", "")),
         keyboard_interactive=str(settings.get("kbdinteractiveauthentication", "")),
@@ -703,9 +705,7 @@ _NETWORK_RULE = re.compile(
 def parse_ufw_added(text: str, ssh_ports: tuple[int, ...]) -> tuple[FirewallRule, ...]:
     standard = {
         *(f"{port}/tcp" for port in ssh_ports),
-        "80/tcp",
-        "443/tcp",
-        "443/udp",
+        *(f"{port}/{protocol}" for protocol, port in STANDARD_PUBLIC_PORTS),
     }
     rules: list[FirewallRule] = []
     for raw in text.splitlines():

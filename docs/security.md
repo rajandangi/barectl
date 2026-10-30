@@ -1,8 +1,9 @@
 # Security checks
 
 A server's **Security** section, beside Sites, Activity, Settings and Advanced, reports what
-Barectl could read about its exposure. It is read-only in this slice: every action is
-disabled with "Not available yet", and nothing on the server changes.
+Barectl could read about its exposure. It is read-only in this slice: every check action is
+disabled with "Not available yet" (the Web runtimes check links to the existing catalog
+update in Advanced), and nothing on the server changes.
 
 ## What it reads
 

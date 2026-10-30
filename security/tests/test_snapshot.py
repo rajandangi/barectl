@@ -7,7 +7,6 @@ from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.snapshot import Observation, current_snapshot, save_snapshot
 from security.observation import (
     AutoUpdatesState,
-    Check,
     FirewallRule,
     FirewallState,
     Listener,
@@ -17,21 +16,14 @@ from security.observation import (
     SshState,
     UpdatesState,
 )
+from security.testing import blocked, check
 from servers.models import Server
 
 ALL_INTERFACES = "0.0.0.0"  # noqa: S104 - an observed address, never bound
 
 
-def _check[T](value: T) -> Check[T]:
-    return Check(ObservationOutcome.OBSERVED, ("a fixed read",), "", value)
-
-
-def _blocked[T]() -> Check[T]:
-    return Check(ObservationOutcome.INACCESSIBLE, ("id -u",), "Root is not available.", None)
-
-
 STATE = SecurityState(
-    firewall=_check(
+    firewall=check(
         FirewallState(
             True,
             True,
@@ -45,9 +37,9 @@ STATE = SecurityState(
             True,
         )
     ),
-    listeners=_check((Listener(ALL_INTERFACES, 443, "tcp", "caddy", True),)),
-    ssh=_check(SshState("no", "no", "prohibit-password", (22,), (22,), ("deploy",), "yes")),
-    auto_updates=_check(
+    listeners=check((Listener(ALL_INTERFACES, 443, "tcp", "caddy", True),)),
+    ssh=check(SshState("no", "no", "prohibit-password", (22,), (22,), ("deploy",), "yes")),
+    auto_updates=check(
         AutoUpdatesState(
             True,
             "active",
@@ -59,13 +51,13 @@ STATE = SecurityState(
             3600,
         )
     ),
-    updates=_check(
+    updates=check(
         UpdatesState(
             7200,
             (PendingUpdate("openssl", "3.0.0", "3.0.1", "resolute-security/main", "security"),),
         )
     ),
-    restart=_check(RestartState(True, ("linux-image-generic",))),
+    restart=check(RestartState(True, ("linux-image-generic",))),
 )
 
 
@@ -95,12 +87,12 @@ class SecuritySnapshotStorageTests(TestCase):
             status=DiscoveryAttempt.Status.SUCCEEDED,
         )
         state = SecurityState(
-            firewall=_blocked(),
-            listeners=_blocked(),
-            ssh=_blocked(),
-            auto_updates=_blocked(),
-            updates=_blocked(),
-            restart=_blocked(),
+            firewall=blocked(),
+            listeners=blocked(),
+            ssh=blocked(),
+            auto_updates=blocked(),
+            updates=blocked(),
+            restart=blocked(),
         )
         collected = replace(
             COLLECTED,

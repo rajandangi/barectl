@@ -110,7 +110,6 @@ class SecurityListener(models.Model):
     protocol = models.CharField(max_length=5)
     process = models.CharField(max_length=80, blank=True)
     public = models.BooleanField(default=False)
-    expected = models.BooleanField(default=False)
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()
