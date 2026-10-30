@@ -777,12 +777,25 @@ def _iptables_has_rules(text: str) -> bool:
 
 
 def parse_apt_config(text: str) -> dict[str, str]:
+    """The effective scalar values; APT applies the last file's value."""
     values: dict[str, str] = {}
     for line in text.splitlines():
         match = re.fullmatch(r'(?P<name>[^ ]+) "(?P<value>[^"]*)";', line.strip())
         if match:
-            values.setdefault(match["name"], match["value"])
+            values[match["name"]] = match["value"]
     return values
+
+
+def parse_allowed_origins(text: str) -> tuple[str, ...]:
+    """Every allowed origin, which APT repeats under one key."""
+    origins = []
+    for line in text.splitlines():
+        match = re.fullmatch(
+            r'Unattended-Upgrade::Allowed-Origins:: "(?P<value>[^"]*)";', line.strip()
+        )
+        if match:
+            origins.append(match["value"])
+    return tuple(origins)
 
 
 def parse_timers(text: str) -> dict[str, str]:

@@ -132,10 +132,14 @@ def _firewall(
         state = OK
     details = (*firewall.details, *exposure.details)
     note = firewall.note or exposure.note
+    if state == UNKNOWN:
+        what = firewall.what if firewall.state == UNKNOWN else exposure.what
+    else:
+        what = " ".join(part for part in (firewall.what, exposure.what) if part)
     return ShownCheck(
         "Firewall",
         state,
-        " ".join(part for part in (firewall.what, exposure.what) if part),
+        what,
         firewall.why,
         read_at,
         _NOT_AVAILABLE,

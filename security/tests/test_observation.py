@@ -199,6 +199,21 @@ Unattended-Upgrade::Allowed-Origins:: "Ubuntu:resolute-security";
         self.assertEqual(values["APT::Periodic::Unattended-Upgrade"], "1")
         self.assertEqual(values["Unattended-Upgrade::Automatic-Reboot"], "false")
 
+    def test_a_later_apt_file_wins_and_every_origin_is_kept(self) -> None:
+        text = """\
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::Unattended-Upgrade "0";
+Unattended-Upgrade::Allowed-Origins:: "Ubuntu:resolute";
+Unattended-Upgrade::Allowed-Origins:: "Ubuntu:resolute-security";
+"""
+        self.assertEqual(
+            observation.parse_apt_config(text)["APT::Periodic::Unattended-Upgrade"], "0"
+        )
+        self.assertEqual(
+            observation.parse_allowed_origins(text),
+            ("Ubuntu:resolute", "Ubuntu:resolute-security"),
+        )
+
     def test_timer_state_prefers_active_over_enabled(self) -> None:
         timers = observation.parse_timers(
             """\
