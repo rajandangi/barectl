@@ -105,6 +105,24 @@ class ScenarioTestCase(TestCase):
         """Run a harness command in the server container (teardown, probes)."""
         return docker("exec", _setting("CONTAINER"), "sh", "-c", command, timeout=timeout)
 
+    def assert_default_server_packages(self) -> None:
+        """The default server packages and update units (docs/bootstrap.md#host-standing)."""
+        status = self.native(
+            "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n' "
+            "unattended-upgrades ufw needrestart update-notifier-common"
+        )
+        for package in ("unattended-upgrades", "ufw", "needrestart", "update-notifier-common"):
+            self.assertIn(f"{package} ii", status, status)
+        self.assertEqual(
+            self.native("systemctl is-active unattended-upgrades.service || true").strip(), "active"
+        )
+        self.assertEqual(
+            self.native(
+                "systemctl is-active apt-daily.service apt-daily-upgrade.service || true"
+            ).splitlines(),
+            ["inactive", "inactive"],
+        )
+
     def stop_for(self, seconds: float) -> None:
         """Stop the container, leave it down for ``seconds``, then start it again."""
         docker("stop", "--time", "5", _setting("CONTAINER"), timeout=60)

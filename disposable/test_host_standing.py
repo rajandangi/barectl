@@ -14,6 +14,7 @@ class ForeignHostScenario(ScenarioTestCase):
     prefix = "standing"
 
     def inspect_host(self, state: str, keep: str) -> HostJudgment:
+        self.assert_default_server_packages()
         self.native(
             "systemctl stop nginx.service apache2.service php8.5-fpm.service 2>/dev/null || true"
         )

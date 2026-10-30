@@ -30,8 +30,8 @@ Shared consent, one exact APT transaction.
   the page and on a direct prepare POST. Only an Administrator applies it. The review names
   the package, its version and the download size in its summary and details.
 - **apt-daily admission and the lock**: every change runs the same engine admission, which
-  refuses `apt_active` while `apt-daily`, `apt-daily-upgrade` or `unattended-upgrades` has
-  processes, and `lock_busy` while another Barectl change holds the mutation lock.
+  refuses `apt_active` while `apt-daily` or `apt-daily-upgrade` has processes, and
+  `lock_busy` while another Barectl change holds the mutation lock.
 
 ### The shared unit stays masked
 

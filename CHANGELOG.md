@@ -24,6 +24,7 @@
 - One change engine prepares, reviews, applies, verifies and reconciles every change, with consent derived from the change's effects ([ADR 0035](docs/adr/0035-one-change-engine-with-effect-derived-consent.md)).
 - A fresh controller reconstructs the foundation, runtimes, defaults and sites from the server alone.
 - A snapshot-based offline native test harness with a five-minute target and a 15-minute limit ([test time budget](docs/quality.md#test-time-budget)).
+- Admit changes on a real Ubuntu 26.04 host: the update check watches only `apt-daily.service` and `apt-daily-upgrade.service`, so the unattended-upgrades shutdown helper that runs for the host's whole uptime is no longer read as update work and no longer refuses every change forever. The native L0 and L0-standing images carry the 26.04 cloud image's default unattended-upgrades, ufw, needrestart and update-notifier-common packages, and prove the host-standing judgment, an admitted change and a refused unexpected apt-daily control group on them ([#411](https://github.com/rajandangi/barectl/issues/411)).
 
 ### PHP sites (Phase B)
 

@@ -99,6 +99,8 @@ class HostFoundation(ScenarioTestCase):
             self.assertTrue(repeated_runtime.no_changes, repeated_runtime.document)
 
     def test_saved_agent_fingerprint_setup_and_fresh_controller_reconstruction(self) -> None:
+        # Every change below is admitted while the helper from issue #411 runs.
+        self.assert_default_server_packages()
         target = self.target()
         self.native("[ -z \"$(ss -Hlnpt '( sport = :2019 )')\" ]")
         with tempfile.TemporaryDirectory(dir="/tmp") as directory:
@@ -375,22 +377,33 @@ class FoundationAdmission(ScenarioTestCase):
         )
 
     def test_active_and_lingering_apt_children_then_held_lock_refuse_without_changes(self) -> None:
-        from operations import native
+        from operations import apt, native
 
         with self.shell() as shell:
             self.reviewed_evidence = foundation.inspect(shell)
+            # The unattended-upgrades helper is running; only apt-daily work may refuse.
+            self.assertEqual(
+                shell.run("systemctl is-active unattended-upgrades.service").stdout.strip(),
+                "active",
+            )
+            self.assertEqual(shell.run(apt.PROCESS_COMMAND).exit_status, 0)
 
         self.native(
-            "install -d /run/systemd/system/apt-daily.service.d; "
+            "install -d /run/systemd/system/apt-daily-upgrade.service.d; "
             "printf '[Service]\\nType=simple\\nExecStart=\\nExecStart=/bin/sleep 90\\n' "
-            ">/run/systemd/system/apt-daily.service.d/fixture.conf; "
-            "systemctl daemon-reload; systemctl start apt-daily.service"
+            ">/run/systemd/system/apt-daily-upgrade.service.d/fixture.conf; "
+            "systemctl daemon-reload; systemctl start apt-daily-upgrade.service"
         )
         try:
             self.run_reviewed_payload("refused", "apt_active")
         finally:
-            self.native("systemctl stop apt-daily.service")
+            self.native(
+                "systemctl stop apt-daily-upgrade.service; "
+                "rm -rf /run/systemd/system/apt-daily-upgrade.service.d; "
+                "systemctl reset-failed apt-daily-upgrade.service; systemctl daemon-reload"
+            )
         self.native(
+            "install -d /run/systemd/system/apt-daily.service.d; "
             "printf '[Service]\\nType=notify\\nNotifyAccess=all\\nExecStart=\\n"
             'ExecStart=/bin/sh -c "sleep 90 & systemd-notify --ready; wait"'
             "\\nKillMode=process\\n' "
@@ -421,6 +434,39 @@ class FoundationAdmission(ScenarioTestCase):
                 "systemctl stop apt-daily.service; "
                 "rm -rf /run/systemd/system/apt-daily.service.d; "
                 "systemctl reset-failed apt-daily.service; systemctl daemon-reload"
+            )
+        # An apt-daily unit outside /system.slice is an unexpected control group: the probe
+        # cannot read it, so the change refuses as unreadable instead of admitting it.
+        self.native(
+            "install -d /run/systemd/system/apt-daily.service.d "
+            "/run/systemd/system/apt-daily-upgrade.service.d; "
+            "printf '[Unit]\\nDescription=Fixture slice\\n[Slice]\\n' "
+            ">/run/systemd/system/barectl-fixture.slice; "
+            "printf '[Service]\\nType=simple\\nSlice=barectl-fixture.slice\\nExecStart=\\n"
+            "ExecStart=/bin/sleep 90\\n' "
+            ">/run/systemd/system/apt-daily.service.d/fixture.conf; "
+            "cp /run/systemd/system/apt-daily.service.d/fixture.conf "
+            "/run/systemd/system/apt-daily-upgrade.service.d/fixture.conf; "
+            "systemctl daemon-reload; "
+            "systemctl start apt-daily.service apt-daily-upgrade.service"
+        )
+        try:
+            for unit in ("apt-daily.service", "apt-daily-upgrade.service"):
+                self.assertIn(
+                    f"/barectl-fixture.slice/{unit}",
+                    self.native(f"systemctl show {unit} -p ControlGroup --value"),
+                )
+            with self.shell() as shell:
+                self.assertEqual(shell.run(apt.PROCESS_COMMAND).exit_status, 2)
+            self.run_reviewed_payload("refused", "apt_unreadable")
+        finally:
+            self.native(
+                "systemctl stop apt-daily.service apt-daily-upgrade.service; "
+                "rm -rf /run/systemd/system/apt-daily.service.d "
+                "/run/systemd/system/apt-daily-upgrade.service.d "
+                "/run/systemd/system/barectl-fixture.slice; "
+                "systemctl reset-failed apt-daily.service apt-daily-upgrade.service; "
+                "systemctl daemon-reload"
             )
         self.native(
             f"install -d -m 700 {native.LOCK_DIRECTORY}; "

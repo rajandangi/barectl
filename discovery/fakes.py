@@ -271,8 +271,6 @@ READ_ONLY = re.compile(
     r"/usr/sbin/(useradd|groupadd|runuser))\Z"
     rf"|\A{re.escape(PROCESS_COMMAND)}\Z"
     r"|\Atimedatectl show -p NTPSynchronized --value\Z"
-    r"|\Asystemctl is-active apt-daily\.service apt-daily-upgrade\.service"
-    r" unattended-upgrades\.service\Z"
     r"|\Ass -Hlnpt '\( sport = :80 or sport = :443 \)'\Z"
     r"|\Anproc\Z"
     r"|\Adf -B1 --output=size,avail,target /\Z"
@@ -451,14 +449,11 @@ class FakeServer:
             "dpkg --version": "Debian 'dpkg' package management program version 1.23.0 (arm64).\n",
             "systemctl --version": "systemd 259 (259.1-0ubuntu1)\n",
             "id -u": "0\n",
-            "systemctl is-active apt-daily.service apt-daily-upgrade.service "
-            "unattended-upgrades.service": ("inactive\ninactive\ninactive\n"),
             "ss -Hlnpt '( sport = :80 or sport = :443 )'": "",
             "timedatectl show -p NTPSynchronized --value": "yes\n",
         }
         if command in answers:
-            status = 3 if command.startswith("systemctl is-active") else 0
-            return ssh.CommandResult(status, answers[command])
+            return ssh.CommandResult(0, answers[command])
         if command == "getent passwd":
             return ssh.CommandResult(0, "")
         if command.startswith("command -v "):

@@ -9,6 +9,7 @@ new harness replaces them.
 
 import hashlib
 import json
+import re
 from dataclasses import replace
 from datetime import timedelta
 from typing import override
@@ -785,6 +786,20 @@ class ResultLineTests(SimpleTestCase):
                 "outcome_unknown",
             },
         )
+
+
+class AptProbeTests(SimpleTestCase):
+    def test_the_probe_watches_only_the_two_apt_daily_units(self) -> None:
+        from . import apt
+
+        units = re.search(r"for unit in ([^;]+);", apt.PROCESS_PROBE)
+        self.assertIsNotNone(units)
+        if units:
+            self.assertEqual(
+                units.group(1).replace("\\\n", " ").split(),
+                ["apt-daily.service", "apt-daily-upgrade.service"],
+            )
+        self.assertNotIn("unattended-upgrades", apt.PROCESS_COMMAND)
 
 
 class EnginePayloadTests(SimpleTestCase):

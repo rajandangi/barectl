@@ -128,6 +128,15 @@ class EgressTests(SimpleTestCase):
             [],
         )
 
+    def test_ubuntus_own_release_check_is_not_an_escape(self) -> None:
+        for name in (
+            "changelogs.ubuntu.com",
+            "contracts.canonical.com",
+            "_https._tcp.motd.ubuntu.com",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(scenarios.unaliased([name], ["cache.nixos.org"]), [])
+
     def test_the_fixture_acme_name_is_a_lane_host(self) -> None:
         self.assertEqual(
             scenarios.unaliased(

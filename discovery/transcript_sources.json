@@ -19,6 +19,7 @@
     "discovery/snapshot.py": "2a06b07ff9eefbbe41865d2b40e3a35c5a575b8e069190cc0548c55085294227",
     "laravel/observation.py": "90bc010b51f82ed8b77bd5da66ae3d2123bec50aa5b55f109bb4a021243418a8",
     "logs/read.py": "bca3174ebb0e2fc4fca8ccb766965be9e0cbe815f611608c2f6b188992f86ecb",
+    "operations/apt.py": "24d3fbfabee47ca22f4c070e2174b44003d70a6f4db96eabf699509453e209c7",
     "runtimes/observation.py": "f96262d7529bbd3dd9433eea67b6e0ae3a1cfd992afcc523e0c14b012b955841",
     "sites/bodies/admission.py": "4d0901b9b088660d518ec3c234a9c9557a9e15c7460ed44f6c0dd597141974dc",
     "sites/bodies/common.py": "dd2988e15c84cedf286798513a97d54b47a57876bae0278d3185b0d1f7be5539",

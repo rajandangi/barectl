@@ -33,6 +33,7 @@ class PlainL0Discovery(ScenarioTestCase):
     records: tuple[str, ...] = ("pristine-26.04",)
 
     def test_a_fresh_controller_discovers_a_plain_l0_server(self) -> None:
+        self.assert_default_server_packages()
         target = self.target()
         with tempfile.TemporaryDirectory(dir="/tmp") as directory:
             agent_socket = Path(directory) / "agent"
