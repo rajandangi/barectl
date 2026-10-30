@@ -7,7 +7,7 @@ times and applies it.
 import json
 import statistics
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 RECORD = Path(__file__).with_name("shard_times.json")
@@ -27,11 +27,17 @@ class Record:
     recorded: str
     scenarios: Mapping[str, float]
     stages: Mapping[str, float]
+    sources: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path = RECORD) -> Record:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return cls(str(data["recorded"]), data["scenarios"], data["stages"])
+        return cls(
+            str(data["recorded"]),
+            data["scenarios"],
+            data["stages"],
+            {str(label): str(source) for label, source in data.get("sources", {}).items()},
+        )
 
     def weight(self, label: str) -> float:
         """A scenario's recorded time, or the record's mean for one it does not name."""

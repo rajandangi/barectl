@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Agent environment
+
+- Every native run takes one host-wide lock inside the runner itself, so the orchestrator, an implementer proving a single item, and the full build wait for the lane owner instead of contending into false failures; `build.sh` holds that lock once for its side-by-side stages. Every item time in `disposable/shard_times.json` now names the run it came from and a placeholder fails the fast gate, which also predicts each hosted shard's stop against the target so budget growth shows up before a phase's last ticket. A mistyped scenario label is named with a suggestion and the `--list` command instead of a Django loader error. Fixtures under any `fixtures/` directory must be recorded from a real server, and a fixture that writes through the container as root cleans up through the container.
+
 ### Protection (Phase D)
 
 - Qualify Phase D on a real server and record the evidence: the tested revision, the restic 0.18.1 and MariaDB 11.8 supply, the measured scenario and build times, the local S3-compatible provider fixture, and every named gate. The safe failures are proved in the same shared native suite: a dump failure leaves no recovery point, a server short of the reserved free space refuses the capture and deletes nothing, and a capture killed after the pause stays gated with one sentence and one **Reopen site** action. The backup native items start from the prepared server snapshot instead of repeating the APT refresh and the database engine install, and the record names the build's remaining target miss with its next action ([qualification record](docs/phase-d-qualification.md), [#410](https://github.com/rajandangi/barectl/issues/410)).
@@ -40,7 +44,7 @@
 
 ### Tooling
 
-- Record every native transcript state in one pass with `scripts/record-all-transcripts.sh`, keep a failed native item's unit, journal and directory state beside its log, and let `BARECTL_BUDGET_STRICT=1 docker/disposable-server/build.sh` fail on a missed time target as well as a limit. A checked-in shared-source digest manifest names stale transcripts; `scripts/native-run.py` serializes native suites on one host; the validator stage runs two lanes and the hosted matrix fourteen; linked worktrees build the production assets during setup, and the implementer brief/handoff shape is recorded in `docs/agents/implementer-brief.md`.
+- Record every native transcript state in one pass with `scripts/record-all-transcripts.sh`, keep a failed native item's unit, journal and directory state beside its log, and let `BARECTL_BUDGET_STRICT=1 docker/disposable-server/build.sh` fail on a missed time target as well as a limit. A checked-in shared-source digest manifest names stale transcripts; the native runner takes a host-wide lock, so suites serialize on one host; the validator stage runs two lanes and the hosted matrix fourteen; linked worktrees build the production assets during setup, and the implementer brief/handoff shape is recorded in `docs/agents/implementer-brief.md`.
 
 ### Automation and cache (Phase C)
 - Run a Laravel site's **database queue workers** from Settings with one reviewed definition: up to eight queue names in priority order, one to four processes and a 30 to 900 second job timeout. Start writes `DB_QUEUE_RETRY_AFTER` above the timeout before any process starts and enables boot activation; Stop disables it so an explicit stop survives a reboot; Restart is graceful and lets each process finish its current job. A crash restarts within a five-start limit and a crash loop reads **stopped after repeated crashes** with a Start action that clears it. Start and Restart refuse without a verified current release, recorded migrations, the `jobs` table, PCNTL or with a duplicate worker; Stop is always available. Discovery reconstructs the definition and state from the units alone ([automation](docs/automation.md#laravel-database-queue-workers), [#266](https://github.com/rajandangi/barectl/issues/266)).

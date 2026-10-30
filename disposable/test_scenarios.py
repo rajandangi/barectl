@@ -340,6 +340,25 @@ class BuildStopTests(SimpleTestCase):
             patch.object(scenarios, "write_results"),
             patch.object(scenarios, "keep_logs"),
         ):
-            scenarios.main(["--time-limit", "10", "--lanes", "1"])
+            scenarios.main(["--time-limit", "10", "--lanes", "1", "--no-lock"])
         self.assertEqual(len(limits), 1)
         self.assertLessEqual(limits[0], 9.5)
+
+
+class UnknownLabelTests(SimpleTestCase):
+    """A mistyped label names itself instead of surfacing a Django loader failure."""
+
+    def test_a_label_django_cannot_load_is_named_as_typed(self) -> None:
+        failed = type("_FailedTest", (), {"__module__": "unittest.loader"})
+        by_class = {failed: ["unittest.loader._FailedTest.test_backups.BackupLifecycle"]}
+        self.assertEqual(scenarios._unknown_labels(by_class), ["test_backups.BackupLifecycle"])
+
+    def test_a_good_label_is_not_reported(self) -> None:
+        good = type("Scenario", (), {"__module__": "disposable.test_backups"})
+        self.assertEqual(scenarios._unknown_labels({good: ["disposable.test_backups.X.test"]}), [])
+
+    def test_the_message_names_the_label_a_suggestion_and_the_list_command(self) -> None:
+        message = scenarios._unknown_message(["test_backups.BackupLifecycle"])
+        self.assertIn("No scenario matches 'test_backups.BackupLifecycle'.", message)
+        self.assertIn("Did you mean 'disposable.test_backups.BackupLifecycle'?", message)
+        self.assertIn("-- --list", message)

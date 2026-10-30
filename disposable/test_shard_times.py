@@ -32,6 +32,26 @@ class RecordTests(SimpleTestCase):
         self.assertRegex(record.recorded, r"hosted .*run \d+ at [0-9a-f]{7}")
         self.assertTrue(all(seconds > 0 for seconds in record.stages.values()))
 
+    def test_every_item_names_the_run_its_time_came_from(self) -> None:
+        """docs/quality.md#limits: a placeholder weight is a defect, not a default."""
+        record = shard_times.Record.load()
+        self.assertEqual(set(record.sources), set(record.scenarios))
+        measured = re.compile(
+            r"hosted run \d+ at [0-9a-f]{7}|local build at [0-9a-f]{7}|"
+            r"local run at [0-9a-f]{7}|local run \d{4}-\d{2}-\d{2}"
+        )
+        for label, source in record.sources.items():
+            self.assertNotEqual(source, "placeholder", f"{label} still carries a placeholder")
+            self.assertRegex(source, measured, f"{label} names no recording")
+
+    def test_the_predicted_hosted_stop_is_inside_the_target(self) -> None:
+        """The shard packing the workflow uses must fit the 300 s target, not only its limit."""
+        record = shard_times.Record.load()
+        _, count = hosted()
+        labels = [scenario.label for scenario in scenarios.discover(include_quarantined=True)]
+        predicted = record.stops(record.partition(labels, count))
+        self.assertLessEqual(max(predicted), scenarios.TARGET, predicted)
+
 
 class PartitionTests(SimpleTestCase):
     def test_every_label_lands_in_exactly_one_shard(self) -> None:

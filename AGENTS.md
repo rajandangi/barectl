@@ -38,15 +38,13 @@ A single ticket run (`/implement`, `/implement-spec`) meets the same completion 
 
 ## Development checks
 
-Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push hook runs the fast subset ([before every push](docs/quality.md#before-every-push)). A linked worktree starts without `.env` and the installed dependencies; `scripts/worktree-setup.sh` copies and installs them. A native-affecting change also needs the native scenarios locally before pushing:
+Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push hook runs the fast subset ([before every push](docs/quality.md#before-every-push)). `scripts/worktree-setup.sh` gives a linked worktree `.env` and the locked dependencies. A native-affecting change runs the scenarios through the runner, which takes the host-wide native lock itself, so parallel agents wait instead of sharing lanes:
 
 ```bash
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-New tests must not grow the suite's total time; see the [test time budget](docs/quality.md#test-time-budget). Start a command that outlives a minute with `docker/disposable-server/quiet-run.sh start LOG -- CMD` and block on `quiet-run.sh wait LOG`; watch pull-request checks with `gh pr checks <n> --watch`. One blocking call at a time ([long-running commands](docs/agents/orchestration.md#long-running-commands)).
-
-A full local build is `docker/disposable-server/build.sh`. The `Native` workflow runs the required `native` check on every pull request; no label is needed. Browser tests need Chromium: `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE`. See [native layer](docs/quality.md#native-layer).
+Keep new tests inside the [test time budget](docs/quality.md#test-time-budget). Start anything longer than a minute with `docker/disposable-server/quiet-run.sh start LOG -- CMD`, block on `quiet-run.sh wait LOG`, and watch a pull request with `gh pr checks <n> --watch` ([long-running commands](docs/agents/orchestration.md#long-running-commands)). A full local build is `docker/disposable-server/build.sh`; it holds the same lock for its stages. Browser tests need Chromium: `uv run playwright install chromium`, or `BARECTL_BROWSER_EXECUTABLE` ([native layer](docs/quality.md#native-layer)).
 
 ## Project boundaries
 
