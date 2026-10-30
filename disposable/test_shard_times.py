@@ -38,7 +38,7 @@ class RecordTests(SimpleTestCase):
         self.assertEqual(set(record.sources), set(record.scenarios))
         measured = re.compile(
             r"hosted run \d+ at [0-9a-f]{7}|local build at [0-9a-f]{7}|"
-            r"local run at [0-9a-f]{7}"
+            r"local run at [0-9a-f]{7}|local run \d{4}-\d{2}-\d{2}"
         )
         for label, source in record.sources.items():
             self.assertNotEqual(source, "placeholder", f"{label} still carries a placeholder")

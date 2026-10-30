@@ -760,13 +760,19 @@ class OfflineRecovery(DisasterRecoveryCase):
 
 
 @tag(SCENARIO_TAG)
-class BackupLifecycle(BackupCase):
-    def test_enables_captures_and_reconstructs_from_native_evidence(self) -> None:
-        from backups import check, convention, observation
-        from discovery.root_read import run_root
+class OffsiteCopy(BackupCase):
+    """Copy a point offsite, repair a failed copy and remove storage without losing copies."""
+
+    identifier = "bks3"
+    domain = "bks3.example.com"
+    prefix = "bks3"
+    exclusive = True
+
+    def test_a_point_copies_offsite_recovers_and_survives_removal(self) -> None:
+        from backups import offsite
 
         self.prepare_site()
-        enabled = self.enable()
+        self.enable()
         # Offsite storage is checked against a local S3-compatible server, never the internet.
         self.start_s3()
         self.offsite_setup()
@@ -778,6 +784,78 @@ class BackupLifecycle(BackupCase):
             "barectl-test-secret",
             self.native("journalctl --no-pager -o cat --grep '^barectl-' | tail -n 40"),
         )
+        self.capture()
+        backup = self.backup_row(self.observe())
+        if backup.last is None:
+            self.fail("No backup result was reconstructed.")
+        self.assertEqual(backup.last.offsite, "copied")
+        offsite_points = self.offsite_points()
+        self.assertEqual(len(offsite_points), 1)
+        self.assertTrue(offsite_points[0]["complete"])
+        self.assertEqual(offsite_points[0]["point"], backup.last.point)
+        # A capture whose offsite copy fails keeps the onsite point and says so. The local S3
+        # server rejects this marker credential, so the failure is immediate and offline.
+        self.native(
+            "mv /etc/barectl/backups/offsite/capture.env /root/capture.env.saved && "
+            "printf 'AWS_ACCESS_KEY_ID=denied\nAWS_SECRET_ACCESS_KEY=denied\n' "
+            "> /etc/barectl/backups/offsite/capture.env && "
+            "chown root:root /etc/barectl/backups/offsite/capture.env && "
+            "chmod 600 /etc/barectl/backups/offsite/capture.env"
+        )
+        try:
+            self.capture()
+        finally:
+            self.native("mv /root/capture.env.saved /etc/barectl/backups/offsite/capture.env")
+        failed = self.backup_row(self.observe()).last
+        if failed is None:
+            self.fail("No failed offsite result was reconstructed.")
+        self.assertEqual(failed.result_class, "succeeded")
+        self.assertEqual(failed.offsite, "failed")
+        self.assertIn(failed.point, {str(point["point"]) for point in self.points()})
+        # Copy offsite again repairs a failed copy without a new capture.
+        apply_change(
+            self,
+            offsite.COPY,
+            PreparationInputs("", self.identifier, point=failed.point),
+            timeout=120,
+        )
+        self.assertTrue(any(str(point["point"]) == failed.point for point in self.offsite_points()))
+        # Removing offsite storage waits for the site's repository lock: a held lock skips it
+        # rather than pulling the keys out from under a copy (#410).
+        self.hold_repository_lock()
+        apply_change(
+            self,
+            offsite.REMOVE,
+            PreparationInputs(),
+            timeout=60,
+            secret=json.dumps({"values": {"bucket": self.S3_BUCKET}}).encode(),
+            expected="lock_busy",
+            reason="backup_lock",
+        )
+        self.release_repository_lock()
+        # Removing offsite storage leaves every copy in the bucket.
+        before_files = self.offsite_files()
+        apply_change(
+            self,
+            offsite.REMOVE,
+            PreparationInputs(),
+            timeout=60,
+            secret=json.dumps({"values": {"bucket": self.S3_BUCKET}}).encode(),
+        )
+        self.assertEqual(
+            self.native("test ! -e /etc/barectl/backups/offsite/config; echo $?").strip(), "0"
+        )
+        self.assertEqual(self.offsite_files(), before_files)
+
+
+@tag(SCENARIO_TAG)
+class BackupLifecycle(BackupCase):
+    def test_enables_captures_and_reconstructs_from_native_evidence(self) -> None:
+        from backups import check, convention, observation
+        from discovery.root_read import run_root
+
+        self.prepare_site()
+        enabled = self.enable()
         with self.shell() as shell:
             row = observation.read(
                 shell,
@@ -825,66 +903,6 @@ class BackupLifecycle(BackupCase):
             self.fail("No backup result was reconstructed.")
         self.assertIn(backup.last.result_class, ("succeeded", "partial"))
         self.assertEqual(backup.last.scope, "database")
-        self.assertEqual(backup.last.offsite, "copied")
-        offsite_points = self.offsite_points()
-        self.assertEqual(len(offsite_points), 1)
-        self.assertTrue(offsite_points[0]["complete"])
-        self.assertEqual(offsite_points[0]["point"], backup.last.point)
-        # A capture whose offsite copy fails keeps the onsite point and says so. The local S3
-        # server rejects this marker credential, so the failure is immediate and offline.
-        self.native(
-            "mv /etc/barectl/backups/offsite/capture.env /root/capture.env.saved && "
-            "printf 'AWS_ACCESS_KEY_ID=denied\nAWS_SECRET_ACCESS_KEY=denied\n' "
-            "> /etc/barectl/backups/offsite/capture.env && "
-            "chown root:root /etc/barectl/backups/offsite/capture.env && "
-            "chmod 600 /etc/barectl/backups/offsite/capture.env"
-        )
-        try:
-            self.capture()
-        finally:
-            self.native("mv /root/capture.env.saved /etc/barectl/backups/offsite/capture.env")
-        failed = self.backup_row(self.observe()).last
-        if failed is None:
-            self.fail("No failed offsite result was reconstructed.")
-        self.assertEqual(failed.result_class, "succeeded")
-        self.assertEqual(failed.offsite, "failed")
-        self.assertIn(failed.point, {str(point["point"]) for point in self.points()})
-        # Copy offsite again repairs a failed copy without a new capture.
-        from backups import offsite
-
-        apply_change(
-            self,
-            offsite.COPY,
-            PreparationInputs("", self.identifier, point=failed.point),
-            timeout=120,
-        )
-        self.assertTrue(any(str(point["point"]) == failed.point for point in self.offsite_points()))
-        # Removing offsite storage waits for the site's repository lock: a held lock skips it
-        # rather than pulling the keys out from under a copy (#410).
-        self.hold_repository_lock()
-        apply_change(
-            self,
-            offsite.REMOVE,
-            PreparationInputs(),
-            timeout=60,
-            secret=json.dumps({"values": {"bucket": self.S3_BUCKET}}).encode(),
-            expected="lock_busy",
-            reason="backup_lock",
-        )
-        self.release_repository_lock()
-        # Removing offsite storage leaves every copy in the bucket.
-        before_files = self.offsite_files()
-        apply_change(
-            self,
-            offsite.REMOVE,
-            PreparationInputs(),
-            timeout=60,
-            secret=json.dumps({"values": {"bucket": self.S3_BUCKET}}).encode(),
-        )
-        self.assertEqual(
-            self.native("test ! -e /etc/barectl/backups/offsite/config; echo $?").strip(), "0"
-        )
-        self.assertEqual(self.offsite_files(), before_files)
         with self.shell() as shell:
             listing = run_root(shell, check.listing_command(self.identifier))
         parsed = check.parse_listing(listing.stdout)
