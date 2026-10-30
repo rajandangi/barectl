@@ -5,6 +5,7 @@
 ### Agent environment
 
 - Every native run takes one host-wide lock inside the runner itself, so the orchestrator, an implementer proving a single item, and the full build wait for the lane owner instead of contending into false failures; `build.sh` holds that lock once for its side-by-side stages. Every item time in `disposable/shard_times.json` now names the run it came from and a placeholder fails the fast gate, which also predicts each hosted shard's stop against the target so budget growth shows up before a phase's last ticket. A mistyped scenario label is named with a suggestion and the `--list` command instead of a Django loader error. Fixtures under any `fixtures/` directory must be recorded from a real server, and a fixture that writes through the container as root cleans up through the container.
+- A transcript recording pass keeps going past a failed state and names the states it could not record, so `scripts/record-all-transcripts.sh --from <state>` resumes instead of repeating the states that already passed; `--only <state>` records one state without writing the source manifest ([recorded transcripts](docs/quality.md#recorded-transcripts)).
 
 ### Protection (Phase D)
 

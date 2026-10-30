@@ -133,6 +133,8 @@ When a shared read source changes on the integration branch, record every declar
 scripts/record-all-transcripts.sh --env-file .env
 ```
 
+One failed state does not stop the pass: the script records the rest, then exits 1 naming every failure and the `--from` state that resumes it. `--from STATE` starts at that state and assumes the states before it passed in the earlier pass; `--only STATE` records one state and leaves the source manifest alone. A pass without `--only` writes the manifest when no state failed.
+
 `disposable/scenarios.py --list-records` prints the states. Record new states on the ticket branch; re-record shared states on the integration tip, so parallel branches do not produce conflicting JSON. `discovery/source_manifest.py` keeps a digest manifest of the shared read and body sources; the fast suite names the stale paths and this command when one changes.
 
 A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
@@ -196,7 +198,7 @@ Every item time names the run it came from (`sources` in the record); a ticket t
 
 ### Recording
 
-`run-scenarios.sh -- --record <state>` runs the scenario that records `<state>` with a recording shell and writes each checkpoint's transcript to `discovery/transcripts/<state>.json`.
+`run-scenarios.sh -- --record <state>` runs the scenario that records `<state>` with a recording shell and writes each checkpoint's transcript to `discovery/transcripts/<state>.json`. `record-all-transcripts.sh` runs that for every declared state, keeps going past a failed state, and names the failures and the `--from` state that resumes them ([recorded transcripts](#recorded-transcripts)).
 
 ### Quarantine
 
