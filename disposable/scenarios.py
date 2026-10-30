@@ -29,13 +29,13 @@ import tempfile
 import threading
 import time
 import unittest
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-from . import images, mirror, quarantine, shard_times
+from . import images, locking, mirror, quarantine, shard_times
 from .docker import DockerError, docker, quietly
 from .machine import Machine
 
@@ -120,6 +120,9 @@ def discover(
     by_class: dict[type[unittest.TestCase], list[str]] = {}
     for test in tests_of(suite):
         by_class.setdefault(type(test), []).append(test.id())
+    unknown = _unknown_labels(by_class)
+    if unknown:
+        raise SystemExit(_unknown_message(unknown))
     scenarios = [
         _scenario(cls, tests)
         for cls, tests in by_class.items()
@@ -134,6 +137,41 @@ def discover(
         )
     ]
     return sorted(scenarios, key=lambda scenario: scenario.label)
+
+
+def _unknown_labels(by_class: Mapping[type[unittest.TestCase], list[str]]) -> list[str]:
+    """The labels Django could not load, named as the operator typed them."""
+    labels: set[str] = set()
+    for cls, tests in by_class.items():
+        if cls.__module__ == "unittest.loader" and cls.__name__ == "_FailedTest":
+            labels.update(test.split("_FailedTest.", 1)[-1] for test in tests)
+    return sorted(labels)
+
+
+def _unknown_message(labels: Sequence[str]) -> str:
+    names = ", ".join(repr(label) for label in labels)
+    suggestions = "".join(
+        f" Did you mean {candidate!r}?" for label in labels if (candidate := _candidate(label))
+    )
+    return (
+        f"No scenario matches {names}.{suggestions} Scenario labels name the module and "
+        "the class, for example 'disposable.test_backups.BackupLifecycle'. Run "
+        "'docker/disposable-server/run-scenarios.sh --env-file .env -- --list' to see "
+        "every label."
+    )
+
+
+def _candidate(label: str) -> str:
+    """The same label under the scenario package, when that one loads."""
+    if label.startswith("disposable."):
+        return ""
+    from django.test.runner import DiscoverRunner
+
+    suite = DiscoverRunner(tags=[SCENARIO_TAG], verbosity=0).build_suite([f"disposable.{label}"])
+    classes = {type(test) for test in tests_of(suite)}
+    if classes and all(cls.__module__ != "unittest.loader" for cls in classes):
+        return f"disposable.{label}"
+    return ""
 
 
 def _wanted(
@@ -897,6 +935,11 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
         help="prove an unaliased lookup fails the item, then stop",
     )
     parser.add_argument("--shard", help="I/N: run only the I-th of N partitions")
+    parser.add_argument(
+        "--no-lock",
+        action="store_true",
+        help="run without the host-wide native lock (build.sh holds it for both stages)",
+    )
     options = parser.parse_args(argv)
     if options.validators and (options.record or options.shard or options.check_egress):
         parser.error(
@@ -1008,6 +1051,13 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901
         if not scenarios:
             print("Native scenarios: no scenarios in this shard.")  # noqa: T201
             return 0
+    if options.no_lock:
+        return _run(options, scenarios, output)
+    with locking.host_lock(output.say):
+        return _run(options, scenarios, output)
+
+
+def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output) -> int:
     if options.validators:
         # Two validator lanes keep the six classes under the joint-fast target; each lane
         # owns its container, so a manager reload in one cannot break another.

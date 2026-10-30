@@ -53,14 +53,14 @@ Complete the run only when every sub-issue's acceptance criteria are met and the
 A native suite run takes many minutes, and every check on it costs a turn at the agent's full context. Wait in as few turns as possible:
 
 ```bash
-docker/disposable-server/quiet-run.sh start "$NOTES/native.log" -- uv run python scripts/native-run.py --env-file .env
+docker/disposable-server/quiet-run.sh start "$NOTES/native.log" -- docker/disposable-server/run-scenarios.sh --env-file .env
 docker/disposable-server/quiet-run.sh wait "$NOTES/native.log"
 ```
 
-`scripts/native-run.py` takes a host-wide lock, so parallel agents wait instead of sharing lanes. `build.sh` does not use it because its validator and native stages run side by side by design.
+The runner takes the host-wide native lock itself (`disposable/locking.py`), so every caller — the orchestrator, an implementer proving one item, `build.sh` — waits for the lane owner instead of sharing lanes. `build.sh` holds the same lock once for its side-by-side validator and native stages.
 
 `wait` blocks for up to nine minutes, then prints only the failure lines and the tail, and exits with the command's status, or 124 while it is still running; give the call a ten-minute tool timeout and call `wait` again on 124. `quiet-run.sh run` starts and waits in one call. For CI, use one blocking `gh pr checks --watch` or `gh run watch --exit-status` call. Wait in one blocking call each time, not with short sleeps between log reads. The runner's own logs stay under `~/.cache/barectl/native/scenario-logs` ([native layer](../quality.md#native-layer)).
 
 Never report the task done while a command is still running. If a stored dependency genuinely blocks safe progress, document exactly what it blocks and continue every independent authorized step; do not stop the run. Do not stop half-way; finish the specification and its sub-issues end to end.
 
-Run one native suite per host at a time. Parallel implementers share Docker lanes and a package-manager, so a second full native run produces contended timings and false failures; the orchestrator serializes them, or the implementers wait for the lane owner.
+Run one native suite per host at a time. Parallel implementers share Docker lanes and a package-manager, so a second full native run produces contended timings and false failures; the runner's host lock makes every caller wait, and an implementer proves its own item through it before pushing rather than deferring the run.

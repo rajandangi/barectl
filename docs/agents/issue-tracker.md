@@ -2,6 +2,8 @@
 
 Issues and specs for Barectl live at https://github.com/rajandangi/barectl/issues. Use the `gh` CLI for all operations.
 
+Reading pull-request checks, the failed job's assertion and a flaky re-run is in [GitHub checks](github-ci.md).
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --repo rajandangi/barectl --title "..." --body-file <file>`. Write the exact multiline body to a temporary file first.

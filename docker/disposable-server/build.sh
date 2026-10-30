@@ -17,6 +17,15 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here/../.."
 
+# The validator and native stages run side by side by design, so this process holds the
+# host-wide native lock for the whole build and the stages below pass --no-lock
+# (disposable/locking.py, docs/quality.md#limits).
+if [ "${BARECTL_NATIVE_LOCKED:-0}" = 0 ]; then
+    BARECTL_NATIVE_LOCKED=1
+    export BARECTL_NATIVE_LOCKED
+    exec uv run python -m disposable.lock -- sh "$here/build.sh" "$@"
+fi
+
 env_file=.env
 if [ "${1:-}" = --env-file ]; then
     env_file=$2
@@ -42,9 +51,9 @@ run() {
 run controller-fast uv run --env-file "$env_file" python manage.py test \
     --exclude-tag browser --exclude-tag scenario --parallel
 run fast-validators env BARECTL_DISPOSABLE_LOGS="$work/validator-logs" \
-    "$here/run-scenarios.sh" --env-file "$env_file" -- --validators
+    "$here/run-scenarios.sh" --env-file "$env_file" -- --validators --no-lock
 run browser uv run --env-file "$env_file" python manage.py test --tag browser
-run native "$here/run-scenarios.sh" --env-file "$env_file"
+run native "$here/run-scenarios.sh" --env-file "$env_file" -- --no-lock
 
 status=0
 # Each job is a subshell that records its own exit code, so this wait always succeeds.

@@ -23,6 +23,10 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 - A required native test is never removed, skipped or weakened to fit an item limit or a time budget. Split the setup into a preparation scenario, or record the gap in the handoff and the qualification record; a missing test is not a pass.
 - Prove the seam the test claims to cover. A staged-source substring is not proof that a body reaches its fence or restore step; drive the body with the reviewed document, or assert the observable effect.
 
+## Recorded fixtures
+
+- A file under any `fixtures/` directory is recorded from a real server, never authored by hand; name the recording state or run in the review handoff. A hand-written fixture can encode output the product will never see, so a passing fast test then proves nothing. See [recorded transcripts](docs/quality.md#recorded-transcripts).
+
 ## Code comments
 
 Comment only business logic the code cannot make clear. Do not restate what code does, narrate steps or repeat names. Business rules belong in `docs/adr/` and the other Markdown docs; a necessary comment points to the owning document instead of explaining the rule again. See [code comments](docs/quality.md#code-comments).
