@@ -3,8 +3,7 @@
 import shlex
 from typing import Final
 
-PROCESS_PROBE: Final = """for unit in apt-daily.service apt-daily-upgrade.service \\
-unattended-upgrades.service; do
+PROCESS_PROBE: Final = """for unit in apt-daily.service apt-daily-upgrade.service; do
 report=$(systemctl show --property=LoadState --property=ControlGroup "$unit") || exit 2
 load=$(printf '%s\\n' "$report" | sed -n 's/^LoadState=//p')
 case "$load" in loaded|not-found|masked) ;; *) exit 2 ;; esac

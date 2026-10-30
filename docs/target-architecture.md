@@ -50,7 +50,7 @@ A server is added through a saved connection: address, user (root by default), p
 
 Setting up a Fresh host is one reviewed plan, executed as one transient unit under the shared lock ([ADR 0006](adr/0006-use-native-bootstrap-execution.md)). Its stages run in order and each reports its own result:
 
-1. Preflight: Ubuntu 26.04, a qualified architecture, root or the exact sudo authorization, disk and memory headroom, no other web stack, PHP or panel, and neither `apt-daily` nor `unattended-upgrades` running. A host that fails any check is refused cleanly, before anything changes.
+1. Preflight: Ubuntu 26.04, a qualified architecture, root or the exact sudo authorization, disk and memory headroom, no other web stack, PHP or panel, and neither `apt-daily` nor `apt-daily-upgrade` running. A host that fails any check is refused cleanly, before anything changes.
 2. Nix: install the pinned release and write `nix.conf` ([Nix](#nix)).
 3. Catalog realisation: Caddy, Composer, WP-CLI and HAProxy from the catalog lock, each as a profile.
 4. Caddy: the unit, the `caddy` user and the main configuration ([Caddy](#caddy)), and the per-site HAProxy and PHP-FPM unit templates.

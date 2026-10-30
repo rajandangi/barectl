@@ -36,6 +36,7 @@ SOURCES = (
     "discovery/snapshot.py",
     "laravel/observation.py",
     "logs/read.py",
+    "operations/apt.py",
     "runtimes/observation.py",
     "sites/bodies/admission.py",
     "sites/bodies/common.py",

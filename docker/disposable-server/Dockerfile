@@ -7,6 +7,12 @@
 # on an Ubuntu server. systemd-resolved is part of Ubuntu server; Docker keeps its own
 # /etc/resolv.conf, so resolved serves only resolvectl, and name lookups through glibc
 # still use Docker's resolver.
+#
+# The server's default packages that change Barectl's evidence ship enabled as on the 26.04
+# cloud image: unattended-upgrades runs its shutdown helper for the host's uptime, ufw and
+# the update-notifier timers are installed as their presets enable them, and needrestart and
+# update-notifier-common add their APT hooks. A probe that counts the helper as update work
+# refuses every change on a real host, so the images must carry it.
 ARG RELEASE=26.04
 # Recordings build the server from the digest in pins.json (docs/quality.md#recorded-transcripts).
 ARG BASE=ubuntu:${RELEASE}
@@ -15,7 +21,8 @@ FROM ${BASE} AS l0
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo sudo-rs \
-    iproute2 ca-certificates curl rsyslog python3-minimal xz-utils \
+    iproute2 ca-certificates curl rsyslog python3-minimal xz-utils unattended-upgrades ufw \
+    needrestart update-notifier-common \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/apt/apt.conf.d/docker-clean /usr/sbin/policy-rc.d \
  && rm -f /etc/ssh/ssh_host_* \
@@ -35,6 +42,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo sudo-rs \
     iproute2 ca-certificates rsyslog python3-minimal xz-utils nginx apache2 php8.5-fpm \
+    unattended-upgrades ufw needrestart update-notifier-common \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/apt/apt.conf.d/docker-clean /usr/sbin/policy-rc.d \
  && rm -f /etc/ssh/ssh_host_* \

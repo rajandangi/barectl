@@ -22,7 +22,7 @@ The server:
 - runs Ubuntu 26.04 LTS with its own apt 3.2, dpkg 1.23 and systemd 259, on amd64 or arm64;
 - is reachable over SSH from the controller as root, or as a user with noninteractive sudo (`NOPASSWD`). Barectl checks with `sudo -n -l` that sudo authorizes each exact command it runs and never prompts for a password;
 - has at least 4 GiB free disk and 900 MiB available memory. These are provisional admission thresholds, not a qualified minimum host size;
-- is not running `apt-daily`, `apt-daily-upgrade` or `unattended-upgrades`. A fresh cloud host often runs them during its first minutes; wait and prepare again.
+- is not running `apt-daily` or `apt-daily-upgrade`. A fresh cloud host often runs them during its first minutes; wait and prepare again.
 
 **Root-equivalent access.** Authorizing an account to run `systemd-run` or a shell through sudo gives it full control of the server. Barectl's permissions decide who may ask for a change; they do not limit what the SSH account can do. Treat the controller, and anyone who can use its keys, as having root on the server.
 
