@@ -23,6 +23,7 @@ from sites.bodies.pool import SitePool
 if TYPE_CHECKING:
     from backups.observation import ObservedBackup, OffsiteStorage
     from cache.models import CacheObservation
+    from security.observation import SecurityState
 
 from .models import (
     ComponentObservation,
@@ -242,6 +243,10 @@ class CollectedSnapshot:
     offsite: Observation[OffsiteStorage | None] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", None)
     )
+    # The read-only security checks, from fixed root reads (Phase E #302).
+    security: Observation[SecurityState | None] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", None)
+    )
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
     certificate_email: str = ""
     certificate_email_state: str = ""
@@ -410,6 +415,7 @@ def save_snapshot(
     _save_automation(snapshot, collected.automation.value)
     _save_workers(snapshot, collected.workers.value)
     _save_backups(snapshot, collected.backups.value)
+    _save_security(snapshot, collected.security.value, collected.security.source)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -565,6 +571,135 @@ def _save_workers(snapshot: DiscoverySnapshot, workers: tuple[ObservedWorker, ..
     )
 
 
+def _save_security(
+    snapshot: DiscoverySnapshot, state: SecurityState | None, state_source: tuple[str, ...]
+) -> None:
+    if state is None:
+        return
+    from security.models import (
+        SecurityListener,
+        SecurityObservation,
+        SecurityPendingUpdate,
+        SecurityRule,
+    )
+
+    row = SecurityObservation.objects.create(
+        snapshot=snapshot,
+        source=_joined(state_source),
+        firewall_status=state.firewall.status,
+        firewall_source=_joined(state.firewall.source),
+        firewall_warning=state.firewall.warning,
+        listeners_status=state.listeners.status,
+        listeners_source=_joined(state.listeners.source),
+        listeners_warning=state.listeners.warning,
+        ssh_status=state.ssh.status,
+        ssh_source=_joined(state.ssh.source),
+        ssh_warning=state.ssh.warning,
+        auto_updates_status=state.auto_updates.status,
+        auto_updates_source=_joined(state.auto_updates.source),
+        auto_updates_warning=state.auto_updates.warning,
+        updates_status=state.updates.status,
+        updates_source=_joined(state.updates.source),
+        updates_warning=state.updates.warning,
+        restart_status=state.restart.status,
+        restart_source=_joined(state.restart.source),
+        restart_warning=state.restart.warning,
+        ufw_installed=state.firewall.value.ufw_installed if state.firewall.value else False,
+        ufw_enabled=state.firewall.value.ufw_enabled if state.firewall.value else None,
+        default_incoming=state.firewall.value.default_incoming if state.firewall.value else "",
+        default_outgoing=state.firewall.value.default_outgoing if state.firewall.value else "",
+        default_routed=state.firewall.value.default_routed if state.firewall.value else "",
+        ipv6=state.firewall.value.ipv6 if state.firewall.value else None,
+        logging=state.firewall.value.logging if state.firewall.value else "",
+        outside="\n".join(state.firewall.value.outside) if state.firewall.value else "",
+        firewall_conffiles_intact=state.firewall.value.conffiles_intact
+        if state.firewall.value
+        else None,
+        password_authentication=state.ssh.value.password_authentication if state.ssh.value else "",
+        keyboard_interactive=state.ssh.value.keyboard_interactive if state.ssh.value else "",
+        permit_root_login=state.ssh.value.permit_root_login if state.ssh.value else "",
+        ssh_ports="\n".join(str(port) for port in state.ssh.value.ports) if state.ssh.value else "",
+        socket_ports="\n".join(str(port) for port in state.ssh.value.socket_ports)
+        if state.ssh.value
+        else "",
+        accounts_without_keys="\n".join(state.ssh.value.accounts_without_keys)
+        if state.ssh.value
+        else "",
+        per_source_penalties=state.ssh.value.per_source_penalties if state.ssh.value else "",
+        auto_updates_enabled=state.auto_updates.value.enabled if state.auto_updates.value else None,
+        list_update_timer=state.auto_updates.value.list_update_timer
+        if state.auto_updates.value
+        else "",
+        upgrade_timer=state.auto_updates.value.upgrade_timer if state.auto_updates.value else "",
+        automatic_reboot=state.auto_updates.value.automatic_reboot
+        if state.auto_updates.value
+        else None,
+        allowed_origins="\n".join(state.auto_updates.value.allowed_origins)
+        if state.auto_updates.value
+        else "",
+        last_upgrade=state.auto_updates.value.last_upgrade if state.auto_updates.value else "",
+        conffile_matches=state.auto_updates.value.conffile_matches_package
+        if state.auto_updates.value
+        else None,
+        newest_log_age=state.auto_updates.value.newest_log_age
+        if state.auto_updates.value
+        else None,
+        list_age_seconds=state.updates.value.list_age_seconds if state.updates.value else None,
+        restart_required=state.restart.value.required if state.restart.value else None,
+        restart_packages="\n".join(state.restart.value.packages) if state.restart.value else "",
+    )
+    SecurityRule.objects.bulk_create(
+        SecurityRule(
+            security=row,
+            kind=rule.kind,
+            line=rule.line,
+            action=rule.action,
+            protocol=rule.protocol,
+            ports=rule.ports,
+            network=rule.network,
+        )
+        for rule in (state.firewall.value.rules if state.firewall.value else ())
+    )
+    SecurityListener.objects.bulk_create(
+        SecurityListener(
+            security=row,
+            address=row_listener.address,
+            port=row_listener.port,
+            protocol=row_listener.protocol,
+            process=row_listener.process,
+            public=row_listener.public,
+            expected=_expected_listener(
+                row_listener, state.ssh.value.ports if state.ssh.value else ()
+            ),
+        )
+        for row_listener in (state.listeners.value or ())
+    )
+    SecurityPendingUpdate.objects.bulk_create(
+        SecurityPendingUpdate(
+            security=row,
+            name=update.name,
+            installed=update.installed,
+            candidate=update.candidate,
+            archive=update.archive,
+            classification=update.classification,
+        )
+        for update in (state.updates.value.pending if state.updates.value else ())
+    )
+
+
+def _expected_listener(listener: object, ssh_ports: tuple[int, ...]) -> bool:
+    from security.observation import Listener
+
+    if not isinstance(listener, Listener) or not listener.public:
+        return False
+    return (listener.protocol, listener.port) in {
+        ("tcp", 80),
+        ("tcp", 443),
+        ("udp", 443),
+        *{("tcp", port) for port in ssh_ports},
+    }
+
+
 def _offsite_document(value: object | None) -> dict[str, object]:
     from backups.observation import OffsiteStorage
 
@@ -683,6 +818,9 @@ _OBSERVATION_ROWS = (
     "automation",
     "workers",
     "backups",
+    "security__rules",
+    "security__listeners",
+    "security__pending_updates",
 )
 
 
@@ -826,6 +964,7 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             row.offsite_warning,
             _read_offsite(row.offsite),
         ),
+        security=_read_security(row),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
             {
@@ -978,6 +1117,139 @@ def _read_automation(row: object) -> ObservedSchedule:
         last_trigger_us=row.last_trigger_us,
         next_elapse_us=row.next_elapse_us,
         slice_populated=row.slice_populated,
+    )
+
+
+def _read_security(row: DiscoverySnapshot) -> Observation[SecurityState | None]:
+    from security.observation import (
+        AutoUpdatesState,
+        Check,
+        FirewallRule,
+        FirewallState,
+        Listener,
+        PendingUpdate,
+        RestartState,
+        SecurityState,
+        SshState,
+        UpdatesState,
+    )
+
+    try:
+        stored = row.security
+    except ObjectDoesNotExist:
+        return Observation(ObservationOutcome.ABSENT, (), "", None)
+
+    def check[T](status: str, source: str, warning: str, value: T | None) -> Check[T]:
+        return Check(ObservationOutcome(status), _reads(source), warning, value)
+
+    firewall = FirewallState(
+        stored.ufw_installed,
+        stored.ufw_enabled,
+        stored.default_incoming,
+        stored.default_outgoing,
+        stored.default_routed,
+        stored.ipv6,
+        stored.logging,
+        tuple(
+            FirewallRule(
+                rule.kind,
+                rule.line,
+                rule.action,
+                rule.protocol,
+                rule.ports,
+                rule.network,
+            )
+            for rule in stored.rules.all()
+        ),
+        tuple(line for line in stored.outside.splitlines() if line),
+        stored.firewall_conffiles_intact,
+    )
+    ssh = SshState(
+        stored.password_authentication,
+        stored.keyboard_interactive,
+        stored.permit_root_login,
+        tuple(int(port) for port in stored.ssh_ports.splitlines() if port.isdigit()),
+        tuple(int(port) for port in stored.socket_ports.splitlines() if port.isdigit()),
+        tuple(line for line in stored.accounts_without_keys.splitlines() if line),
+        stored.per_source_penalties,
+    )
+    auto = AutoUpdatesState(
+        stored.auto_updates_enabled is True,
+        stored.list_update_timer,
+        stored.upgrade_timer,
+        stored.automatic_reboot,
+        tuple(line for line in stored.allowed_origins.splitlines() if line),
+        stored.conffile_matches,
+        stored.last_upgrade,
+        stored.newest_log_age,
+    )
+    updates = UpdatesState(
+        stored.list_age_seconds,
+        tuple(
+            PendingUpdate(
+                update.name,
+                update.installed,
+                update.candidate,
+                update.archive,
+                update.classification,
+            )
+            for update in stored.pending_updates.all()
+        ),
+    )
+    restart = RestartState(
+        stored.restart_required is True,
+        tuple(line for line in stored.restart_packages.splitlines() if line),
+    )
+    listed = tuple(
+        Listener(
+            listener.address,
+            listener.port,
+            listener.protocol,
+            listener.process,
+            listener.public,
+        )
+        for listener in stored.listeners.all()
+    )
+    return Observation(
+        ObservationOutcome.OBSERVED,
+        _reads(stored.source),
+        "",
+        SecurityState(
+            check(stored.firewall_status, stored.firewall_source, stored.firewall_warning, firewall)
+            if stored.firewall_status == ObservationOutcome.OBSERVED
+            else check(
+                stored.firewall_status, stored.firewall_source, stored.firewall_warning, None
+            ),
+            check(
+                stored.listeners_status, stored.listeners_source, stored.listeners_warning, listed
+            )
+            if stored.listeners_status == ObservationOutcome.OBSERVED
+            else check(
+                stored.listeners_status, stored.listeners_source, stored.listeners_warning, None
+            ),
+            check(stored.ssh_status, stored.ssh_source, stored.ssh_warning, ssh)
+            if stored.ssh_status == ObservationOutcome.OBSERVED
+            else check(stored.ssh_status, stored.ssh_source, stored.ssh_warning, None),
+            check(
+                stored.auto_updates_status,
+                stored.auto_updates_source,
+                stored.auto_updates_warning,
+                auto,
+            )
+            if stored.auto_updates_status == ObservationOutcome.OBSERVED
+            else check(
+                stored.auto_updates_status,
+                stored.auto_updates_source,
+                stored.auto_updates_warning,
+                None,
+            ),
+            check(stored.updates_status, stored.updates_source, stored.updates_warning, updates)
+            if stored.updates_status == ObservationOutcome.OBSERVED
+            else check(stored.updates_status, stored.updates_source, stored.updates_warning, None),
+            check(stored.restart_status, stored.restart_source, stored.restart_warning, restart)
+            if stored.restart_status == ObservationOutcome.OBSERVED
+            else check(stored.restart_status, stored.restart_source, stored.restart_warning, None),
+        ),
     )
 
 

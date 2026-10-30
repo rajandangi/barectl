@@ -38,6 +38,7 @@ SOURCES = (
     "logs/read.py",
     "operations/apt.py",
     "runtimes/observation.py",
+    "security/observation.py",
     "sites/bodies/admission.py",
     "sites/bodies/common.py",
     "sites/bodies/logrotate.py",

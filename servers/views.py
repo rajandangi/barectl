@@ -145,9 +145,10 @@ def _more_options_open(form: ServerForm) -> bool:
     return (port not in (None, "", 22, "22")) or bool(alias)
 
 
-Section = Literal["sites", "activity", "advanced", "settings"]
+Section = Literal["sites", "security", "activity", "advanced", "settings"]
 _SECTIONS: dict[Section, str] = {
     "sites": "Sites",
+    "security": "Security",
     "activity": "Activity",
     "advanced": "Advanced",
     "settings": "Settings",
@@ -353,6 +354,19 @@ def _advanced_section(
             checked=snapshot is not None,
             machine=snapshot.collected.architecture.value if snapshot is not None else None,
         )
+        security = snapshot.collected.security.value if snapshot is not None else None
+        context["security_reads"] = (
+            (
+                ("Firewall", security.firewall),
+                ("Public ports", security.listeners),
+                ("SSH sign-in", security.ssh),
+                ("Automatic security updates", security.auto_updates),
+                ("Ubuntu updates", security.updates),
+                ("Restart needed", security.restart),
+            )
+            if security is not None
+            else ()
+        )
 
 
 def server_page(
@@ -419,6 +433,14 @@ def server_page(
         )
     if section == "advanced":
         context["presented"] = state.presentation
+    if section == "security":
+        from security.presentation import present as present_security
+
+        context["security_checks"] = (
+            present_security(state.snapshot.collected, state.snapshot.collected_at)
+            if state.snapshot is not None
+            else ()
+        )
     standing = state.snapshot.collected.standing if state.snapshot else None
     target_host = (
         standing is not None and standing.standing != Standing.NOT_MANAGEABLE

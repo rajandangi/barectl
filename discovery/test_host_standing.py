@@ -58,6 +58,7 @@ class RecordedHostStandingTests(TestCase):
             Standing.NOT_MANAGEABLE,
             ("APT background package activity",),
         ),
+        "security-checks-26.04": (Standing.TARGET_STACK, ()),
     }
 
     def test_each_native_host_transcript_has_the_expected_judgment(self) -> None:
