@@ -49,5 +49,5 @@ class RecordedSecurityTests(SimpleTestCase):
     def test_the_section_projects_the_stored_checks_without_an_unknown(self) -> None:
         collected = self.collect()
         checks = present(collected, datetime(2026, 10, 31, 12, 0, tzinfo=UTC))
-        self.assertEqual(len(checks), 7)
+        self.assertEqual(len(checks), 6)
         self.assertNotIn(UNKNOWN, [check.state for check in checks])

@@ -14,7 +14,7 @@ check" with that reason. It never prompts and never falls back to an unprivilege
 | Check | Evidence |
 | --- | --- |
 | Firewall | UFW package and service state, `ufw status verbose`, `ufw show added`, `ufw.conf`, the IPv6 setting and digests of `before.rules` and `after.rules`; firewalld, Docker, nftables and iptables for another manager. |
-| Public ports | `ss -Hlnptu` listeners, compared with the effective SSH ports, 80/tcp, 443/tcp and 443/udp. |
+| Firewall listeners | `ss -Hlnptu` listeners, compared with the effective SSH ports, 80/tcp, 443/tcp and 443/udp, as part of the Firewall check. |
 | SSH sign-in | `sshd -T` effective settings, `ssh.socket` listen values, accounts with a login shell and no readable `authorized_keys`, and OpenSSH's per-source penalties. |
 | Automatic security updates | `apt-config dump`, the two `apt-daily` timers, the `50unattended-upgrades` conffile digest and the newest unattended-upgrades log. |
 | Ubuntu updates | `apt-get -s upgrade --with-new-pkgs`, `apt-cache policy`, `apt-mark showhold` and the newest package-list index time, without refreshing the lists. |

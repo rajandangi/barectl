@@ -124,7 +124,6 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.assertContains(response, "There is no score")
         for name in (
             "Firewall",
-            "Public ports",
             "SSH sign-in",
             "Automatic security updates",
             "Ubuntu updates",

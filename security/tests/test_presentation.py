@@ -93,7 +93,7 @@ def _by_name(checks: tuple[ShownCheck, ...]) -> dict[str, ShownCheck]:
 class SecurityPresentationTests(SimpleTestCase):
     def test_without_an_observation_every_check_says_it_could_not_be_checked(self) -> None:
         checks = present(_collected(None), READ_AT)
-        self.assertEqual(len(checks), 7)
+        self.assertEqual(len(checks), 6)
         self.assertTrue(all(check.state == UNKNOWN for check in checks))
         self.assertEqual(checks[0].action, "Not available yet")
         self.assertEqual(checks[0].read_at, READ_AT)
@@ -130,7 +130,7 @@ class SecurityPresentationTests(SimpleTestCase):
                 )
             )
         )
-        check = _by_name(present(_collected(state), READ_AT))["Public ports"]
+        check = _by_name(present(_collected(state), READ_AT))["Firewall"]
         self.assertEqual(check.state, ATTENTION)
         self.assertIn("Database", check.what)
         self.assertIn("5432/tcp", check.what)

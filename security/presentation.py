@@ -62,7 +62,6 @@ def present(
     if state is None:
         names = (
             "Firewall",
-            "Public ports",
             "SSH sign-in",
             "Automatic security updates",
             "Ubuntu updates",
@@ -73,8 +72,7 @@ def present(
             _runtimes(collected, read_at, advanced_url),
         )
     return (
-        _firewall(state.firewall, read_at),
-        _listeners(state.listeners, state.ssh, read_at),
+        _firewall(state.firewall, state.listeners, state.ssh, read_at),
         _ssh(state.ssh, read_at),
         _auto_updates(state.auto_updates, read_at),
         _updates(state.updates, read_at),
@@ -115,7 +113,38 @@ def _could_not(name: str, check: Check[object], why: str, read_at: datetime) -> 
     return ShownCheck(name, UNKNOWN, reason, why, read_at, _NOT_AVAILABLE)
 
 
-def _firewall(check: Check[FirewallState], read_at: datetime) -> ShownCheck:
+def _firewall(
+    check: Check[FirewallState],
+    listeners: Check[tuple[Listener, ...]],
+    ssh: Check[SshState],
+    read_at: datetime,
+) -> ShownCheck:
+    firewall = _firewall_state(check, read_at)
+    exposure = _listeners(listeners, ssh, read_at)
+    states = {firewall.state, exposure.state}
+    if OUTSIDE in states:
+        state = OUTSIDE
+    elif ATTENTION in states:
+        state = ATTENTION
+    elif UNKNOWN in states:
+        state = UNKNOWN
+    else:
+        state = OK
+    details = (*firewall.details, *exposure.details)
+    note = firewall.note or exposure.note
+    return ShownCheck(
+        "Firewall",
+        state,
+        " ".join(part for part in (firewall.what, exposure.what) if part),
+        firewall.why,
+        read_at,
+        _NOT_AVAILABLE,
+        details=details,
+        note=note,
+    )
+
+
+def _firewall_state(check: Check[FirewallState], read_at: datetime) -> ShownCheck:
     why = "Only the ports you intend to expose should accept connections from the internet."
     if not check.observed or check.value is None:
         return _could_not("Firewall", check, why, read_at)
@@ -192,14 +221,14 @@ def _listeners(
 ) -> ShownCheck:
     why = "A public database, cache or management port can be reached by anyone."
     if not check.observed or check.value is None:
-        return _could_not("Public ports", check, why, read_at)
+        return _could_not("", check, why, read_at)
     ssh_ports = ssh.value.ports if ssh.observed and ssh.value else (22,)
     expected = set(STANDARD_PUBLIC_PORTS) | {("tcp", port) for port in ssh_ports}
     public = [row for row in check.value if row.public]
     unexpected = [row for row in public if (row.protocol, row.port) not in expected]
     if not public:
         return ShownCheck(
-            "Public ports",
+            "",
             OK,
             "Nothing listens for connections from the internet.",
             why,
@@ -212,7 +241,7 @@ def _listeners(
             for row in unexpected
         )
         return ShownCheck(
-            "Public ports",
+            "",
             ATTENTION,
             f"Programs outside the standard web and SSH ports accept connections: {named}.",
             why,
@@ -225,7 +254,7 @@ def _listeners(
             ),
         )
     return ShownCheck(
-        "Public ports",
+        "",
         OK,
         "Only SSH and web traffic accept connections from the internet.",
         why,
