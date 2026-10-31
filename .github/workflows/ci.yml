@@ -30,7 +30,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: shellcheck operations/bodies/*.sh
+      - run: shellcheck $(git ls-files '*/bodies/*.sh')
       - run: uv run mypy
       - run: uv run vulture
       - run: uv run djlint templates --lint --check

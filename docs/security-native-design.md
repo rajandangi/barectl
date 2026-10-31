@@ -61,7 +61,7 @@ The window is reported as confirmed, reverted, or unknown. Every mutation payloa
 
 Ubuntu installs unattended-upgrades and enables security updates by default through `/etc/apt/apt.conf.d/20auto-upgrades` with `APT::Periodic::Update-Package-Lists "1"` and `APT::Periodic::Unattended-Upgrade "1"`; `Unattended-Upgrade::Automatic-Reboot` defaults to false ([Ubuntu automatic updates](https://ubuntu.com/server/docs/how-to/software/automatic-updates/)). The standard is exactly that state. Observation reads `apt-config dump` for effective values, timer enablement, the package's conffile digest for `50unattended-upgrades` and the latest log under `/var/log/unattended-upgrades/`. Changed allowed origins, package blacklists, automatic reboot or a disabled timer are reported and left alone; enabling refuses them.
 
-Turn on and Turn off run `dpkg-reconfigure -f noninteractive unattended-upgrades` after setting `unattended-upgrades/enable_auto_updates` through `debconf-set-selections`. Verification reads the effective values back.
+Turn on and Turn off set `unattended-upgrades/enable_auto_updates` through `debconf-set-selections` and run `dpkg-reconfigure -f noninteractive unattended-upgrades`. The package's config script reads the current `20auto-upgrades` before asking its question, so the body first installs the package's own shipped enabled or disabled file through `ucf`, the mechanism the package's `postinst` uses; a noninteractive reconfigure alone cannot change the answer. Verification reads the effective values back. Implemented behavior: [security](security.md#automatic-security-updates).
 
 ## Pending updates and Install updates
 
