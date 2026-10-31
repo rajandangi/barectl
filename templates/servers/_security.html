@@ -35,8 +35,15 @@
           <time datetime="{{ check.read_at|date:'c' }}">{{ check.read_at|date:'M j, Y, H:i:s T' }}</time>
           ({{ check.read_at|timesince }} ago).
         </p>
-        <p>
-          {% if check.action_url %}
+        <div>
+          {% if check.action_form %}
+            <form method="post" action="{{ check.action_form }}">
+              {% csrf_token %}
+              <input type="hidden" name="state" value="{{ check.action_value }}">
+              <button class="usa-button usa-button--outline"
+                      type="submit">{{ check.action }}</button>
+            </form>
+          {% elif check.action_url %}
             <a class="usa-button usa-button--outline"
                href="{{ check.action_url }}">{{ check.action }}</a>
           {% else %}
@@ -44,7 +51,7 @@
                     type="button"
                     disabled>{{ check.action }}</button>
           {% endif %}
-        </p>
+        </div>
       </section>
     {% endfor %}
   </div>

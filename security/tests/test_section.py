@@ -7,7 +7,13 @@ from django.utils import timezone
 from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.snapshot import Observation, save_snapshot
-from security.observation import FirewallState, SecurityState
+from operations.models import ChangePreparation
+from security.observation import (
+    DEFAULT_ALLOWED_ORIGINS,
+    AutoUpdatesState,
+    FirewallState,
+    SecurityState,
+)
 from security.testing import blocked, check, ok_state
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
@@ -82,3 +88,59 @@ class SecuritySectionTests(ControllerConfigTestCase):
         response = self.client.get(f"/servers/{self.server.pk}/security/")
         self.assertContains(response, "The latest connection check failed")
         self.assertContains(response, "Only key sign-in is allowed")
+
+    def _store_disabled_updates(self) -> None:
+        self.store(
+            replace(
+                ok_state(),
+                auto_updates=check(
+                    AutoUpdatesState(
+                        False,
+                        "enabled",
+                        "enabled",
+                        False,
+                        DEFAULT_ALLOWED_ORIGINS,
+                        True,
+                        "",
+                        None,
+                        True,
+                    )
+                ),
+            )
+        )
+
+    def test_viewers_and_site_operators_see_no_control_and_a_forged_post_is_refused(
+        self,
+    ) -> None:
+        self._store_disabled_updates()
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(response, 'name="state"')
+        self.assertNotContains(response, ">Turn on<")
+        forged = self.client.post(
+            f"/servers/{self.server.pk}/security/automatic-updates/prepare/",
+            {"state": "on"},
+        )
+        self.assertEqual(forged.status_code, 403)
+        self.grant("view_changes", "change_site")
+        site_operator = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(site_operator, 'name="state"')
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/security/automatic-updates/prepare/",
+            {"state": "on"},
+        )
+        self.assertEqual(refused.status_code, 403)
+
+    def test_a_shared_operator_prepares_the_reviewed_change(self) -> None:
+        self.grant("view_changes", "change_site", "change_shared")
+        self._store_disabled_updates()
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(response, 'name="state" value="on"')
+        self.assertContains(response, "Turn on")
+        queued = self.client.post(
+            f"/servers/{self.server.pk}/security/automatic-updates/prepare/",
+            {"state": "on"},
+        )
+        self.assertEqual(queued.status_code, 302)
+        preparation = ChangePreparation.objects.get(server=self.server)
+        self.assertEqual(preparation.kind_slug, "set_automatic_security_updates")
+        self.assertEqual(preparation.inputs, {"version": 1, "selection": "on"})

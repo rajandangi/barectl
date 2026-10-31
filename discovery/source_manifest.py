@@ -88,6 +88,7 @@ SOURCES = (
     "sites/bodies/pool_change.py",
     "sites/bodies/readiness.py",
     "sites/bodies/remove.py",
+    "security/bodies/automatic_updates.sh",
     "sites/bodies/site_fpm.py",
     "sites/configuration.py",
     "sites/names.py",

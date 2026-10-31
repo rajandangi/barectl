@@ -6,6 +6,7 @@ the server, and every unreadable part stays an explicit "Could not check".
 
 import re
 from dataclasses import dataclass
+from typing import Final
 
 from discovery.models import ObservationOutcome
 from discovery.root_read import run_root
@@ -120,6 +121,16 @@ class SshState:
     per_source_penalties: str
 
 
+# The allowed origins Ubuntu's package ships, read from its own
+# /etc/apt/apt.conf.d/50unattended-upgrades (Ubuntu automatic updates).
+DEFAULT_ALLOWED_ORIGINS: Final = (
+    "${distro_id}:${distro_codename}",
+    "${distro_id}:${distro_codename}-security",
+    "${distro_id}ESMApps:${distro_codename}-apps-security",
+    "${distro_id}ESM:${distro_codename}-infra-security",
+)
+
+
 @dataclass(frozen=True)
 class AutoUpdatesState:
     enabled: bool
@@ -130,6 +141,8 @@ class AutoUpdatesState:
     conffile_matches_package: bool | None
     last_upgrade: str
     newest_log_age: int | None
+    package_installed: bool = False
+    package_blacklist: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -389,6 +402,7 @@ def _read_auto_updates(shell: RemoteShell) -> Check[AutoUpdatesState]:
     timers = parse_timers(timers_text)
     digest_text = _run(shell, UNATTENDED_DIGEST_COMMAND, accepted=(0, 1))
     conffiles_text = _run(shell, UNATTENDED_CONFFILES_COMMAND, accepted=(0, 1))
+    installed = not isinstance(conffiles_text, _Failure)
     matches = None
     if not isinstance(digest_text, _Failure) and not isinstance(conffiles_text, _Failure):
         matches = conffile_matches(
@@ -423,14 +437,12 @@ def _read_auto_updates(shell: RemoteShell) -> Check[AutoUpdatesState]:
             timers.get("apt-daily.timer", ""),
             timers.get("apt-daily-upgrade.timer", ""),
             None if reboot is None else reboot.lower() == "true",
-            tuple(
-                value
-                for name, value in values.items()
-                if name.startswith("Unattended-Upgrade::Allowed-Origins")
-            ),
+            parse_allowed_origins(config),
             matches,
             last_upgrade,
             newest_age,
+            installed,
+            parse_package_blacklist(config),
         ),
     )
 
@@ -798,7 +810,20 @@ def parse_allowed_origins(text: str) -> tuple[str, ...]:
     return tuple(origins)
 
 
+def parse_package_blacklist(text: str) -> tuple[str, ...]:
+    """Every package pattern Ubuntu's automatic updates are told to skip."""
+    entries = []
+    for line in text.splitlines():
+        match = re.fullmatch(
+            r'Unattended-Upgrade::Package-Blacklist:: "(?P<value>[^"]*)";', line.strip()
+        )
+        if match:
+            entries.append(match["value"])
+    return tuple(entries)
+
+
 def parse_timers(text: str) -> dict[str, str]:
+    """Each timer's enablement at boot; a disabled timer does not follow the standard."""
     timers: dict[str, dict[str, str]] = {}
     current = ""
     for line in text.splitlines():
@@ -810,10 +835,7 @@ def parse_timers(text: str) -> dict[str, str]:
             timers[current] = {}
         elif current:
             timers[current][name] = value.strip()
-    return {
-        name: "active" if values.get("ActiveState") == "active" else values.get("UnitFileState", "")
-        for name, values in timers.items()
-    }
+    return {name: values.get("UnitFileState", "") for name, values in timers.items()}
 
 
 def parse_newest_log(text: str) -> tuple[str, int | None]:

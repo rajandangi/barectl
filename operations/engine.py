@@ -297,6 +297,22 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "logrotate refused the reviewed rotation file, so Barectl did not keep it. Check the "
         "run's journal, then prepare a new review."
     ),
+    "automatic_updates_package": (
+        "The reviewed unattended-upgrades package transaction did not match the server's "
+        "resolved one, so Barectl stopped before further changes. Prepare a new review."
+    ),
+    "automatic_updates_configure": (
+        "Ubuntu's automatic-update settings were not accepted. Read the server again before "
+        "preparing a new review."
+    ),
+    "automatic_updates_verify": (
+        "The automatic-update settings did not read back as reviewed. Read the server again "
+        "before preparing a new review."
+    ),
+    "automatic_updates_settings": (
+        "The server's customized automatic-update settings changed during the run, so Barectl "
+        "stopped without overwriting them. Check them through ordinary administration."
+    ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
         "database catalog changed, so Barectl stopped before creating the binding. Prepare a "
@@ -999,6 +1015,10 @@ RESULT_REASONS: Final = frozenset(
         "restore_done",
         "logrotate_missing",
         "rotation_invalid",
+        "automatic_updates_package",
+        "automatic_updates_configure",
+        "automatic_updates_verify",
+        "automatic_updates_settings",
     }
 )
 

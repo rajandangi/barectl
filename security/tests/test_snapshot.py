@@ -42,13 +42,14 @@ STATE = SecurityState(
     auto_updates=check(
         AutoUpdatesState(
             True,
-            "active",
+            "enabled",
             "enabled",
             False,
             ("Ubuntu:resolute", "Ubuntu:resolute-security"),
             True,
             "No updates were installed.",
             3600,
+            True,
         )
     ),
     updates=check(

@@ -60,6 +60,8 @@ class SecurityObservation(models.Model):
     upgrade_timer = models.CharField(max_length=20, blank=True)
     automatic_reboot = models.BooleanField(null=True, blank=True)
     allowed_origins = models.TextField(blank=True)
+    package_blacklist = models.TextField(blank=True)
+    unattended_package_installed = models.BooleanField(default=False)
     last_upgrade = models.TextField(blank=True)
     conffile_matches = models.BooleanField(null=True, blank=True)
     newest_log_age = models.BigIntegerField(null=True, blank=True)

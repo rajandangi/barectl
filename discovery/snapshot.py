@@ -638,6 +638,12 @@ def _save_security(
         allowed_origins="\n".join(state.auto_updates.value.allowed_origins)
         if state.auto_updates.value
         else "",
+        package_blacklist="\n".join(state.auto_updates.value.package_blacklist)
+        if state.auto_updates.value
+        else "",
+        unattended_package_installed=state.auto_updates.value.package_installed
+        if state.auto_updates.value
+        else False,
         last_upgrade=state.auto_updates.value.last_upgrade if state.auto_updates.value else "",
         conffile_matches=state.auto_updates.value.conffile_matches_package
         if state.auto_updates.value
@@ -1168,6 +1174,8 @@ def _read_security(row: DiscoverySnapshot) -> Observation[SecurityState | None]:
         stored.conffile_matches,
         stored.last_upgrade,
         stored.newest_log_age,
+        stored.unattended_package_installed,
+        tuple(line for line in stored.package_blacklist.splitlines() if line),
     )
     updates = UpdatesState(
         stored.list_age_seconds,

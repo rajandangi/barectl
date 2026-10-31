@@ -206,6 +206,14 @@ Unattended-Upgrade::Allowed-Origins:: "Ubuntu:resolute-security";
         self.assertEqual(values["APT::Periodic::Unattended-Upgrade"], "1")
         self.assertEqual(values["Unattended-Upgrade::Automatic-Reboot"], "false")
 
+    def test_package_blacklist_keeps_every_pattern_and_ignores_the_empty_header(self) -> None:
+        text = """\
+Unattended-Upgrade::Package-Blacklist "";
+Unattended-Upgrade::Package-Blacklist:: "linux-";
+Unattended-Upgrade::Package-Blacklist:: "libc6$";
+"""
+        self.assertEqual(observation.parse_package_blacklist(text), ("linux-", "libc6$"))
+
     def test_a_later_apt_file_wins_and_every_origin_is_kept(self) -> None:
         text = """\
 APT::Periodic::Unattended-Upgrade "1";
@@ -221,7 +229,7 @@ Unattended-Upgrade::Allowed-Origins:: "Ubuntu:resolute-security";
             ("Ubuntu:resolute", "Ubuntu:resolute-security"),
         )
 
-    def test_timer_state_prefers_active_over_enabled(self) -> None:
+    def test_timer_state_reads_whether_it_starts_at_boot(self) -> None:
         timers = observation.parse_timers(
             """\
 Id=apt-daily.timer
@@ -229,9 +237,9 @@ UnitFileState=enabled
 ActiveState=active
 
 Id=apt-daily-upgrade.timer
-UnitFileState=enabled
+UnitFileState=disabled
 ActiveState=inactive
 """
         )
-        self.assertEqual(timers["apt-daily.timer"], "active")
-        self.assertEqual(timers["apt-daily-upgrade.timer"], "enabled")
+        self.assertEqual(timers["apt-daily.timer"], "enabled")
+        self.assertEqual(timers["apt-daily-upgrade.timer"], "disabled")

@@ -12,6 +12,7 @@ from discovery.snapshot import (
 )
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from security.observation import (
+    DEFAULT_ALLOWED_ORIGINS,
     AutoUpdatesState,
     Check,
     FirewallState,
@@ -63,7 +64,11 @@ def _state(
         listeners=listeners or read_check(()),
         ssh=ssh or read_check(SshState("no", "no", "prohibit-password", (22,), (22,), (), "yes")),
         auto_updates=auto_updates
-        or read_check(AutoUpdatesState(True, "active", "active", False, (), True, "", None)),
+        or read_check(
+            AutoUpdatesState(
+                True, "enabled", "enabled", False, DEFAULT_ALLOWED_ORIGINS, True, "", None, True
+            )
+        ),
         updates=updates or read_check(UpdatesState(3600, ())),
         restart=restart or read_check(RestartState(False, ())),
     )
@@ -148,12 +153,72 @@ class SecurityPresentationTests(SimpleTestCase):
         state = _state(
             auto_updates=read_check(
                 AutoUpdatesState(
-                    True, "active", "active", False, ("Ubuntu:resolute",), False, "", None
+                    True, "enabled", "enabled", False, ("Ubuntu:resolute",), False, "", None, True
                 )
             )
         )
         check = _by_name(present(_collected(state), READ_AT))["Automatic security updates"]
         self.assertEqual(check.state, OUTSIDE)
+        self.assertEqual(check.action, "Not available yet")
+        self.assertIn("allowed update sources", " ".join(check.details))
+
+    def test_the_check_offers_turn_on_and_shows_ubuntu_history_to_a_permitted_operator(
+        self,
+    ) -> None:
+        state = _state(
+            auto_updates=read_check(
+                AutoUpdatesState(
+                    False,
+                    "enabled",
+                    "enabled",
+                    False,
+                    DEFAULT_ALLOWED_ORIGINS,
+                    True,
+                    "Packages that were upgraded: openssl",
+                    3600,
+                    True,
+                )
+            )
+        )
+        check = _by_name(
+            present(
+                _collected(state),
+                READ_AT,
+                auto_updates_url="/servers/1/security/automatic-updates/prepare/",
+                can_change=True,
+            )
+        )["Automatic security updates"]
+        self.assertEqual(check.action, "Turn on")
+        self.assertEqual(check.action_form, "/servers/1/security/automatic-updates/prepare/")
+        self.assertEqual(check.action_value, "on")
+        self.assertIn("Ubuntu's own history", " ".join(check.details))
+        self.assertIn("Valkey", check.note)
+
+    def test_without_change_permission_the_automatic_updates_control_is_absent(self) -> None:
+        state = _state(
+            auto_updates=read_check(
+                AutoUpdatesState(
+                    False,
+                    "enabled",
+                    "enabled",
+                    False,
+                    DEFAULT_ALLOWED_ORIGINS,
+                    True,
+                    "",
+                    None,
+                    True,
+                )
+            )
+        )
+        check = _by_name(
+            present(
+                _collected(state),
+                READ_AT,
+                auto_updates_url="/servers/1/security/automatic-updates/prepare/",
+            )
+        )["Automatic security updates"]
+        self.assertEqual(check.action, "Not available yet")
+        self.assertEqual(check.action_form, "")
 
     def test_security_updates_are_counted_and_prioritised(self) -> None:
         state = _state(
