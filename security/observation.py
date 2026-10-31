@@ -36,7 +36,6 @@ APT_CONFIG_COMMAND = "apt-config dump"
 APT_TIMERS_COMMAND = (
     "systemctl show apt-daily.timer apt-daily-upgrade.timer -p Id -p UnitFileState -p ActiveState"
 )
-UNATTENDED_STATUS_COMMAND = "dpkg-query -W -f='${db:Status-Status}' unattended-upgrades"
 UNATTENDED_DIGEST_COMMAND = "sha256sum /etc/apt/apt.conf.d/50unattended-upgrades"
 UNATTENDED_CONFFILES_COMMAND = "dpkg-query -W -f='${Conffiles}\\n' unattended-upgrades"
 UNATTENDED_LOG_COMMAND = (
@@ -401,10 +400,9 @@ def _read_auto_updates(shell: RemoteShell) -> Check[AutoUpdatesState]:
     if isinstance(timers_text, _Failure):
         return _unreadable(timers_text)
     timers = parse_timers(timers_text)
-    status_text = _run(shell, UNATTENDED_STATUS_COMMAND, accepted=(0, 1))
-    installed = not isinstance(status_text, _Failure) and status_text.strip() == "installed"
     digest_text = _run(shell, UNATTENDED_DIGEST_COMMAND, accepted=(0, 1))
     conffiles_text = _run(shell, UNATTENDED_CONFFILES_COMMAND, accepted=(0, 1))
+    installed = not isinstance(conffiles_text, _Failure)
     matches = None
     if not isinstance(digest_text, _Failure) and not isinstance(conffiles_text, _Failure):
         matches = conffile_matches(
@@ -430,7 +428,6 @@ def _read_auto_updates(shell: RemoteShell) -> Check[AutoUpdatesState]:
         (
             APT_CONFIG_COMMAND,
             APT_TIMERS_COMMAND,
-            UNATTENDED_STATUS_COMMAND,
             UNATTENDED_DIGEST_COMMAND,
             UNATTENDED_LOG_COMMAND,
         ),
