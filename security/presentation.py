@@ -332,7 +332,7 @@ def _ssh(check: Check[SshState], read_at: datetime) -> ShownCheck:
     )
 
 
-_RESTART_DISCLOSURE = (
+RESTART_DISCLOSURE = (
     "These updates can restart the database engine and Valkey, so sites may pause briefly. "
     "They do not restart the web server or PHP."
 )
@@ -349,17 +349,20 @@ def _auto_updates(
         return _could_not("Automatic security updates", check, why, read_at)
     state = check.value
     history = _history(state)
-    custom = _custom_updates(state)
+    custom = custom_updates(state)
     if custom:
+        form = action_url if can_change and state.enabled else ""
         return ShownCheck(
             "Automatic security updates",
             OUTSIDE,
             "Ubuntu's automatic updates are set up in a way Barectl does not change.",
             why,
             read_at,
-            _NOT_AVAILABLE,
+            "Turn off" if form else _NOT_AVAILABLE,
+            action_form=form,
+            action_value="off",
             details=(*custom, *history),
-            note=_RESTART_DISCLOSURE,
+            note=RESTART_DISCLOSURE,
         )
     action, value = _auto_updates_action(state)
     form = action_url if can_change and action and value else ""
@@ -376,7 +379,7 @@ def _auto_updates(
             action_form=form,
             action_value=value,
             details=history,
-            note=_RESTART_DISCLOSURE,
+            note=RESTART_DISCLOSURE,
         )
     if not state.enabled:
         return ShownCheck(
@@ -389,7 +392,7 @@ def _auto_updates(
             action_form=form,
             action_value=value,
             details=history,
-            note=_RESTART_DISCLOSURE,
+            note=RESTART_DISCLOSURE,
         )
     return ShownCheck(
         "Automatic security updates",
@@ -402,7 +405,7 @@ def _auto_updates(
         action_form=form,
         action_value=value,
         details=history,
-        note=_RESTART_DISCLOSURE,
+        note=RESTART_DISCLOSURE,
     )
 
 
@@ -422,14 +425,8 @@ def _history(state: AutoUpdatesState) -> tuple[str, ...]:
 def custom_updates(state: AutoUpdatesState) -> tuple[str, ...]:
     """Why this setup is outside the supported one, or nothing when it follows it."""
     reasons = []
-    origins_differ = state.allowed_origins != DEFAULT_ALLOWED_ORIGINS
-    if (
-        state.package_installed
-        and origins_differ
-        or not state.package_installed
-        and state.allowed_origins
-        and origins_differ
-    ):
+    origins = state.allowed_origins
+    if (state.package_installed or origins) and origins != DEFAULT_ALLOWED_ORIGINS:
         reasons.append("The allowed update sources are customized.")
     if state.package_blacklist:
         reasons.append("Some packages are kept out of automatic updates.")
@@ -440,10 +437,6 @@ def custom_updates(state: AutoUpdatesState) -> tuple[str, ...]:
     if state.list_update_timer != "enabled" or state.upgrade_timer != "enabled":
         reasons.append("One of Ubuntu's update timers is disabled.")
     return tuple(reasons)
-
-
-def _custom_updates(state: AutoUpdatesState) -> tuple[str, ...]:
-    return custom_updates(state)
 
 
 def _updates(check: Check[UpdatesState], read_at: datetime) -> ShownCheck:

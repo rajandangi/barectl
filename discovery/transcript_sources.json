@@ -57,7 +57,7 @@
     "runtimes/bounded.py": "329cf8a128887b5362367c0d6514c67cc7671e9654ef682c4cff69d328ce2d65",
     "runtimes/configuration.py": "a6c70218c0b80080e254531b3f1fcb29feaffb93ef208a7df458206ce9efd269",
     "runtimes/live.py": "1cc0b8ac8d429b39ce08e431371fefdb4622223336fe15c1c8e6fbf48897e618",
-    "security/bodies/automatic_updates.sh": "3f349407cdbbc9c0d3e65121505f775ea2a3cbb289fdf4f0a5d1e7a694ec99e4",
+    "security/bodies/automatic_updates.sh": "922d7d45097640acf87987d8538715233577dd16c52aebb018cef135d8c2de84",
     "sites/bodies/admission.py": "4d0901b9b088660d518ec3c234a9c9557a9e15c7460ed44f6c0dd597141974dc",
     "sites/bodies/client_change.py": "52f484adbeca2ba866dcd01aaba6a7f2cc949437a5c1cc50b8808adb65813e29",
     "sites/bodies/common.py": "dd2988e15c84cedf286798513a97d54b47a57876bae0278d3185b0d1f7be5539",

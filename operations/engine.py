@@ -313,6 +313,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The server's customized automatic-update settings changed during the run, so Barectl "
         "stopped without overwriting them. Check them through ordinary administration."
     ),
+    "automatic_updates_failed": (
+        "The automatic-updates change stopped before reporting its outcome. Read the server "
+        "again before preparing a new review."
+    ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
         "database catalog changed, so Barectl stopped before creating the binding. Prepare a "
@@ -1019,6 +1023,7 @@ RESULT_REASONS: Final = frozenset(
         "automatic_updates_configure",
         "automatic_updates_verify",
         "automatic_updates_settings",
+        "automatic_updates_failed",
     }
 )
 

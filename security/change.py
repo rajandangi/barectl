@@ -33,7 +33,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 
 from . import observation
-from .presentation import custom_updates
+from .presentation import RESTART_DISCLOSURE, custom_updates
 
 SLUG: Final = "set_automatic_security_updates"
 LABEL: Final = "Change automatic security updates"
@@ -232,13 +232,13 @@ def _platform_reasons(evidence: AutoUpdatesEvidence) -> list[str]:
 
 def _transaction(
     evidence: AutoUpdatesEvidence,
-) -> tuple[Simulation | None, tuple[PackageAction, ...], str, list[str]]:
+) -> tuple[tuple[PackageAction, ...], str, list[str]]:
     refusals: list[str] = []
     simulation = evidence.simulation
     if evidence.simulation_error:
-        return None, (), "", [evidence.simulation_error]
+        return (), "", [evidence.simulation_error]
     if simulation is None:
-        return None, (), "", ["APT could not resolve the unattended-upgrades installation."]
+        return (), "", ["APT could not resolve the unattended-upgrades installation."]
     refusals.extend(simulation.problems)
     installed = next(
         (
@@ -264,8 +264,8 @@ def _transaction(
         actions = actions_of(simulation.transitions, evidence.deb_arch)
     except ValueError as error:
         refusals.append(f"{error} This reduced transaction only installs missing packages.")
-        return simulation, (), installed.version if installed is not None else "", refusals
-    return simulation, actions, installed.version if installed is not None else "", refusals
+        return (), installed.version if installed is not None else "", refusals
+    return actions, installed.version if installed is not None else "", refusals
 
 
 def _expected_settings(
@@ -313,8 +313,7 @@ def _details(
         {
             "label": "Restart",
             "value": (
-                "Automatic updates can restart the database engine and Valkey, so sites may "
-                "pause briefly. They do not restart the web server or PHP."
+                RESTART_DISCLOSURE
                 if selection == "on"
                 else "Off; nothing is restarted by automatic updates."
             ),
@@ -343,7 +342,7 @@ def review(  # noqa: C901 - one list of every refusal
     actions: tuple[PackageAction, ...] = ()
     version = evidence.installed_version
     if install:
-        _simulation, actions, version, transaction_refusals = _transaction(evidence)
+        actions, version, transaction_refusals = _transaction(evidence)
         refusals.extend(transaction_refusals)
     elif state is not None and state.package_installed and not version:
         refusals.append("The unattended-upgrades version could not be read. Prepare again.")
@@ -389,7 +388,7 @@ def review(  # noqa: C901 - one list of every refusal
             )
             if install:
                 text += f" Install unattended-upgrades {version} from the Ubuntu archive."
-            text += " Updates can restart the database engine and Valkey."
+            text += " " + RESTART_DISCLOSURE
         else:
             text = (
                 "Turn off Ubuntu's automatic security updates. Existing allowed update "
@@ -523,17 +522,19 @@ def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
     origins = tuple(str(origin) for origin in document["origins"])
     blacklist = tuple(str(item) for item in document["blacklist"])
     reboot = bool(document["automatic_reboot"])
+    periodic = _periodic_values(shell)
     if document["state"] == "off":
         if not state.package_installed:
             return True
         return (
-            not state.enabled
+            periodic == ("0", "0")
             and state.allowed_origins == origins
             and state.package_blacklist == blacklist
             and bool(state.automatic_reboot) == reboot
         )
     return (
-        state.package_installed
+        periodic == ("1", "1")
+        and state.package_installed
         and state.enabled
         and state.allowed_origins == origins
         and state.package_blacklist == blacklist
@@ -542,6 +543,20 @@ def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
         and state.list_update_timer == "enabled"
         and state.upgrade_timer == "enabled"
         and _installed_version(shell) == version
+    )
+
+
+def _periodic_values(shell: RemoteShell) -> tuple[str, str]:
+    result = run_root(shell, f"apt-config dump | grep -E {_PERIODIC}")
+    if result.exit_status != 0 or result.truncated:
+        return ("", "")
+    values: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        name, _, value = line.partition(" ")
+        values[name] = value.strip().rstrip(";").strip('"')
+    return (
+        values.get("APT::Periodic::Update-Package-Lists", ""),
+        values.get("APT::Periodic::Unattended-Upgrade", ""),
     )
 
 

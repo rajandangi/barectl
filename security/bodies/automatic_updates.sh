@@ -10,7 +10,7 @@ refused() { result "{\"class\":\"refused\",\"reason\":\"$1\"}"; exit 1; }
 finish() {
   status=$?
   if [ "$reported" -eq 0 ] && [ "$status" -ne 0 ]; then
-    result '{"class":"partial","reason":"automatic_updates_configure"}'
+    result '{"class":"partial","reason":"automatic_updates_failed"}'
   fi
   rm -f -- "$0"
 }
