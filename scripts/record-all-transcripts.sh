@@ -5,8 +5,12 @@
 # a change to a shared native read source lands on the integration branch, not on a ticket
 # branch that will merge other read changes later.
 #
-# Usage: record-all-transcripts.sh [--env-file FILE] [--from STATE] [--only STATE]
+# Usage: record-all-transcripts.sh [--env-file FILE] [--from STATE] [--only STATE] [--check]
 #        (default env file .env)
+#
+# --check reports whether the committed source manifest still matches the tree and records
+# nothing. Freeze command-affecting edits before the final full pass; run --check first and
+# after the pass.
 #
 # One failed state does not stop the pass: the script records the rest, then exits 1 naming
 # every failure and the state that resumes it. --from STATE starts at that state and assumes
@@ -24,8 +28,13 @@ usage() {
 env_file=.env
 from=
 only=
+check=
 while [ $# -gt 0 ]; do
     case "$1" in
+        --check)
+            check=1
+            shift
+            ;;
         --env-file)
             [ $# -ge 2 ] || usage
             env_file=$2
@@ -49,6 +58,14 @@ done
 if [ -n "$from" ] && [ -n "$only" ]; then
     echo "--from and --only select different passes; use one." >&2
     exit 2
+fi
+if [ -n "$check" ]; then
+    if [ -n "$from" ] || [ -n "$only" ]; then
+        echo "--check records nothing; do not combine it with --from or --only." >&2
+        exit 2
+    fi
+    uv run --env-file "$env_file" python -m discovery.source_manifest
+    exit $?
 fi
 
 states=$(uv run --env-file "$env_file" python -m disposable.scenarios --list-records)
