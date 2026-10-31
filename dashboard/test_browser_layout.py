@@ -101,6 +101,12 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         page.keyboard.press("Tab")
         expect(
             page.get_by_role("navigation", name="Server sections").get_by_role(
+                "link", name="Security"
+            )
+        ).to_be_focused()
+        page.keyboard.press("Tab")
+        expect(
+            page.get_by_role("navigation", name="Server sections").get_by_role(
                 "link", name="Activity"
             )
         ).to_be_focused()

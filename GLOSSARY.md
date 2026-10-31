@@ -460,12 +460,12 @@ _Avoid_: Log download, log export, log tail
 
 Terms for planned Phase E operations are defined in the [ROADMAP](../ROADMAP.md). Delivered Phase B, Phase C and Phase D terms are defined in the [Phase B qualification record](docs/phase-b-qualification.md), the [Phase C qualification record](docs/phase-c-qualification.md) and the [Phase D qualification record](docs/phase-d-qualification.md).
 
-**Security review** (planned):
-A server's plain-language findings about its firewall, SSH sign-in, automatic security updates, pending updates and restart requirement, reconstructed from native evidence with its collection time. It reports what Barectl could read; it is not a score or a statement that the server is secure.
+**Security checks** (implemented):
+A server's plain-language, read-only findings about its firewall, public ports, SSH sign-in, automatic security updates, pending updates and restart requirement, reconstructed from native evidence with its collection time ([security](docs/security.md)). It reports what Barectl could read; it is not a score or a statement that the server is secure.
 _Avoid_: Security score, audit, compliance check
 
-**Security finding** (planned):
-One observed fact in a security review with its impact and the reviewed action or ordinary administration that addresses it. Unreadable evidence is an unknown finding, never a passing one.
+**Security check** (implemented):
+One of the six findings in the Security checks with its state, why it matters, when it was read and at most one next action. Unreadable evidence is "Could not check", never a passing result.
 _Avoid_: Vulnerability, alert
 
 **Firewall standard** (planned):

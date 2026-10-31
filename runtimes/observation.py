@@ -72,6 +72,8 @@ class RuntimeObservation:
     master_state: str
     protections: tuple[tuple[str, str], ...]
     problem: str
+    # When the profile generation link was last changed, in epoch seconds; 0 if unread.
+    installed_at: int = 0
 
     @property
     def manageable(self) -> bool:
@@ -140,6 +142,16 @@ def read(
     return value
 
 
+def _installed_at(row: dict[str, object]) -> int:
+    profile = row.get("profile")
+    if not isinstance(profile, dict):
+        return 0
+    mtime = profile.get("mtime")
+    if type(mtime) is not int or mtime < 0:
+        return 0
+    return mtime // 1_000_000_000
+
+
 def _text(row: dict[str, object], key: str) -> str:
     value = row.get(key)
     return value if isinstance(value, str) and len(value) <= 32768 else ""
@@ -178,6 +190,7 @@ def observations(value: object, architecture: Architecture) -> tuple[RuntimeObse
                 state,
                 protections,
                 problem,
+                _installed_at(row),
             )
         )
     return tuple(rows)

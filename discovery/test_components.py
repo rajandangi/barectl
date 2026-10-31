@@ -274,7 +274,9 @@ class ServiceTests(ObservationTestCase):
         observed = self.component("php-fpm")
         self.assertEqual(observed.package.value[0].name, "php8.5-fpm")
         self.assertEqual(observed.service.value[0].name, "php8.5-fpm.service")
-        package_commands = [c for c in self.remote.commands if c.startswith("dpkg-query")]
+        package_commands = [
+            c for c in self.remote.commands if c.startswith("dpkg-query") and "ufw" not in c
+        ]
         self.assertEqual(package_commands, [PACKAGE_QUERY, PACKAGE_NAMES_QUERY])
         self.assertNotIn("*", PACKAGE_QUERY)
         for other in ("8.3", "8.4"):
@@ -320,7 +322,9 @@ class PackageInventoryTests(ReplayObservationTestCase):
             ],
         )
         self.assertEqual([c.service.value for c in collected.components], [()] * 6)
-        self.assertFalse([c for c in self.shell.commands if c.startswith("systemctl show")])
+        self.assertFalse(
+            [c for c in self.shell.commands if c.startswith("systemctl show") and ".service" in c]
+        )
         self.assertEqual(
             self.component("nginx").service.source,
             (PACKAGE_QUERY, PACKAGE_NAMES_QUERY),
@@ -344,7 +348,9 @@ class PackageInventoryTests(ReplayObservationTestCase):
         self.override(PACKAGE_QUERY, ssh.CommandResult(127, ""))
         collected = self.collect()
         self.assert_statuses(collected, "package", "unsupported")
-        self.assertFalse([c for c in self.shell.commands if c.startswith("systemctl show")])
+        self.assertFalse(
+            [c for c in self.shell.commands if c.startswith("systemctl show") and ".service" in c]
+        )
         self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
         for component in collected.components:
             with self.subTest(component=component.component):
@@ -406,7 +412,9 @@ class PackageInventoryTests(ReplayObservationTestCase):
         self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(126, ""))
         collected = self.collect()
         self.assert_statuses(collected, "package", "inaccessible")
-        self.assertFalse([c for c in self.shell.commands if c.startswith("systemctl show")])
+        self.assertFalse(
+            [c for c in self.shell.commands if c.startswith("systemctl show") and ".service" in c]
+        )
 
     def test_a_truncated_package_inventory_keeps_evidence_unsupported(self) -> None:
         self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(0, "nginx ii\n", truncated=True))
@@ -415,7 +423,7 @@ class PackageInventoryTests(ReplayObservationTestCase):
     def test_malformed_inventory_names_are_not_reported(self) -> None:
         self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(0, "php8.1;reboot ii\n"))
         self.assert_statuses(self.collect(), "package", "unsupported")
-        self.assert_not_kept("reboot")
+        self.assert_not_kept("php8.1;reboot")
 
 
 class PostgresClusterTests(ObservationTestCase):
@@ -601,10 +609,13 @@ class PostgresClusterTests(ObservationTestCase):
                 *postgres.service.source,
             )
         )
-        for name in [*hostile, "18;reboot", "17\\nmain", "reboot", "(id)"]:
+        for name in [*hostile, "18;reboot", "17\\nmain", "(id)"]:
             with self.subTest(name=name):
                 self.assertNotIn(name, stored)
                 self.assert_not_kept(name)
+        # "reboot" is also the name of an unrelated fixed security read that every
+        # collection now stores, so it is checked in the cluster observation alone.
+        self.assertNotIn("reboot", stored)
 
     def test_clusters_are_not_looked_for_without_an_installed_package(self) -> None:
         # Not installed, and unpacked but not configured.

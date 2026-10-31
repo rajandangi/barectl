@@ -17,6 +17,7 @@ from laravel import observation as laravel_observation
 from runtimes import defaults as runtime_defaults
 from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
+from security import observation as security_observation
 from sites import observation as site_observation
 from wordpress import observation as wordpress_observation
 
@@ -126,6 +127,11 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     certificate_email, certificate_email_state = "", ""
     if sites and standing.standing == Standing.TARGET_STACK:
         certificate_email_state, certificate_email = caddy_email.read(shell)
+    security: Observation[security_observation.SecurityState | None] = (
+        security_observation.collect(shell)
+        if sites
+        else Observation(ObservationOutcome.OBSERVED, (), "", None)
+    )
     collected = CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -145,6 +151,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         workers=workers,
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
+        security=security,
     )
     backups, offsite = _hosting_backups(shell, collected, sites=sites)
     return replace(collected, backups=backups, offsite=offsite)

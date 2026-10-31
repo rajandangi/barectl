@@ -27,4 +27,37 @@
     </p>
   {% endif %}
 </section>
+<section class="margin-top-4" aria-labelledby="advanced-security-heading">
+  <h2 id="advanced-security-heading">Security reads</h2>
+  {% if security_reads %}
+    <p class="barectl-note">
+      The evidence behind each Security check, including the reads it recorded and why a check
+      could not be read. The checks themselves are on the
+      <a href="{% url 'server_security' server.pk %}">Security</a> page.
+    </p>
+    <table class="usa-table usa-table--borderless">
+      <thead>
+        <tr>
+          <th scope="col">Check</th>
+          <th scope="col">Outcome</th>
+          <th scope="col">Read</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for name, check in security_reads %}
+          <tr>
+            <th scope="row">{{ name }}</th>
+            <td>{{ check.status.label }}</td>
+            <td>
+              {% if check.warning %}<p>{{ check.warning }}</p>{% endif %}
+              {% for read in check.source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="barectl-note">No discovery check has read the security evidence yet.</p>
+  {% endif %}
+</section>
 {% include "servers/_history.html" %}

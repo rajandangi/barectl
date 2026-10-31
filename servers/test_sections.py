@@ -17,6 +17,7 @@ class ServerSectionTests(ControllerConfigTestCase):
             for suffix, title in (
                 ("", "Sites"),
                 ("sites/", "Sites"),
+                ("security/", "Security"),
                 ("activity/", "Activity"),
                 ("settings/", "Settings"),
                 ("advanced/", "Advanced"),
@@ -105,6 +106,32 @@ class ServerSectionTests(ControllerConfigTestCase):
         record_attempt(server, RemoteOperation.Status.FAILED, failure="The connection failed.")
         response = self.client.get(f"/servers/{server.pk}/activity/")
         self.assertContains(response, "The connection failed.")
+
+    def test_security_section_is_a_stored_read_with_no_score_or_native_terms(self) -> None:
+        self.grant("view_server", "view_siteobservation", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        empty = self.client.get(f"/servers/{server.pk}/security/")
+        self.assertContains(empty, "No security checks have been read yet")
+        self.assertNotContains(empty, "Security score")
+        remote = FakeServer()
+        with remote.substituted():
+            request_discovery(server)
+            run_worker()
+        with mock.patch("discovery.ssh.connect_alias") as connect:
+            response = self.client.get(f"/servers/{server.pk}/security/")
+            connect.assert_not_called()
+        self.assertContains(response, "There is no score")
+        for name in (
+            "Firewall",
+            "SSH sign-in",
+            "Automatic security updates",
+            "Ubuntu updates",
+            "Restart needed",
+            "Web runtimes",
+        ):
+            self.assertContains(response, name)
+        self.assertContains(response, "Could not check")
 
     def test_advanced_holds_the_stack_and_the_discovery_history(self) -> None:
         self.grant("view_server", "view_siteobservation")

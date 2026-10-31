@@ -362,6 +362,7 @@ class RuntimeObservation(models.Model):
     master_state = models.CharField(max_length=32)
     protections = models.TextField(blank=True)
     problem = models.TextField(blank=True)
+    installed_at = models.BigIntegerField(default=0)
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()

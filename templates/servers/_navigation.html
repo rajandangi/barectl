@@ -5,6 +5,10 @@
          {% if section == 'sites' %}class="usa-current" aria-current="page"{% endif %}>Sites</a>
     </li>
     <li class="usa-sidenav__item">
+      <a href="{% url 'server_security' server.pk %}"
+         {% if section == 'security' %}class="usa-current" aria-current="page"{% endif %}>Security</a>
+    </li>
+    <li class="usa-sidenav__item">
       <a href="{% url 'server_activity' server.pk %}"
          {% if section == 'activity' %}class="usa-current" aria-current="page"{% endif %}>Activity</a>
     </li>

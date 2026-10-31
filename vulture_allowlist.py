@@ -122,6 +122,7 @@ if TYPE_CHECKING:
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
+    from disposable.test_security_checks import SecurityChecks
     from disposable.test_site_database import SiteDatabaseMariaDB, SiteDatabasePostgreSQL
     from disposable.test_site_node import (
         SiteNodeInterruptedTransition,
@@ -439,6 +440,7 @@ if TYPE_CHECKING:
         FoundationValidators,
         SupportedFoundationResume,
         PlainL0Discovery,
+        SecurityChecks,
         EgressControl,
         MirrorNixSignature,
         NginxStanding,

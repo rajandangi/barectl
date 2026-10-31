@@ -11,7 +11,7 @@
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:0xsodoFWP+JJZx2TrK5k7xzNepKbpLGZsQMdp3qUhYA"
+    "host_key": "ssh-ed25519 SHA256:ddeIWvzQBp3FwMD4CFTcEix/BtS31RZjmVFaIMSnOis"
   },
   "commands": [
     {
@@ -38,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:         6354184 kB\nMemAvailable:   11777584 kB\nBuffers:             140 kB\nCached:          1132916 kB\nSwapCached:         1592 kB\nActive:          1877488 kB\nInactive:        2304272 kB\nActive(anon):    1391956 kB\nInactive(anon):  1701292 kB\nActive(file):     485532 kB\nInactive(file):   602980 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       16362840 kB\nDirty:              2092 kB\nWriteback:             0 kB\nAnonPages:       3026696 kB\nMapped:           266776 kB\nShmem:             44612 kB\nKReclaimable:    4592064 kB\nSlab:            5411648 kB\nSReclaimable:    4592064 kB\nSUnreclaim:       819584 kB\nKernelStack:       18512 kB\nPageTables:        42256 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:   15671740 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       73420 kB\nVmallocChunk:          0 kB\nPercpu:            25032 kB\nAnonHugePages:    204800 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:         6860552 kB\nMemAvailable:   11940820 kB\nBuffers:             156 kB\nCached:          1280656 kB\nSwapCached:          664 kB\nActive:          2222480 kB\nInactive:        1968732 kB\nActive(anon):    2074924 kB\nInactive(anon):   878956 kB\nActive(file):     147556 kB\nInactive(file):  1089776 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       16188268 kB\nDirty:              1972 kB\nWriteback:            12 kB\nAnonPages:       2891676 kB\nMapped:           263216 kB\nShmem:             43528 kB\nKReclaimable:    4100112 kB\nSlab:            4894928 kB\nSReclaimable:    4100112 kB\nSUnreclaim:       794816 kB\nKernelStack:       17888 kB\nPageTables:        42212 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:   15729780 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       73392 kB\nVmallocChunk:          0 kB\nPercpu:            24864 kB\nAnonHugePages:    204800 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n584652423168 475834114048 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n583712899072 472772104192 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -94,7 +94,7 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:         6330912 kB\nMemAvailable:   11757844 kB\nBuffers:             140 kB\nCached:          1136444 kB\nSwapCached:         1592 kB\nActive:          1888108 kB\nInactive:        2307804 kB\nActive(anon):    1402576 kB\nInactive(anon):  1701292 kB\nActive(file):     485532 kB\nInactive(file):   606512 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       16362840 kB\nDirty:              5444 kB\nWriteback:             0 kB\nAnonPages:       3037360 kB\nMapped:           267336 kB\nShmem:             44612 kB\nKReclaimable:    4592064 kB\nSlab:            5411648 kB\nSReclaimable:    4592064 kB\nSUnreclaim:       819584 kB\nKernelStack:       18528 kB\nPageTables:        47436 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:   15689328 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       73420 kB\nVmallocChunk:          0 kB\nPercpu:            25032 kB\nAnonHugePages:    208896 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:         6825460 kB\nMemAvailable:   11909376 kB\nBuffers:             156 kB\nCached:          1284368 kB\nSwapCached:          664 kB\nActive:          2231548 kB\nInactive:        1972380 kB\nActive(anon):    2083992 kB\nInactive(anon):   878956 kB\nActive(file):     147556 kB\nInactive(file):  1093424 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       16188268 kB\nDirty:              5436 kB\nWriteback:            12 kB\nAnonPages:       2900180 kB\nMapped:           264112 kB\nShmem:             43528 kB\nKReclaimable:    4100112 kB\nSlab:            4894912 kB\nSReclaimable:    4100112 kB\nSUnreclaim:       794800 kB\nKernelStack:       17872 kB\nPageTables:        47728 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:   15741628 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       73392 kB\nVmallocChunk:          0 kB\nPercpu:            24864 kB\nAnonHugePages:    206848 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -962,6 +962,398 @@
     {
       "command": "test -x /etc",
       "exit": 0,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "ss -Hlnptu",
+      "exit": 0,
+      "stdout": "udp UNCONN 0      0      127.0.0.11:42012 0.0.0.0:*                                                      \ntcp LISTEN 0      4096   127.0.0.11:40531 0.0.0.0:*                                                      \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=112,fd=3),(\"systemd\",pid=1,fd=54))\ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=112,fd=4),(\"systemd\",pid=1,fd=55))\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "sshd -T",
+      "exit": 0,
+      "stdout": "port 22\naddressfamily any\nlistenaddress [::]:22\nlistenaddress 0.0.0.0:22\nusepam yes\npamservicename sshd\nlogingracetime 120\nx11displayoffset 10\nmaxauthtries 6\nmaxsessions 10\nclientaliveinterval 0\nclientalivecountmax 3\nrequiredrsasize 1024\nstreamlocalbindmask 0177\nunusedconnectiontimeout none\npermitrootlogin prohibit-password\nignorerhosts yes\nignoreuserknownhosts no\nhostbasedauthentication no\nhostbasedusesnamefrompacketonly no\npubkeyauthentication yes\nkerberosauthentication no\nkerberosorlocalpasswd yes\nkerberosticketcleanup yes\ngssapiauthentication no\ngssapicleanupcredentials yes\ngssapistrictacceptorcheck yes\ngssapikeyexchange no\ngssapistorecredentialsonrekey no\ngssapikexalgorithms gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-\npasswordauthentication yes\nkbdinteractiveauthentication no\nprintmotd no\nprintlastlog yes\nx11forwarding yes\nx11uselocalhost yes\npermittty yes\npermituserrc yes\nstrictmodes yes\ntcpkeepalive yes\npermitemptypasswords no\ncompression yes\ngatewayports no\nusedns no\nallowtcpforwarding yes\nallowagentforwarding yes\ndisableforwarding no\nallowstreamlocalforwarding yes\nstreamlocalbindunlink no\nfingerprinthash SHA256\nexposeauthinfo no\nrefuseconnection no\ndebianbanner yes\npidfile /run/sshd.pid\nmodulifile /etc/ssh/moduli\nxauthlocation /usr/bin/xauth\nciphers chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr\nmacs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1\nbanner none\nforcecommand none\nchrootdirectory none\ntrustedusercakeys none\nrevokedkeys none\nsecuritykeyprovider internal\nauthorizedprincipalsfile none\nversionaddendum none\nauthorizedkeyscommand none\nauthorizedkeyscommanduser none\nauthorizedprincipalscommand none\nauthorizedprincipalscommanduser none\nhostkeyagent none\nkexalgorithms mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521\ncasignaturealgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostbasedacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\npubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nsshdsessionpath /usr/lib/openssh/sshd-session\nsshdauthpath /usr/lib/openssh/sshd-auth\npersourcepenaltyexemptlist none\nloglevel INFO\nsyslogfacility AUTH\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\nhostkey /etc/ssh/ssh_host_rsa_key\nhostkey /etc/ssh/ssh_host_ecdsa_key\nhostkey /etc/ssh/ssh_host_ed25519_key\nacceptenv LANG\nacceptenv LC_*\nacceptenv COLORTERM\nacceptenv NO_COLOR\nauthenticationmethods any\nchanneltimeout none\nsubsystem sftp /usr/lib/openssh/sftp-server\nmaxstartups 10:30:100\npersourcemaxstartups none\npersourcenetblocksize 32:128\npermittunnel no\nipqos ef cs0\nrekeylimit 0 0\npermitopen any\npermitlisten any\npermituserenvironment no\npubkeyauthoptions none\npersourcepenalties crash:90 authfail:5 noauth:1 grace-exceeded:10 refuseconnection:10 max:600 min:15 max-sources4:65536 max-sources6:65536 overflow:permissive overflow6:permissive\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "systemctl show ssh.socket -p ListenStream",
+      "exit": 0,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "getent passwd",
+      "exit": 0,
+      "stdout": "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nsync:x:4:65534:sync:/bin:/bin/sync\ngames:x:5:60:games:/usr/games:/usr/sbin/nologin\nman:x:6:12:man:/var/cache/man:/usr/sbin/nologin\nlp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin\nmail:x:8:8:mail:/var/mail:/usr/sbin/nologin\nnews:x:9:9:news:/var/spool/news:/usr/sbin/nologin\nuucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin\nproxy:x:13:13:proxy:/bin:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nbackup:x:34:34:backup:/var/backups:/usr/sbin/nologin\nlist:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin\nirc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin\n_apt:x:42:65534::/nonexistent:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\nubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash\nsystemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin\nmessagebus:x:997:997:System Message Bus:/nonexistent:/usr/sbin/nologin\nsyslog:x:100:101::/nonexistent:/usr/sbin/nologin\nsshd:x:996:65534:sshd user:/run/sshd:/usr/sbin/nologin\nbarectl-build-user-collision:x:30001:30001::/home/barectl-build-user-collision:/usr/sbin/nologin\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "find /home /root -maxdepth 4 -type f -path '*/.ssh/authorized_keys' -print",
+      "exit": 0,
+      "stdout": "/root/.ssh/authorized_keys\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "dpkg-query -W -f='${Status}\\t${Version}\\n' ufw",
+      "exit": 0,
+      "stdout": "install ok installed\t0.36.2-9build1\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "ufw status verbose",
+      "exit": 0,
+      "stdout": "Status: inactive\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "ufw show added",
+      "exit": 0,
+      "stdout": "Added user rules (see 'ufw status' for running firewall):\n(None)\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "cat /etc/ufw/ufw.conf",
+      "exit": 0,
+      "stdout": "# /etc/ufw/ufw.conf\n#\n\n# Set to yes to start on boot. If setting this remotely, be sure to add a rule\n# to allow your remote connection before starting ufw. Eg: 'ufw allow 22/tcp'\nENABLED=no\n\n# Please use the 'ufw' command to set the loglevel. Eg: 'ufw logging medium'.\n# See 'man ufw' for details.\nLOGLEVEL=low\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "cat /etc/default/ufw",
+      "exit": 0,
+      "stdout": "# /etc/default/ufw\n#\n\n# Set to yes to apply rules to support IPv6 (no means only IPv6 on loopback\n# accepted). You will need to 'disable' and then 'enable' the firewall for\n# the changes to take affect.\nIPV6=yes\n\n# Set the default input policy to ACCEPT, DROP, or REJECT. Please note that if\n# you change this you will most likely want to adjust your rules.\nDEFAULT_INPUT_POLICY=\"DROP\"\n\n# Set the default output policy to ACCEPT, DROP, or REJECT. Please note that if\n# you change this you will most likely want to adjust your rules.\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n\n# Set the default forward policy to ACCEPT, DROP or REJECT.  Please note that\n# if you change this you will most likely want to adjust your rules\nDEFAULT_FORWARD_POLICY=\"DROP\"\n\n# Set the default application policy to ACCEPT, DROP, REJECT or SKIP. Please\n# note that setting this to ACCEPT may be a security risk. See 'man ufw' for\n# details\nDEFAULT_APPLICATION_POLICY=\"SKIP\"\n\n# By default, ufw only touches its own chains. Set this to 'yes' to have ufw\n# manage the built-in chains too. Warning: setting this to 'yes' will break\n# non-ufw managed firewall rules\nMANAGE_BUILTINS=no\n\n#\n# IPT backend\n#\n# only enable if using iptables backend\nIPT_SYSCTL=/etc/ufw/sysctl.conf\n\n# Extra connection tracking modules to load. IPT_MODULES should typically be\n# empty for new installations and modules added only as needed. See\n# 'CONNECTION HELPERS' from 'man ufw-framework' for details. Complete list can\n# be found in net/netfilter/Kconfig of your kernel source. Some common modules:\n# nf_conntrack_irc, nf_nat_irc: DCC (Direct Client to Client) support\n# nf_conntrack_netbios_ns: NetBIOS (samba) client support\n# nf_conntrack_pptp, nf_nat_pptp: PPTP over stateful firewall/NAT\n# nf_conntrack_ftp, nf_nat_ftp: active FTP support\n# nf_conntrack_tftp, nf_nat_tftp: TFTP support (server side)\n# nf_conntrack_sane: sane support\nIPT_MODULES=\"\"\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "systemctl is-active firewalld",
+      "exit": 4,
+      "stdout": "inactive\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "systemctl is-active docker",
+      "exit": 4,
+      "stdout": "inactive\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "nft list ruleset",
+      "exit": 127,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "iptables-save",
+      "exit": 0,
+      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Sat Oct 31 02:30:45 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:40531\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:42012\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 40531 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 42012 -j SNAT --to-source :53\nCOMMIT\n# Completed on Sat Oct 31 02:30:45 2026\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "sha256sum /etc/ufw/before.rules /etc/ufw/after.rules",
+      "exit": 0,
+      "stdout": "d63bc8bb2df0d20909267b7b40cb5cc187baba6e0baf95bbf71ac14f92df8e6c  /etc/ufw/before.rules\nc1be61c17e850ea16dc5a02be22e0ec79b631904c2383353da360bce2dfc6b64  /etc/ufw/after.rules\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "dpkg-query -W -f='${Conffiles}\\n' ufw",
+      "exit": 0,
+      "stdout": " /etc/default/ufw a921dd9d167380b04de4bc911915ea44\n /etc/init.d/ufw f68c845ae88149c45d0d938394d7832f\n /etc/logrotate.d/ufw 969308e0ddfb74505f0da47b49ada218\n /etc/rsyslog.d/20-ufw.conf 98e2f72c9c65ca8d6299886b524e80d1\n /etc/ufw/sysctl.conf 7723079fc108eda8f57eddab3079c70a\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "apt-config dump",
+      "exit": 0,
+      "stdout": "APT \"\";\nAPT::Architecture \"arm64\";\nAPT::Build-Essential \"\";\nAPT::Build-Essential:: \"build-essential\";\nAPT::Install-Recommends \"1\";\nAPT::Install-Suggests \"0\";\nAPT::Key \"\";\nAPT::Key::Assert-Pubkey-Algo \">=rsa2048,ed25519,ed448,nistp256,nistp384,nistp512,brainpoolP256r1,brainpoolP320r1,brainpoolP384r1,brainpoolP512r1,secp256k1\";\nAPT::Key::Assert-Pubkey-Algo::Next \">=rsa2048,ed25519,ed448,nistp256,nistp384,nistp512\";\nAPT::Key::Assert-Pubkey-Algo::Future \">=rsa3072,ed25519,ed448\";\nAPT::Sandbox \"\";\nAPT::Sandbox::User \"_apt\";\nAPT::NeverAutoRemove \"\";\nAPT::NeverAutoRemove:: \"^firmware-linux.*\";\nAPT::NeverAutoRemove:: \"^linux-firmware$\";\nAPT::NeverAutoRemove:: \"^linux-image-[a-z0-9]*$\";\nAPT::NeverAutoRemove:: \"^linux-image-[a-z0-9]*-[a-z0-9]*$\";\nAPT::VersionedKernelPackages \"\";\nAPT::VersionedKernelPackages:: \"linux-.*\";\nAPT::VersionedKernelPackages:: \"kfreebsd-.*\";\nAPT::VersionedKernelPackages:: \"gnumach-.*\";\nAPT::VersionedKernelPackages:: \".*-modules\";\nAPT::VersionedKernelPackages:: \".*-kernel\";\nAPT::Never-MarkAuto-Sections \"\";\nAPT::Never-MarkAuto-Sections:: \"metapackages\";\nAPT::Never-MarkAuto-Sections:: \"tasks\";\nAPT::Move-Autobit-Sections \"\";\nAPT::Move-Autobit-Sections:: \"oldlibs\";\nAPT::Periodic \"\";\nAPT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Download-Upgradeable-Packages \"0\";\nAPT::Periodic::AutocleanInterval \"0\";\nAPT::Periodic::Unattended-Upgrade \"1\";\nAPT::Periodic::Enable \"0\";\nAPT::Update \"\";\nAPT::Update::Post-Invoke-Success \"\";\nAPT::Update::Post-Invoke-Success:: \"touch /var/lib/apt/periodic/update-success-stamp 2>/dev/null || true\";\nAPT::Update::Post-Invoke-Success:: \"/usr/lib/update-notifier/update-motd-updates-available 2>/dev/null || true\";\nAPT::Update::Pre-Invoke \"\";\nAPT::Update::Pre-Invoke:: \"[ ! -e /run/systemd/system ] || [ $(id -u) -ne 0 ] || systemctl start --no-block apt-news.service esm-cache.service >/dev/null 2>&1 || true\";\nAPT::Archives \"\";\nAPT::Archives::MaxAge \"30\";\nAPT::Archives::MinAge \"2\";\nAPT::Archives::MaxSize \"500\";\nAPT::AutoRemove \"\";\nAPT::AutoRemove::SuggestsImportant \"false\";\nAPT::Solver \"3.0\";\nAPT::Architectures \"\";\nAPT::Architectures:: \"arm64\";\nAPT::Compressor \"\";\nAPT::Compressor::. \"\";\nAPT::Compressor::.::Name \".\";\nAPT::Compressor::.::Extension \"\";\nAPT::Compressor::.::Binary \"\";\nAPT::Compressor::.::Cost \"0\";\nAPT::Compressor::zstd \"\";\nAPT::Compressor::zstd::Name \"zstd\";\nAPT::Compressor::zstd::Extension \".zst\";\nAPT::Compressor::zstd::Binary \"false\";\nAPT::Compressor::zstd::Cost \"60\";\nAPT::Compressor::lz4 \"\";\nAPT::Compressor::lz4::Name \"lz4\";\nAPT::Compressor::lz4::Extension \".lz4\";\nAPT::Compressor::lz4::Binary \"false\";\nAPT::Compressor::lz4::Cost \"50\";\nAPT::Compressor::gzip \"\";\nAPT::Compressor::gzip::Name \"gzip\";\nAPT::Compressor::gzip::Extension \".gz\";\nAPT::Compressor::gzip::Binary \"gzip\";\nAPT::Compressor::gzip::Cost \"100\";\nAPT::Compressor::gzip::CompressArg \"\";\nAPT::Compressor::gzip::CompressArg:: \"-6n\";\nAPT::Compressor::gzip::UncompressArg \"\";\nAPT::Compressor::gzip::UncompressArg:: \"-d\";\nAPT::Compressor::xz \"\";\nAPT::Compressor::xz::Name \"xz\";\nAPT::Compressor::xz::Extension \".xz\";\nAPT::Compressor::xz::Binary \"xz\";\nAPT::Compressor::xz::Cost \"200\";\nAPT::Compressor::xz::CompressArg \"\";\nAPT::Compressor::xz::CompressArg:: \"-6\";\nAPT::Compressor::xz::UncompressArg \"\";\nAPT::Compressor::xz::UncompressArg:: \"-d\";\nAPT::Compressor::bzip2 \"\";\nAPT::Compressor::bzip2::Name \"bzip2\";\nAPT::Compressor::bzip2::Extension \".bz2\";\nAPT::Compressor::bzip2::Binary \"false\";\nAPT::Compressor::bzip2::Cost \"300\";\nAPT::Compressor::lzma \"\";\nAPT::Compressor::lzma::Name \"lzma\";\nAPT::Compressor::lzma::Extension \".lzma\";\nAPT::Compressor::lzma::Binary \"xz\";\nAPT::Compressor::lzma::Cost \"400\";\nAPT::Compressor::lzma::CompressArg \"\";\nAPT::Compressor::lzma::CompressArg:: \"--format=lzma\";\nAPT::Compressor::lzma::CompressArg:: \"-6\";\nAPT::Compressor::lzma::UncompressArg \"\";\nAPT::Compressor::lzma::UncompressArg:: \"--format=lzma\";\nAPT::Compressor::lzma::UncompressArg:: \"-d\";\nDir \"/\";\nDir::State \"var/lib/apt\";\nDir::State::lists \"lists/\";\nDir::State::cdroms \"cdroms.list\";\nDir::State::extended_states \"extended_states\";\nDir::State::status \"/var/lib/dpkg/status\";\nDir::Cache \"var/cache/apt\";\nDir::Cache::archives \"archives/\";\nDir::Cache::srcpkgcache \"srcpkgcache.bin\";\nDir::Cache::pkgcache \"pkgcache.bin\";\nDir::Etc \"etc/apt\";\nDir::Etc::sourcelist \"sources.list\";\nDir::Etc::sourceparts \"sources.list.d\";\nDir::Etc::main \"apt.conf\";\nDir::Etc::netrc \"auth.conf\";\nDir::Etc::netrcparts \"auth.conf.d\";\nDir::Etc::parts \"apt.conf.d\";\nDir::Etc::preferences \"preferences\";\nDir::Etc::preferencesparts \"preferences.d\";\nDir::Etc::trustedparts \"trusted.gpg.d\";\nDir::Boot \"boot\";\nDir::Usr \"usr\";\nDir::Bin \"\";\nDir::Bin::methods \"/usr/lib/apt/methods\";\nDir::Bin::solvers \"\";\nDir::Bin::solvers:: \"/usr/lib/apt/solvers\";\nDir::Bin::planners \"\";\nDir::Bin::planners:: \"/usr/lib/apt/planners\";\nDir::Bin::dpkg \"/usr/bin/dpkg\";\nDir::Bin::gzip \"/bin/gzip\";\nDir::Bin::bzip2 \"/bin/bzip2\";\nDir::Bin::xz \"/usr/bin/xz\";\nDir::Bin::lz4 \"/usr/bin/lz4\";\nDir::Bin::zstd \"/usr/bin/zstd\";\nDir::Bin::lzma \"/usr/bin/xz\";\nDir::Media \"\";\nDir::Media::MountPath \"/media/apt\";\nDir::Log \"var/log/apt\";\nDir::Log::Terminal \"term.log\";\nDir::Log::History \"history.log\";\nDir::Log::Planner \"eipp.log.xz\";\nDir::Ignore-Files-Silently \"\";\nDir::Ignore-Files-Silently:: \"~$\";\nDir::Ignore-Files-Silently:: \"\\.disabled$\";\nDir::Ignore-Files-Silently:: \"\\.bak$\";\nDir::Ignore-Files-Silently:: \"\\.dpkg-[a-z]+$\";\nDir::Ignore-Files-Silently:: \"\\.ucf-[a-z]+$\";\nDir::Ignore-Files-Silently:: \"\\.save$\";\nDir::Ignore-Files-Silently:: \"\\.orig$\";\nDir::Ignore-Files-Silently:: \"\\.distUpgrade$\";\nAcquire \"\";\nAcquire::AllowInsecureRepositories \"0\";\nAcquire::AllowWeakRepositories \"0\";\nAcquire::AllowDowngradeToInsecureRepositories \"0\";\nAcquire::cdrom \"\";\nAcquire::cdrom::mount \"/media/cdrom/\";\nAcquire::IndexTargets \"\";\nAcquire::IndexTargets::deb \"\";\nAcquire::IndexTargets::deb::Packages \"\";\nAcquire::IndexTargets::deb::Packages::MetaKey \"$(COMPONENT)/binary-$(ARCHITECTURE)/Packages\";\nAcquire::IndexTargets::deb::Packages::flatMetaKey \"Packages\";\nAcquire::IndexTargets::deb::Packages::ShortDescription \"Packages\";\nAcquire::IndexTargets::deb::Packages::Description \"$(RELEASE)/$(COMPONENT) $(ARCHITECTURE) Packages\";\nAcquire::IndexTargets::deb::Packages::flatDescription \"$(RELEASE) Packages\";\nAcquire::IndexTargets::deb::Packages::Optional \"0\";\nAcquire::IndexTargets::deb::Translations \"\";\nAcquire::IndexTargets::deb::Translations::MetaKey \"$(COMPONENT)/i18n/Translation-$(LANGUAGE)\";\nAcquire::IndexTargets::deb::Translations::flatMetaKey \"$(LANGUAGE)\";\nAcquire::IndexTargets::deb::Translations::ShortDescription \"Translation-$(LANGUAGE)\";\nAcquire::IndexTargets::deb::Translations::Description \"$(RELEASE)/$(COMPONENT) Translation-$(LANGUAGE)\";\nAcquire::IndexTargets::deb::Translations::flatDescription \"$(RELEASE) Translation-$(LANGUAGE)\";\nAcquire::IndexTargets::deb-src \"\";\nAcquire::IndexTargets::deb-src::Sources \"\";\nAcquire::IndexTargets::deb-src::Sources::MetaKey \"$(COMPONENT)/source/Sources\";\nAcquire::IndexTargets::deb-src::Sources::flatMetaKey \"Sources\";\nAcquire::IndexTargets::deb-src::Sources::ShortDescription \"Sources\";\nAcquire::IndexTargets::deb-src::Sources::Description \"$(RELEASE)/$(COMPONENT) Sources\";\nAcquire::IndexTargets::deb-src::Sources::flatDescription \"$(RELEASE) Sources\";\nAcquire::IndexTargets::deb-src::Sources::Optional \"0\";\nAcquire::Changelogs \"\";\nAcquire::Changelogs::URI \"\";\nAcquire::Changelogs::URI::Origin \"\";\nAcquire::Changelogs::URI::Origin::Debian \"https://metadata.ftp-master.debian.org/changelogs/@CHANGEPATH@_changelog\";\nAcquire::Changelogs::URI::Origin::Ubuntu \"https://changelogs.ubuntu.com/changelogs/pool/@CHANGEPATH@/changelog\";\nAcquire::Changelogs::AlwaysOnline \"true\";\nAcquire::Changelogs::AlwaysOnline::Origin \"\";\nAcquire::Changelogs::AlwaysOnline::Origin::Ubuntu \"1\";\nAcquire::Snapshots \"\";\nAcquire::Snapshots::URI \"\";\nAcquire::Snapshots::URI::Origin \"\";\nAcquire::Snapshots::URI::Origin::Debian \"https://snapshot.debian.org/archive/debian/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Origin::Ubuntu \"https://snapshot.ubuntu.com/ubuntu/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Override \"\";\nAcquire::Snapshots::URI::Override::Label \"\";\nAcquire::Snapshots::URI::Override::Label::Debian-Security \"https://snapshot.debian.org/archive/debian-security/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host \"\";\nAcquire::Snapshots::URI::Host::archive.ubuntu.com \"https://snapshot.ubuntu.com/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::deb.debian.org \"https://snapshot.debian.org/archive/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::.archive.ubuntu.com \"https://snapshot.ubuntu.com/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::security.ubuntu.com \"https://snapshot.ubuntu.com/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::ppa.launchpadcontent.net \"https://snapshot.ppa.launchpadcontent.net/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::ppa.launchpad.net \"https://snapshot.ppa.launchpadcontent.net/@PATH@/@SNAPSHOTID@/\";\nAcquire::http \"\";\nAcquire::http::User-Agent-Non-Interactive \"true\";\nAcquire::GzipIndexes \"true\";\nAcquire::CompressionTypes \"\";\nAcquire::CompressionTypes::Order \"\";\nAcquire::CompressionTypes::Order:: \"gz\";\nAcquire::CompressionTypes::xz \"xz\";\nAcquire::CompressionTypes::bz2 \"bzip2\";\nAcquire::CompressionTypes::lzma \"lzma\";\nAcquire::CompressionTypes::gz \"gzip\";\nAcquire::CompressionTypes::lz4 \"lz4\";\nAcquire::CompressionTypes::zst \"zstd\";\nAcquire::Languages \"\";\nAcquire::Languages:: \"none\";\nDPkg \"\";\nDPkg::Path \"/usr/sbin:/usr/bin:/sbin:/bin\";\nDPkg::Pre-Install-Pkgs \"\";\nDPkg::Pre-Install-Pkgs:: \"/usr/sbin/dpkg-preconfigure --apt || true\";\nDPkg::Post-Invoke \"\";\nDPkg::Post-Invoke:: \"test -x /usr/lib/needrestart/apt-pinvoke && /usr/lib/needrestart/apt-pinvoke -m u || true\";\nDPkg::Post-Invoke:: \"if [ -d /var/lib/update-notifier ]; then touch /var/lib/update-notifier/dpkg-run-stamp; fi; /usr/lib/update-notifier/update-motd-updates-available 2>/dev/null || true\";\nbinary \"apt-config\";\nbinary::apt \"\";\nbinary::apt::AptCli \"\";\nbinary::apt::AptCli::Hooks \"\";\nbinary::apt::AptCli::Hooks::Upgrade \"\";\nbinary::apt::AptCli::Hooks::Upgrade:: \"[ ! -f /usr/lib/ubuntu-advantage/apt-esm-json-hook ] || [ $(id -u) -ne 0 ] || /usr/lib/ubuntu-advantage/apt-esm-json-hook 2>> /var/log/ubuntu-advantage-apt-hook.log || true\";\nbinary::apt-cdrom \"\";\nbinary::apt-cdrom::APT \"\";\nbinary::apt-cdrom::APT::Internal \"\";\nbinary::apt-cdrom::APT::Internal::OpProgress \"\";\nbinary::apt-cdrom::APT::Internal::OpProgress::EraseLines \"0\";\nUnattended-Upgrade \"\";\nUnattended-Upgrade::Allowed-Origins \"\";\nUnattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}\";\nUnattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}-security\";\nUnattended-Upgrade::Allowed-Origins:: \"${distro_id}ESMApps:${distro_codename}-apps-security\";\nUnattended-Upgrade::Allowed-Origins:: \"${distro_id}ESM:${distro_codename}-infra-security\";\nUnattended-Upgrade::DevRelease \"auto\";\nVersion \"\";\nVersion::1.2 \"\";\nVersion::1.2::APT \"\";\nVersion::1.2::APT::Color \"1\";\nVersion::1.2::APT::Keep-Downloaded-Packages \"0\";\nVersion::1.2::DPkg \"\";\nVersion::1.2::DPkg::Progress-Fancy \"1\";\nVersion::3.0 \"\";\nVersion::3.0::APT \"\";\nVersion::3.0::APT::Output-Version \"30\";\nVersion::3.0::Pager \"1\";\nVersion::1.1 \"\";\nVersion::1.1::APT \"\";\nVersion::1.1::APT::Cache \"\";\nVersion::1.1::APT::Cache::Show \"\";\nVersion::1.1::APT::Cache::Show::Version \"2\";\nVersion::1.1::APT::Cache::AllVersions \"0\";\nVersion::1.1::APT::Cache::ShowVirtuals \"1\";\nVersion::1.1::APT::Cache::Search \"\";\nVersion::1.1::APT::Cache::Search::Version \"2\";\nVersion::1.1::APT::Cache::ShowDependencyType \"1\";\nVersion::1.1::APT::Cache::ShowVersion \"1\";\nVersion::1.1::APT::Get \"\";\nVersion::1.1::APT::Get::Upgrade-Allow-New \"1\";\nVersion::1.1::APT::Cmd \"\";\nVersion::1.1::APT::Cmd::Show-Update-Stats \"1\";\nVersion::1.5 \"\";\nVersion::1.5::APT \"\";\nVersion::1.5::APT::Get \"\";\nVersion::1.5::APT::Get::Update \"\";\nVersion::1.5::APT::Get::Update::InteractiveReleaseInfoChanges \"1\";\nVersion::2.0 \"\";\nVersion::2.0::APT \"\";\nVersion::2.0::APT::Cmd \"\";\nVersion::2.0::APT::Cmd::Pattern-Only \"1\";\nVersion::2.0::Dpkg \"\";\nVersion::2.0::Dpkg::Lock \"\";\nVersion::2.0::Dpkg::Lock::Timeout \"120\";\nVersion::0.31 \"\";\nVersion::1.21 \"\";\nVersion::1.21::APT \"\";\nVersion::1.21::APT::Solver \"3.0\";\nVersion::2.11 \"\";\nVersion::2.11::APT \"\";\nVersion::2.11::APT::Solver \"3.0\";\nVersion::3.1 \"\";\nVersion::3.1::APT \"\";\nVersion::3.1::APT::Solver \"3.0\";\nCommandLine \"\";\nCommandLine::AsString \"apt-config dump\";\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "systemctl show apt-daily.timer apt-daily-upgrade.timer -p Id -p UnitFileState -p ActiveState",
+      "exit": 0,
+      "stdout": "Id=apt-daily.timer\nActiveState=active\nUnitFileState=enabled\n\nId=apt-daily-upgrade.timer\nActiveState=active\nUnitFileState=enabled\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "sha256sum /etc/apt/apt.conf.d/50unattended-upgrades",
+      "exit": 0,
+      "stdout": "88fb5cc2a1bbe749468213f6a9d351a8b668760d8a4c94eef5ad7f4723f19a6e  /etc/apt/apt.conf.d/50unattended-upgrades\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "dpkg-query -W -f='${Conffiles}\\n' unattended-upgrades",
+      "exit": 0,
+      "stdout": " /etc/init.d/unattended-upgrades 290829a5efc55b7c435de0bb769f217b\n /etc/kernel/postinst.d/unattended-upgrades f296826482cb797aeef13554e093dbca\n /etc/logrotate.d/unattended-upgrades e45049ee847f069a99e3e6ec39155d4a\n /etc/pm/sleep.d/10_unattended-upgrades-hibernate 0f5d54aa2dd322c805c90e409fc2724a\n /etc/update-motd.d/92-unattended-upgrades afa7546d3fe561e1f5783f7b9cf72096\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "find /var/log/unattended-upgrades -maxdepth 1 -type f -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1",
+      "exit": 0,
+      "stdout": "1793413842.6499697690 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "tail -n 60 '/var/log/unattended-upgrades/unattended-upgrades-shutdown.log'",
+      "exit": 0,
+      "stdout": "2026-10-31 02:30:42,650 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-10-31 02:30:42,650 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "apt-get -s -o APT::Get::Show-Versions=1 upgrade --with-new-pkgs",
+      "exit": 0,
+      "stdout": "Reading package lists...\nBuilding dependency tree...\nReading state information...\nCalculating upgrade...\n0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "apt-mark showhold",
+      "exit": 0,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "find /var/lib/apt/lists -name '*InRelease' -printf '%T@\\n' 2>/dev/null | sort -n | tail -n 1",
+      "exit": 0,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "cat /run/reboot-required",
+      "exit": 1,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "cat /run/reboot-required.pkgs",
+      "exit": 1,
       "stdout": "",
       "truncated": false,
       "stdin_sha256": null

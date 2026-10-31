@@ -1,6 +1,7 @@
 """#179 acceptance sweeps that span journeys (docs/dashboard-workflows.md)."""
 
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import override
 from unittest import mock
@@ -8,11 +9,24 @@ from unittest import mock
 from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.test import override_settings, tag
+from django.utils import timezone
 from paramiko import ECDSAKey
 from playwright.sync_api import expect
 
+from discovery.fakes import COLLECTED, record_attempt
+from discovery.models import DiscoveryAttempt, ObservationOutcome
+from discovery.snapshot import Observation, save_snapshot
 from discovery.ssh import UnknownHostKey
 from operations.models import ChangePreparation, ChangeRun
+from security.observation import (
+    AutoUpdatesState,
+    Check,
+    FirewallState,
+    RestartState,
+    SecurityState,
+    SshState,
+    UpdatesState,
+)
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from sites.ui_testing import record_http_sites
@@ -54,6 +68,11 @@ class AcceptanceSweepTests(BrowserTestCase):
                 self.assert_no_native_terms()
         page.goto(f"{self.live_server_url}/servers/{self.server.pk}/")
         self.assert_no_native_terms()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Security"
+        ).click()
+        self.assert_no_native_terms()
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/")
         page.get_by_role("link", name="alpha.example.com").first.click()
         self.assert_no_native_terms(allowed=("caddy",))
         page.get_by_role("navigation", name="Site sections").get_by_role(
@@ -148,7 +167,6 @@ class FirstSiteActivationTests(BrowserTestCase):
         self.activate(self.page.get_by_role("button", name=name, exact=True).click)
 
     def review(self, server: Server, kind: str, stages: tuple[str, ...]) -> ChangePreparation:
-        from datetime import timedelta
 
         from django.utils import timezone
 
@@ -182,7 +200,6 @@ class FirstSiteActivationTests(BrowserTestCase):
             collected_at=timezone.now(),
             sites_digest="",
         )
-        del timedelta
         return preparation
 
     def complete(self, preparation: ChangePreparation, stages: tuple[str, ...]) -> None:
@@ -343,3 +360,111 @@ class FirstSiteActivationTests(BrowserTestCase):
         self.activate(page.get_by_role("link", name="Open the site", exact=True).click)
         expect(page.get_by_role("heading", name="shop.example.com", level=1)).to_be_visible()
         self.assertLessEqual(self.activations, 11)
+
+
+def _security_check[T](value: T) -> Check[T]:
+    return Check(ObservationOutcome.OBSERVED, ("a fixed read",), "", value)
+
+
+def _security_ok() -> SecurityState:
+    return SecurityState(
+        firewall=_security_check(
+            FirewallState(True, True, "deny", "allow", "deny", True, "on (low)", (), (), True)
+        ),
+        listeners=_security_check(()),
+        ssh=_security_check(SshState("no", "no", "prohibit-password", (22,), (22,), (), "yes")),
+        auto_updates=_security_check(
+            AutoUpdatesState(True, "active", "active", False, (), True, "", None)
+        ),
+        updates=_security_check(UpdatesState(3600, ())),
+        restart=_security_check(RestartState(False, ())),
+    )
+
+
+@tag("browser")
+class SecuritySectionBrowserTests(BrowserTestCase):
+    """The Security default view names no native detail and never hides a failed read."""
+
+    @classmethod
+    @override
+    def serve_assets(cls) -> None:
+        static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
+        cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
+        call_command("collectstatic", interactive=False, verbosity=0)
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        for codename in ("view_siteobservation",):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.server = Server.objects.get(name="Production")
+        self.sign_in()
+
+    def store(self, state: SecurityState | None) -> None:
+        attempt = DiscoveryAttempt.objects.create(
+            server=self.server,
+            ssh_alias=self.server.ssh_alias,
+            status=DiscoveryAttempt.Status.SUCCEEDED,
+        )
+        save_snapshot(
+            attempt,
+            replace(
+                COLLECTED,
+                security=Observation(ObservationOutcome.OBSERVED, ("a read",), "", state),
+            ),
+            timezone.now(),
+        )
+
+    def test_empty_could_not_check_outside_and_stale_states(self) -> None:
+        page = self.page
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/security/")
+        expect(page.get_by_text("No security checks have been read yet")).to_be_visible()
+        self.assert_no_native_terms()
+
+        blocked: Check[FirewallState] = Check(
+            ObservationOutcome.INACCESSIBLE,
+            ("id -u",),
+            "Barectl needs root or the authorized passwordless sudo.",
+            None,
+        )
+        self.store(replace(_security_ok(), firewall=blocked))
+        page.reload()
+        expect(page.get_by_text("Could not check.").first).to_be_visible()
+        expect(
+            page.get_by_text("needs root or the authorized passwordless sudo").first
+        ).to_be_visible()
+        self.assert_no_native_terms()
+
+        self.store(
+            replace(
+                _security_ok(),
+                firewall=_security_check(
+                    FirewallState(
+                        True,
+                        True,
+                        "deny",
+                        "allow",
+                        "deny",
+                        True,
+                        "on (low)",
+                        (),
+                        ("Docker is active and publishes ports ahead of a host firewall.",),
+                        True,
+                    )
+                ),
+            )
+        )
+        page.reload()
+        expect(page.get_by_text("Outside supported settings.").first).to_be_visible()
+        self.assert_no_native_terms()
+
+        self.store(_security_ok())
+        record_attempt(
+            self.server,
+            DiscoveryAttempt.Status.FAILED,
+            failure="The connection failed.",
+        )
+        page.reload()
+        expect(page.get_by_text("The latest connection check failed").first).to_be_visible()
+        expect(page.get_by_text("Only key sign-in is allowed").first).to_be_visible()
+        self.assert_no_native_terms()

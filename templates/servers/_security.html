@@ -1,0 +1,61 @@
+{% if security_checks %}
+  <p class="barectl-note">
+    What Barectl could read about this server. There is no score. A check it could not read
+    is shown as “Could not check”, never as safe.
+  </p>
+  {% if snapshot %}
+    {% include "servers/_snapshot_freshness.html" with snapshot=snapshot %}
+  {% endif %}
+  <div class="barectl-security-checks">
+    {% for check in security_checks %}
+      <section class="margin-top-3"
+               aria-labelledby="security-check-{{ forloop.counter }}">
+        <h3 id="security-check-{{ forloop.counter }}">{{ check.name }}</h3>
+        <p>
+          {% if check.state == "ok" %}
+            <strong>Nothing to do.</strong>
+          {% elif check.state == "attention" %}
+            <strong>Needs attention.</strong>
+          {% elif check.state == "outside" %}
+            <strong>Outside supported settings.</strong>
+          {% else %}
+            <strong>Could not check.</strong>
+          {% endif %}
+          {{ check.what }}
+        </p>
+        {% if check.why %}<p class="barectl-note">{{ check.why }}</p>{% endif %}
+        {% if check.details %}
+          <ul>
+            {% for detail in check.details %}<li>{{ detail }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+        {% if check.note %}<p class="barectl-note">{{ check.note }}</p>{% endif %}
+        <p class="barectl-note">
+          Read
+          <time datetime="{{ check.read_at|date:'c' }}">{{ check.read_at|date:'M j, Y, H:i:s T' }}</time>
+          ({{ check.read_at|timesince }} ago).
+        </p>
+        <p>
+          {% if check.action_url %}
+            <a class="usa-button usa-button--outline"
+               href="{{ check.action_url }}">{{ check.action }}</a>
+          {% else %}
+            <button class="usa-button usa-button--outline"
+                    type="button"
+                    disabled>{{ check.action }}</button>
+          {% endif %}
+        </p>
+      </section>
+    {% endfor %}
+  </div>
+  <p class="barectl-note">
+    Engine detail, such as service state and configuration files, stays in
+    <a href="{% url 'server_advanced' server.pk %}">Advanced</a>.
+  </p>
+{% else %}
+  <p>No security checks have been read yet.</p>
+  <p class="barectl-note">
+    Run a connection check to read the firewall, SSH sign-in, automatic security updates,
+    Ubuntu updates, whether a restart is needed and the web runtimes.
+  </p>
+{% endif %}
