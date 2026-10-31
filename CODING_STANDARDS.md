@@ -7,6 +7,7 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 - Follow `docs/quality.md`: strict Python typing, TypeScript and JavaScript checks, type-aware Oxlint through Vite+, CSS linting, template checks, dependency audits, and runtime validation at external boundaries. Keep Vite assets covered by the frontend checks; do not weaken checks to silence errors.
 - Run Vulture and Knip for dead-code detection. Review Django/template uses before removing a reported symbol. Keep `vulture_allowlist.py` explicit and explained; do not raise the confidence threshold or add blanket ignores to hide findings. Register actual frontend entry files in Knip when adding browser assets.
 - Require Python 3.14 or newer. Keep the development pin, CI and analysis targets on Python 3.14; do not add compatibility work for older Python versions.
+- Target Python 3.14 syntax, including PEP 758's unparenthesized `except A, B:` form; Ruff and the test run enforce syntax.
 - Django is pinned to 6.1.1. Keep remote operations behind application services and infrastructure adapters.
 - New tests must not grow the suite's total time; see the [test time budget](docs/quality.md#test-time-budget).
 
