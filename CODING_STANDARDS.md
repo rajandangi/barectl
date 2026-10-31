@@ -18,6 +18,10 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 - Apply Barectl's color palette through the USWDS theme. Use the semantic colors recorded in `docs/design-palette.md`.
 - Use Inter for Barectl's English interface and Vite for the asset pipeline. Templates load assets with `{% vite_entry %}`; never link built files by hand. See `docs/frontend-assets.md` for typography and Django integration.
 
+## Product-surface lists
+
+- A count, order or set that names a product surface (check names, journey steps, section rows) lives in one exported value that tests and presentation read. Prose points at it; do not restate the count in a docstring, glossary entry or help text.
+
 ## Required evidence
 
 - A required native test is never removed, skipped or weakened to fit an item limit or a time budget. Split the setup into a preparation scenario, or record the gap in the handoff and the qualification record; a missing test is not a pass.

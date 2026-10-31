@@ -15,6 +15,7 @@ Use this shape for a subagent that owns one ticket phase. Keep it short: the tic
 
 - Branch and head commit.
 - What changed, with the smallest useful file map.
+- The final full transcript recording pass, its head commit and the result of `scripts/record-all-transcripts.sh --check`.
 - Acceptance criteria with literal evidence (test names, commands, results).
 - The commands run and their results.
 - What is unrun, unqualified or risky.
