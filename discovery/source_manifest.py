@@ -37,6 +37,7 @@ SOURCES = (
     "laravel/observation.py",
     "logs/read.py",
     "operations/apt.py",
+    "runtimes/bodies/read.py",
     "runtimes/observation.py",
     "security/observation.py",
     "sites/bodies/admission.py",

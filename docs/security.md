@@ -19,7 +19,7 @@ check" with that reason. It never prompts and never falls back to an unprivilege
 | Automatic security updates | `apt-config dump`, the two `apt-daily` timers, the `50unattended-upgrades` conffile digest and the newest unattended-upgrades log. |
 | Ubuntu updates | `apt-get -s upgrade --with-new-pkgs`, `apt-cache policy`, `apt-mark showhold` and the newest package-list index time, without refreshing the lists. |
 | Restart needed | `/run/reboot-required` and `/run/reboot-required.pkgs`. |
-| Web runtimes | The existing runtime and foundation observations, compared with the catalog lock this release ships. |
+| Web runtimes | The existing runtime and foundation observations, compared with the catalog lock this release ships; each in-use runtime shows its profile build and age. |
 
 Rules and settings in the supported shape are adopted whoever made them (ADR 0026).
 Anything else is reported once as outside supported settings and would block only the

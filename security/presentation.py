@@ -10,7 +10,7 @@ from enum import StrEnum
 
 from discovery.snapshot import CollectedSnapshot
 from runtimes.catalog import architecture_of
-from runtimes.presentation import shown_runtimes, shown_updates
+from runtimes.presentation import ShownRuntime, shown_runtimes, shown_updates
 
 from .observation import (
     STANDARD_PUBLIC_PORTS,
@@ -477,7 +477,7 @@ def _runtimes(collected: CollectedSnapshot, read_at: datetime, advanced_url: str
     pending = shown_updates(collected, rows)
     problems = tuple(row.entry for row in rows if row.problem)
     details = (
-        *(f"{_runtime_name(row.entry)}: build {row.generation or 'unknown'}" for row in rows),
+        *(_runtime_line(row, read_at) for row in rows),
         *(
             f"{_runtime_name(entry)}: its live settings do not match what Barectl installed."
             for entry in problems
@@ -518,6 +518,14 @@ def _runtimes(collected: CollectedSnapshot, read_at: datetime, advanced_url: str
         _NOT_AVAILABLE,
         details=details,
     )
+
+
+def _runtime_line(row: ShownRuntime, read_at: datetime) -> str:
+    build = row.generation or "unknown"
+    if not row.installed_at:
+        return f"{_runtime_name(row.entry)}: build {build}, age not recorded"
+    age = _age(int(read_at.timestamp()) - row.installed_at)
+    return f"{_runtime_name(row.entry)}: build {build}, installed {age}"
 
 
 def _plain_process(name: str) -> str:

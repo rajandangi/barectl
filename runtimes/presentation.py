@@ -104,6 +104,8 @@ class ShownRuntime:
     update_sites: tuple[str, ...] = ()
     update_reason: str = ""
     remove_reason: str = ""
+    # When the profile generation changed, in epoch seconds; 0 if unread.
+    installed_at: int = 0
 
     @property
     def can_remove(self) -> bool:
@@ -197,6 +199,7 @@ def _shown_runtime(
         update.sites if update else (),
         update_reason,
         remove_reason,
+        installed_at=row.installed_at,
     )
 
 

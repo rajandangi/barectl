@@ -889,7 +889,7 @@ def parse_apt_policy(text: str) -> dict[str, str]:
             if stripped.partition(":")[2].strip() == "(none)":
                 archives[current] = "removed"
             continue
-        match = re.match(r"^[0-9]+ https?://\S+ (\S+) ", stripped)
+        match = re.match(r"^[0-9]+ (?:https?|file):\S+ (\S+) ", stripped)
         if match:
             archives.setdefault(current, match[1])
     return archives

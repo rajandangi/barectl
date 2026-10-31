@@ -375,6 +375,7 @@ def save_snapshot(
             master_state=row.master_state,
             protections="\n".join(f"{key}\t{value}" for key, value in row.protections),
             problem=row.problem,
+            installed_at=row.installed_at,
         )
         for row in collected.runtimes
     )
@@ -972,6 +973,7 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
                 runtime.master_state,
                 _read_pairs(runtime.protections),
                 runtime.problem,
+                runtime.installed_at,
             )
             for runtime in row.runtimes.all()
         ),

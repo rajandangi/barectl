@@ -203,6 +203,22 @@ class SecurityPresentationTests(SimpleTestCase):
         self.assertEqual(check.state, ATTENTION)
         self.assertIn("do not match", " ".join(check.details))
 
+    def test_a_runtime_shows_its_build_and_age(self) -> None:
+        runtime = ObservedRuntime(
+            "php84",
+            "/nix/store/old-php",
+            "12",
+            "8.4.10",
+            (),
+            "active",
+            (),
+            "",
+            installed_at=int(READ_AT.timestamp()) - 7200,
+        )
+        collected = replace(_collected(_state()), runtimes=(runtime,))
+        check = _by_name(present(collected, READ_AT))["Web runtimes"]
+        self.assertIn("PHP 8.4: build 12, installed 2 hours ago", check.details)
+
     def test_an_unread_architecture_is_could_not_check(self) -> None:
         runtime = ObservedRuntime(
             "php84", "/nix/store/old-php", "12", "8.4.10", (), "active", (), ""

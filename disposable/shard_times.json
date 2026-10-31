@@ -166,7 +166,7 @@
     "disposable.test_runtimes.RuntimeNativeBehavior": 114.9,
     "disposable.test_runtimes.RuntimeSmallHost": 20.4,
     "disposable.test_scheduler.LaravelScheduler": 58.3,
-    "disposable.test_security_checks.SecurityChecks": 9.0,
+    "disposable.test_security_checks.SecurityChecks": 10.0,
     "disposable.test_site_database.SiteDatabaseMariaDB": 84.6,
     "disposable.test_site_database.SiteDatabasePostgreSQL": 65.1,
     "disposable.test_site_node.SiteNodeInterruptedTransition": 38.5,

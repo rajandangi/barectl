@@ -564,7 +564,13 @@ for entry in names:
         continue
     path = os.path.realpath(p)
     generation = os.readlink(p) if p.is_symlink() else ""
-    row: dict[str, object] = {"entry": entry, "path": path, "generation": generation, "files": {}}
+    row: dict[str, object] = {
+        "entry": entry,
+        "path": path,
+        "generation": generation,
+        "profile": file(p),
+        "files": {},
+    }
     if entry in ("php84", "php85"):
         row["files"] = {path: file(path) for path in paths(entry)}
         row["identity"] = identity()

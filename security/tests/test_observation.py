@@ -181,10 +181,17 @@ openssl:
   Version table:
      3.0.0 100
         100 /var/lib/dpkg/status
+fixture:
+  Installed: 1.0
+  Candidate: 2.0
+  Version table:
+     2.0 500
+        500 file:/tmp/security-check-repo resolute-security/main all Packages
 """
         )
         self.assertEqual(archives["libssl3"], "resolute-security/main")
         self.assertEqual(archives["libc6"], "resolute-updates/main")
+        self.assertEqual(archives["fixture"], "resolute-security/main")
 
     def test_apt_config_reports_the_effective_automatic_update_values(self) -> None:
         values = observation.parse_apt_config(
