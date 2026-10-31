@@ -13,6 +13,7 @@ from runtimes.catalog import architecture_of
 from runtimes.presentation import ShownRuntime, shown_runtimes, shown_updates
 
 from .observation import (
+    DEFAULT_ALLOWED_ORIGINS,
     STANDARD_PUBLIC_PORTS,
     AutoUpdatesState,
     Check,
@@ -50,12 +51,19 @@ class ShownCheck:
     read_at: datetime
     action: str
     action_url: str = ""
+    action_form: str = ""
+    action_value: str = ""
     details: tuple[str, ...] = ()
     note: str = ""
 
 
 def present(
-    collected: CollectedSnapshot, read_at: datetime, *, advanced_url: str = ""
+    collected: CollectedSnapshot,
+    read_at: datetime,
+    *,
+    advanced_url: str = "",
+    auto_updates_url: str = "",
+    can_change: bool = False,
 ) -> tuple[ShownCheck, ...]:
     """The checks, in the section's fixed order."""
     state = collected.security.value if collected.security.observed else None
@@ -74,7 +82,7 @@ def present(
     return (
         _firewall(state.firewall, state.listeners, state.ssh, read_at),
         _ssh(state.ssh, read_at),
-        _auto_updates(state.auto_updates, read_at),
+        _auto_updates(state.auto_updates, read_at, auto_updates_url, can_change),
         _updates(state.updates, read_at),
         _restart(state.restart, read_at),
         _runtimes(collected, read_at, advanced_url),
@@ -324,21 +332,54 @@ def _ssh(check: Check[SshState], read_at: datetime) -> ShownCheck:
     )
 
 
-def _auto_updates(check: Check[AutoUpdatesState], read_at: datetime) -> ShownCheck:
+RESTART_DISCLOSURE = (
+    "These updates can restart the database engine and Valkey, so sites may pause briefly. "
+    "They do not restart the web server or PHP."
+)
+
+
+def _auto_updates(
+    check: Check[AutoUpdatesState],
+    read_at: datetime,
+    action_url: str,
+    can_change: bool,
+) -> ShownCheck:
     why = "Ubuntu can install security fixes without waiting for someone to sign in."
     if not check.observed or check.value is None:
         return _could_not("Automatic security updates", check, why, read_at)
     state = check.value
-    custom = _custom_origins(state)
+    history = _history(state)
+    custom = custom_updates(state)
     if custom:
+        form = action_url if can_change and state.enabled else ""
         return ShownCheck(
             "Automatic security updates",
             OUTSIDE,
             "Ubuntu's automatic updates are set up in a way Barectl does not change.",
             why,
             read_at,
-            _NOT_AVAILABLE,
-            details=custom,
+            "Turn off" if form else _NOT_AVAILABLE,
+            action_form=form,
+            action_value="off",
+            details=(*custom, *history),
+            note=RESTART_DISCLOSURE,
+        )
+    action, value = _auto_updates_action(state)
+    form = action_url if can_change and action and value else ""
+    label = action if form else _NOT_AVAILABLE
+    if not state.package_installed:
+        return ShownCheck(
+            "Automatic security updates",
+            ATTENTION,
+            "Ubuntu's automatic security updates are not installed, so it does not install "
+            "security fixes by itself.",
+            why,
+            read_at,
+            label,
+            action_form=form,
+            action_value=value,
+            details=history,
+            note=RESTART_DISCLOSURE,
         )
     if not state.enabled:
         return ShownCheck(
@@ -347,32 +388,54 @@ def _auto_updates(check: Check[AutoUpdatesState], read_at: datetime) -> ShownChe
             "Ubuntu does not install security updates by itself.",
             why,
             read_at,
-            _NOT_AVAILABLE,
+            label,
+            action_form=form,
+            action_value=value,
+            details=history,
+            note=RESTART_DISCLOSURE,
         )
-    details = []
-    if state.newest_log_age is not None:
-        details.append(f"The last automatic run was {_age(state.newest_log_age)}.")
     return ShownCheck(
         "Automatic security updates",
-        ATTENTION if state.list_update_timer == "" or state.upgrade_timer == "" else OK,
+        OK,
         "Ubuntu refreshes its package lists and installs security updates by itself, "
         "without restarting the server.",
         why,
         read_at,
-        _NOT_AVAILABLE,
-        details=tuple(details),
+        label,
+        action_form=form,
+        action_value=value,
+        details=history,
+        note=RESTART_DISCLOSURE,
     )
 
 
-def _custom_origins(state: AutoUpdatesState) -> tuple[str, ...]:
+def _auto_updates_action(state: AutoUpdatesState) -> tuple[str, str]:
+    return ("Turn off", "off") if state.enabled else ("Turn on", "on")
+
+
+def _history(state: AutoUpdatesState) -> tuple[str, ...]:
+    if state.last_upgrade:
+        age = f" ({_age(state.newest_log_age)})" if state.newest_log_age is not None else ""
+        return (f"Ubuntu's own history: {state.last_upgrade}{age}.",)
+    if state.newest_log_age is not None:
+        return (f"Ubuntu's own history last ran {_age(state.newest_log_age)}.",)
+    return ("Ubuntu's own history could not be read.",)
+
+
+def custom_updates(state: AutoUpdatesState) -> tuple[str, ...]:
+    """Why this setup is outside the supported one, or nothing when it follows it."""
     reasons = []
     origins = state.allowed_origins
-    if origins and not any("-security" in origin for origin in origins):
-        reasons.append("The allowed update sources do not include Ubuntu security updates.")
-    if state.conffile_matches_package is False:
-        reasons.append("The automatic-update settings file was edited.")
+    if (state.package_installed or origins) and origins != DEFAULT_ALLOWED_ORIGINS:
+        reasons.append("The allowed update sources are customized.")
+    if state.package_blacklist:
+        reasons.append("Some packages are kept out of automatic updates.")
     if state.automatic_reboot:
         reasons.append("The server is set to restart itself after updates.")
+    if state.package_installed and state.conffile_matches_package is False:
+        reasons.append("The automatic-update settings file was edited.")
+    if state.list_update_timer != "enabled" or state.upgrade_timer != "enabled":
+        reasons.append("One of Ubuntu's update timers is disabled.")
     return tuple(reasons)
 
 

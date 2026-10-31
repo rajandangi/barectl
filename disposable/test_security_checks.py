@@ -11,7 +11,9 @@ from django.test import tag
 
 from discovery.observations import collect
 from discovery.snapshot import CollectedSnapshot
+from security import observation
 
+from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 STATE = "security-checks-26.04"
@@ -144,6 +146,63 @@ class SecurityChecks(ScenarioTestCase):
             self._assert_changes(before, after)
         finally:
             self._clean_up()
+
+    def test_2_turns_automatic_updates_off_and_on_and_refuses_a_custom_setting(self) -> None:
+        from operations.inputs import PreparationInputs
+        from security.change import SET_AUTOMATIC_SECURITY_UPDATES as kind
+
+        apply_change(self, kind, PreparationInputs("off"), timeout=90)
+        self.assertEqual(self._periodic("Unattended-Upgrade"), "0")
+
+        override = "/etc/apt/apt.conf.d/99-security-check-auto-updates"
+        self.native(
+            "printf 'Unattended-Upgrade::Allowed-Origins { \"Example:resolute\"; };\\n' > "
+            + override
+        )
+        try:
+            with self.shell() as shell:
+                inputs = PreparationInputs("on")
+                refused = kind.review(kind.inspect(shell, inputs), inputs)
+            self.assertFalse(refused.eligible)
+            self.assertTrue(
+                any("allowed update sources" in reason for reason in refused.refusals),
+                refused.refusals,
+            )
+        finally:
+            self.native(f"rm -f {override}")
+
+        apply_change(self, kind, PreparationInputs("on"), timeout=90)
+        self.assertEqual(self._periodic("Update-Package-Lists"), "1")
+        self.assertEqual(self._periodic("Unattended-Upgrade"), "1")
+        self.assertEqual(
+            self.native(
+                "systemctl is-enabled apt-daily.timer apt-daily-upgrade.timer"
+            ).splitlines(),
+            ["enabled", "enabled"],
+        )
+
+    def test_3_a_fresh_controller_reconstructs_enabled_automatic_updates(self) -> None:
+        with self.shell() as shell:
+            after = collect(shell)
+        if not after.security.observed or after.security.value is None:
+            self.fail("A fresh controller did not read the security checks.")
+        auto = after.security.value.auto_updates.value
+        if auto is None:
+            self.fail("A fresh controller did not read the automatic update settings.")
+        self.assertTrue(auto.package_installed)
+        self.assertTrue(auto.enabled)
+        self.assertEqual(auto.list_update_timer, "enabled")
+        self.assertEqual(auto.upgrade_timer, "enabled")
+        self.assertEqual(auto.allowed_origins, observation.DEFAULT_ALLOWED_ORIGINS)
+        self.assertEqual(auto.package_blacklist, ())
+        self.assertFalse(auto.automatic_reboot)
+
+    def _periodic(self, setting: str) -> str:
+        return self.native(
+            "apt-config dump | sed -n 's/^APT::Periodic::"
+            + setting
+            + ' "\\(.*\\)";$/\\1/p\' | tail -n 1'
+        ).strip()
 
 
 def _fixture_repository() -> str:

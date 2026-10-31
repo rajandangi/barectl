@@ -164,6 +164,7 @@ if TYPE_CHECKING:
         ShownPhpAddition,
         ShownPhpVersion,
     )
+    from security.apps import SecurityConfig
     from servers.apps import ServersConfig
     from servers.backup_storage import BackupStoragePanel
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
@@ -235,6 +236,7 @@ if TYPE_CHECKING:
         WordPressConfig,
         DatabasesConfig,
         CacheConfig,
+        SecurityConfig,
     )
     # The log rotation validator is found by the runner's --validators selection.
     _log_rotation_validator = LogRotationValidators.test_the_supported_file_passes_logrotate_debug

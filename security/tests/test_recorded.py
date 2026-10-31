@@ -5,6 +5,7 @@ from django.test import SimpleTestCase
 from discovery.observations import collect
 from discovery.recorded import ReplayShell, load
 from discovery.snapshot import CollectedSnapshot
+from security.observation import DEFAULT_ALLOWED_ORIGINS
 from security.presentation import UNKNOWN, present
 
 STATE = "security-checks-26.04"
@@ -44,7 +45,10 @@ class RecordedSecurityTests(SimpleTestCase):
         if checks.auto_updates.value is None:
             self.fail("The automatic updates check was not read.")
         self.assertTrue(checks.auto_updates.value.enabled)
-        self.assertTrue(checks.auto_updates.value.list_update_timer)
+        self.assertTrue(checks.auto_updates.value.package_installed)
+        self.assertEqual(checks.auto_updates.value.list_update_timer, "enabled")
+        self.assertEqual(checks.auto_updates.value.allowed_origins, DEFAULT_ALLOWED_ORIGINS)
+        self.assertEqual(checks.auto_updates.value.package_blacklist, ())
 
     def test_the_section_projects_the_stored_checks_without_an_unknown(self) -> None:
         collected = self.collect()

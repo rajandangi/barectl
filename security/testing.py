@@ -2,6 +2,7 @@
 
 from discovery.models import ObservationOutcome
 from security.observation import (
+    DEFAULT_ALLOWED_ORIGINS,
     AutoUpdatesState,
     Check,
     FirewallState,
@@ -37,7 +38,11 @@ def ok_state() -> SecurityState:
         ),
         listeners=check(()),
         ssh=check(SshState("no", "no", "prohibit-password", (22,), (22,), (), "yes")),
-        auto_updates=check(AutoUpdatesState(True, "active", "active", False, (), True, "", None)),
+        auto_updates=check(
+            AutoUpdatesState(
+                True, "enabled", "enabled", False, DEFAULT_ALLOWED_ORIGINS, True, "", None, True
+            )
+        ),
         updates=check(UpdatesState(3600, ())),
         restart=check(RestartState(False, ())),
     )

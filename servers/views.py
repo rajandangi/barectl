@@ -427,11 +427,16 @@ def server_page(
     if section == "security":
         from security.presentation import present as present_security
 
+        can_change_security = state.can_prepare_changes and request.user.has_perms(
+            (*PREPARE_PERMISSIONS, CHANGE_SHARED)
+        )
         context["security_checks"] = (
             present_security(
                 state.snapshot.collected,
                 state.snapshot.collected_at,
                 advanced_url=reverse("server_advanced", args=[server.pk]),
+                auto_updates_url=reverse("security_auto_updates_prepare", args=[server.pk]),
+                can_change=can_change_security,
             )
             if state.snapshot is not None
             else ()

@@ -19,6 +19,7 @@ from discovery.snapshot import Observation, save_snapshot
 from discovery.ssh import UnknownHostKey
 from operations.models import ChangePreparation, ChangeRun
 from security.observation import (
+    DEFAULT_ALLOWED_ORIGINS,
     AutoUpdatesState,
     Check,
     FirewallState,
@@ -374,7 +375,9 @@ def _security_ok() -> SecurityState:
         listeners=_security_check(()),
         ssh=_security_check(SshState("no", "no", "prohibit-password", (22,), (22,), (), "yes")),
         auto_updates=_security_check(
-            AutoUpdatesState(True, "active", "active", False, (), True, "", None)
+            AutoUpdatesState(
+                True, "enabled", "enabled", False, DEFAULT_ALLOWED_ORIGINS, True, "", None, True
+            )
         ),
         updates=_security_check(UpdatesState(3600, ())),
         restart=_security_check(RestartState(False, ())),
@@ -467,4 +470,40 @@ class SecuritySectionBrowserTests(BrowserTestCase):
         page.reload()
         expect(page.get_by_text("The latest connection check failed").first).to_be_visible()
         expect(page.get_by_text("Only key sign-in is allowed").first).to_be_visible()
+        self.assert_no_native_terms()
+
+    def test_the_automatic_updates_action_works_by_keyboard_at_320_px(self) -> None:
+        for codename in ("view_changes", "change_site", "change_shared"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.store(
+            replace(
+                _security_ok(),
+                auto_updates=_security_check(
+                    AutoUpdatesState(
+                        False,
+                        "enabled",
+                        "enabled",
+                        False,
+                        DEFAULT_ALLOWED_ORIGINS,
+                        True,
+                        "",
+                        None,
+                        True,
+                    )
+                ),
+            )
+        )
+        page = self.page
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/security/")
+        button = page.get_by_role("button", name="Turn on", exact=True)
+        expect(button).to_be_visible()
+        button.focus()
+        expect(button).to_be_focused()
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
         self.assert_no_native_terms()
