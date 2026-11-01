@@ -116,6 +116,16 @@ How to keep it fast:
 - Request only the capabilities a test needs. GitLab scopes browser and background-job capabilities to the examples that use them; here, prove a behavior in the fast layer and add a native scenario only when the fast layer cannot prove it ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)).
 - Remove duplicate coverage. A test that repeats another test's outcome is deleted, not kept for safety.
 
+### Failure-to-recovery contract
+
+`operations/recovery_testing.py` compares an emitted native result with an independently established effect boundary and renders the real recovery template. Preflight refusal before window creation, uncertain target write and confirmed-write failure require `refused`, `failed` and `partial`, respectively. Native access-changing scenarios pass their actual journal result and native window evidence to the same contract that fast workflow tests exercise. It checks the headline, access outcome, absence of contradictory no-change claims, and the existing Try again action. Extend existing scenario cases rather than adding duplicate native items.
+
+Before the final full transcript pass, run focused tests and affected native scenarios, obtain preliminary independent Spec and Standards review, resolve findings, and freeze command-affecting sources. Final review still applies to the exact pushed head.
+
+### Durable build evidence
+
+`build.sh` retains complete stage logs and a machine-readable verification ledger under its run directory. Each invocation uses a unique run directory under the controller cache, `barectl/builds`. Set `BARECTL_BUILD_LOGS` to choose its parent directory. Use the printed artifact paths when a failure's traceback exceeds the terminal summary. Each quiet run also writes `LOG.json`, `LOG.pid` and `LOG.status`. The ledger records the command, source revision, staged index and working-tree fingerprints, untracked input identity, result, exit status, duration and full log path. The restricted `quiet-run.sh build LOG ENV_FILE` interface accepts only the four fixed build gates identified by the log stem and records their full safe argument lists with `command_redacted=false`. Generic `run` and `start` commands record only the executable and a digest of the complete argument list, with `command_redacted=true`; environment values are never stored. Aggregate completion requires matching valid atomic status markers, retained logs and matching results. Any failed Git probe prevents a complete source-identity claim. Untracked sources prevent a complete unchanged-source claim. Source identity alone does not establish equivalent runtime, configuration or dependency state. This is evidence, not an automatic gate-skip mechanism. Preserve the ledger and logs in phase handoffs; a failed stage remains failed regardless of what the bounded summary prints. Compare stage durations against the same inputs and account for observed host variation before attributing a budget regression.
+
 ## Recorded transcripts
 
 The fast layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) meets the server at `RemoteShell.run` ([ADR 0002](adr/0002-keep-the-remote-shell-seam.md)) with real command output recorded from a real server. `discovery/recorded.py` holds both test adapters of the seam:
@@ -129,19 +139,26 @@ The scheduled `Native mirror cache` workflow fetches the checked-in mirror on th
 
 A staged body and a fixed read share their source: `sites/bodies/common.py` is part of the site read's program, and `laravel/bodies/common.py` part of the Laravel read's. Editing either changes the recorded command, so record every state whose read embeds it again in the same change rather than patching a transcript ([automation](automation.md#fencing-site-changes) did this for #395).
 
-When a shared read source changes on the integration branch, record every declared state in one pass:
+When a shared read or provisioning source changes, freeze the candidate after focused proof and preliminary review. Record all declared states for the initial verified pass:
 
 ```bash
 scripts/record-all-transcripts.sh --env-file .env
 ```
 
-One failed state does not stop the pass: the script records the rest, then exits 1 naming every failure and the `--from` state that resumes it. `--from STATE` starts at that state and assumes the states before it passed in the earlier pass; `--only STATE` records one state and leaves the source manifest alone. A pass without `--only` writes the manifest when no state failed. `--check` records nothing and exits nonzero when the committed manifest is stale.
+The pass snapshots source, provisioning and pin inputs in the ignored `.quiet-run/transcript-pass.json`. Each successful state receives a receipt identifying its actual captured JSON, pins and content hash. The recorder continues after a failed state, then exits nonzero with its failed states and resume point. A full pass writes the source manifest only after verifying all required receipts.
 
-`discovery/source_manifest.py` covers the body files and the Python modules that build fixed native reads, such as the discovery observations, the package engine and the security reads. A new command-building module joins `SOURCES` in the same change; the fast suite names it when the manifest is stale.
+`--from STATE` resumes an interrupted pass only when its frozen inputs, pins and declared state list still match, and completed transcript hashes remain intact. Changed inputs refuse resume. `--only STATE` records one state without updating the complete manifest. `--check` records nothing and verifies the committed source manifest.
 
-Freeze every command-affecting edit before the final pass. A pass records the tree it runs on, so a `SOURCES` file edited afterwards makes the whole pass stale and pays for another one. Run `scripts/record-all-transcripts.sh --check` before and after the pass; the handoff names the pass's head commit.
+After a verified pass establishes receipts, use dependency-aware selection:
 
-`disposable/scenarios.py --list-records` prints the states. Record new states on the ticket branch; re-record shared states on the integration tip, so parallel branches do not produce conflicting JSON. `discovery/source_manifest.py` keeps a digest manifest of the shared read and body sources; the fast suite names the stale paths and this command when one changes.
+```bash
+scripts/record-all-transcripts.sh --env-file .env --affected
+uv run --env-file .env python -m discovery.transcript_provenance affected ubuntu-24.04
+```
+
+`--affected` inherits only hash-verified unaffected receipts and recaptures required states. A legacy manifest without receipts requires a full first pass. Dependency coverage is deliberately conservative: the first audited exemption is the unsupported Ubuntu 24.04 state, which does not consume the Ubuntu 26.04 SSH sign-in body. All other read, provisioning and pin inputs remain dependencies. Unknown consumers require full capture. Pin changes retain full invalidation; exact command and standard-input matching still apply in ReplayShell.
+
+`discovery/source_manifest.py` lists command-building modules and fixed bodies. Add every new command-building module to `COMMAND_SOURCES` and fixed native sources to `SOURCES`; a missing dependency must not be inferred as independence. The manifest records capture inputs, pins and state receipts alongside source digests. Use the affected-state explanation before deciding what can be reused, then run `scripts/record-all-transcripts.sh --check` after the pass. Handoffs name the frozen revision, receipts and literal capture/check results.
 
 A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
 

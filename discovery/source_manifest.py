@@ -140,13 +140,17 @@ def read() -> dict[str, str]:
     return sources
 
 
-def write() -> Path:
+def write(*, capture: dict[str, object] | None = None) -> Path:
     """Write the current digest map; run after `scripts/record-all-transcripts.sh`."""
-    MANIFEST.write_text(
-        json.dumps({"version": FORMAT, "sources": dict(sorted(digests().items()))}, indent=2)
-        + "\n",
+    if capture is None:
+        raise ValueError("A verified capture pass is required; use record-all-transcripts.sh")
+    document = {"version": FORMAT, "sources": dict(sorted(digests().items())), **capture}
+    temporary = MANIFEST.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(document, indent=2) + "\n",
         encoding="utf-8",
     )
+    temporary.replace(MANIFEST)
     return MANIFEST
 
 
@@ -154,18 +158,24 @@ def stale() -> tuple[str, ...]:
     """The shared sources whose digest differs from the recorded manifest."""
     recorded = read()
     current = digests()
-    return tuple(
-        sorted(
-            path for path in set(recorded) | set(current) if recorded.get(path) != current.get(path)
-        )
-    )
+    changes = {
+        path for path in set(recorded) | set(current) if recorded.get(path) != current.get(path)
+    }
+    from . import recorded as transcripts
+    from .transcript_provenance import plan
+
+    changes.update(f"capture:{state}" for state in plan(transcripts.stored()))
+    return tuple(sorted(changes))
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     if arguments == ["write"]:
-        print(write())  # noqa: T201
-        return 0
+        print(  # noqa: T201
+            "Use scripts/record-all-transcripts.sh; direct writes have no capture receipts",
+            file=sys.stderr,
+        )
+        return 1
     if arguments:
         print("usage: python -m discovery.source_manifest [write]", file=sys.stderr)  # noqa: T201
         return 2

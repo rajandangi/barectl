@@ -36,8 +36,8 @@ Maintain one persistent todo list for the whole run: every ticket, dependency, a
 
 Every ticket passes through three phases, each run by a **fresh** subagent. A phase ends with a handoff note in the notes directory: the branch and head commit, what is done, what is left, and the evidence. The next phase's brief points to that note, the ticket and the documents its area owns, never to the previous agent's transcript. A subagent whose phase is done returns; it never continues into the next phase.
 
-1. **Implement** (implementer). Read the acceptance criteria and find the existing behavior and test seams. Implement the smallest complete, independently demonstrable slice: permissions, empty, stale and inaccessible states, progress, failure, recovery and accessibility included. Run focused tests, then the checks in `../quality.md#local-commands`; for a native-affecting path, run the native scenarios locally before pushing ([native layer](../quality.md#native-layer)). Merge the integration tip into the branch, push, and write the handoff note.
-2. **Review and fix** (reviewers, then an implementer). Obtain independent Standards and Spec reviews of the pushed diff. A new implementer fixes the actionable findings from the handoff note and the review reports, reruns the affected checks, pushes, and updates the note.
+1. **Implement** (implementer). Read the acceptance criteria and find the existing behavior and test seams. Implement the smallest complete, independently demonstrable slice: permissions, empty, stale and inaccessible states, progress, failure, recovery and accessibility included. Run focused tests and affected native scenarios, then obtain preliminary independent Standards and Spec reviews of the candidate before freezing native sources or starting a full transcript recording pass. Resolve their findings, freeze command-affecting sources, record required states, and run the checks in `../quality.md#local-commands`. If a reviewed native source changes, repeat its affected proof and preliminary review before recording. Merge the integration tip into the branch, push, and write the handoff note.
+2. **Review and fix** (reviewers, then an implementer). Obtain final independent Standards and Spec reviews of the exact pushed diff, including any changes since the preliminary review. A new implementer fixes the actionable findings from the handoff note and the review reports, reruns the affected checks, pushes, and updates the note.
 3. **Publish** (runner). Open one focused pull request with truthful validation evidence from the note, wait for the required checks on its exact head commit, and report the result. The orchestrator merges, updates the current-behavior documentation and records completion evidence in the ticket. Close the sub-issue only when delivered and verified.
 
 Briefs stay short: the ticket, the handoff note, the owning documents and the role. Name only the documents the ticket's area needs, found through the [module map](../architecture.md#module-map). Start from the [implementer brief](implementer-brief.md) shape and return the handoff in the same note.
@@ -50,16 +50,19 @@ Complete the run only when every sub-issue's acceptance criteria are met and the
 
 ## Long-running commands
 
-A native suite run takes many minutes, and every check on it costs a turn at the agent's full context. Wait in as few turns as possible:
+Run long commands in one persistent tool execution. Use the foreground runner, return the tool's live session handle promptly, and resume that session until the runner exits:
 
 ```bash
-docker/disposable-server/quiet-run.sh start "$NOTES/native.log" -- docker/disposable-server/run-scenarios.sh --env-file .env
-docker/disposable-server/quiet-run.sh wait "$NOTES/native.log"
+docker/disposable-server/quiet-run.sh run "$NOTES/native.log" -- docker/disposable-server/run-scenarios.sh --env-file .env
 ```
+
+The parent process stays alive until the command completes. A detached `start` call is only suitable for a host that guarantees detached child survival; returning from an execution tool can terminate its process group. An absent status file is not evidence that a job is running. Read the runner's liveness result before resuming or restarting it.
 
 The runner takes the host-wide native lock itself (`disposable/locking.py`), so every caller — the orchestrator, an implementer proving one item, `build.sh` — waits for the lane owner instead of sharing lanes. `build.sh` holds the same lock once for its side-by-side validator and native stages.
 
-`wait` blocks for up to nine minutes, then prints only the failure lines and the tail, and exits with the command's status, or 124 while it is still running; give the call a ten-minute tool timeout and call `wait` again on 124. `quiet-run.sh run` starts and waits in one call. For CI, use `scripts/watch-checks.sh <pr> "$NOTES/pr-checks.log"`: one blocking call that keeps the refresh output in a log and prints its last 30 lines. `gh run watch --exit-status` is the equivalent for a workflow run. Wait in one blocking call each time, not with short sleeps between log reads. The runner's own logs stay under `~/.cache/barectl/native/scenario-logs` ([native layer](../quality.md#native-layer)).
+`run` and `follow` wait until completion. The legacy bounded `wait` is an observation deadline, not a command deadline; its exit 124 must never be treated as a completed test. Keep the owning tool session alive when a command outlasts a bounded observation. The native harness owns test deadlines. Full recording passes can legitimately exceed nine minutes.
+
+For CI, use `scripts/watch-checks.sh <pr> "$NOTES/pr-checks.log"` in a persistent tool session. One runner owns each command and its wait. Report a changed stage, failure or completion; avoid repeated full log reads while the state is unchanged. Consult the build's verification ledger before rerunning a gate already completed by another phase. Reuse evidence only when its recorded inputs still match and policy permits; pre-push hooks and exact-head required CI remain mandatory.
 
 Never report the task done while a command is still running. If a stored dependency genuinely blocks safe progress, document exactly what it blocks and continue every independent authorized step; do not stop the run. Do not stop half-way; finish the specification and its sub-issues end to end.
 
