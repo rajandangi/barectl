@@ -10,6 +10,11 @@ on:
         description: Commit, branch or tag to test instead of the selected branch
         type: string
         required: false
+      cache-namespace:
+        description: Isolated cache prefix for a cold qualification (empty for normal runs)
+        type: string
+        required: false
+        default: ""
 permissions:
   contents: read
 # A newer commit on a pull request supersedes its running native check; a manual run keeps
@@ -48,6 +53,7 @@ jobs:
     with:
       runner: ubuntu-26.04
       ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+      cache-namespace: ${{ inputs.cache-namespace }}
   # The one required check (docs/quality.md#native-affecting-paths). It replaces the old
   # `native (Ubuntu 26.04)` commit status.
   native:

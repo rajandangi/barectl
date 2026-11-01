@@ -1008,6 +1008,11 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
         action="store_true",
         help="prove an unaliased lookup fails the item, then stop",
     )
+    parser.add_argument(
+        "--prepare-all",
+        action="store_true",
+        help="prepare every missing snapshot (including special images), then stop",
+    )
     parser.add_argument("--shard", help="I/N: run only the I-th of N partitions")
     parser.add_argument(
         "--no-lock",
@@ -1021,6 +1026,14 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
         parser.error(
             "--validators is a single-container stage without shard, record or egress selection"
         )
+    if options.prepare_all and (
+        options.validators
+        or options.record
+        or options.shard
+        or options.check_egress
+        or options.breadth
+    ):
+        parser.error("--prepare-all is its own stage; it selects no scenarios")
     return options
 
 
@@ -1035,78 +1048,145 @@ def _shard(scenarios: Sequence[Scenario], value: str) -> list[Scenario]:
     return [chosen[label] for label in groups[position - 1]]
 
 
-def prepare_layers(
+_PREPARATIONS = {
+    "L1": ("L0", "disposable.test_prepared_foundation.PrepareFoundation"),
+    "L2": ("L1", "disposable.test_prepared_sites.PrepareSites"),
+    "L3": ("L1", "disposable.test_prepared_wordpress.PrepareWordPress"),
+    "L4": ("L3", "disposable.test_prepared_wordpress.PrepareWordPressCache"),
+    "L5": ("L1", "disposable.test_prepared_laravel.PrepareLaravel"),
+}
+PREPARATION_LAYERS = ("L1", "L2", "L3", "L4", "L5")
+SPECIAL_LAYERS = ("L0-standing", "L0-24.04")
+
+
+def prepare_layers(  # noqa: C901 - dependency waves and cached-layer checks are one decision
     runner: Runner,
     scenarios: list[Scenario],
     image: str,
     key: Path,
     limit: float,
     output: Output,
-) -> None:
-    """Prepare each missing snapshot a scenario needs, layer by layer.
+    *,
+    layers: Iterable[str] | None = None,
+    lanes: int | None = None,
+) -> list[Outcome]:
+    """Prepare each missing snapshot once, in dependency order.
 
     A keyed cached layer already contains its ancestors; only a missing layer needs its
-    parent loaded or prepared (docs/quality.md#native-layer).
+    parent loaded or prepared (docs/quality.md#native-layer). Foundation preparation must
+    finish before its descendants, but siblings run together: L2, L3 and L5 share one
+    wave, and L4 follows L3 on the same lane. A cold run therefore pays one foundation
+    preparation and one descendant wave instead of preparing every layer serially.
     """
     deadline = time.monotonic() + limit
     selected = {scenario.label: scenario for scenario in scenarios}
     full_foundation = "disposable.test_foundation.HostFoundation"
-    requirements = {
-        "L1": ("L0", "disposable.test_prepared_foundation.PrepareFoundation"),
-        "L2": ("L1", "disposable.test_prepared_sites.PrepareSites"),
-        "L3": ("L1", "disposable.test_prepared_wordpress.PrepareWordPress"),
-        "L4": ("L3", "disposable.test_prepared_wordpress.PrepareWordPressCache"),
-        "L5": ("L1", "disposable.test_prepared_laravel.PrepareLaravel"),
-    }
+    required = set(layers) if layers is not None else {scenario.layer for scenario in scenarios}
+    available_lanes = max(1, lanes if lanes is not None else 1)
     ready: set[str] = set()
+    missing: set[str] = set()
 
-    def prepare(layer: str) -> None:
-        if layer not in requirements or layer in ready:
+    def visit(layer: str) -> None:
+        if layer in ready or layer in missing or layer not in _PREPARATIONS:
             return
         if images.load(layer):
             ready.add(layer)
             return
-        parent, label = requirements[layer]
-        prepare(parent)
+        missing.add(layer)
+        visit(_PREPARATIONS[layer][0])
+
+    for layer in sorted(required):
+        visit(layer)
+
+    def remaining() -> float:
+        return max(0.0, deadline - time.monotonic())
+
+    def label(layer: str) -> str:
         if (
             layer == "L1"
             and full_foundation in selected
             and selected[full_foundation] in discover([full_foundation])
         ):
-            label = full_foundation
-        remaining = max(0.0, deadline - time.monotonic())
-        _prepare(runner, label, layer, image, key, remaining, output)
-        ready.add(layer)
+            return full_foundation
+        return _PREPARATIONS[layer][1]
 
-    for layer in sorted({scenario.layer for scenario in scenarios}):
-        prepare(layer)
+    outcomes: list[Outcome] = []
+    if "L1" in missing:
+        outcomes += _prepare_units(
+            runner,
+            [[(label("L1"), "L1")]],
+            image,
+            key,
+            remaining(),
+            output,
+            available_lanes,
+        )
+    units: list[list[tuple[str, str]]] = []
+    chain: list[tuple[str, str]] = [
+        (label(layer), layer) for layer in ("L3", "L4") if layer in missing
+    ]
+    if chain:
+        units.append(chain)
+    units.extend([(label(layer), layer)] for layer in ("L2", "L5") if layer in missing)
+    if units:
+        outcomes += _prepare_units(runner, units, image, key, remaining(), output, available_lanes)
+
     runner.outcomes[:] = [
         outcome
         for outcome in runner.outcomes
         if outcome.passed and selected.get(outcome.scenario.label) == outcome.scenario
     ]
+    return outcomes
 
 
-def _prepare(
-    runner: Runner, label: str, layer: str, image: str, key: Path, limit: float, output: Output
-) -> None:
-    preparation = next(iter(discover([label], preparations=True)), None) or next(
-        iter(discover([label])), None
-    )
-    if preparation is None:
-        raise ScenarioError(f"No scenario prepares the {layer} snapshot.")
-    output.say(f"Preparing the missing {layer} snapshot through {preparation.label}.")
+def _prepare_units(
+    runner: Runner,
+    units: list[list[tuple[str, str]]],
+    image: str,
+    key: Path,
+    limit: float,
+    output: Output,
+    lanes: int,
+) -> list[Outcome]:
+    """Run preparation units side by side; a unit's entries stay on one lane in order."""
+    preparations: list[_Unit] = []
+    expected: list[tuple[str, str]] = []
+    planned: list[Scenario] = []
+    for entries in units:
+        group: list[Scenario] = []
+        for label, layer in entries:
+            preparation = next(iter(discover([label], preparations=True)), None) or next(
+                iter(discover([label])), None
+            )
+            if preparation is None:
+                raise ScenarioError(f"No scenario prepares the {layer} snapshot.")
+            output.say(f"Preparing the missing {layer} snapshot through {preparation.label}.")
+            group.append(preparation)
+            planned.append(preparation)
+            expected.append((preparation.label, layer))
+        preparations.append(_Unit(group[0].layer, group))
     previous = len(runner.outcomes)
-    execute(runner, plan([preparation], 1), image, key, 1, limit, output)
+    execute(
+        runner,
+        preparations,
+        image,
+        key,
+        min(max(1, len(preparations)), lanes),
+        limit,
+        output,
+    )
     outcomes = runner.outcomes[previous:]
-    outcome = outcomes[0] if len(outcomes) == 1 else None
-    if outcome is None or outcome.scenario != preparation or not outcome.passed:
-        summarize(outcomes, [preparation], outcome.seconds if outcome else 0, output)
-        write_results(runner.outcomes, runner.work)
-        keep_logs(runner.work, output)
-        raise SystemExit(1)
-    if not images.exists(images.tag(layer)):
-        raise ScenarioError(f"{preparation.label} did not commit the {layer} snapshot.")
+    by_label = {outcome.scenario.label: outcome for outcome in outcomes}
+    for label, layer in expected:
+        outcome = by_label.get(label)
+        if outcome is None or not outcome.passed:
+            summarize(outcomes, planned, outcome.seconds if outcome else 0, output)
+            write_results(runner.outcomes, runner.work)
+            keep_logs(runner.work, output)
+            raise SystemExit(1)
+        if not images.exists(images.tag(layer)):
+            raise ScenarioError(f"{label} did not commit the {layer} snapshot.")
+    return outcomes
 
 
 def _breadth_lanes(lanes: int, options: argparse.Namespace) -> int:
@@ -1119,12 +1199,16 @@ def _breadth_lanes(lanes: int, options: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901
     options = arguments(sys.argv[1:] if argv is None else argv)
     output = Output(sys.stdout)
-    scenarios = discover(
-        options.labels,
-        only_quarantined=options.quarantined,
-        egress_control=options.check_egress,
-        validators=options.validators,
-        breadth=options.breadth,
+    scenarios = (
+        []
+        if options.prepare_all
+        else discover(
+            options.labels,
+            only_quarantined=options.quarantined,
+            egress_control=options.check_egress,
+            validators=options.validators,
+            breadth=options.breadth,
+        )
     )
     if options.list_records:
         for state in sorted({state for scenario in scenarios for state in scenario.records}):
@@ -1137,7 +1221,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901
     if options.quarantined and not scenarios:
         print("Native scenarios: none are quarantined.")  # noqa: T201
         return 0
-    if not scenarios:
+    if not scenarios and not options.prepare_all:
         raise SystemExit("No scenario tests were found.")
     if options.list:
         for scenario in scenarios:
@@ -1154,7 +1238,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901
         return _run(options, scenarios, output)
 
 
-def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output) -> int:
+def _store_layer(layer: str) -> None:
+    images.ensure(layer)
+    images.store(layer)
+
+
+def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output) -> int:  # noqa: C901
     started = time.monotonic()
     if options.validators:
         # Two validator lanes keep the six classes under the joint-fast target; each lane
@@ -1167,45 +1256,81 @@ def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output)
     lanes = _breadth_lanes(lanes, options)
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
-        image = images.ensure()
-        fixture_image = images.ensure("fixture")
-        images.store("fixture")
-        key = controller_key(work)
-        runner = Runner(
-            output, work, record=options.record, keep_failed=options.keep_failed,
-            quarantined=options.quarantined, fixture_image=fixture_image,
-        )  # fmt: skip
-        remaining = max(0.0, options.time_limit - (time.monotonic() - started))
-        prepare_layers(runner, scenarios, image, key, remaining, output)
-        completed = {outcome.scenario.label for outcome in runner.outcomes}
-        remaining_scenarios = [
-            scenario for scenario in scenarios if scenario.label not in completed
-        ]
-        weights = None
-        if options.validators:
-            weights = validator_weights(remaining_scenarios)
-        elif not (options.breadth or options.check_egress or options.record):
-            record = (
-                shard_times.Record.load()
-                if options.shard
-                else shard_times.Record.load(Path(__file__).with_name("local_times.json"))
+        special_pool = None
+        specials: list[Future[None]] = []
+        if options.prepare_all:
+            # The special images are plain Docker targets, independent of the product flows;
+            # build them alongside L0 and the foundation (docs/quality.md#native-layer).
+            mirror.fixture_ca()
+            special_pool = ThreadPoolExecutor(len(SPECIAL_LAYERS))
+            specials = [special_pool.submit(_store_layer, layer) for layer in SPECIAL_LAYERS]
+        try:
+            image = images.ensure()
+            fixture_image = images.ensure("fixture")
+            images.store("fixture")
+            key = controller_key(work)
+            runner = Runner(
+                output, work, record=options.record, keep_failed=options.keep_failed,
+                quarantined=options.quarantined, fixture_image=fixture_image,
+            )  # fmt: skip
+            if options.prepare_all:
+                remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+                prepared = prepare_layers(
+                    runner,
+                    [],
+                    image,
+                    key,
+                    remaining,
+                    output,
+                    layers=PREPARATION_LAYERS,
+                    lanes=lanes,
+                )
+                for layer in ("L0", "fixture", *PREPARATION_LAYERS):
+                    images.store(layer)
+                for future in specials:
+                    future.result()
+                for layer in SPECIAL_LAYERS:
+                    images.store(layer)
+                seconds = time.monotonic() - started
+                passed = sum(1 for outcome in prepared if outcome.passed)
+                print(f"Prepared snapshots: {passed} of {len(prepared)} passed in {seconds:.0f} s")  # noqa: T201
+                write_results(prepared, work)
+                keep_logs(work, output)
+                return 0 if passed == len(prepared) else 1
+            remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+            prepare_layers(runner, scenarios, image, key, remaining, output, lanes=lanes)
+            completed = {outcome.scenario.label for outcome in runner.outcomes}
+            remaining_scenarios = [
+                scenario for scenario in scenarios if scenario.label not in completed
+            ]
+            weights = None
+            if options.validators:
+                weights = validator_weights(remaining_scenarios)
+            elif not (options.breadth or options.check_egress or options.record):
+                record = (
+                    shard_times.Record.load()
+                    if options.shard
+                    else shard_times.Record.load(Path(__file__).with_name("local_times.json"))
+                )
+                weights = record.scenarios
+            units = plan(
+                remaining_scenarios,
+                lanes,
+                weights=weights,
             )
-            weights = record.scenarios
-        units = plan(
-            remaining_scenarios,
-            lanes,
-            weights=weights,
-        )
-        remaining = max(0.0, options.time_limit - (time.monotonic() - started))
-        execute(runner, units, image, key, lanes, remaining, output)
-        for layer in ("L1", "L2", "L3", "L4", "L5"):
-            images.store(layer)
-        seconds = time.monotonic() - started
-        summarize(runner.outcomes, scenarios, seconds, output, validators=options.validators)
-        write_results(runner.outcomes, work)
-        keep_logs(work, output)
-        if options.check_egress:
-            return _egress_control(runner.outcomes, output)
+            remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+            execute(runner, units, image, key, lanes, remaining, output)
+            for layer in ("L1", "L2", "L3", "L4", "L5"):
+                images.store(layer)
+            seconds = time.monotonic() - started
+            summarize(runner.outcomes, scenarios, seconds, output, validators=options.validators)
+            write_results(runner.outcomes, work)
+            keep_logs(work, output)
+            if options.check_egress:
+                return _egress_control(runner.outcomes, output)
+        finally:
+            if special_pool is not None:
+                special_pool.shutdown(wait=True)
     finished = {outcome.scenario.label for outcome in runner.outcomes}
     complete = all(scenario.label in finished for scenario in scenarios)
     return 0 if complete and all(o.passed for o in runner.outcomes) else 1
