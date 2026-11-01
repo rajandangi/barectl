@@ -221,7 +221,7 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "stopped before changing anything. Wait for the window to close, then prepare again."
     ),
     "revert_preimage": (
-        "Barectl could not save the firewall's previous settings, so it stopped before "
+        "Barectl could not save the previous access settings, so it stopped before "
         "changing anything. Check the run's journal on the server, then prepare again."
     ),
     "revert_arm": (
@@ -251,6 +251,20 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
     "firewall_verify": (
         "The firewall did not read back as the reviewed change. The server restores the "
         "previous firewall on its own; check the run's journal if it does not."
+    ),
+    "sign_in_syntax": (
+        "OpenSSH rejected the configuration. The server restores the previous sign-in "
+        "settings on its own."
+    ),
+    "sign_in_reload": (
+        "SSH could not reload. The server restores the previous sign-in settings on its own."
+    ),
+    "sign_in_verify": (
+        "The effective sign-in settings do not match the reviewed policy. The server "
+        "restores the previous settings on its own."
+    ),
+    "sign_in_apply": (
+        "The sign-in change stopped partway. The server restores the previous settings on its own."
     ),
     "active_backup": (
         "This site's scheduled backup still had processes on the server, so this run stopped "
@@ -970,6 +984,10 @@ RESULT_REASONS: Final = frozenset(
         "firewall_standard",
         "firewall_apply",
         "firewall_verify",
+        "sign_in_syntax",
+        "sign_in_reload",
+        "sign_in_verify",
+        "sign_in_apply",
         "capacity",
         "affected_sites",
         "evidence",
@@ -1928,6 +1946,15 @@ def _conclude_rejected(run: ChangeRun) -> None:
 
 
 def _failure(outcome: Result, reason: str) -> str:
+    if outcome == Result.REFUSED and reason == "sign_in_syntax":
+        return "OpenSSH rejected the existing configuration before Barectl changed anything."
+    if outcome == Result.REFUSED and reason == "sign_in_apply":
+        return "Barectl could not prepare the sign-in file before changing the server."
+    if outcome == Result.FAILED and reason == "sign_in_apply":
+        return (
+            "The sign-in file write may have changed the server. The server is restoring "
+            "the previous settings on its own."
+        )
     if reason in _REFUSED_REASONS and outcome in (Result.REFUSED, Result.PARTIAL):
         return _REFUSED_REASONS[reason]
     return _FAILURES.get(outcome, "")
@@ -2021,8 +2048,12 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
         elif verification == Verification.UNAVAILABLE:
             failure = VERIFICATION_UNAVAILABLE
         if kind.access_changing:
-            window = _window(run, confirm=True)
-    elif kind.access_changing and outcome in (Result.PARTIAL, Result.FAILED, Result.TIMED_OUT):
+            window = _window(run, confirm=verification == Verification.PASSED)
+    elif kind.access_changing and outcome in (
+        Result.PARTIAL,
+        Result.FAILED,
+        Result.TIMED_OUT,
+    ):
         window = _window(run, confirm=False)
     if outcome == Result.SUCCEEDED and window is revert.Window.PUT_BACK:
         verification = Verification.FAILED

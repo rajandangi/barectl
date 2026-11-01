@@ -44,6 +44,7 @@ from runtimes.defaults_views import prepare_default
 from security.views import (
     prepare_auto_updates,
     prepare_firewall,
+    prepare_sign_in,
     prepare_updates_check,
     prepare_updates_install,
 )
@@ -162,6 +163,11 @@ urlpatterns = [
         "servers/<int:pk>/security/firewall/prepare/",
         prepare_firewall,
         name="security_firewall_prepare",
+    ),
+    path(
+        "servers/<int:pk>/security/sign-in/prepare/",
+        prepare_sign_in,
+        name="security_sign_in_prepare",
     ),
     path(
         "servers/<int:pk>/security/updates/check/prepare/",

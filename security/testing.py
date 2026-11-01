@@ -37,7 +37,18 @@ def ok_state() -> SecurityState:
             FirewallState(True, True, "deny", "allow", "deny", True, "on (low)", (), (), True)
         ),
         listeners=check(()),
-        ssh=check(SshState("no", "no", "prohibit-password", (22,), (22,), (), "yes")),
+        ssh=check(
+            SshState(
+                "no",
+                "no",
+                "prohibit-password",
+                (22,),
+                (22,),
+                (),
+                "yes",
+                contexts_checked=True,
+            )
+        ),
         auto_updates=check(
             AutoUpdatesState(
                 True, "enabled", "enabled", False, DEFAULT_ALLOWED_ORIGINS, True, "", None, True

@@ -627,6 +627,10 @@ def _save_security(
         if state.ssh.value
         else "",
         per_source_penalties=state.ssh.value.per_source_penalties if state.ssh.value else "",
+        ssh_match_overrides="\n".join(state.ssh.value.match_overrides) if state.ssh.value else "",
+        ssh_contexts_checked=state.ssh.value.contexts_checked if state.ssh.value else False,
+        ssh_accounts_readable=state.ssh.value.accounts_readable if state.ssh.value else False,
+        ssh_login_accounts="\n".join(state.ssh.value.login_accounts) if state.ssh.value else "",
         auto_updates_enabled=state.auto_updates.value.enabled if state.auto_updates.value else None,
         list_update_timer=state.auto_updates.value.list_update_timer
         if state.auto_updates.value
@@ -1164,6 +1168,11 @@ def _read_security(row: DiscoverySnapshot) -> Observation[SecurityState | None]:
         tuple(int(port) for port in stored.socket_ports.splitlines() if port.isdigit()),
         tuple(line for line in stored.accounts_without_keys.splitlines() if line),
         stored.per_source_penalties,
+        (),
+        tuple(line for line in stored.ssh_match_overrides.splitlines() if line),
+        stored.ssh_contexts_checked,
+        stored.ssh_accounts_readable,
+        tuple(line for line in stored.ssh_login_accounts.splitlines() if line),
     )
     auto = AutoUpdatesState(
         stored.auto_updates_enabled is True,

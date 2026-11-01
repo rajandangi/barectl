@@ -72,7 +72,19 @@ def _state(
             )
         ),
         listeners=listeners or read_check(()),
-        ssh=ssh or read_check(SshState("no", "no", "prohibit-password", (22,), (22,), (), "yes")),
+        ssh=ssh
+        or read_check(
+            SshState(
+                "no",
+                "no",
+                "prohibit-password",
+                (22,),
+                (22,),
+                (),
+                "yes",
+                contexts_checked=True,
+            )
+        ),
         auto_updates=auto_updates
         or read_check(
             AutoUpdatesState(
@@ -152,7 +164,18 @@ class SecurityPresentationTests(SimpleTestCase):
 
     def test_weak_ssh_sign_in_is_attention_and_names_accounts_without_keys(self) -> None:
         state = _state(
-            ssh=read_check(SshState("yes", "no", "yes", (22,), (22,), ("deploy",), "no"))
+            ssh=read_check(
+                SshState(
+                    "yes",
+                    "no",
+                    "yes",
+                    (22,),
+                    (22,),
+                    ("deploy",),
+                    "no",
+                    contexts_checked=True,
+                )
+            )
         )
         check = _by_name(present(_collected(state), READ_AT))["SSH sign-in"]
         self.assertEqual(check.state, ATTENTION)
@@ -321,7 +344,18 @@ class SecurityPresentationTests(SimpleTestCase):
 
     def test_root_without_password_is_key_sign_in_not_a_password(self) -> None:
         state = _state(
-            ssh=read_check(SshState("no", "no", "without-password", (22,), (22,), (), "no"))
+            ssh=read_check(
+                SshState(
+                    "no",
+                    "no",
+                    "without-password",
+                    (22,),
+                    (22,),
+                    (),
+                    "no",
+                    contexts_checked=True,
+                )
+            )
         )
         check = _by_name(present(_collected(state), READ_AT))["SSH sign-in"]
         self.assertEqual(check.state, OK)

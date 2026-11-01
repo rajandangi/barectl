@@ -79,6 +79,17 @@ class SecuritySectionTests(ControllerConfigTestCase):
         self.assertContains(response, "Could not check")
         self.assertContains(response, "needs root or the authorized passwordless sudo")
 
+    def test_old_snapshot_without_match_checks_does_not_claim_key_only_sign_in(self) -> None:
+        self.store(
+            replace(
+                ok_state(),
+                ssh=check(SshState("no", "no", "prohibit-password", (22,), (22,), (), "yes")),
+            )
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(response, "Could not check sign-in for every login account")
+        self.assertNotContains(response, "Only key sign-in is allowed")
+
     def test_advanced_shows_the_reads_behind_the_checks(self) -> None:
         self.store(ok_state())
         response = self.client.get(f"/servers/{self.server.pk}/advanced/")
@@ -133,6 +144,47 @@ class SecuritySectionTests(ControllerConfigTestCase):
             {"state": "on"},
         )
         self.assertEqual(refused.status_code, 403)
+
+    def test_key_sign_in_control_requires_shared_permission_and_posts_to_preparation(self) -> None:
+        self.store(
+            replace(
+                ok_state(),
+                ssh=check(
+                    SshState(
+                        "yes",
+                        "no",
+                        "yes",
+                        (22,),
+                        (22,),
+                        ("deploy",),
+                        "yes",
+                        (22,),
+                        (),
+                        True,
+                        True,
+                        ("deploy", "root"),
+                    )
+                ),
+            )
+        )
+        url = f"/servers/{self.server.pk}/security/sign-in/prepare/"
+        viewer = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(viewer, "Require key sign-in")
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.grant("view_changes", "change_site")
+        site_operator = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(site_operator, "Require key sign-in")
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.grant("change_shared")
+        owner = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(owner, f'action="{url}"')
+        self.assertContains(owner, 'name="selection"')
+        queued = self.client.post(url, {"selection": "on"})
+        self.assertEqual(queued.status_code, 302)
+        self.assertEqual(
+            ChangePreparation.objects.get(server=self.server).kind_slug,
+            "require_key_sign_in",
+        )
 
     def _store_waiting_updates(self) -> None:
         self.store(

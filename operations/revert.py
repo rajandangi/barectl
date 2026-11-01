@@ -128,7 +128,7 @@ def restore_script(files: tuple[str, ...], reload_steps: str) -> str:
     )
 
 
-def save_steps(files: tuple[str, ...], reload_steps: str) -> str:
+def save_steps(files: tuple[str, ...], reload_steps: str, *, capture_ufw: bool = True) -> str:
     """Shell body code that saves the preimage and its restore script; uses ``$id``.
 
     The body sets ``id`` from the run's validated revert identifier argument.
@@ -142,19 +142,22 @@ def save_steps(files: tuple[str, ...], reload_steps: str) -> str:
         for path in window_files
     )
     restore = restore_script(window_files, reload_steps)
-    return "\n".join(
+    steps = [
+        "umask 077",
+        f"revert={PREIMAGE_ROOT}/revert-$id",
+        f"mkdir -p -m 0700 {shlex.quote(PREIMAGE_ROOT)} || refused revert_preimage",
+        'rm -rf -- "$revert"',
+        'mkdir -m 0700 -- "$revert" || refused revert_preimage',
+        copies,
+    ]
+    if capture_ufw:
+        steps.append(
+            'if [ "$(ufw status 2>/dev/null | head -n 1)" = "Status: active" ]; then '
+            "printf 'yes\\n' > \"$revert/enabled\"; else "
+            "printf 'no\\n' > \"$revert/enabled\"; fi"
+        )
+    steps.extend(
         [
-            "umask 077",
-            f"revert={PREIMAGE_ROOT}/revert-$id",
-            f"mkdir -p -m 0700 {shlex.quote(PREIMAGE_ROOT)} || refused revert_preimage",
-            'rm -rf -- "$revert"',
-            'mkdir -m 0700 -- "$revert" || refused revert_preimage',
-            copies,
-            (
-                'if [ "$(ufw status 2>/dev/null | head -n 1)" = "Status: active" ]; then '
-                "printf 'yes\\n' > \"$revert/enabled\"; else "
-                "printf 'no\\n' > \"$revert/enabled\"; fi"
-            ),
             "cat > \"$revert/restore.sh\" <<'BARECTL_REVERT_RESTORE'",
             restore,
             "BARECTL_REVERT_RESTORE",
@@ -163,10 +166,9 @@ def save_steps(files: tuple[str, ...], reload_steps: str) -> str:
                 "[ \"$(stat -c '%F %u %a' \"$revert\")\" = 'directory 0 700' ] "
                 "|| refused revert_preimage"
             ),
-            'chmod 0600 -- "$revert"/* 2>/dev/null || refused revert_preimage',
-            'chmod 0700 -- "$revert/restore.sh" || refused revert_preimage',
         ]
     )
+    return "\n".join(steps)
 
 
 def arm_step() -> str:
