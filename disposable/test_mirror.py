@@ -440,6 +440,11 @@ class FixtureCAWorkflowTests(SimpleTestCase):
         self.assertIn("cache-namespace", dispatch)
         consumer = native["jobs"]["scenarios"]["with"]
         self.assertEqual(consumer["cache-namespace"], prefix)
+        for job_name in ("prepare", "scenarios"):
+            steps = workflow["jobs"][job_name]["steps"]
+            for name in ("Save the L1 snapshot", "Save the L5 snapshot"):
+                save = next(item for item in steps if item.get("name") == name)
+                self.assertTrue(save["if"].startswith("always()"))
 
     def test_default_branch_seeding_and_mirror_restore_share_the_same_ca_policy(self) -> None:
         directory = mirror.REPOSITORY / ".github/workflows"

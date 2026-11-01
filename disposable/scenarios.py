@@ -1186,6 +1186,9 @@ def _prepare_units(
             raise SystemExit(1)
         if not images.exists(images.tag(layer)):
             raise ScenarioError(f"{label} did not commit the {layer} snapshot.")
+    with ThreadPoolExecutor(max_workers=max(1, len(expected))) as stored:
+        for future in [stored.submit(images.store, layer) for _, layer in expected]:
+            future.result()
     return outcomes
 
 

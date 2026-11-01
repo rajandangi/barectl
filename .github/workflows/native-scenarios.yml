@@ -24,6 +24,8 @@ jobs:
   prepare:
     runs-on: ${{ inputs.runner }}
     env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
       BARECTL_NATIVE_L0_CACHE: ${{ runner.temp }}/native-images
     outputs:
       phase-started: ${{ steps.phase.outputs.started }}
@@ -315,12 +317,6 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
           key: ${{ steps.fixture.outputs.cache-primary-key }}
-      - if: always()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: native-prepare-${{ inputs.runner }}
-          path: ${{ runner.temp }}/native-images
-          if-no-files-found: ignore
   scenarios:
     needs: prepare
     name: scenarios (${{ matrix.shard }}/11)
