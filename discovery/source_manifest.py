@@ -24,7 +24,9 @@ COMMAND_SOURCES = (
     "discovery/observations/components.py",
     "discovery/observations/probes.py",
     "discovery/observations/standing.py",
+    "operations/revert.py",
     "security/change.py",
+    "security/firewall.py",
     "security/observation.py",
     "security/updates.py",
 )
@@ -91,6 +93,7 @@ SOURCES = (
     "runtimes/live.py",
     "security/bodies/automatic_updates.sh",
     "security/bodies/check_updates.sh",
+    "security/bodies/firewall.sh",
     "security/bodies/install_updates.sh",
     "sites/bodies/admission.py",
     "sites/bodies/client_change.py",

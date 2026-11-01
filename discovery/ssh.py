@@ -201,7 +201,12 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
             transport = transports[-1]
             key = transport.get_remote_server_key()
             yield _PyinfraShell(
-                host, transport, sock, f"{key.get_name()} {key.fingerprint}", target.alias
+                host,
+                transport,
+                sock,
+                f"{key.get_name()} {key.fingerprint}",
+                target.alias,
+                target.port,
             )
         finally:
             host.disconnect()
@@ -459,12 +464,19 @@ def _unwrap(lines: list[str], alias: str) -> CommandResult:
 
 class _PyinfraShell:
     def __init__(
-        self, host: Host, transport: Transport, sock: _MeteredSocket, host_key: str, alias: str
+        self,
+        host: Host,
+        transport: Transport,
+        sock: _MeteredSocket,
+        host_key: str,
+        alias: str,
+        port: int,
     ) -> None:
         self._host = host
         self._transport = transport
         self._socket = sock
         self.host_key = host_key
+        self.port = port
         self._alias = alias
         self._session_deadline = time.monotonic() + SESSION_TIMEOUT
         # Why the connection was closed, after which nothing more is sent.

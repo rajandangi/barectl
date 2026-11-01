@@ -33,6 +33,7 @@ class InputShape(StrEnum):
     LARAVEL_ENVIRONMENT = "laravel_environment"
     WORDPRESS_SETTINGS = "wordpress_settings"
     CERTIFICATE_EMAIL = "certificate_email"
+    FIREWALL = "firewall"
     AUTOMATION_SCHEDULE = "automation_schedule"
     BACKUP_SCHEDULE = "backup_schedule"
     LARAVEL_QUEUE_WORKERS = "laravel_queue_workers"
@@ -129,6 +130,12 @@ class PreparationInputs:
     # Connecting another server's offsite storage: the kit's prefix and source sites.
     prefix: str = ""
     sites: tuple[str, ...] = ()
+    # A firewall change: turn on the standard, or add or remove one operator rule
+    # (Phase E #306). ``network`` is empty for a rule from anywhere.
+    firewall: bool = False
+    port: str = ""
+    protocol: str = ""
+    network: str = ""
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -164,6 +171,13 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
+        if self.firewall:
+            firewall: dict[str, object] = {"version": 1, "selection": self.selection}
+            if self.selection != "on":
+                firewall.update(port=self.port, protocol=self.protocol)
+                if self.network:
+                    firewall["network"] = self.network
+            return firewall
         if self.days:
             return {
                 "version": 1,
@@ -358,6 +372,35 @@ def _selection_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Pre
     if not isinstance(selection, str) or selection not in choices:
         raise ValueError(INVALID_INPUTS)
     return PreparationInputs(selection)
+
+
+def _firewall_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
+    selection = value.get("selection")
+    if set(value) in (
+        {"version", "selection"},
+        {"version", "selection", "port", "protocol"},
+        {"version", "selection", "port", "protocol", "network"},
+    ) and isinstance(selection, str):
+        raw_port = value.get("port", "")
+        raw_protocol = value.get("protocol", "")
+        raw_network = value.get("network", "")
+        if (
+            not isinstance(raw_port, str)
+            or not isinstance(raw_protocol, str)
+            or not isinstance(raw_network, str)
+        ):
+            raise ValueError(INVALID_INPUTS)
+        port, protocol, network = raw_port, raw_protocol, raw_network
+        if selection == "on" and (port or protocol or network):
+            raise ValueError(INVALID_INPUTS)
+        if selection in {"add", "remove"} and not (port and protocol):
+            raise ValueError(INVALID_INPUTS)
+        if selection not in {"on", "add", "remove"}:
+            raise ValueError(INVALID_INPUTS)
+        return PreparationInputs(
+            selection, firewall=True, port=port, protocol=protocol, network=network
+        )
+    raise ValueError(INVALID_INPUTS)
 
 
 def _domains_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
@@ -1141,6 +1184,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.LARAVEL_ENVIRONMENT: _settings_inputs,
     InputShape.WORDPRESS_SETTINGS: _settings_inputs,
     InputShape.CERTIFICATE_EMAIL: _certificate_email_inputs,
+    InputShape.FIREWALL: _firewall_inputs,
     InputShape.AUTOMATION_SCHEDULE: _schedule_inputs,
     InputShape.BACKUP_SCHEDULE: _backup_schedule_inputs,
     InputShape.LARAVEL_QUEUE_WORKERS: _worker_inputs,

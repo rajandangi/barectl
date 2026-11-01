@@ -30,6 +30,21 @@
       </div>
     {% endif %}
     {% if plain.sentence %}<p>{{ plain.sentence }}</p>{% endif %}
+    {% if run.window_label %}
+      <p>
+        <strong>Access check: {{ run.window_label }}.</strong>
+        {% if run.run.window_outcome == "kept" %}
+          A new connection confirmed the change inside the {{ run.window_minutes }}-minute
+          window.
+        {% elif run.run.window_outcome == "put_back" %}
+          The server put the earlier settings back because a new connection did not confirm
+          the change.
+        {% else %}
+          Barectl could not confirm access. The server puts the change back on its own
+          unless a new verified connection confirms it.
+        {% endif %}
+      </p>
+    {% endif %}
     {% if run.refused_before_changes %}
       <p>The run stopped before making any requested change.</p>
     {% endif %}

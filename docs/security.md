@@ -1,10 +1,11 @@
 # Security checks
 
 A server's **Security** section, beside Sites, Activity, Settings and Advanced, reports what
-Barectl could read about its exposure. Automatic security updates can be turned on or off,
-and Ubuntu updates can be checked for and installed from the section. Every other check
-action is disabled with "Not available yet" (the Web runtimes check links to the existing
-catalog update in Advanced), and those changes arrive in later Phase E slices.
+Barectl could read about its exposure. The standard firewall can be turned on and extra
+ports allowed or removed, automatic security updates can be turned on or off, and Ubuntu
+updates can be checked for and installed from the section. Every other check action is
+disabled with "Not available yet" (the Web runtimes check links to the existing catalog
+update in Advanced), and those changes arrive in later Phase E slices.
 
 ## What it reads
 
@@ -39,6 +40,57 @@ Engine detail, such as service state and configuration files, stays in
 [Advanced](dashboard-workflows.md). The Caddy administration socket, its port 2019,
 Nix users and OPcache protections come from the existing foundation and runtime
 verdicts there; this section does not read them again.
+
+## Firewall
+
+UFW 0.36.2 from the Ubuntu archive is the only supported firewall. The standard is UFW
+active and enabled at boot, `IPV6=yes`, deny incoming, allow outgoing, deny routed, logging
+low, and an allow rule for every effective SSH port on TCP, 80/tcp, 443/tcp and 443/udp, on
+IPv4 and IPv6. 80/tcp serves certificate challenges and redirects visitors to HTTPS;
+443/udp serves HTTP/3. A missing UFW is installed first through the exact APT transaction of
+[ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md), naming
+every package and version.
+
+**Turn on firewall** is a kind of the one change engine ([ADR
+0035](adr/0035-one-change-engine-with-effect-derived-consent.md)) and declares a server
+effect, so it needs Shared consent and its site list is rechecked under the mutation lock.
+It adopts rules in the supported grammar whoever added them; a rule outside it, an edited
+`before.rules` or `after.rules`, firewalld, Docker installed, or another nftables or
+iptables filter ruleset refuses firewall actions only. UFW's own chains and Docker's
+internal DNS rules are not another manager.
+
+The effective SSH ports are the `sshd -T` port lines, `ssh.socket`'s `ListenStream` values
+and the ports sshd actually listens on. They must agree and include the port the server's
+SSH daemon sees the verified connection on; otherwise every firewall action refuses.
+
+**Allow a port** and **Remove a port** take one port or range, TCP or UDP, from anywhere or
+from one IPv4 or IPv6 network. They are offered only while the standard holds. Standard
+rules cannot be removed; removing an absent rule or adding a duplicate is "No changes
+needed". Changes go only through `ufw` commands and the rule files are never edited.
+Preparation runs each rule change with `ufw --dry-run`. It does not dry-run `ufw enable`:
+ufw 0.36.2 writes `ENABLED=yes` to `/etc/ufw/ufw.conf` even under `--dry-run`, so the body
+enables and validates the result under the lock instead.
+
+### Confirm-or-revert
+
+Every firewall change runs inside the five-minute window of [ADR
+0023](adr/0023-change-server-access-with-native-confirm-or-revert.md). Its body saves a
+root-only preimage of the UFW files under `/run/barectl/revert-<run>`, records whether UFW
+was enabled, arms `barectl-revert-<run>.timer` with `systemd-run --on-active=300`, then
+applies and validates. A failed body starts the revert service at once. The revert service
+waits up to 120 seconds for the mutation lock, restarts on failure up to three times,
+restores the preimage, and then runs `ufw reload`, or `ufw --force disable` when UFW was
+disabled before.
+
+After a successful run the worker opens a **new** verified connection, not the one that
+watched the run, and runs one fixed confirmation under the mutation lock. It stops the
+timer and removes the preimage only when the revert service has no invocation and an empty
+control group. The run page shows the window outcome as **Kept**, **Put back** or **Not
+known**, read from the timer, service, journal and preimage. A successful run whose window
+is not confirmed is recorded as failed: the server puts the old firewall back on its own.
+Every change payload refuses while a revert timer is active, its service is running or
+failed, or a preimage remains. A restart inside the window keeps the new firewall and loses
+only the automatic put-back.
 
 ## Automatic security updates
 
@@ -111,9 +163,13 @@ waiting updates and any restart Ubuntu asks for from the server alone.
 
 - The checks are a snapshot, not live status. A later failed or running connection check
   marks them stale without discarding the last readable evidence.
-- Automatic security updates and Ubuntu package updates can be changed here. The firewall,
-  SSH sign-in and restart actions, and their confirm-or-revert window, are later Phase E
-  slices ([#301](https://github.com/rajandangi/barectl/issues/301)).
+- The firewall, automatic security updates and Ubuntu package updates can be changed here.
+  SSH sign-in and restart actions are later Phase E slices
+  ([#301](https://github.com/rajandangi/barectl/issues/301)); SSH sign-in reuses the same
+  confirm-or-revert window.
+- A firewall whose revert service fails is left for ordinary administration: every later
+  change refuses while the failed service or its preimage remains, and Barectl never retries
+  the revert.
 - Installing updates is not reversible. Downgrades are refused, so recovery is ordinary
   administration or a backup. A restart Ubuntu asks for is shown, not performed here.
 - The newest log is Ubuntu's own retained output. A host without it shows that the history

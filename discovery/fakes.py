@@ -347,6 +347,7 @@ class FakeServer:
     # Exit mid-task, as the worker does when an operator forces it to stop.
     interrupt: bool = False
     host_key: str = HOST_KEY
+    port: int = 22
     targets: list[ConnectionTarget] = field(default_factory=list)
     commands: list[str] = field(default_factory=list)
 

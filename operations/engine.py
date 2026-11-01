@@ -26,7 +26,7 @@ from django.utils import timezone
 
 from discovery import ssh
 from discovery.ssh import ConnectionFailed, RemoteShell
-from operations import apt, confidential, lifecycle, native
+from operations import apt, confidential, lifecycle, native, revert
 from operations.lifecycle import OperationRefused
 from operations.models import RemoteOperation
 
@@ -60,6 +60,9 @@ ADMISSION_SECONDS: Final = ADMISSION_CENTISECONDS // 100
 WATCH_LIMIT = timedelta(minutes=4)
 POLL_INTERVAL = 2.0
 JOURNAL_SETTLE_SECONDS = 3.0
+# A started revert waits for the confirmation's lock, so it restores just after the script
+# exits. This is the bounded chance the worker gives the page to say Put back.
+WINDOW_SETTLE_SECONDS = 10.0
 STALE_AFTER = timedelta(minutes=10)
 
 UNEXPECTED_FAILURE = (
@@ -211,6 +214,43 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
     "active_run": (
         "Another barectl run still had processes on the server, so this run stopped before "
         "changing anything. Prepare a new review after it finishes."
+    ),
+    "revert_active": (
+        "A firewall or sign-in change is inside its confirmation window, or its put-back has "
+        "not finished. The server keeps the change it can restore on its own, so this run "
+        "stopped before changing anything. Wait for the window to close, then prepare again."
+    ),
+    "revert_preimage": (
+        "Barectl could not save the firewall's previous settings, so it stopped before "
+        "changing anything. Check the run's journal on the server, then prepare again."
+    ),
+    "revert_arm": (
+        "Barectl could not arm the automatic put-back, so it stopped before changing anything."
+    ),
+    "firewall_ports": (
+        "The server's SSH ports changed or no longer agree, so the run stopped before "
+        "changing the firewall. Prepare a new review."
+    ),
+    "firewall_outside": (
+        "Another packet filter or a rule outside the supported shape appeared on the server, "
+        "so the run stopped before changing the firewall."
+    ),
+    "firewall_package": (
+        "The firewall's package transaction did not match the reviewed one, so the run "
+        "stopped before changing the firewall. Prepare a new review."
+    ),
+    "firewall_standard": (
+        "The rule to remove is no longer an extra allowance, or the standard web and SSH "
+        "allowances were asked for. The run stopped before changing the firewall. Prepare a "
+        "new review."
+    ),
+    "firewall_apply": (
+        "The firewall change stopped partway. The server restores the previous firewall on "
+        "its own; check the run's journal if it does not."
+    ),
+    "firewall_verify": (
+        "The firewall did not read back as the reviewed change. The server restores the "
+        "previous firewall on its own; check the run's journal if it does not."
     ),
     "active_backup": (
         "This site's scheduled backup still had processes on the server, so this run stopped "
@@ -764,6 +804,17 @@ VERIFICATION_UNAVAILABLE = (
     "it records the run as failed with verification unavailable. Prepare a new review "
     "before any later change."
 )
+WINDOW_PUT_BACK = (
+    "The server put the change back: Barectl could not confirm access over a new "
+    "connection inside the five-minute window, so the previous firewall or sign-in "
+    "configuration is in place again. Review the access settings and prepare a new change."
+)
+WINDOW_NOT_CONFIRMED = (
+    "The change reached the server, but Barectl could not confirm access over a new "
+    "connection inside the five-minute window. The server puts the change back on its own "
+    "unless a new verified connection confirms it. Check the server through ordinary "
+    "administration, then prepare a new review."
+)
 
 # Why a closure attempt left the run reconciling. Acknowledging again asks for another.
 CLOSURE_ACCOUNT = (
@@ -871,6 +922,10 @@ class ChangeKind:
     # the manage-secrets permission and its body receives the staged file path
     # (docs/adr/0032-keep-secrets-in-private-native-files.md).
     writes_secrets: bool = False
+    # The kind can cut off the connection that would repair it. Its body saves a recovery
+    # preimage and arms the five-minute revert timer, and after success the worker confirms
+    # access over a new verified connection (docs/adr/0023).
+    access_changing: bool = False
 
 
 _KINDS: dict[str, ChangeKind] = {}
@@ -906,6 +961,15 @@ RESULT_REASONS: Final = frozenset(
         "boot",
         "deadline",
         "active_run",
+        "revert_active",
+        "revert_preimage",
+        "revert_arm",
+        "firewall_ports",
+        "firewall_outside",
+        "firewall_package",
+        "firewall_standard",
+        "firewall_apply",
+        "firewall_verify",
         "capacity",
         "affected_sites",
         "evidence",
@@ -1367,6 +1431,7 @@ def payload(
             f'[ "$e" = {own} ] && continue; [ -e "$e" ] || continue; '
             f"grep -qx 'populated 1' \"$e\" && {_refused('active_run')}; done"
         ),
+        revert.refusal_step(_refused("revert_active")),
         *_backup_step(review),
         (f"n=$({native.RETAINED_UNITS} | grep -c .)"),
         f'[ "$((n - 1))" -lt {kind.capacity} ] || {_refused("capacity")}',
@@ -1584,14 +1649,16 @@ def _admit(
     result_argv: list[str],
     kind: ChangeKind,
     secret_argv: list[str] | None = None,
+    window_argv: tuple[list[str], ...] = (),
 ) -> bool:
-    """Check privilege for the exact staging, submission and cleanup commands."""
+    """Check privilege for the exact staging, submission, cleanup and window commands."""
     root = _root(shell)
     if root is None:
         raise OperationRefused(UNREADABLE_FAILURE)
     authorized = [stage_argv, submission_argv, remove_argv, result_argv]
     if secret_argv is not None:
         authorized.append(secret_argv)
+    authorized.extend(window_argv)
     if root is False and any(
         shell.run(native.authorization(argv)).exit_status != 0 for argv in authorized
     ):
@@ -1719,6 +1786,14 @@ def _apply(run: ChangeRun) -> None:
             submission.result,
             kind,
             submission.secret_stage,
+            (
+                (
+                    revert.confirmation(run.unit_name),
+                    revert.evidence_command(run.unit_name),
+                )
+                if kind.access_changing
+                else ()
+            ),
         )
         _stage_payloads(shell, root, submission, secret, run.pk)
         # Recorded before anything is sent; a recovery that already failed the run wins.
@@ -1858,7 +1933,58 @@ def _failure(outcome: Result, reason: str) -> str:
     return _FAILURES.get(outcome, "")
 
 
-def _conclude(
+def _fixed_privileged(shell: RemoteShell, argv: list[str]) -> str | None:
+    """Run one fixed command with root or the authorized sudo; ``None`` when unreadable."""
+    root = _root(shell)
+    if root is None:
+        raise OperationRefused(UNREADABLE_FAILURE)
+    if root is False and shell.run(native.authorization(argv)).exit_status != 0:
+        raise OperationRefused(PRIVILEGE_FAILURE)
+    result = shell.run(native.privileged(argv, root=root))
+    if result.exit_status != 0 or result.truncated:
+        return None
+    return result.stdout
+
+
+def _window(run: ChangeRun, *, confirm: bool) -> revert.Window | None:
+    """The window's native evidence over a new verified connection.
+
+    Confirmation stops the timer and removes the preimage only when the revert service has
+    not started. A started revert is left alone; a short bounded wait lets it finish so the
+    page can say Put back instead of Not known.
+    """
+    try:
+        with ssh.connect_operation(run) as shell:
+            if shell.host_key != run.review.host_key:
+                return revert.Window.NOT_KNOWN
+            argv = (
+                revert.confirmation(run.unit_name)
+                if confirm
+                else revert.evidence_command(run.unit_name)
+            )
+            text = _fixed_privileged(shell, argv)
+            if text is None:
+                return revert.Window.NOT_KNOWN
+            window = revert.parse_window(text)
+            if window is None:
+                return revert.Window.NOT_KNOWN if confirm else None
+            if not confirm or window is not revert.Window.NOT_KNOWN:
+                return window
+            deadline = time.monotonic() + WINDOW_SETTLE_SECONDS
+            while time.monotonic() < deadline:
+                time.sleep(0.2)
+                evidence = _fixed_privileged(shell, revert.evidence_command(run.unit_name))
+                settled = revert.parse_window(evidence) if evidence is not None else None
+                if settled is revert.Window.PUT_BACK:
+                    return settled
+                if settled is None:
+                    break
+            return window
+    except ConnectionFailed, OperationRefused:
+        return revert.Window.NOT_KNOWN
+
+
+def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
     shell: RemoteShell,
     run: ChangeRun,
     kind: ChangeKind,
@@ -1879,6 +2005,7 @@ def _conclude(
     exit_status: int | None = evidence.exec_main_status if evidence is not None and exited else None
     verification = Verification.NOT_APPLICABLE
     failure = _failure(outcome, reason)
+    window: revert.Window | None = None
     if outcome == Result.SUCCEEDED:
         try:
             passed = kind.verify(shell, run.review)
@@ -1893,6 +2020,20 @@ def _conclude(
             failure = VERIFICATION_FAILED
         elif verification == Verification.UNAVAILABLE:
             failure = VERIFICATION_UNAVAILABLE
+        if kind.access_changing:
+            window = _window(run, confirm=True)
+    elif kind.access_changing and outcome in (Result.PARTIAL, Result.FAILED, Result.TIMED_OUT):
+        window = _window(run, confirm=False)
+    if outcome == Result.SUCCEEDED and window is revert.Window.PUT_BACK:
+        verification = Verification.FAILED
+        failure = WINDOW_PUT_BACK
+    elif (
+        outcome == Result.SUCCEEDED
+        and window is revert.Window.NOT_KNOWN
+        and verification == Verification.PASSED
+    ):
+        verification = Verification.UNAVAILABLE
+        failure = WINDOW_NOT_CONFIRMED
     succeeded = outcome == Result.SUCCEEDED and verification == Verification.PASSED
     if succeeded:
         failure = ""
@@ -1906,6 +2047,7 @@ def _conclude(
             exit_status=exit_status,
             result_reason=reason,
             verification=verification,
+            window_outcome=window.value if window is not None else "",
             invocation_id=evidence.invocation_id if evidence is not None else run.invocation_id,
         )
     logger.info("Change run %s finished: %s", run.pk, outcome)

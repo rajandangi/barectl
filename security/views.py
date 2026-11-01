@@ -19,7 +19,40 @@ from servers.discovery_state import server_state
 from servers.models import Server
 
 from .change import SLUG, STATES
+from .firewall import ACTIONS as FIREWALL_ACTIONS
+from .firewall import PROTOCOLS as FIREWALL_PROTOCOLS
+from .firewall import SLUG as FIREWALL_SLUG
 from .updates import CHECK_SLUG, INSTALL_SLUG, SELECTIONS
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, CHANGE_SHARED), raise_exception=True)
+def prepare_firewall(request: HttpRequest, pk: int) -> HttpResponse:
+    """Turn on the standard firewall, or add or remove one operator port."""
+    selection = request.POST.get("selection", "")
+    if selection not in FIREWALL_ACTIONS:
+        return _redirect_problem(
+            request, pk, "Choose whether to turn on the firewall or change one port."
+        )
+    inputs: dict[str, object] = {"version": 1, "selection": selection}
+    if selection != "on":
+        port = request.POST.get("port", "").strip()
+        protocol = request.POST.get("protocol", "").strip().lower()
+        network = request.POST.get("network", "").strip()
+        if not port or protocol not in FIREWALL_PROTOCOLS:
+            return _redirect_problem(request, pk, "Enter one port and choose TCP or UDP.")
+        inputs.update(port=port, protocol=protocol)
+        if network:
+            inputs["network"] = network
+    return _prepare(
+        request,
+        pk,
+        FIREWALL_SLUG,
+        inputs,
+        "This server has no current manageable observation. Run a connection check and "
+        "resolve any findings before changing the firewall.",
+    )
 
 
 @require_POST

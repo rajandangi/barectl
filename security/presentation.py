@@ -9,6 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from discovery.snapshot import CollectedSnapshot
+from operations import revert
 from runtimes.catalog import architecture_of
 from runtimes.presentation import ShownRuntime, shown_runtimes, shown_updates
 
@@ -63,9 +64,30 @@ class ShownCheck:
     action_url: str = ""
     action_form: str = ""
     action_value: str = ""
+    action_name: str = "state"
     details: tuple[str, ...] = ()
     note: str = ""
     actions: tuple[ShownAction, ...] = ()
+
+
+@dataclass(frozen=True)
+class ShownFirewallRule:
+    """One operator allowance the panel can remove."""
+
+    label: str
+    port: str
+    protocol: str
+    network: str = ""
+
+
+@dataclass(frozen=True)
+class FirewallPanel:
+    """The extra-port panel under the Firewall check, when the standard holds."""
+
+    prepare_url: str
+    can_change: bool
+    rules: tuple[ShownFirewallRule, ...]
+    window_minutes: int
 
 
 def present(
@@ -76,6 +98,7 @@ def present(
     auto_updates_url: str = "",
     updates_check_url: str = "",
     updates_install_url: str = "",
+    firewall_url: str = "",
     can_change: bool = False,
 ) -> tuple[ShownCheck, ...]:
     """The checks, in the section's fixed order."""
@@ -93,7 +116,7 @@ def present(
             _runtimes(collected, read_at, advanced_url),
         )
     return (
-        _firewall(state.firewall, state.listeners, state.ssh, read_at),
+        _firewall(state.firewall, state.listeners, state.ssh, read_at, firewall_url, can_change),
         _ssh(state.ssh, read_at),
         _auto_updates(state.auto_updates, read_at, auto_updates_url, can_change),
         _updates(
@@ -145,8 +168,10 @@ def _firewall(
     listeners: Check[tuple[Listener, ...]],
     ssh: Check[SshState],
     read_at: datetime,
+    action_url: str,
+    can_change: bool,
 ) -> ShownCheck:
-    firewall = _firewall_state(check, read_at)
+    firewall = _firewall_state(check, ssh, read_at, action_url, can_change)
     exposure = _listeners(listeners, ssh, read_at)
     states = {firewall.state, exposure.state}
     if OUTSIDE in states:
@@ -169,13 +194,38 @@ def _firewall(
         what,
         firewall.why,
         read_at,
-        _NOT_AVAILABLE,
+        firewall.action,
+        action_form=firewall.action_form,
+        action_value=firewall.action_value,
+        action_name=firewall.action_name,
         details=details,
         note=note,
     )
 
 
-def _firewall_state(check: Check[FirewallState], read_at: datetime) -> ShownCheck:
+def _firewall_action(
+    state: FirewallState, ssh: Check[SshState], action_url: str, can_change: bool
+) -> tuple[str, str]:
+    """The one next action the Firewall check offers, or no action when the panel does."""
+    if not can_change or not action_url or state.outside:
+        return _NOT_AVAILABLE, ""
+    if not state.ufw_installed or state.ufw_enabled is not True:
+        return "Turn on firewall", "on"
+    ports = ssh.value.sshd_ports or ssh.value.ports if ssh.observed and ssh.value else ()
+    from .firewall import standard_holds
+
+    if standard_holds(state, ports):
+        return "", ""
+    return "Set up the standard firewall", "on"
+
+
+def _firewall_state(
+    check: Check[FirewallState],
+    ssh: Check[SshState],
+    read_at: datetime,
+    action_url: str,
+    can_change: bool,
+) -> ShownCheck:
     why = "Only the ports you intend to expose should accept connections from the internet."
     if not check.observed or check.value is None:
         return _could_not("Firewall", check, why, read_at)
@@ -192,6 +242,7 @@ def _firewall_state(check: Check[FirewallState], read_at: datetime) -> ShownChec
             details=state.outside,
             note=_CLOUD_FIREWALL,
         )
+    action, value = _firewall_action(state, ssh, action_url, can_change)
     if not state.ufw_installed:
         return ShownCheck(
             "Firewall",
@@ -199,17 +250,23 @@ def _firewall_state(check: Check[FirewallState], read_at: datetime) -> ShownChec
             "No firewall is set up on the server, so every port it listens on is reachable.",
             why,
             read_at,
-            _NOT_AVAILABLE,
+            action,
+            action_form=action_url if action and action != _NOT_AVAILABLE else "",
+            action_value=value,
+            action_name="selection",
             note=_CLOUD_FIREWALL,
         )
     if state.ufw_enabled is not True:
         return ShownCheck(
             "Firewall",
             ATTENTION,
-            "The firewall is off, so every port the server listens on is reachable.",
+            "The firewall is off or not enabled at start-up, so its protection does not hold.",
             why,
             read_at,
-            _NOT_AVAILABLE,
+            action,
+            action_form=action_url if action and action != _NOT_AVAILABLE else "",
+            action_value=value,
+            action_name="selection",
             note=_CLOUD_FIREWALL,
         )
     allowed = _firewall_allowed(state)
@@ -224,11 +281,18 @@ def _firewall_state(check: Check[FirewallState], read_at: datetime) -> ShownChec
     details.extend(row.line for row in state.rules if row.kind == "operator")
     return ShownCheck(
         "Firewall",
-        ATTENTION if state.ipv6 is False else OK,
-        f"The firewall is on. It allows {allowed}.",
+        ATTENTION if action else (ATTENTION if state.ipv6 is False else OK),
+        (
+            f"The firewall is on. It allows {allowed}."
+            if not action
+            else "The firewall is on but does not follow the standard Barectl manages."
+        ),
         why,
         read_at,
-        _NOT_AVAILABLE,
+        action,
+        action_form=action_url if action and action != _NOT_AVAILABLE else "",
+        action_value=value,
+        action_name="selection",
         details=tuple(details),
         note=_CLOUD_FIREWALL,
     )
@@ -243,6 +307,44 @@ def _firewall_allowed(state: FirewallState) -> str:
         }
     )
     return ", ".join(ports) if ports else "nothing yet"
+
+
+def firewall_panel(
+    state: SecurityState | None, *, prepare_url: str, can_change: bool
+) -> FirewallPanel | None:
+    """The extra-port controls, only when the standard firewall holds and can be changed."""
+    if state is None or not state.firewall.observed or state.firewall.value is None:
+        return None
+    firewall = state.firewall.value
+    ssh_ports = (
+        state.ssh.value.sshd_ports or state.ssh.value.ports
+        if state.ssh.observed and state.ssh.value
+        else ()
+    )
+    from .firewall import standard_holds
+
+    if not standard_holds(firewall, ssh_ports):
+        return None
+    rules = tuple(
+        ShownFirewallRule(
+            (
+                f"{row.ports}/{row.protocol} from {row.network}"
+                if row.network
+                else f"{row.ports}/{row.protocol} from anywhere"
+            ),
+            row.ports,
+            row.protocol,
+            row.network,
+        )
+        for row in firewall.rules
+        if row.kind == "operator" and row.action == "allow" and row.ports
+    )
+    return FirewallPanel(
+        prepare_url=prepare_url,
+        can_change=can_change,
+        rules=rules,
+        window_minutes=revert.WINDOW_MINUTES,
+    )
 
 
 def _listeners(

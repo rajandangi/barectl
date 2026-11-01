@@ -116,10 +116,14 @@ class SshState:
     password_authentication: str
     keyboard_interactive: str
     permit_root_login: str
+    # ``ports`` is the effective set: ``sshd -T`` plus the sockets sshd actually listens on.
     ports: tuple[int, ...]
     socket_ports: tuple[int, ...]
     accounts_without_keys: tuple[str, ...]
     per_source_penalties: str
+    # The ``sshd -T`` port lines alone, kept so a firewall change can prove every source of
+    # truth agrees before it could close the controller's own access.
+    sshd_ports: tuple[int, ...] = ()
 
 
 # The allowed origins Ubuntu's package ships, read from its own
@@ -292,6 +296,7 @@ def _read_ssh(shell: RemoteShell, listeners: Check[tuple[Listener, ...]]) -> Che
             socket_ports,
             accounts,
             settings.per_source_penalties,
+            settings.ports,
         ),
     )
 
@@ -313,7 +318,7 @@ def _read_firewall(shell: RemoteShell, ssh: Check[SshState]) -> Check[FirewallSt
         if isinstance(status, _Failure):
             return _unreadable(status)
         status_text = status
-        enabled, defaults, logging = parse_ufw_status(status_text)
+        active, defaults, logging = parse_ufw_status(status_text)
         added = _run(shell, UFW_ADDED_COMMAND, accepted=(0, 1))
         if isinstance(added, _Failure):
             return _unreadable(added)
@@ -323,8 +328,9 @@ def _read_firewall(shell: RemoteShell, ssh: Check[SshState]) -> Check[FirewallSt
     ipv6 = (
         parse_ipv6(default_file) if installed and not isinstance(default_file, _Failure) else None
     )
-    if installed and enabled is None and not isinstance(config, _Failure):
-        enabled = parse_ufw_config(config)
+    if installed:
+        boot = None if isinstance(config, _Failure) else parse_ufw_config(config)
+        enabled = None if active is None or boot is None else (active is True and boot is True)
     rules = parse_ufw_added(added_text, _ssh_ports(ssh))
     outside = list(_outside_managers(shell, installed, enabled))
     outside.extend(rule.line for rule in rules if rule.kind == "outside")
@@ -379,7 +385,7 @@ def _outside_managers(shell: RemoteShell, installed: bool, enabled: bool | None)
         )
     if not installed or enabled is not True:
         nft = _run(shell, NFT_COMMAND, accepted=(0, 1))
-        if not isinstance(nft, _Failure) and nft.strip():
+        if not isinstance(nft, _Failure) and _nft_has_foreign_rules(nft):
             found.append("An nftables ruleset outside UFW is active.")
         iptables = _run(shell, IPTABLES_COMMAND, accepted=(0, 1))
         if not isinstance(iptables, _Failure) and _iptables_has_rules(iptables):
@@ -784,9 +790,37 @@ def conffile_matches(digests: str, conffiles: str, path: str) -> bool | None:
 
 
 def _iptables_has_rules(text: str) -> bool:
-    return any(
-        line.startswith(("-A ", "-I ")) for line in text.splitlines() if not line.startswith("#")
-    )
+    """A rule outside UFW's own chains, which a firewall change must leave alone."""
+    table = ""
+    for line in text.splitlines():
+        if line.startswith("*"):
+            table = line[1:].strip()
+            continue
+        if table != "filter" or not line.startswith(("-A ", "-I ")):
+            continue
+        fields = line.split()
+        chain = fields[1] if len(fields) > 1 else ""
+        if chain.startswith("ufw") or " -j ufw" in line:
+            continue
+        return True
+    return False
+
+
+def _nft_has_foreign_rules(text: str) -> bool:
+    """A rule in a chain UFW does not own; UFW's own chains are adopted."""
+    chain = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        match = re.match(r"chain ([^ ]+) \{", stripped)
+        if match:
+            chain = match[1]
+            continue
+        if not chain or chain.startswith("ufw") or not stripped:
+            continue
+        if stripped in {"}", "{"} or stripped.startswith(("type ", "policy ", "comment ")):
+            continue
+        return True
+    return False
 
 
 def parse_apt_config(text: str) -> dict[str, str]:
