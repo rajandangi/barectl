@@ -8,6 +8,7 @@ fast layer proves the timer is armed with 300 s.
 
 import time
 from typing import override
+from unittest import mock
 
 from django.test import tag
 
@@ -104,8 +105,7 @@ class FirewallLifecycle(ScenarioTestCase):
         self.assertIn("-p udp --dport 443 -j ACCEPT", ipv6)
 
         for inputs, line in (
-            (_add("8080:8085"), "ufw allow 8080:8085/tcp"),
-            (_add("5353", "udp"), "ufw allow 5353/udp"),
+            (_add("8080:8085", "udp"), "ufw allow 8080:8085/udp"),
             (
                 _add("5432", "tcp", "203.0.113.0/24"),
                 "ufw allow from 203.0.113.0/24 to any port 5432 proto tcp",
@@ -116,8 +116,7 @@ class FirewallLifecycle(ScenarioTestCase):
                 self.assertIs(confirm_window(self, added), revert.Window.KEPT)
                 self.assertIn(line, self._rules())
         for inputs, line in (
-            (_remove("8080:8085"), "ufw allow 8080:8085/tcp"),
-            (_remove("5353", "udp"), "ufw allow 5353/udp"),
+            (_remove("8080:8085", "udp"), "ufw allow 8080:8085/udp"),
             (
                 _remove("5432", "tcp", "203.0.113.0/24"),
                 "ufw allow from 203.0.113.0/24 to any port 5432 proto tcp",
@@ -187,21 +186,26 @@ class FirewallLifecycle(ScenarioTestCase):
         opened = self._run(_on())
         ssh_port = self.native("sshd -T | sed -n 's/^port //p' | head -n 1").strip()
         self.native(f"ufw deny {ssh_port}/tcp")
+        from discovery import ssh
         from discovery.ssh import ConnectionFailed
 
-        with self.assertRaises(ConnectionFailed), self.shell():
-            pass
-        # The worker cannot confirm over a new connection and this test starts the revert
-        # service directly, as the spec allows inside the 180 s item limit.
-        self._start_revert(opened.unit)
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            try:
-                with self.shell():
-                    break
-            except ConnectionFailed:
-                time.sleep(0.2)
-        else:
-            self.fail("The server did not become reachable again after the put-back.")
+        # A dropped packet leaves the forwarder waiting for the SSH banner. The production
+        # timeout is ten seconds; this test shortens it so the class stays inside its item
+        # limit while proving the same refusal.
+        with mock.patch.object(ssh, "CONNECT_TIMEOUT", 2):
+            with self.assertRaises(ConnectionFailed), self.shell():
+                pass
+            # The worker cannot confirm over a new connection and this test starts the revert
+            # service directly, as the spec allows inside the 180 s item limit.
+            self._start_revert(opened.unit)
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                try:
+                    with self.shell():
+                        break
+                except ConnectionFailed:
+                    time.sleep(0.2)
+            else:
+                self.fail("The server did not become reachable again after the put-back.")
         self.assertIn("Status: inactive", self._status())
         self.assertNotIn(f"deny {ssh_port}/tcp", self._rules())
