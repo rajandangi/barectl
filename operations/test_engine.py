@@ -155,6 +155,13 @@ class AccessChangeWindowTests(ChangeTestCase):
         self.assertEqual(run.window_outcome, "put_back")
         self.assertIn("put the change back", run.failure)
 
+    def test_a_sudo_policy_must_authorize_the_window_commands(self) -> None:
+        self.systemd.sudo_policy = lambda command: "# barectl-revert-" not in command
+        run = self.apply(self.change("fixture_access"))
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertIn("sudo -n -l does not authorize", run.failure)
+        self.assertEqual(self.systemd.submissions, [])
+
     def test_an_unconfirmed_window_is_not_known_and_fails_the_run(self) -> None:
         self.systemd.window = "not_known"
         run = self.apply(self.change("fixture_access"))

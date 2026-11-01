@@ -28,6 +28,8 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 - A required native test is never removed, skipped or weakened to fit an item limit or a time budget. Split the setup into a preparation scenario, or record the gap in the handoff and the qualification record; a missing test is not a pass.
 - Prove the seam the test claims to cover. A staged-source substring is not proof that a body reaches its fence or restore step; drive the body with the reviewed document, or assert the observable effect.
 - Assert a parser's exact derived value from a known input. A test that only proves it parsed, or that a result is not `None`, does not cover the meaning; a raw timestamp accepted as an age passes that shape.
+- A test of a dashboard POST drives the rendered form — in a browser, or by reading the rendered field names — and proves the action reaches its preparation or run. Hand-built field names can agree with the view while the rendered form names a different field.
+- A validator test proves the lowest accepted value, the highest accepted value, and the first rejected value on each side of every bound. "Invalid input" alone does not cover a bound.
 
 ## Recorded fixtures
 

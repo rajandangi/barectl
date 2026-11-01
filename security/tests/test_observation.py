@@ -64,6 +64,14 @@ udp UNCONN 0      0               0.0.0.0:443        0.0.0.0:*    users:(("caddy
         self.assertIsNone(observation.parse_listeners("nonsense\n"))
 
 
+class FirewallEnabledTests(SimpleTestCase):
+    def test_the_standard_needs_ufw_active_now_and_enabled_at_boot(self) -> None:
+        self.assertIs(observation.enabled_for_standard(True, True), True)
+        self.assertIs(observation.enabled_for_standard(True, False), False)
+        self.assertIs(observation.enabled_for_standard(False, True), False)
+        self.assertIsNone(observation.enabled_for_standard(None, True))
+
+
 class FirewallParserTests(SimpleTestCase):
     STATUS = """\
 Status: active

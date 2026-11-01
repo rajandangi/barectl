@@ -301,6 +301,11 @@ def _read_ssh(shell: RemoteShell, listeners: Check[tuple[Listener, ...]]) -> Che
     )
 
 
+def enabled_for_standard(active: bool | None, boot: bool | None) -> bool | None:
+    """The standard needs UFW active now *and* enabled at boot."""
+    return None if active is None or boot is None else active is True and boot is True
+
+
 def is_ssh_listener(listener: Listener) -> bool:
     return listener.protocol == "tcp" and listener.process == "sshd"
 

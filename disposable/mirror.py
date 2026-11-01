@@ -277,7 +277,8 @@ def host_architecture() -> str:
     return _DOCKER_TO_LOCK[docker_arch]
 
 
-def download(url: str, *, attempts: int = 3) -> bytes:
+def download(url: str, *, attempts: int = 8) -> bytes:
+    """Fetch a manifest entry, riding out a transient upstream 5xx or timeout."""
     last: Exception | None = None
     for attempt in range(attempts):
         try:
@@ -286,7 +287,8 @@ def download(url: str, *, attempts: int = 3) -> bytes:
                 return body
         except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
             last = error
-            time.sleep(0.5 * (attempt + 1))
+            if attempt + 1 < attempts:
+                time.sleep(min(30.0, 2.0**attempt))
     raise MirrorError(f"Could not fetch {url}: {last}")
 
 

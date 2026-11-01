@@ -121,6 +121,9 @@ def _recorded_not_found(boot_id: str, unit: str) -> str:
 class EngineSystemd:
     root: bool = False
     sudo_allowed: bool = True
+    # A per-command sudo policy, so a test can authorize submission but not one of the
+    # window commands (docs/adr/0023). ``None`` keeps the one boolean for older tests.
+    sudo_policy: Callable[[str], bool] | None = None
     # Finished units counted as retained besides ``units``, which list with no details.
     retained: int = 0
     # The retained-unit reads fail, as they do when systemd cannot answer.
@@ -187,12 +190,15 @@ class EngineSystemd:
     def _identity_answer(self, command: str) -> CommandResult | None:
         if command == "id -u":
             return CommandResult(0, "0\n" if self.root else "1000\n")
-        if command.startswith(("sudo -n -l /usr/bin/systemd-run ", "sudo -n -l /usr/bin/sh -c ")):
-            return CommandResult(0 if self.sudo_allowed else 1, "")
-        if command.startswith("sudo -n -l /usr/bin/rm -f -- /run/lock/barectl/body-"):
-            return CommandResult(0 if self.sudo_allowed else 1, "")
-        if command.startswith("sudo -n -l /usr/bin/journalctl -u barectl-apply-"):
-            return CommandResult(0 if self.sudo_allowed else 1, "")
+        if command.startswith(
+            (
+                "sudo -n -l /usr/bin/systemd-run ",
+                "sudo -n -l /usr/bin/sh -c ",
+                "sudo -n -l /usr/bin/rm -f -- /run/lock/barectl/body-",
+                "sudo -n -l /usr/bin/journalctl -u barectl-apply-",
+            )
+        ):
+            return CommandResult(0 if self._sudo_allows(command) else 1, "")
         if command == "cut -d' ' -f1 /proc/uptime | tr -d .":
             return CommandResult(0, f"{self.uptime_centiseconds}\n")
         return None
@@ -245,6 +251,9 @@ class EngineSystemd:
         ):
             return self._probe(command)
         return None
+
+    def _sudo_allows(self, command: str) -> bool:
+        return self.sudo_policy(command) if self.sudo_policy is not None else self.sudo_allowed
 
     def _retained(self) -> CommandResult:
         lines = "".join(
