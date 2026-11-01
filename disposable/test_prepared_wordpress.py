@@ -1,4 +1,4 @@
-"""The prepared-WordPress snapshot layer: L2 plus MariaDB and one WordPress site.
+"""The prepared-WordPress snapshot layer: L1 plus MariaDB and one WordPress site.
 
 docs/quality.md#native-layer. Phase C's WordPress scenarios need a real, product-created
 WordPress site. Creating it (with its database engine) costs more than one item and more
@@ -21,12 +21,14 @@ from .change_testing import apply_change
 from .docker import docker
 from .scenario_testing import SCENARIO_TAG
 from .test_wordpress_create import CANARY, WordPressCreateCase
+from .wordpress_testing import (
+    WORDPRESS_ADMIN,
+    WORDPRESS_DOMAIN,
+    WORDPRESS_EMAIL,
+    WORDPRESS_SITE,
+    WORDPRESS_TITLE,
+)
 
-WORDPRESS_SITE = "l3wordpress"
-WORDPRESS_DOMAIN = "site.fixture.test"
-WORDPRESS_TITLE = "Barectl cached fixture"
-WORDPRESS_ADMIN = "barectladmin"
-WORDPRESS_EMAIL = "admin@example.com"
 OTHER_SITE = "l4other"
 OTHER_DOMAIN = "l4other.example.com"
 

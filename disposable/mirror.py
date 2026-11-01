@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -24,6 +25,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+from .locking import file_lock
 
 REPOSITORY = Path(__file__).resolve().parent.parent
 MANIFEST = REPOSITORY / "docker" / "disposable-server" / "mirror-manifest.json"
@@ -713,6 +716,7 @@ def drift(manifest: Manifest) -> list[str]:
 FIXTURE_CA = "barectl-native-fixture-ca"
 CA_CERTIFICATE = "ca.crt"
 CA_KEY = "ca.key"
+FIXTURE_CA_POLICY = "native-fixture-ca-v1-ec-prime256v1-x509-ca-3650"
 
 
 def fixture_ca() -> tuple[Path, Path]:
@@ -736,31 +740,37 @@ def fixture_ca() -> tuple[Path, Path]:
 def mirror_certificate(hosts: Iterable[str]) -> tuple[Path, Path]:
     """A leaf certificate, signed by the fixture CA, valid for the mirrored host names."""
     names = tuple(sorted(set(hosts)))
-    directory = cache_root() / f"mirror-{sha256(' '.join(names).encode())[:12]}"
+    ca_certificate, ca_key = fixture_ca()
+    identity = sha256(json.dumps(names).encode() + ca_certificate.read_bytes())[:12]
+    directory = cache_root() / f"mirror-{identity}"
     certificate = directory / "mirror.crt"
     key = directory / "mirror.key"
-    if not certificate.exists() or not key.exists():
-        directory.mkdir(parents=True, exist_ok=True)
-        ca_certificate, ca_key = fixture_ca()
-        san = ",".join(f"DNS:{name}" for name in names)
-        _openssl(
-            "req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-            "-nodes", "-keyout", str(key), "-out", str(directory / "mirror.csr"),
-            "-subj", "/CN=cache.nixos.org",
-        )  # fmt: skip
-        _openssl(
-            "x509", "-req", "-sha256", "-in", str(directory / "mirror.csr"),
-            "-CA", str(ca_certificate), "-CAkey", str(ca_key), "-set_serial", "0x01",
-            "-days", "365", "-extfile", "/dev/stdin", "-out", str(certificate),
-            stdin=(
-                "basicConstraints=critical,CA:FALSE\n"
-                "keyUsage=critical,digitalSignature,keyEncipherment\n"
-                "extendedKeyUsage=serverAuth\n"
-                "subjectKeyIdentifier=hash\n"
-                "authorityKeyIdentifier=keyid:always\n"
-                f"subjectAltName={san}\n"
-            ),
-        )  # fmt: skip
+    with file_lock(directory / ".lock"):
+        if certificate.exists() and key.exists():
+            return certificate, key
+        with tempfile.TemporaryDirectory(dir=directory) as temporary:
+            staging = Path(temporary)
+            san = ",".join(f"DNS:{name}" for name in names)
+            _openssl(
+                "req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+                "-nodes", "-keyout", str(staging / "mirror.key"),
+                "-out", str(staging / "mirror.csr"), "-subj", "/CN=cache.nixos.org",
+            )  # fmt: skip
+            _openssl(
+                "x509", "-req", "-sha256", "-in", str(staging / "mirror.csr"),
+                "-CA", str(ca_certificate), "-CAkey", str(ca_key), "-set_serial", "0x01",
+                "-days", "365", "-extfile", "/dev/stdin", "-out", str(staging / "mirror.crt"),
+                stdin=(
+                    "basicConstraints=critical,CA:FALSE\n"
+                    "keyUsage=critical,digitalSignature,keyEncipherment\n"
+                    "extendedKeyUsage=serverAuth\n"
+                    "subjectKeyIdentifier=hash\n"
+                    "authorityKeyIdentifier=keyid:always\n"
+                    f"subjectAltName={san}\n"
+                ),
+            )  # fmt: skip
+            (staging / "mirror.key").replace(key)
+            (staging / "mirror.crt").replace(certificate)
     return certificate, key
 
 
@@ -795,7 +805,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     import sys
 
     parser = argparse.ArgumentParser(prog="mirror", description=__doc__)
-    parser.add_argument("command", choices=("generate", "fetch", "drift"))
+    parser.add_argument(
+        "command", choices=("generate", "fetch", "drift", "fixture-ca", "fixture-ca-key")
+    )
     parser.add_argument("--all-architectures", action="store_true", help="not just this host's")
     parser.add_argument(
         "--host-architecture",
@@ -803,6 +815,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="generate this host's architecture only, keeping the other entries",
     )
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    if options.command == "fixture-ca-key":
+        print(FIXTURE_CA_POLICY)  # noqa: T201 - Actions cache identity
+        return 0
+    if options.command == "fixture-ca":
+        certificate, _ = fixture_ca()
+        print(f"mirror: fixture CA ready at {certificate}.")  # noqa: T201
+        return 0
     root = cache_root()
     if options.command == "generate":
         manifest = generate(root, (host_architecture(),) if options.host_architecture else None)

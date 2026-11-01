@@ -1,8 +1,10 @@
 """Malformed native proxy evidence cannot select a PHP runtime."""
 
+from types import SimpleNamespace
 from typing import ClassVar
-from unittest import TestCase
+from unittest import TestCase, mock
 
+from sites.bodies import admission
 from sites.bodies.admission import state_selection
 
 HEADER = (
@@ -17,6 +19,62 @@ STATE = (
     "2 php 1 php84 - 2 4 1 1 0 1 0 0 8 0 0 1 - 0 - 0 0 - - 0\n"
     "2 php 2 php85 - 0 5 1 1 0 1 0 0 8 0 0 1 - 0 - 0 0 - - 0\n"
 )
+
+INFO = "Name: HAProxy\nNbthread: 1\nNbproc: 1\nPid: 4321\nMaxconn: 64"
+STAT = (
+    "# pxname,svname,slim,econ,eresp,cli_abrt,srv_abrt\n"
+    "php,FRONTEND,64,0,0,0,0\n"
+    "php,php84,2,0,0,0,0\n"
+    "php,php85,2,0,0,0,0\n"
+    "php,BACKEND,64,0,0,0,0"
+)
+
+
+class ProxyBatchTests(TestCase):
+    def read(self, batch: str, *, changed: bool = False) -> admission.ProxyState:
+        process = {"pid": 4321}
+        observations = [process, {"pid": 4322}] if changed else [process, process]
+        with (
+            mock.patch.object(admission, "hap_process", side_effect=observations),
+            mock.patch.object(admission, "haproxy_config", return_value="convention"),
+            mock.patch(
+                "sites.bodies.admission.pathlib.Path.read_text",
+                side_effect=["convention", STATE],
+            ),
+            mock.patch.object(admission, "hap_safe"),
+            mock.patch.object(admission, "hap_api", return_value=batch) as api,
+        ):
+            result = admission.haproxy_state(SimpleNamespace(identifier="alpha"))
+        api.assert_called_once_with("alpha", "show info;show servers state;show stat")
+        return result
+
+    def test_batch_preserves_native_state_and_selection(self) -> None:
+        result = self.read("\n\n".join((INFO, STATE.rstrip("\n"), STAT)))
+        self.assertEqual(result["state"], STATE)
+        self.assertEqual(result["selection"], "php84")
+        self.assertEqual(result["persistent"], "php84")
+        self.assertEqual(result["ready"], ["php84"])
+        self.assertEqual(result["errors"]["php85"]["econ"], 0)
+
+    def test_missing_extra_and_malformed_blocks_refuse_at_state_read(self) -> None:
+        blocks = (INFO, STATE.rstrip("\n"), STAT)
+        for invalid in (
+            "\n\n".join(blocks[:2]),
+            "\n\n".join((*blocks, "extra")),
+            "\n\n".join((INFO, "", STAT)),
+            "\n\n".join(("Wrong: HAProxy\n" + INFO, *blocks[1:])),
+            "\n\n".join((INFO, "2\n" + blocks[1][2:], STAT)),
+            "\n\n".join((INFO, blocks[1], "pxname," + STAT[len("# pxname,") :])),
+            "\n\n".join((INFO, blocks[1].replace("php85", "foreign"), STAT)),
+            "\n\n".join((INFO, blocks[1], STAT.replace("php85", "foreign"))),
+        ):
+            with self.subTest(invalid=invalid[:70]), self.assertRaises(ValueError):
+                self.read(invalid)
+
+    def test_generation_change_after_complete_batch_refuses_state(self) -> None:
+        batch = "\n\n".join((INFO, STATE.rstrip("\n"), STAT))
+        with self.assertRaisesRegex(ValueError, "Proxy identity changed during observation"):
+            self.read(batch, changed=True)
 
 
 class ProxyNativeStateTests(TestCase):

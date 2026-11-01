@@ -18,6 +18,8 @@ FORMAT = 1
 # Python modules that build fixed native reads whose command text a transcript embeds.
 # docs/quality.md#recorded-transcripts lists the recording pass.
 COMMAND_SOURCES = (
+    "disposable/foundation_testing.py",
+    "disposable/wordpress_testing.py",
     "databases/packages.py",
     "discovery/observations/__init__.py",
     "discovery/observations/caddy_email.py",

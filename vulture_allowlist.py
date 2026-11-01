@@ -116,6 +116,7 @@ if TYPE_CHECKING:
         SitePHPIsolation,
         SitePHPServing,
     )
+    from disposable.test_prepared_foundation import PrepareFoundation
     from disposable.test_prepared_laravel import PrepareLaravel
     from disposable.test_prepared_sites import PreparedSitesReuse, PrepareSites
     from disposable.test_prepared_wordpress import PrepareWordPress, PrepareWordPressCache
@@ -605,6 +606,7 @@ if TYPE_CHECKING:
         PrepareWordPress,
         PrepareWordPressCache,
         PrepareLaravel,
+        PrepareFoundation,
     )
     # The cache state choices are Django field choices, read through the field.
     _cache_states = (CacheState.OFF, CacheState.ON, CacheState.PARTIAL, CacheState.UNSUPPORTED)

@@ -23,6 +23,22 @@ jobs:
         with:
           path: ~/.cache/barectl/native/mirror
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+      - id: ca-key
+        run: echo "key=$(uv run python -m disposable.mirror fixture-ca-key)" >> "$GITHUB_OUTPUT"
+      - name: Restore the fixture CA
+        id: ca
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
+          key: ${{ steps.ca-key.outputs.key }}
+      - name: Ensure the fixture CA
+        run: uv run python -m disposable.mirror fixture-ca
+      - name: Save the fixture CA
+        if: steps.ca.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
+          key: ${{ steps.ca-key.outputs.key }}
       - name: Fetch the mirror
         if: steps.mirror.outputs.cache-hit != 'true'
         run: docker/disposable-server/mirror.sh -- fetch

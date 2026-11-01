@@ -26,6 +26,7 @@ from servers.models import Server
 
 from . import images
 from .docker import docker
+from .foundation_testing import assert_foundation_runtimes, commit_foundation
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 
@@ -39,18 +40,7 @@ class HostFoundation(ScenarioTestCase):
 
     def assert_runtime_reconstruction(self, observed: CollectedSnapshot) -> None:
         self.assertEqual(observed.runtimes, self.runtimes_after_apply)
-        self.assertEqual({row.entry for row in observed.runtimes}, {"php84", "php85"})
-        self.assertTrue(
-            all(row.manageable and row.master_state == "active" for row in observed.runtimes)
-        )
-        for entry in ("php84", "php85"):
-            self.native(
-                f"/nix/var/nix/profiles/barectl/{entry}/bin/php-fpm -t "
-                f"-y /etc/php-fpm/{entry}/php-fpm.conf -c /etc/php-fpm/{entry}/php.ini"
-            )
-            self.assertIn(
-                "0600", self.native(f"stat -c '0%a' /run/php-fpm/{entry}/diagnostic.sock")
-            )
+        assert_foundation_runtimes(self, observed)
 
     def add_php_runtimes(self, server: Server) -> None:
         for entry in ("php84", "php85"):
@@ -315,17 +305,7 @@ class HostFoundation(ScenarioTestCase):
             ).strip(),
             "404",
         )
-        self.native("systemctl stop caddy.service nix-daemon.service nix-daemon.socket")
-        self.native(
-            "rm -f /root/.ssh/authorized_keys /etc/ssh/ssh_host_* /run/foundation-admin-listeners"
-        )
-        image = images.tag("L1")
-        if not images.exists(image):
-            docker("commit", os.environ["BARECTL_SSH_TEST_CONTAINER"], image, timeout=60)
-        self.assertEqual(images.ensure("L1"), image)
-        first = docker("image", "inspect", "--format", "{{.Id}}", image).strip()
-        self.assertEqual(images.ensure("L1"), image)
-        self.assertEqual(docker("image", "inspect", "--format", "{{.Id}}", image).strip(), first)
+        commit_foundation(self)
 
 
 @tag(SCENARIO_TAG)

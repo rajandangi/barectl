@@ -14,7 +14,50 @@ on:
 permissions:
   contents: read
 jobs:
+  fixture-ca:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      phase-started: ${{ steps.phase.outputs.started }}
+      ca-seconds: ${{ steps.ca-preparation.outputs.seconds }}
+    steps:
+      - id: phase
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - id: ca-key
+        run: echo "key=$(uv run python -m disposable.mirror fixture-ca-key)" >> "$GITHUB_OUTPUT"
+      - name: Restore the fixture CA
+        id: ca
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
+          key: ${{ steps.ca-key.outputs.key }}
+      - name: Ensure the fixture CA
+        id: ca-preparation
+        run: |
+          started=$(date +%s)
+          uv run python -m disposable.mirror fixture-ca
+          echo "seconds=$(( $(date +%s) - started + 1 ))" >> "$GITHUB_OUTPUT"
+      - name: Save the fixture CA
+        if: steps.ca.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
+          key: ${{ steps.ca-key.outputs.key }}
+      - name: Share this run's fixture CA
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-fixture-ca-${{ inputs.runner }}
+          path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
+          if-no-files-found: error
+          retention-days: 1
   scenarios:
+    needs: fixture-ca
     name: scenarios (${{ matrix.shard }}/11)
     runs-on: ${{ inputs.runner }}
     strategy:
@@ -25,6 +68,8 @@ jobs:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
       BARECTL_NATIVE_LANES: "2"
+      BARECTL_NATIVE_PHASE_STARTED: ${{ needs.fixture-ca.outputs.phase-started }}
+      BARECTL_NATIVE_CA_SECONDS: ${{ needs.fixture-ca.outputs.ca-seconds }}
     steps:
       - run: echo "BARECTL_NATIVE_L0_CACHE=$RUNNER_TEMP/native-images" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
@@ -40,6 +85,11 @@ jobs:
         with:
           path: ~/.cache/barectl/native/mirror
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+      - name: Use this run's shared fixture CA
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: native-fixture-ca-${{ inputs.runner }}
+          path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
       - name: Fetch the mirror
         run: |
           if ! docker/disposable-server/mirror.sh -- fetch; then
@@ -92,7 +142,7 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
           key: native-l2-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l2 }}
-      # L3 is L2 plus the database engine and WordPress site every cache scenario needs.
+      # L3 is L1 plus the database engine and WordPress site every cache scenario needs.
       - name: Restore the L3 snapshot
         id: l3
         uses: actions/cache/restore@v6.1.0
@@ -115,17 +165,52 @@ jobs:
           key: native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
       # One 900 s build stop covers every native stage of the shard.
       - run: |
-          deadline=$(( $(date +%s) + 900 ))
+          ca_seconds=${BARECTL_NATIVE_CA_SECONDS-}
+          case "$ca_seconds" in ''|*[!0-9]*) echo "Invalid fixture preparation duration" >&2; exit 2 ;; esac
+          if [ "${#ca_seconds}" -gt 9 ]; then
+            echo "Invalid fixture preparation duration" >&2
+            exit 2
+          fi
+          ca_seconds=$((10#$ca_seconds))
+          if [ "$ca_seconds" -gt 900 ]; then
+            echo "Invalid fixture preparation duration" >&2
+            exit 2
+          fi
+          started=$(date +%s)
+          deadline=$(( started + 900 - ca_seconds ))
           remaining() { echo $(( deadline - $(date +%s) )); }
+          run_native() {
+            budget=$(remaining)
+            if [ "$budget" -le 0 ]; then
+              echo "Native phase hard limit exhausted" >&2
+              return 124
+            fi
+            timeout --signal=TERM --kill-after=10s "${budget}s" \
+              docker/disposable-server/run-scenarios.sh -- "$@" --time-limit "$budget"
+          }
+          finish_budget() {
+            result=$?
+            elapsed=$(( $(date +%s) - started + ca_seconds ))
+            printf 'Complete native phase: %ss against the 300s target and 900s hard limit.\n' "$elapsed"
+            if [ "$elapsed" -gt 300 ]; then
+              echo "Native phase target missed" >&2
+              if [ "$result" -eq 0 ]; then result=1; fi
+            fi
+            exit "$result"
+          }
+          trap finish_budget EXIT
+          if [ "$(remaining)" -le 0 ]; then
+            echo "Native phase hard limit exhausted" >&2
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/native/logs"
           export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
           if [ "${{ matrix.shard }}" = "1" ]; then
             BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/validators" \
-              docker/disposable-server/run-scenarios.sh -- --validators --time-limit "$(remaining)"
-            docker/disposable-server/run-scenarios.sh -- --check-egress --time-limit "$(remaining)"
+              run_native --validators
+            run_native --check-egress
           fi
-          docker/disposable-server/run-scenarios.sh -- \
-            --shard ${{ matrix.shard }}/11 --time-limit "$(remaining)"
+          run_native --shard ${{ matrix.shard }}/11
       - id: l1-archive
         if: always() && steps.l1.outputs.cache-hit != 'true'
         run: |

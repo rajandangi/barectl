@@ -6,10 +6,97 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from django.test import SimpleTestCase
 
-from .verification import BUILD_GATES, aggregate, follow, input_revision, record
+from .verification import (
+    BUILD_GATES,
+    aggregate,
+    build_command,
+    execute,
+    follow,
+    input_revision,
+    prepare_command,
+    record,
+)
+
+
+class BuildDeadlineTests(SimpleTestCase):
+    def test_small_positive_budget_interrupts_setup_and_reaps_its_child(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reaped = root / "reaped"
+            script = (
+                "import signal, subprocess, sys, time; from pathlib import Path\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+                "def stop(signum, frame):\n"
+                "    child.wait(timeout=3)\n"
+                f"    Path({str(reaped)!r}).write_text(str(child.returncode))\n"
+                "    raise SystemExit(0)\n"
+                "signal.signal(signal.SIGTERM, stop)\n"
+                "print('setup started', flush=True)\n"
+                "time.sleep(30)\n"
+            )
+            log = root / "native.log"
+            with (
+                mock.patch.dict(os.environ, {"BARECTL_BUILD_DEADLINE": "1002"}),
+                mock.patch("disposable.verification.time.time", return_value=1000),
+                mock.patch(
+                    "disposable.verification.build_command",
+                    return_value=[sys.executable, "-c", script],
+                ),
+            ):
+                _, command, reveal = prepare_command("build", log, [".env"])
+            self.assertEqual(execute(log, command[1:], reveal_command=reveal), 124)
+            self.assertIn("setup started", log.read_text())
+            self.assertEqual(reaped.read_text(), "-15")
+            self.assertEqual(
+                json.loads(log.with_suffix(".log.json").read_text())["exit_status"], 124
+            )
+
+    def test_exhausted_build_records_failure_without_launching_setup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "started"
+            log = root / "native.log"
+            with (
+                mock.patch.dict(os.environ, {"BARECTL_BUILD_DEADLINE": "1000"}),
+                mock.patch("disposable.verification.time.time", return_value=1000),
+                mock.patch(
+                    "disposable.verification.build_command",
+                    return_value=[sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"],
+                ),
+            ):
+                _, command, reveal = prepare_command("build", log, [".env"])
+            self.assertEqual(execute(log, command[1:], reveal_command=reveal), 124)
+            self.assertFalse(marker.exists())
+            self.assertIn("hard limit exhausted", log.read_text())
+
+    def test_general_foreground_work_remains_unbounded(self) -> None:
+        with mock.patch.dict(os.environ, {"BARECTL_BUILD_DEADLINE": "1"}):
+            self.assertEqual(
+                prepare_command("run", Path("capture.log"), ["--", "capture"]),
+                ("run", ["--", "capture"], False),
+            )
+
+    def test_native_spends_only_the_remaining_full_build_budget(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {"BARECTL_BUILD_DEADLINE": "1900"}),
+            mock.patch("disposable.verification.time.time", return_value=1050.1),
+        ):
+            self.assertEqual(
+                build_command(Path("native.log"), ".env")[-2:], ["--time-limit", "849"]
+            )
+
+    def test_deadline_cannot_extend_or_restart_the_native_hard_limit(self) -> None:
+        for deadline, expected in (("1000", "0"), ("100000", "900")):
+            with (
+                self.subTest(deadline=deadline),
+                mock.patch.dict(os.environ, {"BARECTL_BUILD_DEADLINE": deadline}),
+                mock.patch("disposable.verification.time.time", return_value=1050),
+            ):
+                self.assertEqual(build_command(Path("native.log"), ".env")[-1], expected)
 
 
 class VerificationRunnerTests(SimpleTestCase):

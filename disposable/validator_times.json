@@ -1,0 +1,11 @@
+{
+  "recorded": "2026-11-01 local full build /tmp/barectl-retro/builds/run-83iYd6Ic/validator-logs/summary.json; parent full-build fast-validators 75.8s",
+  "scenarios": {
+    "disposable.test_automation_validators.AutomationValidators": 11.7,
+    "disposable.test_logs_journal.JournalLogValidators": 4.4,
+    "disposable.test_runtime_defaults.RuntimeDefaultValidators": 5.0,
+    "disposable.test_http_site_validators.HttpSiteValidators": 25.8,
+    "disposable.test_logs_validators.LogRotationValidators": 8.8,
+    "disposable.test_site_node.SiteNodeValidators": 26.0
+  }
+}

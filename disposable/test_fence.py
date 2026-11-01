@@ -20,11 +20,13 @@ from automation.convention import service_name, slice_name, timer_name
 from discovery import recorded, ssh
 from operations.inputs import PreparationInputs
 from sites import php_change
-from wordpress import create
 
 from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG
-from .test_wordpress_create import CANARY, DOMAIN, IDENTIFIER, WordPressCreateCase
+from .test_wordpress_create import WordPressCreateCase
+from .wordpress_testing import WORDPRESS_DOMAIN as DOMAIN
+from .wordpress_testing import WORDPRESS_SITE as IDENTIFIER
+from .wordpress_testing import prepare_wordpress_https, start_wordpress_cron_for_fence
 
 STATE = "fence-wordpress-26.04"
 BLOCKER = "barectl-fence-blocker"
@@ -37,6 +39,8 @@ class PHPFence(WordPressCreateCase):
     """One WordPress site with server cron on, then a PHP switch that fences it."""
 
     records: tuple[str, ...] = (STATE,)
+    layer = "L3"
+    prefix = "l3"
 
     @override
     @contextmanager
@@ -82,26 +86,11 @@ class PHPFence(WordPressCreateCase):
             if time.monotonic() >= end:
                 self.fail(f"The host is not manageable: {standing}")
 
-    def test_1_creates_the_site_and_turns_server_cron_on(self) -> None:
-        from automation import change
-
+    def test_1_uses_the_prepared_site_and_turns_server_cron_on(self) -> None:
         self.install_acme()
-        self.install_engine()
-        apply_change(
-            self,
-            create.CREATE_WORDPRESS,
-            self.inputs(),
-            timeout=120,
-            secret=CANARY.encode(),
-        )
-        self.assertIn("WordPress", self.home())
+        self.assertIn("WordPress", prepare_wordpress_https(self))
         self.wait_manageable()
-        apply_change(
-            self,
-            change.SET_WORDPRESS_SERVER_CRON,
-            PreparationInputs("", IDENTIFIER, schedule_state="on"),
-            timeout=180,
-        )
+        start_wordpress_cron_for_fence(self)
         self.assertEqual(self.property(timer_name(IDENTIFIER, "wpcron"), "ActiveState"), "active")
 
     def test_2_a_switch_fences_and_restores_the_timer_on_the_target_runtime(self) -> None:

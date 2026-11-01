@@ -203,7 +203,7 @@ class SiteObjectCache(ValkeyCase):
 
     @property
     def site(self) -> str:
-        from .test_prepared_wordpress import WORDPRESS_SITE
+        from .wordpress_testing import WORDPRESS_SITE
 
         return WORDPRESS_SITE
 
