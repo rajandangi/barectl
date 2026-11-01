@@ -35,11 +35,20 @@ jobs:
           python-version: "3.14"
       - run: uv sync --locked
       - name: Restore the mirror
+        id: mirror
         uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/barectl/native/mirror
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
-      - run: docker/disposable-server/mirror.sh -- fetch
+      - name: Fetch the mirror
+        run: |
+          if ! docker/disposable-server/mirror.sh -- fetch; then
+            if [ "${{ steps.mirror.outputs.cache-hit }}" = "true" ]; then
+              echo "::warning::The mirror fetch failed; using the restored mirror with the same manifest."
+            else
+              exit 1
+            fi
+          fi
       # The L1 key hashes the rendered foundation payload, the catalog lock and the base
       # digest (disposable/images.py), so a hit is exactly the snapshot S1 would commit.
       - id: keys
