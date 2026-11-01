@@ -2040,7 +2040,12 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
             failure = VERIFICATION_UNAVAILABLE
         if kind.access_changing:
             window = _window(run, confirm=verification == Verification.PASSED)
-    elif kind.access_changing and outcome in (Result.PARTIAL, Result.FAILED, Result.TIMED_OUT):
+    elif kind.access_changing and outcome in (
+        Result.REFUSED,
+        Result.PARTIAL,
+        Result.FAILED,
+        Result.TIMED_OUT,
+    ):
         window = _window(run, confirm=False)
     if outcome == Result.SUCCEEDED and window is revert.Window.PUT_BACK:
         verification = Verification.FAILED

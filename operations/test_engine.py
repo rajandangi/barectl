@@ -178,6 +178,29 @@ class AccessChangeWindowTests(ChangeTestCase):
         self.assertEqual(run.verification, Verification.FAILED)
         self.assertEqual(self.systemd.confirmations, [])
 
+    def test_a_refused_policy_after_apply_reports_native_put_back(self) -> None:
+        self.systemd.result_class = "refused"
+        self.systemd.reason = "sign_in_verify"
+        self.systemd.window_evidence = "put_back"
+        run = self.apply(self.change("fixture_access"))
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Result.REFUSED)
+        self.assertEqual(run.result_reason, "sign_in_verify")
+        self.assertEqual(run.window_outcome, "put_back")
+        self.assertEqual(self.systemd.confirmations, [])
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, "Access check: Put back.")
+
+    def test_a_preflight_refusal_without_a_window_has_no_access_outcome(self) -> None:
+        self.systemd.result_class = "refused"
+        self.systemd.reason = "evidence"
+        run = self.apply(self.change("fixture_access"))
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Result.REFUSED)
+        self.assertEqual(run.window_outcome, "")
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertNotContains(page, "Access check:")
+
 
 class EngineAdapterTests(SimpleTestCase):
     def test_unanswered_root_reads_never_become_closure_probe_evidence(self) -> None:

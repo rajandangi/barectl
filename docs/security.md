@@ -99,7 +99,7 @@ root:root 0644. It sets `PasswordAuthentication no`,
 `KbdInteractiveAuthentication no` and `PermitRootLogin prohibit-password`. When the
 verified Barectl connection signs in as a non-root user with the required sudo access,
 it sets `PermitRootLogin no` instead. It does not change ports, listen addresses, users
-or keys. OpenSSH's `PerSourcePenalties` remains at its default.
+or keys. Barectl leaves the server's `PerSourcePenalties` setting unchanged.
 
 Preparation reads the effective `sshd -T` settings and checks `sshd -T -C` for each
 account with a login shell using the current connection's client and server addresses
