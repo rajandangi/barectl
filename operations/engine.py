@@ -1946,6 +1946,15 @@ def _conclude_rejected(run: ChangeRun) -> None:
 
 
 def _failure(outcome: Result, reason: str) -> str:
+    if outcome == Result.REFUSED and reason == "sign_in_syntax":
+        return "OpenSSH rejected the existing configuration before Barectl changed anything."
+    if outcome == Result.REFUSED and reason == "sign_in_apply":
+        return "Barectl could not prepare the sign-in file before changing the server."
+    if outcome == Result.FAILED and reason == "sign_in_apply":
+        return (
+            "The sign-in file write may have changed the server. The server is restoring "
+            "the previous settings on its own."
+        )
     if reason in _REFUSED_REASONS and outcome in (Result.REFUSED, Result.PARTIAL):
         return _REFUSED_REASONS[reason]
     return _FAILURES.get(outcome, "")
@@ -2041,7 +2050,6 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
         if kind.access_changing:
             window = _window(run, confirm=verification == Verification.PASSED)
     elif kind.access_changing and outcome in (
-        Result.REFUSED,
         Result.PARTIAL,
         Result.FAILED,
         Result.TIMED_OUT,

@@ -118,7 +118,7 @@ class SignInLifecycle(ScenarioTestCase):
 
     def test_4_an_earlier_setting_that_wins_is_reported_and_put_back(self) -> None:
         self.native(f"printf 'PasswordAuthentication yes\\n' > {OVERRIDE}")
-        opened = self._run(expected="refused", reason="sign_in_verify")
+        opened = self._run(expected="partial", reason="sign_in_verify")
         self.assertIs(wait_window(self, opened), revert.Window.PUT_BACK)
         self.assertEqual(self.native(f"test -e {PATH} && echo present || true"), "")
 
@@ -144,5 +144,5 @@ class SignInLifecycle(ScenarioTestCase):
         self.native(
             f"printf 'Match User root\\nPasswordAuthentication yes\\n' > {MATCH_OVERRIDE}; sshd -t"
         )
-        opened = self._run(expected="refused", reason="sign_in_verify")
+        opened = self._run(expected="partial", reason="sign_in_verify")
         self.assertIs(wait_window(self, opened), revert.Window.PUT_BACK)

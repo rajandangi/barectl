@@ -166,7 +166,6 @@ def save_steps(files: tuple[str, ...], reload_steps: str, *, capture_ufw: bool =
                 "[ \"$(stat -c '%F %u %a' \"$revert\")\" = 'directory 0 700' ] "
                 "|| refused revert_preimage"
             ),
-            'chmod 0700 -- "$revert/restore.sh" || refused revert_preimage',
         ]
     )
     return "\n".join(steps)

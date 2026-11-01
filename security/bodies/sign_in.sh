@@ -6,6 +6,8 @@ reported=0
 armed=0
 result() { reported=1; printf 'barectl-result %s\n' "$1"; }
 refused() { result "{\"class\":\"refused\",\"reason\":\"$1\"}"; exit 1; }
+partial() { result "{\"class\":\"partial\",\"reason\":\"$1\"}"; exit 2; }
+failed() { result "{\"class\":\"failed\",\"reason\":\"$1\"}"; exit 2; }
 finish() {
   status=$?
   if [ "$reported" -eq 0 ] && [ "$status" -ne 0 ]; then
@@ -79,13 +81,13 @@ stage apply
 umask 077
 temporary=$(mktemp /etc/ssh/sshd_config.d/.barectl-sign-in.XXXXXXXX) || refused sign_in_apply
 printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin %s\n' "$root_policy" > "$temporary" || refused sign_in_apply
-install -o root -g root -m 0644 -- "$temporary" /etc/ssh/sshd_config.d/00-barectl-sign-in.conf || refused sign_in_apply
+install -o root -g root -m 0644 -- "$temporary" /etc/ssh/sshd_config.d/00-barectl-sign-in.conf || failed sign_in_apply
 rm -f -- "$temporary"
-sshd -t || refused sign_in_syntax
+sshd -t || partial sign_in_syntax
 if [ "$(systemctl is-active ssh.service 2>/dev/null || true)" = active ]; then
-  systemctl reload ssh.service || refused sign_in_reload
+  systemctl reload ssh.service || partial sign_in_reload
 fi
 
 stage verify
-policy_ok || refused sign_in_verify
+policy_ok || partial sign_in_verify
 result '{"class":"succeeded"}'
