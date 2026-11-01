@@ -193,6 +193,23 @@ fixture:
         self.assertEqual(archives["libc6"], "resolute-updates/main")
         self.assertEqual(archives["fixture"], "resolute-security/main")
 
+    def test_a_candidate_in_updates_and_security_is_a_security_update(self) -> None:
+        archives = observation.parse_apt_policy(
+            """\
+openssl:
+  Installed: 3.5.5-1ubuntu3
+  Candidate: 3.5.5-1ubuntu3.7
+  Version table:
+     3.5.5-1ubuntu3.7 500
+        500 http://archive.ubuntu.com/ubuntu resolute-updates/main arm64 Packages
+     3.5.5-1ubuntu3.7 500
+        500 http://security.ubuntu.com/ubuntu resolute-security/main arm64 Packages
+     3.5.5-1ubuntu3 500
+        500 http://archive.ubuntu.com/ubuntu resolute/main arm64 Packages
+"""
+        )
+        self.assertEqual(archives["openssl"], "resolute-security/main")
+
     def test_apt_config_reports_the_effective_automatic_update_values(self) -> None:
         values = observation.parse_apt_config(
             """\
@@ -228,6 +245,17 @@ Unattended-Upgrade::Allowed-Origins:: "Ubuntu:resolute-security";
             observation.parse_allowed_origins(text),
             ("Ubuntu:resolute", "Ubuntu:resolute-security"),
         )
+
+    def test_the_list_age_is_the_time_since_the_newest_index(self) -> None:
+        self.assertEqual(
+            observation.parse_list_age("1792312892.5", now=1792312893.0),
+            0,
+        )
+        self.assertEqual(
+            observation.parse_list_age("1792312892.5", now=1792316492.5),
+            3600,
+        )
+        self.assertIsNone(observation.parse_list_age(""))
 
     def test_timer_state_reads_whether_it_starts_at_boot(self) -> None:
         timers = observation.parse_timers(

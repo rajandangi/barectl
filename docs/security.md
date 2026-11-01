@@ -1,10 +1,10 @@
 # Security checks
 
 A server's **Security** section, beside Sites, Activity, Settings and Advanced, reports what
-Barectl could read about its exposure. Automatic security updates can be turned on or off
-from the section; every other check action is disabled with "Not available yet" (the Web
-runtimes check links to the existing catalog update in Advanced), and those changes arrive
-in later Phase E slices.
+Barectl could read about its exposure. Automatic security updates can be turned on or off,
+and Ubuntu updates can be checked for and installed from the section. Every other check
+action is disabled with "Not available yet" (the Web runtimes check links to the existing
+catalog update in Advanced), and those changes arrive in later Phase E slices.
 
 ## What it reads
 
@@ -71,13 +71,51 @@ unchanged; Turn on refuses them. Turn off is still offered because it only stops
 own automatic work. Automatic updates can restart the database engine and Valkey, so sites
 may pause briefly; they do not restart Caddy, HAProxy or PHP from the Nix catalog.
 
+## Ubuntu updates
+
+The check lists Ubuntu's waiting package updates, security updates first, with the age of
+the package lists. Security means the candidate is published by the release's `-security`
+suite, even when Ubuntu also copies it into `-updates`. Phased candidates are shown as
+waiting for Ubuntu's rollout, held packages as held by an administrator, and an update that
+would remove a package as blocked. The section never installs those.
+
+**Check for updates** is its own change kind. It runs Ubuntu's `apt-get update` under the
+shared mutation lock, changes no installed package, and then refreshes discovery so the list
+age and waiting updates are read back from the server. A permitted operator sees it beside
+the waiting updates and whenever the lists are more than a day old.
+
+**Install updates** offers security updates only, or all installable updates. Its review
+extends Phase B's exact APT transaction ([ADR
+0024](adr/0024-admit-exact-reviewed-upgrade-transactions.md)): it names every selected
+package at its candidate version with `--only-upgrade` and every new dependency, with the
+download and installed sizes. Removals and downgrades refuse, as do an unfinished package
+state and a package whose configuration file differs from dpkg's or ucf's recorded digest,
+each with a reason. Held, phased and blocked updates stay listed as kept waiting and are
+never installed. Only the authenticated Ubuntu 26.04 archive suites are accepted; Barectl
+adds no source.
+
+The confirm screen discloses the services Ubuntu may restart and the sites they serve. The
+database engine and Valkey can restart, so their sites may pause briefly; SSH can restart
+without affecting site traffic. Web serving and PHP come from Nix and are not restarted by
+Ubuntu updates. The body rechecks the reviewed package state under the mutation lock and the
+inline guard admits only the reviewed upgrade and new-package lines, so a list refresh, a
+hold, a modified configuration file or a newly resolved dependency between review and apply
+stops the run instead of installing more than was confirmed. A lost response is reconciled
+from the unit's native evidence and never resubmitted.
+
+Verification reads every installed version, `dpkg --audit`, the foundation's profile units
+and each site's [readiness](sites.md#readiness). Discovery then reads the versions, the
+waiting updates and any restart Ubuntu asks for from the server alone.
+
 ## Limits
 
 - The checks are a snapshot, not live status. A later failed or running connection check
   marks them stale without discarding the last readable evidence.
-- Only automatic security updates can be changed here. The firewall, SSH sign-in, package
-  updates and restart actions, and their confirm-or-revert window, are later Phase E slices
-  ([#301](https://github.com/rajandangi/barectl/issues/301)).
+- Automatic security updates and Ubuntu package updates can be changed here. The firewall,
+  SSH sign-in and restart actions, and their confirm-or-revert window, are later Phase E
+  slices ([#301](https://github.com/rajandangi/barectl/issues/301)).
+- Installing updates is not reversible. Downgrades are refused, so recovery is ordinary
+  administration or a backup. A restart Ubuntu asks for is shown, not performed here.
 - The newest log is Ubuntu's own retained output. A host without it shows that the history
   could not be read; Barectl does not reconstruct a result from another file.
 - Web runtime fixes arrive through reviewed Barectl releases, not Ubuntu updates. The

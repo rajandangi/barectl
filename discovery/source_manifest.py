@@ -75,6 +75,8 @@ SOURCES = (
     "runtimes/configuration.py",
     "runtimes/live.py",
     "security/bodies/automatic_updates.sh",
+    "security/bodies/check_updates.sh",
+    "security/bodies/install_updates.sh",
     "sites/bodies/admission.py",
     "sites/bodies/client_change.py",
     "sites/bodies/common.py",

@@ -30,6 +30,16 @@ class _Handler(SimpleHTTPRequestHandler):
         return str(server.root / host / relative)
 
     @override
+    def date_time_string(self, timestamp: float | None = None) -> str:
+        """Report every mirrored file as just served.
+
+        The mirror's cached bytes are immutable, but apt stores a list file's modification
+        time from ``Last-Modified``. Serving the fetch time keeps the list age on the
+        disposable server honest after a refresh (docs/security-native-design.md).
+        """
+        return super().date_time_string()
+
+    @override
     def log_message(self, format: str, *args: object) -> None:
         sys.stderr.write(f"mirror {self.address_string()} {format % args}\n")
 

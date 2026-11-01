@@ -41,7 +41,11 @@ from operations.views import (
     server_change_prepare,
 )
 from runtimes.defaults_views import prepare_default
-from security.views import prepare_auto_updates
+from security.views import (
+    prepare_auto_updates,
+    prepare_updates_check,
+    prepare_updates_install,
+)
 from servers.backup_storage_views import (
     prepare_connect,
     prepare_remove_storage,
@@ -152,6 +156,16 @@ urlpatterns = [
         "servers/<int:pk>/security/automatic-updates/prepare/",
         prepare_auto_updates,
         name="security_auto_updates_prepare",
+    ),
+    path(
+        "servers/<int:pk>/security/updates/check/prepare/",
+        prepare_updates_check,
+        name="security_updates_check_prepare",
+    ),
+    path(
+        "servers/<int:pk>/security/updates/install/prepare/",
+        prepare_updates_install,
+        name="security_updates_install_prepare",
     ),
     path(
         "servers/<int:pk>/advanced/", server_detail, {"section": "advanced"}, name="server_advanced"

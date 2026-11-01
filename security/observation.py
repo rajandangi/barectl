@@ -5,6 +5,7 @@ the server, and every unreadable part stays an explicit "Could not check".
 """
 
 import re
+import time
 from dataclasses import dataclass
 from typing import Final
 
@@ -897,29 +898,49 @@ def parse_upgrades(text: str) -> tuple[tuple[str, str, str], ...] | None:
 
 
 def parse_apt_policy(text: str) -> dict[str, str]:
-    """The archive that offers each package's candidate, or ``removed``/``kept back``."""
+    """The archive that offers each package's candidate, or ``removed``/``kept back``.
+
+    A candidate published to both ``-updates`` and ``-security`` is a security update;
+    Ubuntu copies security fixes into the updates suite too (docs/security.md#ubuntu-updates).
+    """
     archives: dict[str, str] = {}
+    suites: dict[str, list[str]] = {}
+    candidate: dict[str, str] = {}
+    offering = ""
     current = ""
     for line in text.splitlines():
         if line and not line.startswith(" "):
             current = line.strip().rstrip(":")
+            offering = ""
             continue
         if not current:
             continue
         stripped = line.strip()
         if stripped.startswith("Candidate:"):
-            if stripped.partition(":")[2].strip() == "(none)":
+            version = stripped.partition(":")[2].strip()
+            candidate[current] = version
+            if version == "(none)":
                 archives[current] = "removed"
             continue
+        offered = re.fullmatch(r"(?:\*\*\* )?(\S+) \d+", stripped)
+        if offered:
+            offering = offered[1]
+            continue
         match = re.match(r"^[0-9]+ (?:https?|file):\S+ (\S+) ", stripped)
-        if match:
-            archives.setdefault(current, match[1])
+        if match and offering and offering == candidate.get(current):
+            suites.setdefault(current, []).append(match[1])
+    for name, values in suites.items():
+        if name in archives:
+            continue
+        archives[name] = next((value for value in values if "-security" in value), values[0])
     return archives
 
 
-def parse_list_age(text: str) -> int | None:
+def parse_list_age(text: str, *, now: float | None = None) -> int | None:
+    """The age of the newest package index from its modification time."""
     value = text.strip()
     try:
-        return int(float(value))
+        modified = float(value)
     except ValueError:
         return None
+    return max(0, int((time.time() if now is None else now) - modified))

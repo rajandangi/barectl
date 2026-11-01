@@ -292,6 +292,49 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after_home=Home.SERVER_SITE_CREATE,
         after_permission="operations.change_site",
     ),
+    "check_for_ubuntu_updates": ChangeWords(
+        title="Check for Ubuntu updates",
+        summary=(
+            (
+                "Barectl asks Ubuntu's own package tool to refresh the server's package "
+                "lists, so the waiting updates it shows are current."
+            ),
+            (
+                "This changes no installed package. A server that is already up to date "
+                "keeps the lists it has."
+            ),
+            "Sites keep serving while the lists are refreshed.",
+        ),
+        action="Check for updates",
+        steps={
+            "preflight": "Checking the server",
+            "refresh": "Refreshing Ubuntu's package lists",
+            "verify": "Reading the waiting updates",
+        },
+    ),
+    "install_ubuntu_updates": ChangeWords(
+        title="Install Ubuntu updates",
+        summary=(
+            (
+                "Barectl installs exactly the packages and versions on this screen. If the "
+                "server resolves anything else, the change stops before installing."
+            ),
+            (
+                "Ubuntu may restart the database engine, the object cache and SSH, so sites "
+                "may pause briefly. Web serving and PHP are not restarted by Ubuntu updates."
+            ),
+            (
+                "Barectl does not remove packages, downgrade anything, or install an update "
+                "that would replace a configuration file you edited."
+            ),
+        ),
+        action="Install updates",
+        steps={
+            "preflight": "Checking the reviewed packages",
+            "install": "Installing the updates",
+            "verify": "Checking the packages and sites",
+        },
+    ),
     "install_valkey": ChangeWords(
         title="Install Valkey on {server}",
         summary=(

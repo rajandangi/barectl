@@ -31,56 +31,64 @@ def submit_change(
         # The worker also records the reviewed fence (automation/fence.py) before it stores
         # the review, so a scenario that applies a fenced change uses the same review.
         draft = engine._planned(shell, kind.review(kind.inspect(shell, inputs), inputs))
-        test.assertTrue(draft.eligible, draft.refusals)
-        stored = ChangeReview(
-            document=draft.document,
-            sites_read=draft.sites_read,
-            sites_digest=engine._sites_digest(shell, draft),
-        )
-        if draft.no_changes:
-            return Submitted(stored, "", True)
-        if draft.uptime_centiseconds is None:
-            test.fail("No native clock.")
-        unit = native.new_unit_name()
-        staged_secret = engine.secret_path(unit)
-        context = engine.BodyContext(
-            unit,
-            draft.boot_id,
-            draft.uptime_centiseconds + 90000,
-            secret_path=staged_secret if secret is not None else "",
-        )
-        body = kind.body(draft.document, context)
-        path = engine.body_path(context.unit)
-        digest = str(draft.document["body_sha256"])
+        return submit_draft(test, shell, kind, draft, secret=secret)
+
+
+def submit_draft(
+    test: ScenarioTestCase,
+    shell: RemoteShell,
+    kind: engine.ChangeKind,
+    draft: engine.ReviewDraft,
+    *,
+    secret: bytes | None = None,
+    acknowledge: bool = True,
+) -> Submitted:
+    """Stage and submit an already reviewed draft, without refreshing its evidence."""
+    test.assertTrue(draft.eligible, draft.refusals)
+    stored = ChangeReview(
+        document=draft.document,
+        sites_read=draft.sites_read,
+        sites_digest=engine._sites_digest(shell, draft),
+    )
+    if draft.no_changes:
+        return Submitted(stored, "", True)
+    if draft.uptime_centiseconds is None:
+        test.fail("No native clock.")
+    unit = native.new_unit_name()
+    staged_secret = engine.secret_path(unit)
+    context = engine.BodyContext(
+        unit,
+        draft.boot_id,
+        draft.uptime_centiseconds + 90000,
+        secret_path=staged_secret if secret is not None else "",
+    )
+    body = kind.body(draft.document, context)
+    path = engine.body_path(context.unit)
+    digest = str(draft.document["body_sha256"])
+    test.assertEqual(
+        shell.run(shlex.join(engine.stage_command(path, digest)), stdin=body.source).exit_status,
+        0,
+    )
+    if secret is not None:
         test.assertEqual(
             shell.run(
-                shlex.join(engine.stage_command(path, digest)), stdin=body.source
+                shlex.join(engine.stage_secret_command(staged_secret, len(secret))),
+                stdin=secret,
             ).exit_status,
             0,
         )
-        if secret is not None:
-            test.assertEqual(
-                shell.run(
-                    shlex.join(engine.stage_secret_command(staged_secret, len(secret))),
-                    stdin=secret,
-                ).exit_status,
-                0,
-            )
-        payload = engine.payload(
-            kind,
-            stored,
-            context,
-            body,
-            path,
-            secret=staged_secret if secret is not None else "",
-        )
-        test.assertEqual(
-            shell.run(
-                shlex.join(native.submission(context.unit, payload, collect=True))
-            ).exit_status,
-            0,
-        )
-        return Submitted(stored, context.unit, False)
+    payload = engine.payload(
+        kind,
+        stored,
+        context,
+        body,
+        path,
+        secret=staged_secret if secret is not None else "",
+    )
+    result = shell.run(shlex.join(native.submission(context.unit, payload, collect=True)))
+    if acknowledge:
+        test.assertEqual(result.exit_status, 0)
+    return Submitted(stored, context.unit, False)
 
 
 def wait_result(

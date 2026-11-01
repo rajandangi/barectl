@@ -43,6 +43,16 @@ _CLOUD_FIREWALL = "A firewall at your cloud provider is outside what Barectl can
 
 
 @dataclass(frozen=True)
+class ShownAction:
+    """One POST control a check offers, such as the updates' check and install choices."""
+
+    label: str
+    form: str
+    value: str = ""
+    name: str = "selection"
+
+
+@dataclass(frozen=True)
 class ShownCheck:
     name: str
     state: CheckState
@@ -55,6 +65,7 @@ class ShownCheck:
     action_value: str = ""
     details: tuple[str, ...] = ()
     note: str = ""
+    actions: tuple[ShownAction, ...] = ()
 
 
 def present(
@@ -63,6 +74,8 @@ def present(
     *,
     advanced_url: str = "",
     auto_updates_url: str = "",
+    updates_check_url: str = "",
+    updates_install_url: str = "",
     can_change: bool = False,
 ) -> tuple[ShownCheck, ...]:
     """The checks, in the section's fixed order."""
@@ -83,7 +96,13 @@ def present(
         _firewall(state.firewall, state.listeners, state.ssh, read_at),
         _ssh(state.ssh, read_at),
         _auto_updates(state.auto_updates, read_at, auto_updates_url, can_change),
-        _updates(state.updates, read_at),
+        _updates(
+            state.updates,
+            read_at,
+            updates_check_url,
+            updates_install_url,
+            can_change,
+        ),
         _restart(state.restart, read_at),
         _runtimes(collected, read_at, advanced_url),
     )
@@ -336,6 +355,13 @@ RESTART_DISCLOSURE = (
     "These updates can restart the database engine and Valkey, so sites may pause briefly. "
     "They do not restart the web server or PHP."
 )
+UPDATES_DISCLOSURE = (
+    "Ubuntu may restart the database engine, the object cache and SSH, so sites may pause "
+    "briefly. Web serving and PHP are not restarted by Ubuntu updates."
+)
+UPDATES_CHECK_LABEL = "Check for updates"
+UPDATES_SECURITY_LABEL = "Install security updates"
+UPDATES_ALL_LABEL = "Install all updates"
 
 
 def _auto_updates(
@@ -439,19 +465,31 @@ def custom_updates(state: AutoUpdatesState) -> tuple[str, ...]:
     return tuple(reasons)
 
 
-def _updates(check: Check[UpdatesState], read_at: datetime) -> ShownCheck:
+def _updates(
+    check: Check[UpdatesState],
+    read_at: datetime,
+    check_url: str,
+    install_url: str,
+    can_change: bool,
+) -> ShownCheck:
     why = "Security updates fix known vulnerabilities; installing them closes the window."
     if not check.observed or check.value is None:
         return _could_not("Ubuntu updates", check, why, read_at)
     state = check.value
     counts = _counts(state)
     security = counts.get("security", 0)
+    other = counts.get("other", 0)
     blocked = sum(counts.get(name, 0) for name in ("phased", "held", "blocked"))
     details = [_classification_line(name, count) for name, count in counts.items() if count]
     if state.list_age_seconds is None:
         details.append("The age of the package lists could not be read.")
     else:
         details.append(f"Package lists last refreshed {_age(state.list_age_seconds)}.")
+        if state.list_age_seconds >= 86400 and not security:
+            details.append(
+                "The package lists are more than a day old. Check for updates before "
+                "installing anything."
+            )
     if security:
         what = f"{security} security update{'s' if security != 1 else ''} waiting."
     elif blocked:
@@ -461,14 +499,23 @@ def _updates(check: Check[UpdatesState], read_at: datetime) -> ShownCheck:
         )
     else:
         what = "No Ubuntu updates are waiting."
+    actions: list[ShownAction] = []
+    if can_change and check_url:
+        actions.append(ShownAction(UPDATES_CHECK_LABEL, check_url))
+    if can_change and install_url:
+        if security:
+            actions.append(ShownAction(UPDATES_SECURITY_LABEL, install_url, "security"))
+        if other:
+            actions.append(ShownAction(UPDATES_ALL_LABEL, install_url, "all"))
     return ShownCheck(
         "Ubuntu updates",
         ATTENTION if security or counts.get("blocked", 0) else OK,
         what,
         why,
         read_at,
-        _NOT_AVAILABLE,
+        _NOT_AVAILABLE if not actions else actions[0].label,
         details=tuple(details),
+        actions=tuple(actions),
     )
 
 

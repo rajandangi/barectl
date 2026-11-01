@@ -36,7 +36,20 @@
           ({{ check.read_at|timesince }} ago).
         </p>
         <div>
-          {% if check.action_form %}
+          {% if check.actions %}
+            <div class="barectl-security-actions">
+              {% for action in check.actions %}
+                <form method="post" action="{{ action.form }}">
+                  {% csrf_token %}
+                  {% if action.value %}
+                    <input type="hidden" name="{{ action.name }}" value="{{ action.value }}">
+                  {% endif %}
+                  <button class="usa-button usa-button--outline"
+                          type="submit">{{ action.label }}</button>
+                </form>
+              {% endfor %}
+            </div>
+          {% elif check.action_form %}
             <form method="post" action="{{ check.action_form }}">
               {% csrf_token %}
               <input type="hidden" name="state" value="{{ check.action_value }}">

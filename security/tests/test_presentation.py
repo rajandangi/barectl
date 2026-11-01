@@ -23,7 +23,17 @@ from security.observation import (
     SshState,
     UpdatesState,
 )
-from security.presentation import ATTENTION, OK, OUTSIDE, UNKNOWN, ShownCheck, present
+from security.presentation import (
+    ATTENTION,
+    OK,
+    OUTSIDE,
+    UNKNOWN,
+    UPDATES_ALL_LABEL,
+    UPDATES_CHECK_LABEL,
+    UPDATES_SECURITY_LABEL,
+    ShownCheck,
+    present,
+)
 from security.testing import check as read_check
 
 READ_AT = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
@@ -246,6 +256,62 @@ class SecurityPresentationTests(SimpleTestCase):
         self.assertEqual(check.state, ATTENTION)
         self.assertIn("1 security update", check.what)
         self.assertIn("2 hours ago", " ".join(check.details))
+
+    def test_a_permitted_operator_checks_for_updates_then_installs_each_choice(self) -> None:
+        state = _state(
+            updates=read_check(
+                UpdatesState(
+                    7200,
+                    (
+                        PendingUpdate(
+                            "openssl", "3.0.0", "3.0.1", "resolute-security/main", "security"
+                        ),
+                        PendingUpdate("curl", "8.0", "8.1", "resolute-updates/main", "other"),
+                    ),
+                )
+            )
+        )
+        check = _by_name(
+            present(
+                _collected(state),
+                READ_AT,
+                updates_check_url="/servers/1/security/updates/check/prepare/",
+                updates_install_url="/servers/1/security/updates/install/prepare/",
+                can_change=True,
+            )
+        )["Ubuntu updates"]
+        self.assertEqual(
+            [(action.label, action.value) for action in check.actions],
+            [
+                (UPDATES_CHECK_LABEL, ""),
+                (UPDATES_SECURITY_LABEL, "security"),
+                (UPDATES_ALL_LABEL, "all"),
+            ],
+        )
+
+    def test_a_viewer_sees_no_update_control(self) -> None:
+        state = _state(
+            updates=read_check(
+                UpdatesState(
+                    7200,
+                    (
+                        PendingUpdate(
+                            "openssl", "3.0.0", "3.0.1", "resolute-security/main", "security"
+                        ),
+                    ),
+                )
+            )
+        )
+        check = _by_name(
+            present(
+                _collected(state),
+                READ_AT,
+                updates_check_url="/servers/1/security/updates/check/prepare/",
+                updates_install_url="/servers/1/security/updates/install/prepare/",
+            )
+        )["Ubuntu updates"]
+        self.assertEqual(check.actions, ())
+        self.assertEqual(check.action, "Not available yet")
 
     def test_a_restart_names_the_packages_that_need_it(self) -> None:
         state = _state(restart=read_check(RestartState(True, ("linux-image-generic",))))

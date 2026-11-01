@@ -9161,6 +9161,62 @@
   {
    "architecture": "x86_64-linux",
    "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3.7_amd64.deb",
+   "sha256": "3ff73e121f6cd4f19e80ab4329dfd914108b3936c9db3708200203a9b245b34d",
+   "size": 2368026
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3.7_arm64.deb",
+   "sha256": "9fe87b6beec5de636a70e4fb6076517a39f5053c7e23e628c9459b94f85c75ff",
+   "size": 2769448
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3_amd64.deb",
+   "sha256": "fe78b8124fb6c8c0d7efc8f2bd8d5e0d3f217351f520a3b4652ee0afe24143c2",
+   "size": 2359122
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3_arm64.deb",
+   "sha256": "9ada8cf212787ead17a496fa39c3e727d7273b2e900da96aa921949d404b16bb",
+   "size": 2760988
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/o/openssl/openssl_3.5.5-1ubuntu3.7_amd64.deb",
+   "sha256": "6965aafe69e0a49ef34d2e26f8e83d09d1c6037b7e9ee37f19b292a3c6851621",
+   "size": 1242886
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/o/openssl/openssl_3.5.5-1ubuntu3.7_arm64.deb",
+   "sha256": "623ea7ec0eb80da3f40e89e3318a4e82d4c64146d206c90cabbce6998d822fa8",
+   "size": 1222930
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/o/openssl/openssl_3.5.5-1ubuntu3_amd64.deb",
+   "sha256": "5fe36591ab13d2bd63197cfe6b06e3a9b1fb2bf97b3be67883bb3807fcc8fc32",
+   "size": 1242868
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "snapshot.ubuntu.com",
+   "path": "ubuntu/20261017T000000Z/pool/main/o/openssl/openssl_3.5.5-1ubuntu3_arm64.deb",
+   "sha256": "abf0959ecb04c37d84bcdf64bfb6d6a7bb953bab364a1b907c75810378f476c0",
+   "size": 1222934
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "snapshot.ubuntu.com",
    "path": "ubuntu/20261017T000000Z/pool/main/p/p11-kit/libp11-kit0_0.26.2-2_amd64.deb",
    "sha256": "e70d3422e24b267293215134458f340944bf10e92b27147594c69a7dd2823089",
    "size": 312508

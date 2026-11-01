@@ -7,6 +7,11 @@ inline ``DPkg::Pre-Install-Pkgs`` guard, and the guard refuses unless APT's reso
 actions are exactly the reviewed ones. Nothing here imports Django: the module is standard
 library only, so the controller and the asserted native body share one source of truth.
 
+Phase E's Install updates extends the same transaction to upgrades
+(docs/adr/0024-admit-exact-reviewed-upgrade-transactions.md): the review simulates
+``--only-upgrade`` requests at their candidate versions, and a separate guard admits an
+upgrade only when its old and new versions, architectures and archive match the review.
+
 This holds no models and needs no migration. The old per-feature plan tables were deleted at
 the Phase A exit; the change engine of ADR 0035 stores the review whole.
 """
@@ -63,6 +68,28 @@ class PackageAction:
             return f"C {package} {version} {architecture}"
         archive = f"{package}_{version.replace(':', '%3a')}_{architecture}.deb"
         return f"U {package} {version} {architecture} {archive}"
+
+
+@dataclass(frozen=True)
+class UpgradeAction:
+    """One dpkg action of an upgrade transaction. ``previous`` is ``-`` for a new dependency."""
+
+    unpack: bool
+    package: str
+    previous: str
+    version: str
+    architecture: str
+
+    def normalized(self) -> str:
+        package = _check(_PACKAGE, self.package, "package name")
+        version = _check(_VERSION, self.version, "version")
+        architecture = _check(_ARCHITECTURE, self.architecture, "architecture")
+        if not self.unpack:
+            return f"C {package} {version} {architecture}"
+        previous = "-" if self.previous == "-" else _check(_VERSION, self.previous, "version")
+        old_architecture = "-" if previous == "-" else architecture
+        archive = f"{package}_{version.replace(':', '%3a')}_{architecture}.deb"
+        return f"U {package} {previous} {old_architecture} {version} {architecture} {archive}"
 
 
 class Transition(NamedTuple):
@@ -150,6 +177,26 @@ def size_command(roots: tuple[str, ...]) -> str:
     )
     requested = " ".join(shlex.quote(root) for root in roots)
     return f"DEBIAN_FRONTEND=noninteractive apt-get -y --print-uris {options} install {requested}"
+
+
+# docs/adr/0024-admit-exact-reviewed-upgrade-transactions.md#the-transaction. ``--only-upgrade``
+# keeps the reviewed packages from being installed where they are absent, while APT may still
+# add a dependency the reviewed transaction names.
+UPGRADE_OPTIONS: Final = (*INSTALL_OPTIONS, "--only-upgrade")
+
+
+def upgrade_command(requests: tuple[tuple[str, str], ...]) -> str:
+    """The read that resolves an upgrade of each reviewed package at its candidate version."""
+    if not requests:
+        raise ValueError("An upgrade transaction names no package.")
+    options = " ".join(shlex.quote(option) for option in UPGRADE_OPTIONS)
+    requested = " ".join(
+        shlex.quote(
+            f"{_check(_PACKAGE, name, 'package name')}={_check(_VERSION, version, 'version')}"
+        )
+        for name, version in requests
+    )
+    return f"DEBIAN_FRONTEND=noninteractive apt-get {options} --simulate install {requested}"
 
 
 def parse_simulation(text: str) -> Simulation:
@@ -304,6 +351,104 @@ def guard(actions: tuple[PackageAction, ...]) -> str:
             'case "$9" in '
             "'**CONFIGURE**') a=\"$a|C $1 $6 $7\";; "
             f'{ARCHIVES}*.deb) a="$a|U $1 $6 $7 ${{9#{ARCHIVES}}}";; '
+            f"*) {refuse} action;; esac; done"
+        ),
+        f'[ -z "$l" ] || {refuse} truncated',
+        (
+            "[ \"$(printf '%s\\n' \"${a#|}\" | tr '|' '\\n' | LC_ALL=C sort)\" = "
+            f"\"$(printf '%s\\n' {expected})\" ] || {refuse} transaction"
+        ),
+        f'echo "{GUARD_ADMITTED}"',
+    ]
+    return f"{GUARD_NAME}() {{ {'; '.join(body)}; }}; {GUARD_NAME}"
+
+
+# The authenticated Ubuntu 26.04 archive suites an upgrade may come from
+# (docs/adr/0024-admit-exact-reviewed-upgrade-transactions.md). APT's simulation names an
+# origin as ``Ubuntu:26.04/resolute``; ``apt-cache policy`` names the same source as
+# ``resolute/main``.
+_UBUNTU_SUITES: Final = frozenset({"resolute", "resolute-updates", "resolute-security"})
+_UBUNTU_SIMULATION = re.compile(r"Ubuntu:26\.04/(?P<suite>[a-z0-9-]+)(?:/[A-Za-z0-9-]+)?")
+_UBUNTU_POLICY = re.compile(r"(?P<suite>[a-z0-9-]+)(?:/[A-Za-z0-9-]+)?")
+
+
+def ubuntu_origin(origin: str) -> bool:
+    """Whether an APT origin is one of Ubuntu 26.04's authenticated archive suites."""
+    for pattern in (_UBUNTU_SIMULATION, _UBUNTU_POLICY):
+        match = pattern.fullmatch(origin)
+        if match is not None and match["suite"] in _UBUNTU_SUITES:
+            return True
+    return False
+
+
+def upgrade_actions_of(
+    transitions: tuple[Transition, ...], architecture: str
+) -> tuple[UpgradeAction, ...]:
+    """The approved actions of an upgrade transaction, or a ``ValueError`` explaining why not.
+
+    Removals and actions from any other source refuse. A new dependency is admitted only
+    when APT's own resolved transaction names it; ``--only-upgrade`` keeps a reviewed
+    package from being installed where it is absent.
+    """
+    actions: list[UpgradeAction] = []
+    for transition in transitions:
+        if transition.action in {"Remv", "Purg"}:
+            raise ValueError(f"Installing would remove {transition.package} {transition.previous}.")
+        if not transition.origins:
+            raise ValueError(f"APT did not name the source of {transition.package}.")
+        foreign = [origin for origin in transition.origins if not ubuntu_origin(origin)]
+        if foreign:
+            raise ValueError(
+                f"{transition.package} comes from {foreign[0]}, which is not the Ubuntu 26.04 "
+                "archive."
+            )
+        if transition.architecture not in {architecture, "all"}:
+            raise ValueError(f"{transition.package} would be installed for another architecture.")
+        actions.append(
+            UpgradeAction(
+                transition.action == "Inst",
+                transition.package,
+                transition.previous or "-",
+                transition.version,
+                transition.architecture,
+            )
+        )
+    return tuple(actions)
+
+
+def upgrade_guard(actions: tuple[UpgradeAction, ...]) -> str:
+    """The guard of docs/adr/0024-admit-exact-reviewed-upgrade-transactions.md#the-guard."""
+    approved = sorted(action.normalized() for action in actions)
+    if not approved or len(set(approved)) != len(approved):
+        raise ValueError("Not a valid package transaction.")
+    expected = " ".join(f"'{line}'" for line in approved)
+    refuse = "barectl_refuse"
+    body = [
+        "set -f",
+        f'{refuse}() {{ echo "{GUARD_REFUSED} $1"; exit 1; }}',
+        f'[ "${{DPKG_FRONTEND_LOCKED:-}}" = true ] || {refuse} frontend-lock',
+        f'[ "${{APT_HOOK_INFO_FD:-}}" = 0 ] || {refuse} descriptor',
+        (
+            f'[ "$(sha256sum {DPKG_STATUS} | cut -d\' \' -f1)" = "${{{STATUS_VARIABLE}:-}}" ] '
+            f"|| {refuse} dpkg-status"
+        ),
+        f"IFS= read -r l || {refuse} truncated",
+        f'[ "$l" = "VERSION 3" ] || {refuse} version',
+        f'while :; do IFS= read -r l || {refuse} truncated; [ -n "$l" ] || break; done',
+        "a=",
+        (
+            "while IFS= read -r l; do IFS=' '; set -- $l; IFS=; "
+            f"[ $# -eq 9 ] || {refuse} form; "
+            f'[ "$l" = "$1 $2 $3 $4 $5 $6 $7 $8 $9" ] || {refuse} form; '
+            f'[ "$5" = "<" ] || {refuse} direction; '
+            f'case "$2" in '
+            f'-) [ "$3" = - ] && {{ [ "$4" = none ] || [ "$4" = no ]; }} '
+            f"|| {refuse} form;; "
+            f"*) case \"$3\" in ''|-) {refuse} form;; esac;; esac; "
+            f'case "$8" in none|no|same|foreign|allowed) ;; *) {refuse} form;; esac; '
+            'case "$9" in '
+            "'**CONFIGURE**') a=\"$a|C $1 $6 $7\";; "
+            f'{ARCHIVES}*.deb) a="$a|U $1 $2 $3 $6 $7 ${{9#{ARCHIVES}}}";; '
             f"*) {refuse} action;; esac; done"
         ),
         f'[ -z "$l" ] || {refuse} truncated',
