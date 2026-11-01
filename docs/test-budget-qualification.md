@@ -1,6 +1,6 @@
 # Test budget qualification
 
-[#479](https://github.com/rajandangi/barectl/issues/479) owns this work. The targets in [quality](quality.md#test-time-budget) remain 60 seconds for the joint fast stage, 90 seconds for controller-fast, 180 seconds per native item, and 300 seconds for a full local build or complete hosted shard, with the 900-second build hard limit. Revision `d5186fb` passed all 31 fresh native captures, the 293-second strict local build, and all eleven hosted native phase targets below. This qualifies the merge workflow with exact-key snapshots. The historical all-cache-miss result is retained as an unqualified setup measurement. The final measured timing-record refresh is also subject to required checks before merge.
+[#479](https://github.com/rajandangi/barectl/issues/479) owns this work. The targets in [quality](quality.md#test-time-budget) remain 60 seconds for the joint fast stage, 90 seconds for controller-fast, 180 seconds per native item, and 300 seconds for a full local build or complete hosted shard, with the 900-second build hard limit. Revision `e655e6be` passed all 31 fresh native captures, the 289-second strict local build, and all eleven hosted native phase targets with exact-key snapshots in run 41351088130, attempt 2. This qualifies the snapshot-backed merge workflow. The historical all-cache-miss result and the special-image first-fill misses remain unqualified setup measurements. Required checks on the merge head repeat these budgets; the record does not claim a cold 300-second pass.
 
 ## Local measurements
 
@@ -152,6 +152,32 @@ Shard 7's final NginxStanding server replacement took 52.751 seconds, including 
 [Run 41348484150](https://github.com/rajandangi/barectl/actions/runs/41348484150) at `fec31f23` passed all 87 unique required items, but shards 6 and 7 missed the complete-phase target at 304 and 301 seconds. Its longest item was FirewallLifecycle at 177.6 seconds. Logs exposed a defect in the special-cache implementation: the existing image-key CLI did not accept either special layer name. `echo` masked the failed command substitutions and published empty key suffixes. All special restores missed; two consumers saved under those empty-suffix keys. This run is not valid digest-keyed cache qualification. The ordinary keyed snapshots and all native assertions remained intact.
 
 The correction exposes the two existing image layers through the CLI's accepted choices and assigns each CLI result before publishing it, allowing the workflow shell to stop on any CLI error. A regression executes the actual nine-key workflow block with real CLI calls and requires the exact special keys with their hash suffixes. Another executes the same block with CLI failures at both special layers and proves exit propagation without publishing the failed key. All 42 mirror tests passed in 8.371 seconds. The empty-suffix caches have different keys from the corrected digest-keyed entries and cannot be selected by the corrected workflow. After another complete real 31-state capture pass and successful receipt validation, the frozen correction passed the strict local build in 289 seconds with unchanged source identity. Controller-fast took 30 seconds for 2,094 tests with the existing one skip, all 25 validators passed in a 41-second joint stage, all 102 browser tests passed in 105 seconds, and all 87 native items passed in a 248-second native stage, 246 seconds in its runner. Exact-head hosted qualification remains required before merge.
+
+### Corrected special-cache first fill
+
+[Run 41351088130, attempt 1](https://github.com/rajandangi/barectl/actions/runs/41351088130/attempts/1) at `e655e6be` used valid special keys on every shard: `native-standing-Linux-X64-standing-26.04-bd8119581d7b` and `native-ubuntu24-Linux-X64-l0-24.04-672540d00402`. Both were initial misses on all eleven runners. Shards 10 and 2 respectively saved the completed standing and Ubuntu 24.04 archives under those keys. Its complete phases were 198, 256, 257, 301, 269, 304, 283, 263, 253, 250 and 252 seconds. All 87 unique items passed, with WordPressServerCron longest at 177.8 seconds. Shards 4 and 6 missed the phase target. Their standing-image server replacements took 65.265 and 52.359 seconds; that stage includes image ensure/load/build and container startup. First-fill work remains inside the clock, and this run does not qualify as a cold or target-compliant pass.
+
+A controlled same-head run tests the newly saved exact keys separately. It does not replace or reinterpret the first-fill result. The following snapshot-backed qualification must retain this cache scope; no target, limit, scenario, allocation or timing weight changed between attempts.
+
+### Snapshot-backed qualification at `e655e6be`
+
+[Run 41351088130, attempt 2](https://github.com/rajandangi/barectl/actions/runs/41351088130/attempts/2) passed all eleven complete native phase targets on the unchanged source. Every runner restored both exact special-image keys recorded above, with 11/11 hits for each. The ordinary keyed snapshots remained in use. No timing weight, clock, target, limit, matrix size or lane allocation changed between attempts. These are complete phase measurements, including actual Docker image loading and cleanup, rather than job durations or predictions.
+
+| Shard | Complete phase |
+| ---: | ---: |
+| 1 | 229 s |
+| 2 | 235 s |
+| 3 | 266 s |
+| 4 | 257 s |
+| 5 | 260 s |
+| 6 | 235 s |
+| 7 | 249 s |
+| 8 | 264 s |
+| 9 | 238 s |
+| 10 | 224 s |
+| 11 | 252 s |
+
+All 87 unique required items passed, with no duplicates or omissions. The longest item was FirewallLifecycle at 177.0 seconds, below the unchanged 180-second limit. The five special-layer server replacements took 5.691–7.914 seconds after restore, compared with 36.155–65.265 seconds during first fill. Those stage observations include server replacement and image work; they do not isolate a Docker component or remove run-to-run variation. Controller, browser, frontend and dependency checks passed on this head. Final independent Standards and Spec reviews found no issues, including the actual CLI execution and failure-propagation regressions, the re-audited narrow future transcript exclusion, and the new real capture receipts. The final documentation-only publication retains this qualified source and remains subject to required checks before merge.
 
 A separate external host-only preparation-read experiment passed its semantic guard and five unchanged cache cases but improved 32.0 to 28.6 seconds in one pair, below its adoption threshold. No product collector or observation contract was changed.
 
