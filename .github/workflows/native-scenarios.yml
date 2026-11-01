@@ -104,15 +104,24 @@ jobs:
       # digest (disposable/images.py), so a hit is exactly the snapshot S1 would commit.
       - id: keys
         run: |
-          echo "l0=$(uv run python -m disposable.images cache-key)" >> "$GITHUB_OUTPUT"
-          echo "standing=$(uv run python -m disposable.images cache-key --layer L0-standing)" >> "$GITHUB_OUTPUT"
-          echo "ubuntu24=$(uv run python -m disposable.images cache-key --layer L0-24.04)" >> "$GITHUB_OUTPUT"
-          echo "l1=$(uv run python -m disposable.images cache-key --layer L1)" >> "$GITHUB_OUTPUT"
-          echo "l2=$(uv run python -m disposable.images cache-key --layer L2)" >> "$GITHUB_OUTPUT"
-          echo "l3=$(uv run python -m disposable.images cache-key --layer L3)" >> "$GITHUB_OUTPUT"
-          echo "l4=$(uv run python -m disposable.images cache-key --layer L4)" >> "$GITHUB_OUTPUT"
-          echo "l5=$(uv run python -m disposable.images cache-key --layer L5)" >> "$GITHUB_OUTPUT"
-          echo "fixture=$(uv run python -m disposable.images cache-key --layer fixture)" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key)
+          echo "l0=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L0-standing)
+          echo "standing=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L0-24.04)
+          echo "ubuntu24=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L1)
+          echo "l1=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L2)
+          echo "l2=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L3)
+          echo "l3=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L4)
+          echo "l4=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L5)
+          echo "l5=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer fixture)
+          echo "fixture=$snapshot_key" >> "$GITHUB_OUTPUT"
       - name: Restore the fixture snapshot
         id: fixture
         uses: actions/cache/restore@v6.1.0

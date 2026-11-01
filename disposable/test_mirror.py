@@ -386,6 +386,64 @@ class FixtureCAWorkflowTests(SimpleTestCase):
 
 
 class SpecialSnapshotCacheTests(SimpleTestCase):
+    def test_workflow_key_commands_accept_both_special_layers(self) -> None:
+        workflow = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
+        )
+        keys = next(
+            step for step in workflow["jobs"]["scenarios"]["steps"] if step.get("id") == "keys"
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, {"XDG_CACHE_HOME": directory}),
+        ):
+            output = Path(directory) / "output"
+            completed = subprocess.run(  # noqa: S603 - actual workflow and real image-key CLI
+                ["/bin/bash", "-e", "-c", keys["run"]],
+                check=False,
+                env={**os.environ, "GITHUB_OUTPUT": str(output)},
+                capture_output=True,
+                text=True,
+                cwd=mirror.REPOSITORY,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            observed = dict(line.split("=", 1) for line in output.read_text().splitlines())
+            self.assertEqual(observed["standing"], images.cache_key("L0-standing"))
+            self.assertEqual(observed["ubuntu24"], images.cache_key("L0-24.04"))
+            self.assertRegex(observed["standing"], r"^standing-26\.04-[0-9a-f]{12}$")
+            self.assertRegex(observed["ubuntu24"], r"^l0-24\.04-[0-9a-f]{12}$")
+            self.assertEqual(len(observed), 9)
+
+    def test_workflow_does_not_publish_keys_after_a_cli_failure(self) -> None:
+        workflow = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
+        )
+        keys = next(
+            step for step in workflow["jobs"]["scenarios"]["steps"] if step.get("id") == "keys"
+        )
+        for argument, preceding in (
+            ("", []),
+            (" --layer L0-standing", ["l0"]),
+            (" --layer L0-24.04", ["l0", "standing"]),
+        ):
+            with self.subTest(argument=argument), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "output"
+                stub = (
+                    'uv() { if [ "$*" = "run python -m disposable.images cache-key'
+                    + argument
+                    + '" ]; then return 23; fi; echo valid-key; }\n'
+                )
+                completed = subprocess.run(  # noqa: S603 - workflow shell, failing CLI stub
+                    ["/bin/bash", "-e", "-c", stub + keys["run"]],
+                    check=False,
+                    env={**os.environ, "GITHUB_OUTPUT": str(output)},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 23, completed.stderr)
+                expected = "".join(f"{name}=valid-key\n" for name in preceding)
+                self.assertEqual(output.read_text() if output.exists() else "", expected)
+
     def test_special_layers_discard_legacy_copies_and_cache_independently(
         self,
     ) -> None:
