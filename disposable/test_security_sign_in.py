@@ -10,7 +10,9 @@ from discovery import ssh
 from discovery.observations import collect
 from discovery.ssh import ConnectionFailed
 from operations import revert
+from operations.engine import read_result
 from operations.inputs import PreparationInputs
+from operations.recovery_testing import FailurePhase, assert_access_failure
 from security.sign_in import PATH, REQUIRE_KEY_SIGN_IN
 
 from .change_testing import Submitted, confirm_window, submit_change, wait_result, wait_window
@@ -119,7 +121,9 @@ class SignInLifecycle(ScenarioTestCase):
     def test_4_an_earlier_setting_that_wins_is_reported_and_put_back(self) -> None:
         self.native(f"printf 'PasswordAuthentication yes\\n' > {OVERRIDE}")
         opened = self._run(expected="partial", reason="sign_in_verify")
-        self.assertIs(wait_window(self, opened), revert.Window.PUT_BACK)
+        window = wait_window(self, opened)
+        self.assertIs(window, revert.Window.PUT_BACK)
+        self._assert_recovery(opened, window)
         self.assertEqual(self.native(f"test -e {PATH} && echo present || true"), "")
 
     def test_5_source_specific_match_is_unknown_and_refuses(self) -> None:
@@ -140,9 +144,25 @@ class SignInLifecycle(ScenarioTestCase):
             self.assertFalse(draft.eligible)
             self.assertIn("every connection", str(draft.refusals))
 
+    def _assert_recovery(self, opened: Submitted, window: revert.Window) -> None:
+        with self.shell() as shell:
+            emitted = read_result(shell, opened.unit)
+        if emitted is None:
+            self.fail("No emitted native result for recovery contract.")
+        assert_access_failure(
+            self,
+            emitted,
+            phase=FailurePhase.AFTER_WRITE,
+            kind_slug=REQUIRE_KEY_SIGN_IN.slug,
+            window=window,
+            stopped_step="Checking key sign-in",
+        )
+
     def test_6_user_match_that_reenables_passwords_is_reported_and_put_back(self) -> None:
         self.native(
             f"printf 'Match User root\\nPasswordAuthentication yes\\n' > {MATCH_OVERRIDE}; sshd -t"
         )
         opened = self._run(expected="partial", reason="sign_in_verify")
-        self.assertIs(wait_window(self, opened), revert.Window.PUT_BACK)
+        window = wait_window(self, opened)
+        self.assertIs(window, revert.Window.PUT_BACK)
+        self._assert_recovery(opened, window)

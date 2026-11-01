@@ -32,32 +32,32 @@ if [ "${1:-}" = --env-file ]; then
 fi
 strict=${BARECTL_BUDGET_STRICT:-0}
 
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+logs=${BARECTL_BUILD_LOGS:-"${XDG_CACHE_HOME:-$HOME/.cache}/barectl/builds"}
+mkdir -p "$logs"
+work=$(mktemp -d "$logs/run-XXXXXXXX")
+printf 'Full build logs: %s\n' "$work"
 started=$(date +%s)
 
 run() {
     name=$1
-    shift
     (
         job_started=$(date +%s)
         set +e
-        "$@" >"$work/$name.log" 2>&1
+        "$here/quiet-run.sh" build "$work/$name.log" "$env_file" >"$work/$name.summary" 2>&1
         echo $? >"$work/$name.code"
         echo $(( $(date +%s) - job_started )) >"$work/$name.secs"
     ) &
 }
 
-run controller-fast uv run --env-file "$env_file" python manage.py test \
-    --exclude-tag browser --exclude-tag scenario --parallel
-run fast-validators env BARECTL_DISPOSABLE_LOGS="$work/validator-logs" \
-    "$here/run-scenarios.sh" --env-file "$env_file" -- --validators --no-lock
-run browser uv run --env-file "$env_file" python manage.py test --tag browser
-run native "$here/run-scenarios.sh" --env-file "$env_file" -- --no-lock
+run controller-fast
+run fast-validators
+run browser
+run native
 
 status=0
 # Each job is a subshell that records its own exit code, so this wait always succeeds.
 wait
+uv run python -m disposable.verification ledger "$work"
 
 for name in controller-fast fast-validators browser native; do
     code=$(cat "$work/$name.code" 2>/dev/null || echo 1)
@@ -66,6 +66,8 @@ for name in controller-fast fast-validators browser native; do
     if [ "$code" != 0 ]; then
         status=1
         printf '%s\n' "---- $name ----"
+        printf 'Full failure log: %s\n' "$work/$name.log"
+        grep -E '^(FAIL:|ERROR:|AssertionError)' "$work/$name.log" || true
         tail -n 60 "$work/$name.log"
     fi
 done

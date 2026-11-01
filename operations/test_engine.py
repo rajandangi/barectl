@@ -229,6 +229,86 @@ class AccessChangeWindowTests(ChangeTestCase):
         self.assertNotContains(page, "Access check:")
 
 
+class AccessRecoveryContractTests(SimpleTestCase):
+    def test_failure_effects_and_recovery_message_agree(self) -> None:
+        from .recovery_testing import FailurePhase, assert_access_failure
+        from .revert import Window
+
+        for phase, result, window in (
+            (FailurePhase.PREFLIGHT, "refused", None),
+            (FailurePhase.UNCERTAIN_WRITE, "failed", Window.NOT_KNOWN),
+            (FailurePhase.AFTER_WRITE, "partial", Window.PUT_BACK),
+            (FailurePhase.AFTER_WRITE, "partial", Window.NOT_KNOWN),
+        ):
+            with self.subTest(phase=phase, window=window):
+                assert_access_failure(
+                    self,
+                    engine.ResultLine(result, "sign_in_verify"),
+                    phase=phase,
+                    kind_slug="require_key_sign_in",
+                    window=window,
+                    stopped_step=(
+                        "Checking key sign-in"
+                        if phase is FailurePhase.AFTER_WRITE
+                        else "Changing sign-in"
+                    ),
+                )
+
+    def test_a_post_write_refusal_cannot_satisfy_the_contract(self) -> None:
+        from .recovery_testing import FailurePhase, assert_access_failure
+        from .revert import Window
+
+        with self.assertRaises(AssertionError):
+            assert_access_failure(
+                self,
+                engine.ResultLine("refused", "sign_in_verify"),
+                phase=FailurePhase.AFTER_WRITE,
+                kind_slug="require_key_sign_in",
+                window=Window.PUT_BACK,
+            )
+
+    def test_correct_window_caption_cannot_mask_wrong_guidance_or_retry_destination(self) -> None:
+        from .recovery_testing import FailurePhase, assert_access_failure
+        from .revert import Window
+
+        original = (
+            "The server put the earlier settings back because a new connection did not confirm"
+        )
+        for window, old, new in (
+            (Window.PUT_BACK, original, "The server kept the new settings because it confirmed"),
+            (Window.NOT_KNOWN, "Barectl could not confirm access.", "Barectl confirmed access."),
+            (
+                Window.PUT_BACK,
+                "This stopped after checking key sign-in.",
+                "This finished successfully.",
+            ),
+            (Window.PUT_BACK, 'action="/changes/1/again/"', 'action="/changes/2/again/"'),
+        ):
+            with self.subTest(window=window, old=old):
+                from django.template.loader import render_to_string
+
+                def corrupt_page(
+                    template: str, context: dict[str, object], old: str = old, new: str = new
+                ) -> str:
+                    page = render_to_string(template, context)
+                    if old not in page:
+                        raise ValueError(f"Regression mutation did not find {old!r}")
+                    return page.replace(old, new)
+
+                with (
+                    mock.patch("operations.recovery_testing.render_to_string", corrupt_page),
+                    self.assertRaises(AssertionError),
+                ):
+                    assert_access_failure(
+                        self,
+                        engine.ResultLine("partial", "sign_in_verify"),
+                        phase=FailurePhase.AFTER_WRITE,
+                        kind_slug="require_key_sign_in",
+                        window=window,
+                        stopped_step="Checking key sign-in",
+                    )
+
+
 class EngineAdapterTests(SimpleTestCase):
     def test_unanswered_root_reads_never_become_closure_probe_evidence(self) -> None:
         remote = FakeServer()

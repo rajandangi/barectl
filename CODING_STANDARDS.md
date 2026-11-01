@@ -31,6 +31,8 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 - A test of a dashboard POST drives the rendered form — in a browser, or by reading the rendered field names — and proves the action reaches its preparation or run. Hand-built field names can agree with the view while the rendered form names a different field.
 - A validator test proves the lowest accepted value, the highest accepted value, and the first rejected value on each side of every bound. "Invalid input" alone does not cover a bound.
 
+- Trace failure outcomes across native effects, the emitted result class and the complete rendered recovery message and action. A correct access-window caption does not establish that the headline or retry action is truthful. Reuse the access-failure contract in `operations/recovery_testing.py` for native policy failure cases.
+
 ## Recorded fixtures
 
 - A file under any `fixtures/` directory is recorded from a real server, never authored by hand; name the recording state or run in the review handoff. A hand-written fixture can encode output the product will never see, so a passing fast test then proves nothing. See [recorded transcripts](docs/quality.md#recorded-transcripts).
