@@ -7,6 +7,7 @@ they must be recorded again (docs/adr/0033-prove-real-behavior-in-two-test-layer
 import hashlib
 import json
 import re
+import sys
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -252,3 +253,39 @@ def _command(entry: object, problem: str) -> tuple[str, Recorded]:
     ):
         raise ValueError(f"{problem}: a command entry is malformed.")
     return command, Recorded(CommandResult(status, stdout, truncated), digest)
+
+
+def find(text: str, *, limit: int = 240) -> tuple[tuple[str, str], ...]:
+    """The transcript state and matching line for ``text``, for a targeted search.
+
+    A repository-wide grep reads every recorded command and result, including multi-hundred
+    kilobyte bodies. docs/quality.md#recorded-transcripts points here instead.
+    """
+    needle = text.lower()
+    found: list[tuple[str, str]] = []
+    for state in stored():
+        for command, _recorded in load(state).commands:
+            line = next(
+                (part.strip() for part in command.splitlines() if needle in part.lower()),
+                "",
+            )
+            if not line:
+                continue
+            shown = line if len(line) <= limit else line[: limit - 1] + "…"
+            found.append((state, shown))
+    return tuple(found)
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if len(arguments) != 1:
+        print("usage: python -m discovery.recorded TEXT", file=sys.stderr)  # noqa: T201
+        return 2
+    matches = find(arguments[0])
+    for state, line in matches:
+        print(f"{state}\t{line}")  # noqa: T201
+    return 0 if matches else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

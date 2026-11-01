@@ -38,7 +38,7 @@ A single ticket run (`/implement`, `/implement-spec`) meets the same completion 
 
 ## Development checks
 
-Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push hook runs the fast subset ([before every push](docs/quality.md#before-every-push)). `scripts/worktree-setup.sh` gives a linked worktree `.env` and the locked dependencies. A native-affecting change runs the scenarios through the runner, which takes the host-wide native lock itself, so parallel agents wait instead of sharing lanes:
+Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push hook runs the fast subset ([before every push](docs/quality.md#before-every-push)). Before adding or changing a fixed native read, body or lifecycle scenario, read [adding a scenario](docs/quality.md#adding-a-scenario) and [recorded transcripts](docs/quality.md#recorded-transcripts), and add every command-building module to `discovery/source_manifest.py`. `scripts/worktree-setup.sh` gives a linked worktree `.env` and the locked dependencies. A native-affecting change runs the scenarios through the runner, which takes the host-wide native lock itself, so parallel agents wait instead of sharing lanes:
 
 ```bash
 docker/disposable-server/run-scenarios.sh --env-file .env

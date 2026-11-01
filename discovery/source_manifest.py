@@ -15,9 +15,24 @@ REPOSITORY = Path(__file__).resolve().parent.parent
 MANIFEST = Path(__file__).resolve().with_name("transcript_sources.json")
 FORMAT = 1
 
+# Python modules that build fixed native reads whose command text a transcript embeds.
+# docs/quality.md#recorded-transcripts lists the recording pass.
+COMMAND_SOURCES = (
+    "databases/packages.py",
+    "discovery/observations/__init__.py",
+    "discovery/observations/caddy_email.py",
+    "discovery/observations/components.py",
+    "discovery/observations/probes.py",
+    "discovery/observations/standing.py",
+    "security/change.py",
+    "security/observation.py",
+    "security/updates.py",
+)
+
 # Shared native reads and body sources. A transcript may embed only some of them, but every
 # one can change a command a transcript holds; record all states when any changes.
 SOURCES = (
+    *COMMAND_SOURCES,
     "automation/bodies/observe.py",
     "automation/bodies/observe_workers.py",
     "automation/bodies/schedule.py",

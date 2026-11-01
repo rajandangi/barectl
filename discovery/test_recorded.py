@@ -151,6 +151,41 @@ def stale_states() -> list[str]:
     return [state for state in recorded.stored() if dict(recorded.load(state).pins) != current]
 
 
+class TranscriptSearchTests(SimpleTestCase):
+    def test_find_names_the_state_and_matching_line(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "example.json").write_text(
+                transcript(
+                    (
+                        "apt-get update\napt-get install openssl",
+                        Recorded(ssh.CommandResult(0, "")),
+                    ),
+                    ("cat /etc/os-release", Recorded(ssh.CommandResult(0, ""))),
+                ).dumps(),
+                encoding="utf-8",
+            )
+            with mock.patch.object(recorded, "TRANSCRIPTS", root):
+                self.assertEqual(
+                    recorded.find("install openssl"),
+                    (("example", "apt-get install openssl"),),
+                )
+                self.assertEqual(recorded.find("no such command"), ())
+
+    def test_a_long_matching_line_is_truncated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "example.json").write_text(
+                transcript(("x" * 500 + " needle", Recorded(ssh.CommandResult(0, "")))).dumps(),
+                encoding="utf-8",
+            )
+            with mock.patch.object(recorded, "TRANSCRIPTS", root):
+                state, line = recorded.find("needle", limit=20)[0]
+        self.assertEqual(state, "example")
+        self.assertEqual(len(line), 20)
+        self.assertTrue(line.endswith("…"))
+
+
 class StoredTranscriptTests(SimpleTestCase):
     """Every transcript in the repository, read as tests read it."""
 
