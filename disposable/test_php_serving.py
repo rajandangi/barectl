@@ -1,5 +1,6 @@
 """Site serving identity and switches require actual native admission boundaries."""
 
+import json
 import shlex
 
 from django.test import tag
@@ -54,14 +55,15 @@ class SitePHPServing(ScenarioTestCase):
         self.assertFalse(self.native("find /etc/php-fpm/php84/pools -name s339serve.conf").strip())
 
         self.native(
-            "cat > /var/www/s339serve/current/public/index.php <<'PHP'\n"
+            "set -e\ncat > /var/www/s339serve/current/public/index.php <<'PHP'\n"
             "<?php echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION.'|'."
             "($_SERVER['PATH_INFO'] ?? '').'|'.($_GET['abc'] ?? '').'|'."
             "($_SERVER['HTTP_PROXY'] ?? '').'|'.($_SERVER['HTTP_X_TEST'] ?? '');\nPHP\n"
-            # OPcache keeps serving a script cached by the create-site verification until
-            # the file is older than opcache.file_update_protection, two seconds.
+            # Backdating permits cache insertion; a previously cached script may still
+            # await its next OPcache timestamp revalidation.
             "touch -d '-1 minute' /var/www/s339serve/current/public/index.php"
         )
+        self.native("systemctl restart php-fpm-site-php84@s339serve.service")
         self.assertEqual(
             self.native(
                 "curl --fail --silent -H 'Host: s339serve.example.com' "
@@ -70,6 +72,7 @@ class SitePHPServing(ScenarioTestCase):
             ),
             "8.4|/extra|one||preserved",
         )
+        self.assert_proxy_restart_during_complete_batch_refuses_read()
         self.native(
             "cat > /var/www/s339serve/current/canary.php <<'PHP'\n"
             "<?php file_put_contents('/var/www/s339serve/private/traversal-effect', 'ran'); "
@@ -125,6 +128,54 @@ class SitePHPServing(ScenarioTestCase):
                 ),
                 ("8.5" if entry == "php85" else "8.4") + "|/extra|two||",
             )
+
+    def assert_proxy_restart_during_complete_batch_refuses_read(self) -> None:
+        from discovery.root_read import run_root
+        from operations import native
+        from sites import observation
+
+        source = observation.READ_SOURCE
+        old_recv = "while part := client.recv(16384):"
+        self.assertEqual(source.count(old_recv), 1)
+        source = source.replace(
+            old_recv, "while part := native_test_recv(client, identifier, command):"
+        )
+        hook = (
+            "def native_test_recv(client, identifier, command):\n"
+            "    part = client.recv(16384)\n"
+            "    if identifier == 's339serve' and command == "
+            "'show info;show servers state;show stat':\n"
+            "        if part:\n"
+            "            native_test_recv.parts.append(part)\n"
+            "        else:\n"
+            "            blocks = b''.join(native_test_recv.parts).strip().split(b'\\n\\n')\n"
+            "            if len(blocks) != 3 or not blocks[0].startswith(b'Name: HAProxy\\n') "
+            "or not blocks[1].startswith(b'1\\n# ') "
+            "or not blocks[2].startswith(b'# pxname,'):\n"
+            "                raise ValueError('The proxy batch was incomplete before restart.')\n"
+            "            subprocess.run(['systemctl', 'restart', "
+            "'haproxy-site@s339serve.service'], check=True)\n"
+            "    return part\n"
+            "native_test_recv.parts = []\n"
+        )
+        source = source.replace("\nimport sys\noptions =", "\n" + hook + "import sys\noptions =")
+        before = self.native("systemctl show --value -p MainPID haproxy-site@s339serve.service")
+        options = json.dumps({"site_only": True, "protections": False, "https": True})
+        command = observation.python_command(source, ("s339serve", "", "[]", options))
+        locked = "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + command]))
+        with self.shell() as shell:
+            response = run_root(shell, locked)
+        self.assertEqual(response.exit_status, 0)
+        self.assertFalse(response.truncated)
+        after = self.native("systemctl show --value -p MainPID haproxy-site@s339serve.service")
+        self.assertNotEqual(after, before)
+        site = next(
+            entry
+            for entry in json.loads(response.stdout)["sites"]
+            if entry["identifier"] == "s339serve"
+        )
+        self.assertEqual(site["state"], "unsupported")
+        self.assertEqual(site["problem"], "The private PHP admission evidence is unavailable.")
 
 
 @tag(SCENARIO_TAG)

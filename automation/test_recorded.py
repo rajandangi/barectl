@@ -16,7 +16,7 @@ from .status import ScheduleStatus
 
 STATE = "automation-wordpress-26.04"
 LARAVEL_STATE = "automation-laravel-26.04"
-IDENTIFIER = "swpalpha"
+IDENTIFIER = "l3wordpress"
 LARAVEL_IDENTIFIER = "sqwalpha"
 
 

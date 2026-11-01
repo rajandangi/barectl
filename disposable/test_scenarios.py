@@ -1,13 +1,15 @@
 import io
+import json
 import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import override
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from . import scenarios
+from . import scenarios, shard_times
 
 
 def scenario(label: str, *, layer: str = "L0", exclusive: bool = False) -> scenarios.Scenario:
@@ -15,6 +17,20 @@ def scenario(label: str, *, layer: str = "L0", exclusive: bool = False) -> scena
 
 
 class PlanTests(SimpleTestCase):
+    def test_expired_or_nonfinite_budget_cannot_start_native_preparation(self) -> None:
+        for value in ("0", "-1", "nan", "inf"):
+            with (
+                self.subTest(value=value),
+                patch("sys.stderr", new_callable=io.StringIO),
+                patch.object(scenarios, "discover") as discover,
+                patch("disposable.images.ensure") as ensure,
+                self.assertRaises(SystemExit) as stopped,
+            ):
+                scenarios.main(["--time-limit", value, "--no-lock"])
+            self.assertEqual(stopped.exception.code, 2)
+            discover.assert_not_called()
+            ensure.assert_not_called()
+
     def test_non_exclusive_scenarios_share_a_layer(self) -> None:
         units = scenarios.plan([scenario("a"), scenario("b")], lanes=1)
         self.assertEqual(len(units), 1)
@@ -35,17 +51,62 @@ class PlanTests(SimpleTestCase):
         self.assertEqual(len(exclusive), 1)
         self.assertEqual(len(exclusive[0].scenarios), 1)
 
+    def test_measured_long_items_start_first_without_sharing_exclusive_servers(self) -> None:
+        selected = [scenario(name, exclusive=True) for name in ("short", "long", "middle")]
+        units = scenarios.plan(selected, lanes=2, weights={"short": 1, "long": 10, "middle": 5})
+        self.assertEqual(
+            [[item.label for item in unit.scenarios] for unit in units],
+            [
+                ["long"],
+                ["middle"],
+                ["short"],
+            ],
+        )
+
+
+class LaneTimingTests(SimpleTestCase):
+    def test_retains_successful_and_interrupted_stage_times(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lane = scenarios.Lane(
+                0, "image", root / "key", root, root, scenarios.Output(io.StringIO())
+            )
+            lane.name = "lane-0"
+            with patch("disposable.scenarios.time.monotonic", side_effect=[10.0, 12.5, 20.0, 21.0]):
+                with lane.timing("lane-start"):
+                    pass
+                with (
+                    self.assertRaisesRegex(RuntimeError, "interrupted"),
+                    lane.timing("scenario", "a"),
+                ):
+                    raise RuntimeError("interrupted")
+            lane.write_timings()
+            self.assertEqual(
+                json.loads((root / "logs/lane-0-timings.json").read_text()),
+                [
+                    {"stage": "lane-start", "scenario": "", "seconds": 2.5},
+                    {"stage": "scenario", "scenario": "a", "seconds": 1.0},
+                ],
+            )
+
 
 class LaneFormulaTests(SimpleTestCase):
-    def test_follows_the_spike_formula(self) -> None:
-        for cpus, mebibytes, expected in ((14, 15.6, 8), (4, 15.6, 2), (2, 15.6, 1)):
+    def test_capacity_stays_within_measured_lanes_and_allocated_memory(self) -> None:
+        for cpus, gib, expected in (
+            (14, 15.6, 16),
+            (4, 15.6, 4),
+            (2, 15.6, 2),
+            (64, 64, 16),
+            (14, 2, 4),
+            (1, 0.25, 1),
+        ):
             with (
                 self.subTest(cpus=cpus),
                 patch.dict("os.environ", {"BARECTL_NATIVE_LANES": ""}),
                 patch.object(
                     scenarios,
                     "docker",
-                    return_value=f"{cpus} {int(mebibytes * 2**30)}",
+                    return_value=f"{cpus} {int(gib * 2**30)}",
                 ),
             ):
                 self.assertEqual(scenarios.default_lanes(), expected)
@@ -207,6 +268,19 @@ class DiscoveryTests(SimpleTestCase):
 
 
 class FixtureSelectionTests(SimpleTestCase):
+    def test_minimal_foundation_is_preparation_only_and_starts_from_l0(self) -> None:
+        label = "disposable.test_prepared_foundation.PrepareFoundation"
+        self.assertEqual(scenarios.discover([label]), [])
+        selected = scenarios.discover([label], preparations=True)
+        self.assertEqual([candidate.layer for candidate in selected], ["L0"])
+        self.assertTrue(selected[0].exclusive)
+        self.assertEqual(selected[0].records, ())
+
+    def test_wordpress_preparation_uses_l1_without_the_l2_site(self) -> None:
+        label = "disposable.test_prepared_wordpress.PrepareWordPress"
+        selected = scenarios.discover([label], preparations=True)
+        self.assertEqual([candidate.layer for candidate in selected], ["L1"])
+
     def test_preparation_scenarios_are_excluded_from_ordinary_discovery(self) -> None:
         label = "disposable.test_prepared_sites.PrepareSites"
         self.assertEqual(scenarios.discover([label]), [])
@@ -271,6 +345,27 @@ class ValidatorSelectionTests(SimpleTestCase):
         self.assertEqual(units[0].layer, "L1")
         self.assertEqual(units[0].scenarios, selected)
 
+    def test_measured_validator_partition_preserves_coverage_and_balances_the_slow_lane(
+        self,
+    ) -> None:
+        selected = scenarios.discover(validators=True)
+        weights = scenarios.validator_weights(selected)
+        units = scenarios.plan(selected, lanes=2, weights=weights)
+        self.assertEqual(len(units), 2)
+        assigned = [item.label for unit in units for item in unit.scenarios]
+        self.assertCountEqual(assigned, [item.label for item in selected])
+        self.assertEqual(len(assigned), len(set(assigned)))
+        self.assertTrue(all(unit.layer == "L1" for unit in units))
+        previous = scenarios.plan(selected, lanes=2)
+        stop = max(sum(weights[item.label] for item in unit.scenarios) for unit in units)
+        old_stop = max(sum(weights[item.label] for item in unit.scenarios) for unit in previous)
+        self.assertLess(stop, old_stop - 18)
+        self.assertLessEqual(stop, 42.0)
+
+    def test_a_new_validator_requires_timing_instead_of_a_guessed_weight(self) -> None:
+        with self.assertRaisesMessage(ValueError, "Record validator durations"):
+            scenarios.validator_weights([scenario("unmeasured", layer="L1")])
+
     def test_validator_stage_does_not_absorb_lifecycle_or_recording_cases(self) -> None:
         self.assertEqual(
             scenarios.discover(
@@ -330,28 +425,281 @@ class BuildStopTests(SimpleTestCase):
 
     def test_foundation_preparation_spends_the_same_limit(self) -> None:
         self.addCleanup(scenarios.stopping.clear)
+        clock = 0.0
         limits: list[float] = []
+        prepared_limits: list[float] = []
+        stored: list[str] = []
 
         def prepare(*arguments: object) -> None:
-            time.sleep(0.5)
+            nonlocal clock
+            prepared_limits.append(float(arguments[4]))  # type: ignore[arg-type]
+            clock += 3
+
+        def ensure(layer: str = "L0") -> str:
+            nonlocal clock
+            clock += 2
+            return "image"
+
+        def store(layer: str) -> None:
+            nonlocal clock
+            stored.append(layer)
+            clock += 1
 
         def execute(*arguments: object) -> None:
+            nonlocal clock
             limits.append(float(arguments[5]))  # type: ignore[arg-type]
+            clock += 4
 
         with (
             patch.object(scenarios, "discover", return_value=[scenario("one", layer="L1")]),
-            patch("disposable.images.ensure", return_value="image"),
-            patch("disposable.images.store"),
+            patch.object(
+                shard_times.Record,
+                "load",
+                return_value=shard_times.Record("test", {"one": 1.0}, {}),
+            ),
+            patch("disposable.scenarios.time.monotonic", side_effect=lambda: clock),
+            patch("disposable.images.ensure", side_effect=ensure),
+            patch("disposable.images.store", side_effect=store),
             patch.object(scenarios, "controller_key", return_value=Path("key")),
             patch.object(scenarios, "prepare_layers", side_effect=prepare),
             patch.object(scenarios, "execute", side_effect=execute),
-            patch.object(scenarios, "summarize"),
+            patch.object(scenarios, "summarize") as summarize,
             patch.object(scenarios, "write_results"),
             patch.object(scenarios, "keep_logs"),
         ):
-            scenarios.main(["--time-limit", "10", "--lanes", "1", "--no-lock"])
-        self.assertEqual(len(limits), 1)
-        self.assertLessEqual(limits[0], 9.5)
+            scenarios.main(["--time-limit", "20", "--lanes", "1", "--no-lock"])
+        self.assertEqual(prepared_limits, [15])
+        self.assertEqual(limits, [12])
+        self.assertEqual(stored, ["fixture", "L1", "L2", "L3", "L4", "L5"])
+        self.assertEqual(summarize.call_args.args[2], 17)
+
+    def test_each_cold_layer_spends_the_same_preparation_limit(self) -> None:
+        clock = 0.0
+        limits: list[float] = []
+
+        def prepare(*arguments: object) -> None:
+            nonlocal clock
+            limits.append(float(arguments[5]))  # type: ignore[arg-type]
+            clock += 3
+
+        with (
+            patch("disposable.scenarios.time.monotonic", side_effect=lambda: clock),
+            patch("disposable.images.load", return_value=False),
+            patch.object(scenarios, "_prepare", side_effect=prepare),
+        ):
+            scenarios.prepare_layers(
+                self.runner(io.StringIO()),
+                [scenario("one", layer="L5")],
+                "image",
+                Path("key"),
+                10,
+                scenarios.Output(io.StringIO()),
+            )
+        self.assertEqual(limits, [10, 7])
+
+    def test_a_cached_descendant_needs_no_ancestor_archives(self) -> None:
+        with (
+            patch("disposable.images.load", return_value=True) as load,
+            patch.object(scenarios, "_prepare") as prepare,
+        ):
+            scenarios.prepare_layers(
+                self.runner(io.StringIO()),
+                [scenario("one", layer="L4")],
+                "image",
+                Path("key"),
+                10,
+                scenarios.Output(io.StringIO()),
+            )
+        load.assert_called_once_with("L4")
+        prepare.assert_not_called()
+
+    def test_a_cached_parent_prepares_only_the_missing_child(self) -> None:
+        with (
+            patch("disposable.images.load", side_effect=lambda layer: layer == "L3") as load,
+            patch.object(scenarios, "_prepare") as prepare,
+        ):
+            scenarios.prepare_layers(
+                self.runner(io.StringIO()),
+                [scenario("one", layer="L4")],
+                "image",
+                Path("key"),
+                10,
+                scenarios.Output(io.StringIO()),
+            )
+        self.assertEqual([call.args[0] for call in load.call_args_list], ["L4", "L3"])
+        self.assertEqual([call.args[2] for call in prepare.call_args_list], ["L4"])
+
+    def test_cold_branches_prepare_every_missing_layer_once(self) -> None:
+        with (
+            patch("disposable.images.load", return_value=False),
+            patch.object(scenarios, "_prepare") as prepare,
+        ):
+            scenarios.prepare_layers(
+                self.runner(io.StringIO()),
+                [scenario("one", layer="L4"), scenario("two", layer="L5")],
+                "image",
+                Path("key"),
+                10,
+                scenarios.Output(io.StringIO()),
+            )
+        self.assertEqual(
+            [call.args[2] for call in prepare.call_args_list], ["L1", "L3", "L4", "L5"]
+        )
+
+    def test_an_explicit_l2_request_still_prepares_it(self) -> None:
+        with (
+            patch("disposable.images.load", return_value=False),
+            patch.object(scenarios, "_prepare") as prepare,
+        ):
+            scenarios.prepare_layers(
+                self.runner(io.StringIO()),
+                [scenario("one", layer="L2"), scenario("two", layer="L4")],
+                "image",
+                Path("key"),
+                10,
+                scenarios.Output(io.StringIO()),
+            )
+        self.assertEqual(
+            [call.args[2] for call in prepare.call_args_list], ["L1", "L2", "L3", "L4"]
+        )
+
+
+class PreparationReuseTests(SimpleTestCase):
+    foundation = scenario("disposable.test_foundation.HostFoundation", exclusive=True)
+    dependent = scenario("disposable.test_foundation.FoundationValidators", layer="L1")
+
+    def runner(self) -> scenarios.Runner:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        return scenarios.Runner(
+            scenarios.Output(io.StringIO()),
+            directory,
+            record="",
+            keep_failed=False,
+            quarantined=False,
+        )
+
+    def outcome(self, selected: scenarios.Scenario, *, passed: bool = True) -> scenarios.Outcome:
+        return scenarios.Outcome(selected, passed, len(selected.tests), 1, Path("result.log"), "")
+
+    def test_only_a_selected_complete_s1_uses_the_full_journey_for_preparation(self) -> None:
+        full = scenarios.discover([self.foundation.label])[0]
+        minimal = "disposable.test_prepared_foundation.PrepareFoundation"
+        for selected, expected in (
+            ([self.dependent], minimal),
+            ([full, self.dependent], full.label),
+            ([replace(full, tests=("different.test",)), self.dependent], minimal),
+        ):
+            runner = self.runner()
+            with (
+                self.subTest(selected=selected),
+                patch("disposable.images.load", return_value=False),
+                patch.object(scenarios, "_prepare") as prepare,
+            ):
+                scenarios.prepare_layers(runner, selected, "image", Path("key"), 10, runner.output)
+            self.assertEqual([call.args[1] for call in prepare.call_args_list], [expected])
+
+    def test_only_an_exact_selected_scenario_gets_completion_credit(self) -> None:
+        for selected, expected in (
+            ([self.foundation, self.dependent], [self.foundation]),
+            ([self.dependent], []),
+            ([replace(self.foundation, tests=("another.test",)), self.dependent], []),
+        ):
+            with self.subTest(selected=selected):
+                runner = self.runner()
+
+                def prepare(*arguments: object, target: scenarios.Runner = runner) -> None:
+                    target.outcomes.append(self.outcome(self.foundation))
+
+                with (
+                    patch("disposable.images.load", return_value=False),
+                    patch.object(scenarios, "_prepare", side_effect=prepare),
+                ):
+                    scenarios.prepare_layers(
+                        runner, selected, "image", Path("key"), 10, runner.output
+                    )
+                self.assertEqual([outcome.scenario for outcome in runner.outcomes], expected)
+
+    def test_cold_completed_foundation_is_not_repeated_but_cached_foundation_runs(self) -> None:
+        for cached in (False, True):
+            executed: list[str] = []
+
+            def prepare(runner: scenarios.Runner, *arguments: object) -> None:
+                runner.outcomes.append(self.outcome(self.foundation))
+
+            def execute(
+                runner: scenarios.Runner,
+                units: list[scenarios._Unit],
+                *args: object,
+                labels: list[str] = executed,
+            ) -> None:
+                for unit in units:
+                    for item in unit.scenarios:
+                        labels.append(item.label)
+                        runner.outcomes.append(self.outcome(item))
+
+            with (
+                self.subTest(cached=cached),
+                patch("disposable.images.ensure", return_value="image"),
+                patch("disposable.images.store"),
+                patch("disposable.images.load", return_value=cached),
+                patch.object(scenarios, "controller_key", return_value=Path("key")),
+                patch.object(scenarios, "_prepare", side_effect=prepare),
+                patch.object(scenarios, "execute", side_effect=execute),
+                patch.object(scenarios, "summarize"),
+                patch.object(scenarios, "write_results"),
+                patch.object(scenarios, "keep_logs"),
+            ):
+                result = scenarios._run(
+                    scenarios.arguments(["--lanes", "1"]),
+                    [self.foundation, self.dependent],
+                    scenarios.Output(io.StringIO()),
+                )
+            self.assertEqual(result, 0)
+            self.assertEqual(executed.count(self.foundation.label), int(cached))
+            self.assertEqual(executed.count(self.dependent.label), 1)
+
+    def test_failed_or_missing_preparation_cannot_reuse_an_earlier_success(self) -> None:
+        for produced in ([], [self.outcome(self.foundation, passed=False)]):
+            runner = self.runner()
+            runner.outcomes.append(self.outcome(self.dependent))
+
+            def execute(
+                *arguments: object,
+                target: scenarios.Runner = runner,
+                outcomes: list[scenarios.Outcome] = produced,
+            ) -> None:
+                target.outcomes.extend(outcomes)
+
+            with (
+                self.subTest(produced=produced),
+                patch.object(scenarios, "discover", return_value=[self.foundation]),
+                patch.object(scenarios, "execute", side_effect=execute),
+                patch.object(scenarios, "summarize"),
+                patch.object(scenarios, "write_results"),
+                patch.object(scenarios, "keep_logs"),
+                self.assertRaises(SystemExit),
+            ):
+                scenarios._prepare(
+                    runner, self.foundation.label, "L1", "image", Path("key"), 10, runner.output
+                )
+
+    def test_a_successful_preparation_preserves_its_actual_outcome(self) -> None:
+        runner = self.runner()
+        expected = self.outcome(self.foundation)
+
+        def execute(*arguments: object) -> None:
+            runner.outcomes.append(expected)
+
+        with (
+            patch.object(scenarios, "discover", return_value=[self.foundation]),
+            patch.object(scenarios, "execute", side_effect=execute),
+            patch("disposable.images.exists", return_value=True),
+            patch("disposable.images.tag", return_value="image"),
+        ):
+            scenarios._prepare(
+                runner, self.foundation.label, "L1", "image", Path("key"), 10, runner.output
+            )
+        self.assertEqual(runner.outcomes, [expected])
 
 
 class UnknownLabelTests(SimpleTestCase):

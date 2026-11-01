@@ -524,11 +524,18 @@ def haproxy_state(settings: SiteSettings | SimpleNamespace) -> ProxyState:
     cfg = f"/etc/haproxy/sites/{identifier}.cfg"
     if pathlib.Path(cfg).read_text() != haproxy_config(settings):
         raise ValueError("Proxy ACL/configuration differs from its immutable convention.")
-    info = dict(
-        line.split(": ", 1)
-        for line in hap_api(identifier, "show info").splitlines()
-        if ": " in line
-    )
+    batch = hap_api(identifier, "show info;show servers state;show stat")
+    blocks = batch.split("\n\n")
+    if (
+        len(blocks) != 3
+        or not all(blocks)
+        or not blocks[0].startswith("Name: HAProxy\n")
+        or not blocks[1].startswith("1\n# ")
+        or not blocks[2].startswith("# pxname,")
+    ):
+        raise ValueError("Incomplete proxy Runtime API batch.")
+    info_text, state_text, stat_text = blocks
+    info = dict(line.split(": ", 1) for line in info_text.splitlines() if ": " in line)
     if (
         info.get("Nbthread") != "1"
         or info.get("Nbproc") != "1"
@@ -536,10 +543,10 @@ def haproxy_state(settings: SiteSettings | SimpleNamespace) -> ProxyState:
         or info.get("Maxconn") != "64"
     ):
         raise ValueError("Unsupported current proxy topology/capacity.")
-    raw = hap_api(identifier, "show servers state") + "\n"
+    raw = state_text + "\n"
     rows = state_rows(raw)
     ready = [entry for entry, row in rows.items() if row[6] == "4"]
-    stats = list(csv.DictReader(io.StringIO(hap_api(identifier, "show stat").removeprefix("# "))))
+    stats = list(csv.DictReader(io.StringIO(stat_text.removeprefix("# "))))
     if {row.get("svname") for row in stats} != {"php84", "php85", "FRONTEND", "BACKEND"} or len(
         stats
     ) != 4:

@@ -21,12 +21,14 @@ from automation.worker_observation import ObservedWorker
 from automation.workers import WorkerDefinition
 from discovery import recorded, ssh
 from operations.inputs import PreparationInputs
-from wordpress import create
 
 from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG
 from .test_laravel_deploy import LaravelDeployCase
-from .test_wordpress_create import CANARY, DOMAIN, IDENTIFIER, WordPressCreateCase
+from .test_wordpress_create import WordPressCreateCase
+from .wordpress_testing import WORDPRESS_DOMAIN as DOMAIN
+from .wordpress_testing import WORDPRESS_SITE as IDENTIFIER
+from .wordpress_testing import prepare_wordpress_https
 
 STATE = "automation-wordpress-26.04"
 QUEUE_STATE = "automation-laravel-workers-26.04"
@@ -39,6 +41,8 @@ PRIVATE = f"/var/www/{IDENTIFIER}/private/wp-config.php"
 @tag(SCENARIO_TAG)
 class WordPressServerCron(WordPressCreateCase):
     records: tuple[str, ...] = (STATE,)
+    layer = "L3"
+    prefix = "l3"
 
     @override
     @contextmanager
@@ -84,11 +88,13 @@ class WordPressServerCron(WordPressCreateCase):
             if time.monotonic() >= end:
                 self.fail(f"The host is not manageable: {standing}")
 
-    def wait_for_due_events(self, count: int, *, hook: str = DUE_EVENT, timeout: float = 20) -> int:
+    def wait_for_due_events(
+        self, count: int, *, hook: str = DUE_EVENT, timeout: float = 20, interval: float = 0.2
+    ) -> int:
         end = time.monotonic() + timeout
         value = self.due_events(hook)
         while value != count and time.monotonic() < end:
-            time.sleep(0.2)
+            time.sleep(interval)
             value = self.due_events(hook)
         return value
 
@@ -109,21 +115,9 @@ class WordPressServerCron(WordPressCreateCase):
     def unix_property(self, unit: str, name: str) -> str:
         return self.native(f"systemctl show --value --timestamp=unix -p {name} {unit}").strip()
 
-    def test_1_creates_the_pinned_wordpress_site(self) -> None:
+    def test_1_uses_the_prepared_wordpress_site(self) -> None:
         self.install_acme()
-        self.install_engine()
-        apply_change(
-            self,
-            create.CREATE_WORDPRESS,
-            self.inputs(),
-            timeout=120,
-            secret=CANARY.encode(),
-        )
-        home = self.native(
-            "curl --silent --show-error --fail --max-time 20 --insecure "
-            f"--resolve {DOMAIN}:443:127.0.0.1 https://{DOMAIN}/"
-        )
-        self.assertIn("WordPress", home)
+        self.assertIn("WordPress", prepare_wordpress_https(self))
 
     def test_2_turns_on_server_cron_and_page_loads_stop_running_it(self) -> None:
         self.wait_manageable()
@@ -149,9 +143,22 @@ class WordPressServerCron(WordPressCreateCase):
         self.wp("eval", "delete_transient('doing_cron');")
         self.visit_home()
         self.assertEqual(self.wait_for_due_events(1, hook=ON_EVENT, timeout=3), 1)
-        # The task itself runs it, exactly as the timer will every minute.
-        self.native(f"systemctl start {service}")
-        self.assertEqual(self.wait_for_due_events(0, hook=ON_EVENT, timeout=15), 0)
+        # C1 requires further automatic ticks with every SSH connection closed (#357).
+        self.assertEqual(self.wait_for_due_events(0, hook=ON_EVENT, timeout=75, interval=1), 0)
+        completed = (
+            "while :; do case $(systemctl show --value -p ActiveState "
+            f"{service}) in inactive|failed) break;; esac; sleep 0.1; done"
+        )
+        self.native("timeout 10 sh -c " + shlex.quote(completed))
+        self.assertGreater(
+            int(self.unix_property(timer, "LastTriggerUSec").strip("@")),
+            int(triggered.strip("@")),
+        )
+        self.assertGreater(
+            int(self.unix_property(service, "ExecMainStartTimestamp").strip("@")),
+            int(started.strip("@")),
+        )
+        self.assertEqual(self.property(service, "Result"), "success")
         # The timer is armed for the next minute without any controller involved.
         self.assertNotIn(self.property(timer, "NextElapseUSecRealtime"), ("", "0", "n/a"))
 

@@ -2,23 +2,21 @@
 # docs/quality.md#native-layer
 #
 # One full local build. The fast gate, the fast validators, the browser tests and the native
-# scenarios run concurrently; each is timed and the wall time is reported against the
+# scenarios are timed and the wall time is reported against the
 # 5-minute target and the 15-minute limit
 # (docs/adr/0033-prove-real-behavior-in-two-test-layers.md).
 #
-# The wall is the native stage, the longest one. Running the browser stage first and starting
-# the native stage when it ends was measured at Phase D and made the build slower: browser
-# 79 s plus native 335 s, 414 s against 365 s for the concurrent build, because the native
-# stage takes almost the same time alone as it does beside the browser stage. The stage times
-# are recorded in docs/phase-d-qualification.md#build-budget.
+# Controller tests and validators run first, alongside the browser stage. Native lifecycle
+# work starts when both fast gates finish, avoiding contention during the joint fast stage.
+# The full-build clock includes this wait; browser work remains concurrent with native work.
 #
 # Usage: build.sh [--env-file FILE]   (default .env)
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here/../.."
 
-# The validator and native stages run side by side by design, so this process holds the
-# host-wide native lock for the whole build and the stages below pass --no-lock
+# This process holds the host-wide native lock across validator and lifecycle stages,
+# and the stages below pass --no-lock
 # (disposable/locking.py, docs/quality.md#limits).
 if [ "${BARECTL_NATIVE_LOCKED:-0}" = 0 ]; then
     BARECTL_NATIVE_LOCKED=1
@@ -37,6 +35,8 @@ mkdir -p "$logs"
 work=$(mktemp -d "$logs/run-XXXXXXXX")
 printf 'Full build logs: %s\n' "$work"
 started=$(date +%s)
+BARECTL_BUILD_DEADLINE=$(( started + 900 ))
+export BARECTL_BUILD_DEADLINE
 
 run() {
     name=$1
@@ -47,11 +47,15 @@ run() {
         echo $? >"$work/$name.code"
         echo $(( $(date +%s) - job_started )) >"$work/$name.secs"
     ) &
+    run_pid=$!
 }
 
 run controller-fast
+controller_pid=$run_pid
 run fast-validators
+validators_pid=$run_pid
 run browser
+wait "$controller_pid" "$validators_pid"
 run native
 
 status=0

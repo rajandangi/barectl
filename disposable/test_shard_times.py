@@ -1,5 +1,9 @@
+import io
+import json
+import math
 import re
 from pathlib import Path
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -53,6 +57,50 @@ class RecordTests(SimpleTestCase):
         self.assertLessEqual(max(predicted), scenarios.TARGET, predicted)
 
 
+class LocalRecordTests(SimpleTestCase):
+    path = Path(__file__).with_name("local_times.json")
+
+    def test_every_local_scenario_has_a_positive_finite_measured_time(self) -> None:
+        record = shard_times.Record.load(self.path)
+        self.assertEqual(set(record.scenarios), {item.label for item in scenarios.discover()})
+        self.assertEqual(set(record.sources), set(record.scenarios))
+        self.assertTrue(
+            all(math.isfinite(value) and value > 0 for value in record.scenarios.values())
+        )
+        self.assertEqual(record.stages, {})
+        for source in record.sources.values():
+            self.assertRegex(source, r"^local run \d{4}-\d{2}-\d{2} capacity16$")
+
+    def test_the_local_measurement_retains_hardware_and_input_identity(self) -> None:
+        record = json.loads(self.path.read_text())
+        self.assertEqual(record["lane_count"], 16)
+        self.assertEqual(record["hardware"]["docker_cpus"], 14)
+        for key in ("source_manifest_sha256", "summary_sha256", "log_sha256"):
+            self.assertRegex(record[key], r"^[0-9a-f]{64}$")
+
+    def test_only_unsharded_local_native_uses_the_local_record(self) -> None:
+        selected = scenarios.discover(["disposable.test_l0_discovery.PlainL0Discovery"])
+        for arguments in (["--lanes", "1"], ["--lanes", "1", "--shard", "1/11"]):
+            options = scenarios.arguments(arguments)
+            with (
+                self.subTest(shard=options.shard),
+                patch.object(shard_times.Record, "load", wraps=shard_times.Record.load) as load,
+                patch("disposable.images.ensure", return_value="image"),
+                patch("disposable.images.store"),
+                patch.object(scenarios, "controller_key", return_value=Path("key")),
+                patch.object(scenarios, "prepare_layers"),
+                patch.object(scenarios, "execute"),
+                patch.object(scenarios, "summarize"),
+                patch.object(scenarios, "write_results"),
+                patch.object(scenarios, "keep_logs"),
+            ):
+                scenarios._run(options, selected, scenarios.Output(io.StringIO()))
+            if options.shard:
+                load.assert_called_once_with()
+            else:
+                load.assert_called_once_with(self.path)
+
+
 class PartitionTests(SimpleTestCase):
     def test_every_label_lands_in_exactly_one_shard(self) -> None:
         record = shard_times.Record("test", {"a": 50, "b": 40, "c": 30, "d": 20, "e": 10}, {})
@@ -92,6 +140,12 @@ class PartitionTests(SimpleTestCase):
 
 
 class ShardSelectionTests(SimpleTestCase):
+    def test_the_partition_uses_the_workflows_actual_lane_count(self) -> None:
+        text, _ = hosted()
+        self.assertEqual(
+            re.findall(r'BARECTL_NATIVE_LANES: "(\d+)"', text), [str(shard_times.LANES)]
+        )
+
     def test_the_shards_partition_the_discovered_scenarios(self) -> None:
         discovered = scenarios.discover()
         _, count = hosted()

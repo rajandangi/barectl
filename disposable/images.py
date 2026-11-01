@@ -327,7 +327,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="images", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("cache-key", "build"))
     parser.add_argument(
-        "--layer", default="L0", choices=("L0", "L1", "L2", "L3", "L4", "L5", "fixture")
+        "--layer",
+        default="L0",
+        choices=("L0", "L0-standing", "L0-24.04", "L1", "L2", "L3", "L4", "L5", "fixture"),
     )
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if options.command == "cache-key":

@@ -9,8 +9,10 @@ which cannot drain refuses with nothing changed.
 """
 
 import os
+import shlex
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import override
 
@@ -20,16 +22,35 @@ from automation.convention import service_name, slice_name, timer_name
 from discovery import recorded, ssh
 from operations.inputs import PreparationInputs
 from sites import php_change
-from wordpress import create
 
-from .change_testing import apply_change
+from .change_testing import apply_change, submit_change, wait_result
 from .scenario_testing import SCENARIO_TAG
-from .test_wordpress_create import CANARY, DOMAIN, IDENTIFIER, WordPressCreateCase
+from .test_wordpress_create import WordPressCreateCase
+from .wordpress_testing import WORDPRESS_DOMAIN as DOMAIN
+from .wordpress_testing import WORDPRESS_SITE as IDENTIFIER
+from .wordpress_testing import prepare_wordpress_https, start_wordpress_cron_for_fence
 
 STATE = "fence-wordpress-26.04"
 BLOCKER = "barectl-fence-blocker"
 TARGET = "php85"
 SOURCE = "php84"
+GATE = f"/var/www/{IDENTIFIER}/private/tmp/fence-request"
+PLUGIN = f"/var/www/{IDENTIFIER}/current/public/wp-content/mu-plugins/barectl-fence-request.php"
+HELD_REQUEST = r"""<?php
+add_action('init', function () {
+    if (($_GET['barectl_fence_request'] ?? '') !== 'hold') return;
+    $gate = '/var/www/l3wordpress/private/tmp/fence-request';
+    file_put_contents($gate . '/ready', PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION);
+    $deadline = microtime(true) + 45;
+    do {
+        clearstatcache(true, $gate . '/release');
+        if (file_exists($gate . '/release')) return;
+        usleep(10000);
+    } while (microtime(true) < $deadline);
+    http_response_code(500);
+    exit('Fence request gate expired');
+});
+"""
 
 
 @tag(SCENARIO_TAG)
@@ -37,6 +58,8 @@ class PHPFence(WordPressCreateCase):
     """One WordPress site with server cron on, then a PHP switch that fences it."""
 
     records: tuple[str, ...] = (STATE,)
+    layer = "L3"
+    prefix = "l3"
 
     @override
     @contextmanager
@@ -82,26 +105,11 @@ class PHPFence(WordPressCreateCase):
             if time.monotonic() >= end:
                 self.fail(f"The host is not manageable: {standing}")
 
-    def test_1_creates_the_site_and_turns_server_cron_on(self) -> None:
-        from automation import change
-
+    def test_1_uses_the_prepared_site_and_turns_server_cron_on(self) -> None:
         self.install_acme()
-        self.install_engine()
-        apply_change(
-            self,
-            create.CREATE_WORDPRESS,
-            self.inputs(),
-            timeout=120,
-            secret=CANARY.encode(),
-        )
-        self.assertIn("WordPress", self.home())
+        self.assertIn("WordPress", prepare_wordpress_https(self))
         self.wait_manageable()
-        apply_change(
-            self,
-            change.SET_WORDPRESS_SERVER_CRON,
-            PreparationInputs("", IDENTIFIER, schedule_state="on"),
-            timeout=180,
-        )
+        start_wordpress_cron_for_fence(self)
         self.assertEqual(self.property(timer_name(IDENTIFIER, "wpcron"), "ActiveState"), "active")
 
     def test_2_a_switch_fences_and_restores_the_timer_on_the_target_runtime(self) -> None:
@@ -109,7 +117,6 @@ class PHPFence(WordPressCreateCase):
         service = service_name(IDENTIFIER, "wpcron")
         proxy = f"haproxy-site@{IDENTIFIER}.service"
         before_proxy = self.property(proxy, "MainPID")
-        self.assertFalse(self.slice_populated())
         with self.shell() as shell:
             evidence = php_change.inspect(shell, PreparationInputs(TARGET, IDENTIFIER))
         if evidence.state is None:
@@ -120,7 +127,70 @@ class PHPFence(WordPressCreateCase):
                 + " 2>&1; true"
             )
             self.fail("The site's PHP state could not be read:\n" + raw[-4000:])
-        apply_change(self, php_change.SET_SITE_PHP, PreparationInputs(TARGET, IDENTIFIER))
+        self.addCleanup(self.native, f"rm -f {PLUGIN}; rm -rf {GATE}")
+        self.native(f"install -d -m700 -o s{IDENTIFIER} -g s{IDENTIFIER} {GATE}")
+        self.native(f"install -d -m755 {shlex.quote(os.path.dirname(PLUGIN))}")
+        self.native("printf %s " + shlex.quote(HELD_REQUEST) + " > " + shlex.quote(PLUGIN))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            request = pool.submit(
+                self.native,
+                "curl --silent --show-error --fail --max-time 50 --insecure "
+                f"--resolve {DOMAIN}:443:127.0.0.1 "
+                f"'https://{DOMAIN}/?barectl_fence_request=hold'",
+                timeout=55,
+            )
+            submitted = None
+            try:
+                self.native(
+                    "timeout 10 sh -ec "
+                    + shlex.quote(f"until test -f {GATE}/ready; do sleep 0.05; done"),
+                    timeout=12,
+                )
+                self.assertEqual(self.native(f"cat {GATE}/ready").strip(), "8.4")
+                submitted = submit_change(
+                    self, php_change.SET_SITE_PHP, PreparationInputs(TARGET, IDENTIFIER)
+                )
+                self.assertFalse(submitted.no_changes)
+                journal = shlex.join(
+                    ("journalctl", "-u", submitted.unit, "--no-pager", "-o", "cat")
+                )
+                self.native(
+                    "timeout 15 sh -ec "
+                    + shlex.quote(
+                        f"until {journal} --grep='^barectl-stage drain$' >/dev/null; "
+                        "do sleep 0.05; done"
+                    ),
+                    timeout=17,
+                )
+                self.assertFalse(request.done(), "The source HTTP request must hold the drain.")
+                self.assertEqual(self.property(submitted.unit, "ActiveState"), "active")
+                self.assertFalse(self.slice_populated())
+                for unit in (timer, service):
+                    self.assertEqual(self.property(unit, "RefuseManualStart"), "yes")
+                    if unit == timer:
+                        self.assertEqual(self.property(unit, "ActiveState"), "inactive")
+                    else:
+                        self.assertIn(self.property(unit, "ActiveState"), ("inactive", "failed"))
+                        self.assertEqual(self.property(unit, "MainPID"), "0")
+                    self.assertEqual(
+                        self.native(f"readlink /run/systemd/system/{unit}").strip(), "/dev/null"
+                    )
+                # ADR 0036's empty-slice guarantee holds while fenced, before restore.
+                self.assertFalse(self.slice_populated())
+                self.assertFalse(request.done(), "The fence proof must precede request release.")
+                self.assertEqual(self.property(submitted.unit, "ActiveState"), "active")
+            finally:
+                try:
+                    self.native(f"touch {GATE}/release")
+                    self.assertIn("WordPress", request.result(timeout=60))
+                finally:
+                    try:
+                        if submitted is not None:
+                            wait_result(self, submitted, timeout=30)
+                    finally:
+                        self.native(f"rm -f {PLUGIN}; rm -rf {GATE}")
+        with self.shell() as shell:
+            self.assertTrue(php_change.SET_SITE_PHP.verify(shell, submitted.review))
         self.assertIn("WordPress", self.home(), "The site must keep serving across the fence.")
         self.assertEqual(
             self.property(proxy, "MainPID"),
@@ -130,8 +200,8 @@ class PHPFence(WordPressCreateCase):
         self.assertIn(TARGET, self.wrapper_runtime())
         self.assertEqual(self.property(timer, "ActiveState"), "active")
         self.assertTrue(self.property(timer, "UnitFileState").startswith("enabled"))
+        self.native(f"systemctl start {service}", timeout=30)
         self.assertEqual(self.property(service, "Result"), "success")
-        self.assertFalse(self.slice_populated())
 
     def test_3_a_fence_that_cannot_drain_refuses_with_nothing_changed(self) -> None:
         timer = timer_name(IDENTIFIER, "wpcron")

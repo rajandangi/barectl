@@ -6,7 +6,7 @@ nothing but the lane's local mirror; the harness reaches its SSH through the lan
 forwarder. Non-exclusive scenarios share one server in sequence, each with its own name
 prefix and a residue check; a failed scenario or residue check discards the server. Items
 are killed at 180 s, the build stops at 900 s naming what did not finish, and the summary
-reports the total against the 10-minute target. The scheduled breadth scenarios
+reports the total against the 5-minute target. The scheduled breadth scenarios
 (``--breadth``) are separate: a reboot, a long scheduler run and the 1/2/4 GiB memory classes
 never add to the merge build (docs/quality.md#the-scheduled-breadth-job).
 """
@@ -47,8 +47,9 @@ RELEASE = "26.04"
 ITEM_LIMIT = 180.0
 BUILD_LIMIT = 900.0
 TARGET = 300.0
-# lanes = min(floor(CPUs / 1.75), floor(VM GiB / 0.5)) — spike P3, docs/quality.md.
-LANE_CPUS = 1.75
+# Same-allocation 8/12/16-lane measurements: docs/test-budget-qualification.md.
+MAX_LANES = 16
+LANE_CPUS = 0.875
 LANE_GIB = 0.5
 # A real name no mirror serves: a lane that resolves it is not egress-denied.
 EGRESS_PROBE = "example.com"
@@ -419,6 +420,24 @@ class Lane:
     dns: str = ""
     git_key: Path | None = None
     acme_root: Path | None = None
+    timings: list[dict[str, str | float]] = field(default_factory=list)
+
+    @contextlib.contextmanager
+    def timing(self, stage: str, scenario: str = "") -> Iterator[None]:
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            self.timings.append(
+                {"stage": stage, "scenario": scenario, "seconds": time.monotonic() - started}
+            )
+
+    def write_timings(self) -> None:
+        logs = self.work / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        (logs / f"{self.name}-timings.json").write_text(
+            json.dumps(self.timings, indent=1) + "\n", encoding="utf-8"
+        )
 
     def start(self) -> None:
         self.name = f"barectl-native-lane-{os.getpid()}-{secrets.token_hex(3)}-{self.index}"
@@ -701,13 +720,15 @@ class Runner:
         with self.lock:
             self.lanes.append(lane)
         try:
-            lane.start()
+            with lane.timing("lane-start"):
+                lane.start()
             while not stopping.is_set():
                 try:
                     unit = units.get_nowait()
                 except queue.Empty:
                     break
-                lane.discard_server()
+                with lane.timing("server-discard"):
+                    lane.discard_server()
                 for scenario in unit.scenarios:
                     if stopping.is_set():
                         break
@@ -716,7 +737,11 @@ class Runner:
             self.output.say(f"lane {index} stopped: {type(error).__name__}: {error}")
             stopping.set()
         finally:
-            lane.remove()
+            try:
+                with lane.timing("lane-remove"):
+                    lane.remove()
+            finally:
+                lane.write_timings()
 
     def _run_scenario(self, lane: Lane, scenario: Scenario) -> None:
         if (
@@ -724,19 +749,23 @@ class Runner:
             or lane.server_layer != scenario.layer
             or lane.server_memory_gib != scenario.memory_gib
         ):
-            lane.discard_server()
-            lane.boot_server(scenario.layer, scenario.memory_gib)
+            with lane.timing("server-replace", scenario.label):
+                lane.discard_server()
+                lane.boot_server(scenario.layer, scenario.memory_gib)
         server = lane.server
         if server is None:
             raise ScenarioError("the lane has no server to run a scenario on.")
-        outcome = self._execute(lane, server, scenario)
+        with lane.timing("scenario", scenario.label):
+            outcome = self._execute(lane, server, scenario)
         if not outcome.passed:
             self._diagnose(server, scenario)
         residue_ok = True
         if not self.record and scenario.prefix:
-            residue_ok = self._residue(server, scenario, outcome)
+            with lane.timing("residue", scenario.label):
+                residue_ok = self._residue(server, scenario, outcome)
         if (not outcome.passed or not residue_ok) and not self.keep_failed:
-            lane.discard_server()
+            with lane.timing("failed-server-discard", scenario.label):
+                lane.discard_server()
 
     def _diagnose(self, server: Machine, scenario: Scenario) -> None:
         """Keep the native state a failed item leaves behind (docs/quality.md#native-layer)."""
@@ -766,10 +795,13 @@ class Runner:
     def _execute(self, lane: Lane, server: Machine, scenario: Scenario) -> Outcome:
         log = self.work / "logs" / f"{server.name}-{scenario.label.rsplit('.', 1)[-1]}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
-        environment = lane.environment(scenario, server, self.record, quarantined=self.quarantined)
+        with lane.timing("environment", scenario.label):
+            environment = lane.environment(
+                scenario, server, self.record, quarantined=self.quarantined
+            )
         command = [
             sys.executable, "manage.py", "test", "--tag", SCENARIO_TAG,
-            "--verbosity", "2", scenario.label,
+            "--verbosity", "2", "--durations", "10", scenario.label,
         ]  # fmt: skip
         before = set(lane.dns_queries())
         started = time.monotonic()
@@ -831,7 +863,9 @@ class _Unit:
     scenarios: list[Scenario]
 
 
-def plan(scenarios: list[Scenario], lanes: int) -> list[_Unit]:
+def plan(
+    scenarios: list[Scenario], lanes: int, *, weights: Mapping[str, float] | None = None
+) -> list[_Unit]:
     """Non-exclusive scenarios share a lane server; exclusive ones get their own unit."""
     units: list[_Unit] = [
         _Unit(scenario.layer, [scenario]) for scenario in scenarios if scenario.exclusive
@@ -842,8 +876,37 @@ def plan(scenarios: list[Scenario], lanes: int) -> list[_Unit]:
             by_layer.setdefault(scenario.layer, []).append(scenario)
     for layer, group in by_layer.items():
         batches = min(max(lanes, 1), len(group))
-        units.extend(_Unit(layer, group[index::batches]) for index in range(batches))
+        if weights is None:
+            units.extend(_Unit(layer, group[index::batches]) for index in range(batches))
+            continue
+        assigned: list[list[Scenario]] = [[] for _ in range(batches)]
+        loads = [0.0] * batches
+        for item in sorted(group, key=lambda item: (-weights[item.label], item.label)):
+            index = loads.index(min(loads))
+            assigned[index].append(item)
+            loads[index] += weights[item.label]
+        units.extend(_Unit(layer, batch) for batch in assigned)
+
+    if weights is not None:
+        units.sort(
+            key=lambda unit: (
+                -sum(weights[item.label] for item in unit.scenarios),
+                tuple(item.label for item in unit.scenarios),
+            )
+        )
     return units
+
+
+def validator_weights(scenarios: Sequence[Scenario]) -> Mapping[str, float]:
+    """Measured class durations; an unmeasured validator needs a new timing record."""
+    path = Path(__file__).with_name("validator_times.json")
+    weights: dict[str, float] = json.loads(path.read_text())["scenarios"]
+    missing = sorted(item.label for item in scenarios if item.label not in weights)
+    if missing:
+        raise ValueError("Record validator durations before scheduling: " + ", ".join(missing))
+    if any(not math.isfinite(value) or value <= 0 for value in weights.values()):
+        raise ValueError("Validator durations must be positive finite seconds.")
+    return weights
 
 
 def default_lanes() -> int:
@@ -853,7 +916,7 @@ def default_lanes() -> int:
     info = docker("info", "--format", "{{.NCPU}} {{.MemTotal}}").split()
     cpus = int(info[0])
     memory = int(info[1]) / 2**30
-    return max(1, min(math.floor(cpus / LANE_CPUS), math.floor(memory / LANE_GIB)))
+    return max(1, min(MAX_LANES, math.floor(cpus / LANE_CPUS), math.floor(memory / LANE_GIB)))
 
 
 def write_results(outcomes: Sequence[Outcome], work: Path) -> None:
@@ -952,6 +1015,8 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
         help="run without the host-wide native lock (build.sh holds it for both stages)",
     )
     options = parser.parse_args(argv)
+    if not math.isfinite(options.time_limit) or options.time_limit <= 0:
+        parser.error("--time-limit must be positive finite seconds")
     if options.validators and (options.record or options.shard or options.check_egress):
         parser.error(
             "--validators is a single-container stage without shard, record or egress selection"
@@ -980,26 +1045,46 @@ def prepare_layers(
 ) -> None:
     """Prepare each missing snapshot a scenario needs, layer by layer.
 
-    L1 is the real S1 foundation; L2 is the prepared-sites layer built by the product's own
-    Create site change on top of L1. Both are prepared through the real flow and reused
-    from the keyed cache.
+    A keyed cached layer already contains its ancestors; only a missing layer needs its
+    parent loaded or prepared (docs/quality.md#native-layer).
     """
-    layers = {scenario.layer for scenario in scenarios}
-    requirements = []
-    if layers & {"L1", "L2", "L3", "L4", "L5"}:
-        requirements.append(("L1", "disposable.test_foundation.HostFoundation"))
-    if layers & {"L2", "L3", "L4"}:
-        requirements.append(("L2", "disposable.test_prepared_sites.PrepareSites"))
-    if layers & {"L3", "L4"}:
-        requirements.append(("L3", "disposable.test_prepared_wordpress.PrepareWordPress"))
-    if "L4" in layers:
-        requirements.append(("L4", "disposable.test_prepared_wordpress.PrepareWordPressCache"))
-    if "L5" in layers:
-        requirements.append(("L5", "disposable.test_prepared_laravel.PrepareLaravel"))
-    for layer, label in requirements:
+    deadline = time.monotonic() + limit
+    selected = {scenario.label: scenario for scenario in scenarios}
+    full_foundation = "disposable.test_foundation.HostFoundation"
+    requirements = {
+        "L1": ("L0", "disposable.test_prepared_foundation.PrepareFoundation"),
+        "L2": ("L1", "disposable.test_prepared_sites.PrepareSites"),
+        "L3": ("L1", "disposable.test_prepared_wordpress.PrepareWordPress"),
+        "L4": ("L3", "disposable.test_prepared_wordpress.PrepareWordPressCache"),
+        "L5": ("L1", "disposable.test_prepared_laravel.PrepareLaravel"),
+    }
+    ready: set[str] = set()
+
+    def prepare(layer: str) -> None:
+        if layer not in requirements or layer in ready:
+            return
         if images.load(layer):
-            continue
-        _prepare(runner, label, layer, image, key, limit, output)
+            ready.add(layer)
+            return
+        parent, label = requirements[layer]
+        prepare(parent)
+        if (
+            layer == "L1"
+            and full_foundation in selected
+            and selected[full_foundation] in discover([full_foundation])
+        ):
+            label = full_foundation
+        remaining = max(0.0, deadline - time.monotonic())
+        _prepare(runner, label, layer, image, key, remaining, output)
+        ready.add(layer)
+
+    for layer in sorted({scenario.layer for scenario in scenarios}):
+        prepare(layer)
+    runner.outcomes[:] = [
+        outcome
+        for outcome in runner.outcomes
+        if outcome.passed and selected.get(outcome.scenario.label) == outcome.scenario
+    ]
 
 
 def _prepare(
@@ -1011,16 +1096,17 @@ def _prepare(
     if preparation is None:
         raise ScenarioError(f"No scenario prepares the {layer} snapshot.")
     output.say(f"Preparing the missing {layer} snapshot through {preparation.label}.")
+    previous = len(runner.outcomes)
     execute(runner, plan([preparation], 1), image, key, 1, limit, output)
-    outcome = runner.outcomes[-1] if runner.outcomes else None
-    if outcome is None or not outcome.passed:
-        summarize(runner.outcomes or [], [preparation], outcome.seconds if outcome else 0, output)
+    outcomes = runner.outcomes[previous:]
+    outcome = outcomes[0] if len(outcomes) == 1 else None
+    if outcome is None or outcome.scenario != preparation or not outcome.passed:
+        summarize(outcomes, [preparation], outcome.seconds if outcome else 0, output)
         write_results(runner.outcomes, runner.work)
         keep_logs(runner.work, output)
         raise SystemExit(1)
     if not images.exists(images.tag(layer)):
         raise ScenarioError(f"{preparation.label} did not commit the {layer} snapshot.")
-    runner.outcomes.clear()
 
 
 def _breadth_lanes(lanes: int, options: argparse.Namespace) -> int:
@@ -1069,6 +1155,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901
 
 
 def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output) -> int:
+    started = time.monotonic()
     if options.validators:
         # Two validator lanes keep the six classes under the joint-fast target; each lane
         # owns its container, so a manager reload in one cannot break another.
@@ -1088,20 +1175,35 @@ def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output)
             output, work, record=options.record, keep_failed=options.keep_failed,
             quarantined=options.quarantined, fixture_image=fixture_image,
         )  # fmt: skip
-        started = time.monotonic()
-        prepare_layers(runner, scenarios, image, key, options.time_limit, output)
+        remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+        prepare_layers(runner, scenarios, image, key, remaining, output)
         completed = {outcome.scenario.label for outcome in runner.outcomes}
-        units = plan([scenario for scenario in scenarios if scenario.label not in completed], lanes)
+        remaining_scenarios = [
+            scenario for scenario in scenarios if scenario.label not in completed
+        ]
+        weights = None
+        if options.validators:
+            weights = validator_weights(remaining_scenarios)
+        elif not (options.breadth or options.check_egress or options.record):
+            record = (
+                shard_times.Record.load()
+                if options.shard
+                else shard_times.Record.load(Path(__file__).with_name("local_times.json"))
+            )
+            weights = record.scenarios
+        units = plan(
+            remaining_scenarios,
+            lanes,
+            weights=weights,
+        )
         remaining = max(0.0, options.time_limit - (time.monotonic() - started))
         execute(runner, units, image, key, lanes, remaining, output)
+        for layer in ("L1", "L2", "L3", "L4", "L5"):
+            images.store(layer)
         seconds = time.monotonic() - started
         summarize(runner.outcomes, scenarios, seconds, output, validators=options.validators)
         write_results(runner.outcomes, work)
         keep_logs(work, output)
-        images.store("L1")
-        images.store("L2")
-        images.store("L3")
-        images.store("L4")
         if options.check_egress:
             return _egress_control(runner.outcomes, output)
     finished = {outcome.scenario.label for outcome in runner.outcomes}

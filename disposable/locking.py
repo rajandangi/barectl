@@ -26,12 +26,19 @@ def lock_path() -> Path:
 @contextmanager
 def host_lock(announce: Callable[[str], None]) -> Iterator[None]:
     """Hold the host-wide native lock, announcing once when another run owns it."""
-    path = lock_path()
+    with file_lock(lock_path(), announce):
+        yield
+
+
+@contextmanager
+def file_lock(path: Path, announce: Callable[[str], None] | None = None) -> Iterator[None]:
+    """Serialize shared harness cache creation with the same kernel lock as native runs."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            announce(f"{WAITING}{path}")
+            if announce is not None:
+                announce(f"{WAITING}{path}")
             fcntl.flock(handle, fcntl.LOCK_EX)
         yield

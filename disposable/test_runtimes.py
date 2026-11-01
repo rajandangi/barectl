@@ -394,19 +394,19 @@ class RuntimeNativeBehavior(ScenarioTestCase):
         self.native("systemctl daemon-reload")
         try:
             with self.shell() as shell:
-                observed = collect(shell)
+                observed = collect(shell, sites=False)
             self.assertFalse(
                 next(row for row in observed.runtimes if row.entry == "php84").manageable
             )
             self.native("systemctl reload php-fpm@php84.service")
             with self.shell() as shell:
-                after_reload = collect(shell)
+                after_reload = collect(shell, sites=False)
             self.assertFalse(
                 next(row for row in after_reload.runtimes if row.entry == "php84").manageable
             )
             self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
             with self.shell() as shell:
-                after_restart = collect(shell)
+                after_restart = collect(shell, sites=False)
             self.assertTrue(all(row.manageable for row in after_restart.runtimes))
         finally:
             self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
@@ -450,7 +450,7 @@ class RuntimeNativeBehavior(ScenarioTestCase):
                 shared,
             )
             with self.shell() as shell:
-                observed = collect(shell)
+                observed = collect(shell, sites=False)
             by_entry = {row.entry: row for row in observed.runtimes}
             self.assertFalse(by_entry["php84"].manageable)
             self.assertTrue(by_entry["php85"].manageable, by_entry["php85"].problem)
@@ -475,7 +475,7 @@ class RuntimeNativeBehavior(ScenarioTestCase):
         deadline = time.monotonic() + 15
         while True:
             with self.shell() as shell:
-                observed = collect(shell)
+                observed = collect(shell, sites=False)
             row = next(row for row in observed.runtimes if row.entry == "php84")
             if row.manageable or time.monotonic() >= deadline:
                 break

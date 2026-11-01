@@ -167,6 +167,11 @@ def follow(log: Path, seconds: float | None) -> int:
 BUILD_GATES = {"controller-fast", "fast-validators", "browser", "native"}
 
 
+def _build_remaining() -> int | None:
+    deadline = os.environ.get("BARECTL_BUILD_DEADLINE")
+    return max(0, min(900, int(deadline) - int(time.time()) - 1)) if deadline else None
+
+
 def build_command(log: Path, env_file: str) -> list[str]:
     """Expand repository-owned gates; only these known commands expose their argv."""
     if log.stem == "controller-fast":
@@ -183,6 +188,8 @@ def build_command(log: Path, env_file: str) -> list[str]:
             "--exclude-tag",
             "scenario",
             "--parallel",
+            "--durations",
+            "20",
         ]
     if log.stem == "browser":
         return [
@@ -209,7 +216,10 @@ def build_command(log: Path, env_file: str) -> list[str]:
             "--no-lock",
         ]
     if log.stem == "native":
-        return [runner, "--env-file", env_file, "--", "--no-lock"]
+        command = [runner, "--env-file", env_file, "--", "--no-lock"]
+        if (remaining := _build_remaining()) is not None:
+            command += ["--time-limit", str(remaining)]
+        return command
     raise ValueError("Unknown repository build gate.")
 
 
@@ -305,7 +315,17 @@ def prepare_command(mode: str, log: Path, remaining: list[str]) -> tuple[str, li
         return mode, remaining, False
     if len(remaining) != 1:
         raise ValueError("Expected build LOG ENV_FILE.")
-    return "run", ["--", *build_command(log, remaining[0])], True
+    command = build_command(log, remaining[0])
+    if (seconds := _build_remaining()) is not None:
+        if seconds == 0:
+            command = [
+                sys.executable,
+                "-c",
+                "print('Full-build hard limit exhausted'); raise SystemExit(124)",
+            ]
+        else:
+            command = ["timeout", "-k", "10", str(seconds), *command]
+    return "run", ["--", *command], True
 
 
 def main(arguments: list[str] | None = None) -> int:
