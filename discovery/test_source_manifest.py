@@ -92,3 +92,14 @@ class SourceManifestTests(SimpleTestCase):
     def test_every_shared_source_exists(self) -> None:
         missing = [path for path in source_manifest.SOURCES if not (REPOSITORY / path).is_file()]
         self.assertEqual(missing, [])
+
+    def test_every_command_source_is_a_shared_source(self) -> None:
+        missing = sorted(
+            path for path in source_manifest.COMMAND_SOURCES if path not in source_manifest.SOURCES
+        )
+        self.assertEqual(
+            missing,
+            [],
+            "a module that builds transcript commands is missing from SOURCES; changing "
+            "its command text would leave every replay silently current",
+        )

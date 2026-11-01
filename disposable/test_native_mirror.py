@@ -1,7 +1,10 @@
+import os
 import socket
 import struct
 import tempfile
 import threading
+import time
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -118,6 +121,40 @@ class ServeRoutingTests(SimpleTestCase):
                 self.assertEqual(response.read(), b"cached")
                 connection.request("GET", "/x.narinfo", headers={"Host": "other.example"})
                 self.assertEqual(connection.getresponse().status, 404)
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_a_cached_file_reports_a_fresh_last_modified(self) -> None:
+        from .native_mirror import serve
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            relative = Path("snapshot.ubuntu.com") / "ubuntu" / "dists" / "resolute" / "InRelease"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"cached")
+            old = time.time() - 30 * 86400
+            os.utime(path, (old, old))
+            server = serve._Server(("127.0.0.1", 0), root, frozenset({"snapshot.ubuntu.com"}))
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                import http.client
+
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                connection.request(
+                    "GET",
+                    "/ubuntu/dists/resolute/InRelease",
+                    headers={"Host": "snapshot.ubuntu.com"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                modified = parsedate_to_datetime(response.getheader("Last-Modified") or "")
+                self.assertGreater(modified.timestamp(), time.time() - 60)
                 connection.close()
             finally:
                 server.shutdown()
