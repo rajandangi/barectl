@@ -436,6 +436,8 @@ def server_page(
                 state.snapshot.collected_at,
                 advanced_url=reverse("server_advanced", args=[server.pk]),
                 auto_updates_url=reverse("security_auto_updates_prepare", args=[server.pk]),
+                updates_check_url=reverse("security_updates_check_prepare", args=[server.pk]),
+                updates_install_url=reverse("security_updates_install_prepare", args=[server.pk]),
                 can_change=can_change_security,
             )
             if state.snapshot is not None

@@ -317,6 +317,43 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The automatic-updates change stopped before reporting its outcome. Read the server "
         "again before preparing a new review."
     ),
+    "updates_refresh": (
+        "Ubuntu's package lists were not refreshed, so nothing was installed. Check the "
+        "server's configured Ubuntu archive, then prepare a new review."
+    ),
+    "updates_refresh_failed": (
+        "The package-list refresh stopped before reporting its outcome. Read the server "
+        "again before preparing a new review."
+    ),
+    "updates_transaction": (
+        "The server's resolved package transaction differs from the reviewed one, so "
+        "Barectl stopped before changing packages. Check for updates and prepare a new "
+        "review."
+    ),
+    "updates_hold": (
+        "A reviewed package is now held with apt-mark hold, so Barectl stopped before "
+        "changing packages. Release the hold through ordinary administration, then prepare "
+        "a new review."
+    ),
+    "updates_conffile": (
+        "A reviewed package's configuration file differs from the package's own copy, so "
+        "Barectl stopped before changing packages. Restore or confirm it through ordinary "
+        "administration, then prepare a new review."
+    ),
+    "updates_pending": (
+        "Ubuntu's package database has an unfinished package state, so Barectl stopped "
+        "before changing packages. Finish it through ordinary administration, then prepare "
+        "a new review."
+    ),
+    "updates_verify": (
+        "The reviewed packages were installed, but a package version or the package "
+        "database did not read back as expected. Read the server again before preparing a "
+        "new review."
+    ),
+    "updates_failed": (
+        "The updates change stopped before reporting its outcome. Read the server again "
+        "before preparing a new review that proposes only what remains."
+    ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
         "database catalog changed, so Barectl stopped before creating the binding. Prepare a "
@@ -1024,6 +1061,14 @@ RESULT_REASONS: Final = frozenset(
         "automatic_updates_verify",
         "automatic_updates_settings",
         "automatic_updates_failed",
+        "updates_refresh",
+        "updates_refresh_failed",
+        "updates_transaction",
+        "updates_hold",
+        "updates_conffile",
+        "updates_pending",
+        "updates_verify",
+        "updates_failed",
     }
 )
 

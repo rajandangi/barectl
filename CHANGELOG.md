@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Security (Phase E)
+
+- **Check for updates** refreshes Ubuntu's own package lists as one change under the shared mutation lock, so the Security section's list age and waiting updates are current without installing anything. **Install updates** installs security updates only, or all installable updates, by extending the exact APT transaction of ADR 0024: the confirm screen names every package at its candidate version and every new dependency, discloses the services Ubuntu may restart and the sites they serve, and refuses removals, downgrades, holds, phased candidates, unfinished package states and modified conffiles with a reason. The run verifies installed versions, the package database, the foundation's units and each site's readiness, then discovery shows the versions and any restart needed. The native scenario installs the snapshot's release-pocket OpenSSL and upgrades it, and proves a stale review, an unreviewed dependency, a hold placed after review and a modified conffile refuse before dpkg changes anything ([security](docs/security.md#ubuntu-updates), [#304](https://github.com/rajandangi/barectl/issues/304)).
+- Fix the Security check's package-list age: the read reports the newest index time and the projection now turns it into an age, so the section shows how long ago the lists were refreshed instead of a date far in the past. A candidate published by both `-updates` and `-security` is counted as a security update.
+
 ### Agent environment
 
 - Every native run takes one host-wide lock inside the runner itself, so the orchestrator, an implementer proving a single item, and the full build wait for the lane owner instead of contending into false failures; `build.sh` holds that lock once for its side-by-side stages. Every item time in `disposable/shard_times.json` now names the run it came from and a placeholder fails the fast gate, which also predicts each hosted shard's stop against the target so budget growth shows up before a phase's last ticket. A mistyped scenario label is named with a suggestion and the `--list` command instead of a Django loader error. Fixtures under any `fixtures/` directory must be recorded from a real server, and a fixture that writes through the container as root cleans up through the container.

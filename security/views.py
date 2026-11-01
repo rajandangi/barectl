@@ -19,6 +19,7 @@ from servers.discovery_state import server_state
 from servers.models import Server
 
 from .change import SLUG, STATES
+from .updates import CHECK_SLUG, INSTALL_SLUG, SELECTIONS
 
 
 @require_POST
@@ -26,27 +27,69 @@ from .change import SLUG, STATES
 @permission_required((*PREPARE_PERMISSIONS, CHANGE_SHARED), raise_exception=True)
 def prepare_auto_updates(request: HttpRequest, pk: int) -> HttpResponse:
     """Turn Ubuntu's automatic security updates on or off through the change engine."""
+    state = request.POST.get("state", "")
+    if state not in STATES:
+        return _redirect_problem(request, pk, "Choose whether to turn automatic updates on or off.")
+    return _prepare(
+        request,
+        pk,
+        SLUG,
+        {"version": 1, "selection": state},
+        "This server has no current manageable observation. Run a connection check and "
+        "resolve any findings before changing automatic updates.",
+    )
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, CHANGE_SHARED), raise_exception=True)
+def prepare_updates_check(request: HttpRequest, pk: int) -> HttpResponse:
+    """Refresh Ubuntu's package lists as its own reviewed change."""
+    return _prepare(
+        request,
+        pk,
+        CHECK_SLUG,
+        {"version": 1},
+        "This server has no current manageable observation. Run a connection check and "
+        "resolve any findings before checking for Ubuntu updates.",
+    )
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, CHANGE_SHARED), raise_exception=True)
+def prepare_updates_install(request: HttpRequest, pk: int) -> HttpResponse:
+    """Install the reviewed security updates only, or all waiting Ubuntu updates."""
+    selection = request.POST.get("selection", "")
+    if selection not in SELECTIONS:
+        return _redirect_problem(
+            request, pk, "Choose whether to install security updates only or all updates."
+        )
+    return _prepare(
+        request,
+        pk,
+        INSTALL_SLUG,
+        {"version": 1, "selection": selection},
+        "This server has no current manageable observation. Run a connection check and "
+        "resolve any findings before installing Ubuntu updates.",
+    )
+
+
+def _prepare(
+    request: HttpRequest,
+    pk: int,
+    slug: str,
+    inputs: dict[str, object],
+    unmanageable: str,
+) -> HttpResponse:
     if not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
     if not server_state(server).can_prepare_changes:
-        messages.error(
-            request,
-            "This server has no current manageable observation. Run a connection check and "
-            "resolve any findings before changing automatic updates.",
-        )
-        return redirect("server_security", pk=pk)
-    state = request.POST.get("state", "")
-    if state not in STATES:
-        messages.error(request, "Choose whether to turn automatic updates on or off.")
+        messages.error(request, unmanageable)
         return redirect("server_security", pk=pk)
     try:
-        queued = change_services.request_prepare(
-            server,
-            request.user,
-            SLUG,
-            inputs={"version": 1, "selection": state},
-        )
+        queued = change_services.request_prepare(server, request.user, slug, inputs=inputs)
     except OperationRefused, ValueError:
         messages.error(request, "The saved connection changed. Refresh and try again.")
         return redirect("server_security", pk=pk)
@@ -59,3 +102,8 @@ def prepare_auto_updates(request: HttpRequest, pk: int) -> HttpResponse:
         )
         return redirect("server_security", pk=pk)
     return redirect("change_detail", operation_id=queued.pk)
+
+
+def _redirect_problem(request: HttpRequest, pk: int, message: str) -> HttpResponse:
+    messages.error(request, message)
+    return redirect("server_security", pk=pk)

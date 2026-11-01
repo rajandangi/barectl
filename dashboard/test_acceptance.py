@@ -1,5 +1,6 @@
 """#179 acceptance sweeps that span journeys (docs/dashboard-workflows.md)."""
 
+import re
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -23,11 +24,13 @@ from security.observation import (
     AutoUpdatesState,
     Check,
     FirewallState,
+    PendingUpdate,
     RestartState,
     SecurityState,
     SshState,
     UpdatesState,
 )
+from security.presentation import UPDATES_ALL_LABEL, UPDATES_CHECK_LABEL, UPDATES_SECURITY_LABEL
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from sites.ui_testing import record_http_sites
@@ -500,6 +503,48 @@ class SecuritySectionBrowserTests(BrowserTestCase):
         expect(button).to_be_visible()
         button.focus()
         expect(button).to_be_focused()
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+        self.assert_no_native_terms()
+
+    def test_the_updates_actions_work_by_keyboard_at_320_px(self) -> None:
+        for codename in ("view_changes", "change_site", "change_shared"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.store(
+            replace(
+                _security_ok(),
+                updates=_security_check(
+                    UpdatesState(
+                        7200,
+                        (
+                            PendingUpdate(
+                                "openssl",
+                                "3.0.0",
+                                "3.0.1",
+                                "resolute-security/main",
+                                "security",
+                            ),
+                            PendingUpdate("curl", "8.0", "8.1", "resolute-updates/main", "other"),
+                        ),
+                    )
+                ),
+            )
+        )
+        page = self.page
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/security/")
+        for label in (UPDATES_CHECK_LABEL, UPDATES_SECURITY_LABEL, UPDATES_ALL_LABEL):
+            action = page.get_by_role("button", name=label, exact=True)
+            expect(action).to_be_visible()
+            action.focus()
+            expect(action).to_be_focused()
+        page.get_by_role("button", name=UPDATES_CHECK_LABEL, exact=True).focus()
+        page.keyboard.press("Enter")
+        expect(page).to_have_url(re.compile(r"/changes/\d+/$"))
         self.assertEqual(
             page.evaluate(
                 "document.documentElement.scrollWidth - document.documentElement.clientWidth"

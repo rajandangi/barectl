@@ -12,8 +12,11 @@ from security.observation import (
     DEFAULT_ALLOWED_ORIGINS,
     AutoUpdatesState,
     FirewallState,
+    PendingUpdate,
     SecurityState,
+    UpdatesState,
 )
+from security.presentation import UPDATES_ALL_LABEL, UPDATES_CHECK_LABEL, UPDATES_SECURITY_LABEL
 from security.testing import blocked, check, ok_state
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
@@ -129,6 +132,69 @@ class SecuritySectionTests(ControllerConfigTestCase):
             {"state": "on"},
         )
         self.assertEqual(refused.status_code, 403)
+
+    def _store_waiting_updates(self) -> None:
+        self.store(
+            replace(
+                ok_state(),
+                updates=check(
+                    UpdatesState(
+                        7200,
+                        (
+                            PendingUpdate(
+                                "openssl",
+                                "3.0.0",
+                                "3.0.1",
+                                "resolute-security/main",
+                                "security",
+                            ),
+                            PendingUpdate("curl", "8.0", "8.1", "resolute-updates/main", "other"),
+                        ),
+                    )
+                ),
+            )
+        )
+
+    def test_viewers_and_site_operators_get_no_update_control_and_forged_posts_refuse(
+        self,
+    ) -> None:
+        self._store_waiting_updates()
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(response, UPDATES_CHECK_LABEL)
+        self.assertNotContains(response, UPDATES_SECURITY_LABEL)
+        for url in ("check", "install"):
+            forged = self.client.post(f"/servers/{self.server.pk}/security/updates/{url}/prepare/")
+            self.assertEqual(forged.status_code, 403)
+        self.grant("view_changes", "change_site")
+        site_operator = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(site_operator, UPDATES_CHECK_LABEL)
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/security/updates/install/prepare/",
+            {"selection": "security"},
+        )
+        self.assertEqual(refused.status_code, 403)
+
+    def test_a_shared_operator_checks_for_and_installs_updates(self) -> None:
+        self.grant("view_changes", "change_site", "change_shared")
+        self._store_waiting_updates()
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(response, UPDATES_CHECK_LABEL)
+        self.assertContains(response, UPDATES_SECURITY_LABEL)
+        self.assertContains(response, UPDATES_ALL_LABEL)
+        checked = self.client.post(f"/servers/{self.server.pk}/security/updates/check/prepare/")
+        self.assertEqual(checked.status_code, 302)
+        preparation = ChangePreparation.objects.get(server=self.server)
+        self.assertEqual(preparation.kind_slug, "check_for_ubuntu_updates")
+        self.assertEqual(preparation.inputs, {"version": 1})
+        ChangePreparation.objects.all().delete()
+        installed = self.client.post(
+            f"/servers/{self.server.pk}/security/updates/install/prepare/",
+            {"selection": "security"},
+        )
+        self.assertEqual(installed.status_code, 302)
+        preparation = ChangePreparation.objects.get(server=self.server)
+        self.assertEqual(preparation.kind_slug, "install_ubuntu_updates")
+        self.assertEqual(preparation.inputs, {"version": 1, "selection": "security"})
 
     def test_a_shared_operator_prepares_the_reviewed_change(self) -> None:
         self.grant("view_changes", "change_site", "change_shared")

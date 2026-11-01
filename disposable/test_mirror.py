@@ -174,6 +174,21 @@ def collector() -> tuple[list[tuple[str, str]], mirror._StoreFn]:
 
 
 class FixtureTests(SimpleTestCase):
+    def test_the_updates_fixture_has_a_release_pocket_and_security_copy(self) -> None:
+        paths = {
+            entry.path
+            for entry in mirror.Manifest.parse(mirror.MANIFEST.read_text()).entries
+            if entry.host == mirror.SNAPSHOT_HOST and "/pool/main/o/openssl/" in entry.path
+        }
+        self.assertIn(
+            f"{mirror.SNAPSHOT_ROOT}/pool/main/o/openssl/openssl_3.5.5-1ubuntu3_amd64.deb",
+            paths,
+        )
+        self.assertIn(
+            f"{mirror.SNAPSHOT_ROOT}/pool/main/o/openssl/openssl_3.5.5-1ubuntu3.7_amd64.deb",
+            paths,
+        )
+
     def test_apt_sources_name_the_mirrored_snapshot(self) -> None:
         text = mirror.apt_sources()
         self.assertIn(f"https://{mirror.SNAPSHOT_HOST}/{mirror.SNAPSHOT_ROOT}", text)
@@ -183,7 +198,11 @@ class FixtureTests(SimpleTestCase):
     def test_snapshot_entries_mirror_indices_and_the_resolved_packages(self) -> None:
         stored, store = collector()
         deb = f"https://{mirror.SNAPSHOT_HOST}/{mirror.SNAPSHOT_ROOT}/pool/main/m/mariadb/x.deb"
-        with patch.object(mirror, "_package_urls", return_value=[deb]):
+        with (
+            patch.object(mirror, "_package_urls", return_value=[deb]),
+            patch.object(mirror, "_release_pocket_urls", return_value=[]),
+            patch.object(mirror, "_security_pocket_urls", return_value=[]),
+        ):
             mirror._snapshot_entries("x86_64-linux", store)
         paths = {path for _, path in stored}
         root = mirror.SNAPSHOT_ROOT

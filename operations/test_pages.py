@@ -179,6 +179,8 @@ class PlainWordTests(SimpleTestCase):
             "install_valkey",
             "create_wordpress_site",
             "create_laravel_site",
+            "check_for_ubuntu_updates",
+            "install_ubuntu_updates",
         ):
             with self.subTest(kind=slug):
                 words = plain_words.words_for(slug)

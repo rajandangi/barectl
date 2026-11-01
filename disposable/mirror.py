@@ -56,6 +56,11 @@ SNAPSHOT_COMPONENT = "main"
 # The database engines and Git #356 names, the object cache #391 names and logrotate #389,
 # installed from the Ubuntu 26.04 archive.
 UBUNTU_FIXTURES = ("mariadb-server", "postgresql", "git", "valkey-server", "logrotate")
+# The Ubuntu updates scenario (#304) installs the release pocket's version of one package
+# and then lets Barectl upgrade it to the snapshot's security version. OpenSSL is small,
+# differs between the two pockets in the pinned snapshot, and carries a conffile the
+# scenario can modify.
+UPDATE_FIXTURES = ("openssl", "libssl3t64")
 _DEB_ARCH = {"x86_64-linux": "amd64", "aarch64-linux": "arm64"}
 _DOCKER_PLATFORM = {"x86_64-linux": "linux/amd64", "aarch64-linux": "linux/arm64"}
 _IMAGETOOLS_FORMAT = (
@@ -106,7 +111,7 @@ Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 EOF
 rm -f /etc/apt/sources.list.d/ubuntu.sources
 apt-get update -qq >/dev/null 2>&1
-apt-get install -y --print-uris --no-install-recommends {packages} 2>/dev/null
+apt-get install -y {extra} --print-uris --no-install-recommends {packages} 2>/dev/null
 """
 
 
@@ -440,18 +445,53 @@ def _snapshot_entries(architecture: str, store: _StoreFn) -> None:
             f"{SNAPSHOT_ROOT}/dists/{suite}/{SNAPSHOT_COMPONENT}/cnf/Commands-{deb_arch}.xz",
             architecture,
         )
-    for url in _package_urls(architecture):
+    for url in (
+        *_package_urls(architecture),
+        *_release_pocket_urls(architecture),
+        *_security_pocket_urls(architecture),
+    ):
         host, _, path = url.partition("://")[2].partition("/")
         store(host, path, architecture)
 
 
 def _package_urls(architecture: str) -> list[str]:
+    return _resolved_urls(architecture, SNAPSHOT_SUITES, UBUNTU_FIXTURES)
+
+
+def _release_pocket_urls(architecture: str) -> list[str]:
+    """The release pocket's copy of the updates fixture, fetched with ordinary APT."""
+    return _resolved_urls(
+        architecture,
+        ("resolute",),
+        UPDATE_FIXTURES,
+        extra="--reinstall --allow-downgrades",
+    )
+
+
+def _security_pocket_urls(architecture: str) -> list[str]:
+    """The snapshot's security copy of the updates fixture, fetched with ordinary APT."""
+    return _resolved_urls(
+        architecture,
+        SNAPSHOT_SUITES,
+        UPDATE_FIXTURES,
+        extra="--reinstall",
+    )
+
+
+def _resolved_urls(
+    architecture: str,
+    suites: tuple[str, ...],
+    packages: tuple[str, ...],
+    *,
+    extra: str = "",
+) -> list[str]:
     script = _APT_RESOLVE.format(
         host=SNAPSHOT_HOST,
         root=SNAPSHOT_ROOT,
-        suites=" ".join(SNAPSHOT_SUITES),
+        suites=" ".join(suites),
         component=SNAPSHOT_COMPONENT,
-        packages=" ".join(UBUNTU_FIXTURES),
+        packages=" ".join(packages),
+        extra=extra,
     )
     command = [
         "docker", "run", "--rm", "--platform", _DOCKER_PLATFORM[architecture],
