@@ -5,6 +5,7 @@ the server, and every unreadable part stays an explicit "Could not check".
 """
 
 import re
+import shlex
 import time
 from dataclasses import dataclass
 from typing import Final
@@ -28,10 +29,20 @@ DOCKER_COMMAND = "systemctl is-active docker"
 NFT_COMMAND = "nft list ruleset"
 IPTABLES_COMMAND = "iptables-save"
 SSHD_COMMAND = "sshd -T"
+SSH_GRAMMAR_COMMAND = (
+    "[ -r /etc/ssh/sshd_config ] || exit 1; "
+    "for file in /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf; do "
+    '[ -e "$file" ] || [ -L "$file" ] || continue; '
+    'awk \'tolower($1)=="include" || tolower($1)=="match" {print}\' '
+    '"$file" || exit 1; done'
+)
 SSH_SOCKET_COMMAND = "systemctl show ssh.socket -p ListenStream"
 ACCOUNTS_COMMAND = "getent passwd"
+LOGIN_SHELLS_COMMAND = "cat /etc/shells"
 AUTHORIZED_KEYS_COMMAND = (
-    "find /home /root -maxdepth 4 -type f -path '*/.ssh/authorized_keys' -print"
+    "getent passwd | while IFS=: read -r name pass uid gid gecos home shell; do "
+    'if runuser -u "$name" -- test -r "$home/.ssh/authorized_keys" 2>/dev/null; then '
+    "printf '%s\\n' \"$home/.ssh/authorized_keys\"; fi; done"
 )
 APT_CONFIG_COMMAND = "apt-config dump"
 APT_TIMERS_COMMAND = (
@@ -124,6 +135,10 @@ class SshState:
     # The ``sshd -T`` port lines alone, kept so a firewall change can prove every source of
     # truth agrees before it could close the controller's own access.
     sshd_ports: tuple[int, ...] = ()
+    match_overrides: tuple[str, ...] = ()
+    contexts_checked: bool = False
+    accounts_readable: bool = True
+    login_accounts: tuple[str, ...] = ()
 
 
 # The allowed origins Ubuntu's package ships, read from its own
@@ -268,17 +283,56 @@ def _read_ssh(shell: RemoteShell, listeners: Check[tuple[Listener, ...]]) -> Che
                 "The server did not report its SSH settings in a supported format.",
             )
         )
+    grammar = _run(shell, SSH_GRAMMAR_COMMAND)
+    if isinstance(grammar, _Failure):
+        grammar_warning = "Barectl could not check SSH configuration for every connection."
+    elif not parse_ssh_grammar(grammar):
+        grammar_warning = (
+            "The SSH configuration has an include or sign-in exception Barectl "
+            "cannot check for every connection."
+        )
+    else:
+        grammar_warning = ""
     socket_text = _run(shell, SSH_SOCKET_COMMAND, accepted=(0, 1))
     socket_ports = () if isinstance(socket_text, _Failure) else parse_socket_ports(socket_text)
     passwd = _run(shell, ACCOUNTS_COMMAND)
+    shells = _run(shell, LOGIN_SHELLS_COMMAND)
     keys = _run(shell, AUTHORIZED_KEYS_COMMAND, accepted=(0, 1))
     accounts: tuple[str, ...] = ()
-    warning = ""
-    if isinstance(passwd, _Failure) or isinstance(keys, _Failure):
-        warning = "Barectl could not read the accounts that sign in without a key."
+    overrides: tuple[str, ...] = ()
+    contexts_checked = False
+    accounts_readable = True
+    login_accounts: tuple[str, ...] = ()
+    warning = grammar_warning
+    if (
+        isinstance(passwd, _Failure)
+        or isinstance(shells, _Failure)
+        or isinstance(keys, _Failure)
+        or not shells.strip()
+    ):
+        warning = warning or "Barectl could not read the accounts that sign in without a key."
+        accounts_readable = False
     else:
-        accounts = parse_accounts_without_keys(passwd, keys)
-    source = (SSHD_COMMAND, SSH_SOCKET_COMMAND, ACCOUNTS_COMMAND, AUTHORIZED_KEYS_COMMAND)
+        login_shells = frozenset(shells.splitlines()) - {
+            "/usr/sbin/nologin",
+            "/sbin/nologin",
+            "/bin/false",
+            "/usr/bin/false",
+        }
+        accounts = parse_accounts_without_keys(passwd, keys, login_shells)
+        overrides, contexts_checked, login_accounts = _match_accounts(
+            shell, passwd, settings.permit_root_login, login_shells
+        )
+        if not contexts_checked:
+            warning = warning or "Barectl could not check SSH sign-in for every login account."
+    source = (
+        SSHD_COMMAND,
+        SSH_GRAMMAR_COMMAND,
+        SSH_SOCKET_COMMAND,
+        ACCOUNTS_COMMAND,
+        LOGIN_SHELLS_COMMAND,
+        AUTHORIZED_KEYS_COMMAND,
+    )
     ports = settings.ports
     if listeners.observed and listeners.value:
         ports = tuple(
@@ -297,8 +351,40 @@ def _read_ssh(shell: RemoteShell, listeners: Check[tuple[Listener, ...]]) -> Che
             accounts,
             settings.per_source_penalties,
             settings.ports,
+            overrides,
+            contexts_checked,
+            accounts_readable,
+            login_accounts,
         ),
     )
+
+
+def _match_accounts(
+    shell: RemoteShell, passwd: str, root_policy: str, login_shells: frozenset[str]
+) -> tuple[tuple[str, ...], bool, tuple[str, ...]]:
+    context = shell.run("printenv SSH_CONNECTION")
+    fields = context.stdout.split() if context.exit_status == 0 and not context.truncated else []
+    names = parse_login_accounts(passwd, login_shells)
+    if names is None or len(fields) != 4 or not fields[1].isdigit() or not fields[3].isdigit():
+        return (), False, ()
+    client, _, local, port = fields
+    found: list[str] = []
+    for name in names:
+        try:
+            command = sshd_match_command(name, client, local, port)
+        except ValueError:
+            return (), False, names
+        matched = _run(shell, command)
+        parsed = parse_sshd(matched) if isinstance(matched, str) else None
+        if parsed is None:
+            return (), False, names
+        if (
+            parsed.password_authentication != "no"  # noqa: S105 - OpenSSH setting
+            or parsed.keyboard_interactive != "no"
+            or (name == "root" and parsed.permit_root_login != root_policy)
+        ):
+            found.append(name)
+    return tuple(found), True, names
 
 
 def enabled_for_standard(active: bool | None, boot: bool | None) -> bool | None:
@@ -669,7 +755,9 @@ def parse_socket_ports(text: str) -> tuple[int, ...]:
     return tuple(sorted(ports))
 
 
-def parse_accounts_without_keys(passwd: str, keys: str) -> tuple[str, ...]:
+def parse_accounts_without_keys(
+    passwd: str, keys: str, login_shells: frozenset[str] = _LOGIN_SHELLS
+) -> tuple[str, ...]:
     authorized = set(keys.split())
     accounts = []
     for line in passwd.splitlines():
@@ -677,11 +765,65 @@ def parse_accounts_without_keys(passwd: str, keys: str) -> tuple[str, ...]:
         if len(fields) != 7:
             continue
         name, home, shell = fields[0], fields[5], fields[6]
-        if shell not in _LOGIN_SHELLS:
+        if shell not in login_shells:
             continue
         if f"{home.rstrip('/')}/.ssh/authorized_keys" not in authorized:
             accounts.append(name)
     return tuple(sorted(accounts))
+
+
+def parse_login_accounts(
+    passwd: str, login_shells: frozenset[str] = _LOGIN_SHELLS
+) -> tuple[str, ...] | None:
+    names: list[str] = []
+    for line in passwd.splitlines():
+        fields = line.split(":")
+        if len(fields) != 7:
+            return None
+        if fields[6] in login_shells:
+            if not re.fullmatch(r"[a-z_][a-z0-9_-]*[$]?", fields[0]):
+                return None
+            names.append(fields[0])
+    return tuple(sorted(set(names))) if len(names) <= 500 else None
+
+
+def parse_ssh_grammar(text: str) -> bool:
+    """Whether current-context checks cover every supported Match condition."""
+    for raw in text.splitlines():
+        try:
+            words = shlex.split(raw, comments=True)
+        except ValueError:
+            return False
+        if not words:
+            continue
+        keyword = words[0].lower()
+        if keyword == "include":
+            if len(words) != 2 or words[1] != "/etc/ssh/sshd_config.d/*.conf":
+                return False
+        elif keyword == "match":
+            if len(words) == 2 and words[1].lower() == "all":
+                continue
+            if len(words) < 3 or len(words) % 2 != 1:
+                return False
+            if any(
+                words[index].lower() not in {"user", "group"} for index in range(1, len(words), 2)
+            ):
+                return False
+        else:
+            return False
+    return True
+
+
+def sshd_match_command(name: str, client: str, local: str, port: str) -> str:
+    for address in (client, local):
+        if not re.fullmatch(r"[0-9a-fA-F:.]+", address):
+            raise ValueError("Invalid SSH connection address.")
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        raise ValueError("Invalid SSH connection port.")
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]*[$]?", name):
+        raise ValueError("Invalid SSH account.")
+    context = f"user={name},host={client},addr={client},laddr={local},lport={port}"
+    return "sshd -T -C " + shlex.quote(context)
 
 
 def parse_ufw_status(text: str) -> tuple[bool | None, tuple[str, str, str], str]:

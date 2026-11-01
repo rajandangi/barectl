@@ -11,7 +11,7 @@
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:+ereGogDVrUkqtbwcLjsK6AUjpUVV3CCjQyHl5VSsUQ"
+    "host_key": "ssh-ed25519 SHA256:akKAouY+Uh8WsGLt7mYqUWzoy6v7ozXRRKjzp8zEWDI"
   },
   "commands": [
     {
@@ -38,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:         7255616 kB\nMemAvailable:   11922012 kB\nBuffers:             144 kB\nCached:           862920 kB\nSwapCached:          664 kB\nActive:          1521360 kB\nInactive:        2256972 kB\nActive(anon):    1298920 kB\nInactive(anon):  1659888 kB\nActive(file):     222440 kB\nInactive(file):   597084 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       16192716 kB\nDirty:              2116 kB\nWriteback:             0 kB\nAnonPages:       2896952 kB\nMapped:           254640 kB\nShmem:             43608 kB\nKReclaimable:    4104048 kB\nSlab:            4901008 kB\nSReclaimable:    4104048 kB\nSUnreclaim:       796960 kB\nKernelStack:       18576 kB\nPageTables:        42036 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:   15713384 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       73404 kB\nVmallocChunk:          0 kB\nPercpu:            25200 kB\nAnonHugePages:    208896 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:         6283036 kB\nMemAvailable:   10908220 kB\nBuffers:             144 kB\nCached:           853924 kB\nSwapCached:          392 kB\nActive:          1675800 kB\nInactive:        3021608 kB\nActive(anon):    1483560 kB\nInactive(anon):  2442864 kB\nActive(file):     192240 kB\nInactive(file):   578744 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       16156344 kB\nDirty:              3224 kB\nWriteback:           224 kB\nAnonPages:       3824444 kB\nMapped:           342300 kB\nShmem:             82884 kB\nKReclaimable:    4111376 kB\nSlab:            4919248 kB\nSReclaimable:    4111376 kB\nSUnreclaim:       807872 kB\nKernelStack:       23184 kB\nPageTables:        55360 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:   20984040 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       74452 kB\nVmallocChunk:          0 kB\nPercpu:            25256 kB\nAnonHugePages:    411648 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n585659056128 474021912576 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n582572048384 468516216832 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -94,7 +94,7 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:         7231268 kB\nMemAvailable:   11901564 kB\nBuffers:             144 kB\nCached:           866816 kB\nSwapCached:          664 kB\nActive:          1530240 kB\nInactive:        2260872 kB\nActive(anon):    1307800 kB\nInactive(anon):  1659888 kB\nActive(file):     222440 kB\nInactive(file):   600984 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       16192716 kB\nDirty:              5516 kB\nWriteback:             0 kB\nAnonPages:       2905760 kB\nMapped:           255312 kB\nShmem:             43608 kB\nKReclaimable:    4104048 kB\nSlab:            4901008 kB\nSReclaimable:    4104048 kB\nSUnreclaim:       796960 kB\nKernelStack:       18512 kB\nPageTables:        46760 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:   15739760 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       73404 kB\nVmallocChunk:          0 kB\nPercpu:            25200 kB\nAnonHugePages:    210944 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:         6243100 kB\nMemAvailable:   10872964 kB\nBuffers:             144 kB\nCached:           858604 kB\nSwapCached:          392 kB\nActive:          1687636 kB\nInactive:        3026288 kB\nActive(anon):    1495396 kB\nInactive(anon):  2442864 kB\nActive(file):     192240 kB\nInactive(file):   583424 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       16156344 kB\nDirty:              6608 kB\nWriteback:           224 kB\nAnonPages:       3836344 kB\nMapped:           343472 kB\nShmem:             82884 kB\nKReclaimable:    4111376 kB\nSlab:            4919232 kB\nSReclaimable:    4111376 kB\nSUnreclaim:       807856 kB\nKernelStack:       23088 kB\nPageTables:        60740 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:   21020540 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       74452 kB\nVmallocChunk:          0 kB\nPercpu:            25256 kB\nAnonHugePages:    417792 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -990,7 +990,7 @@
     {
       "command": "ss -Hlnptu",
       "exit": 0,
-      "stdout": "udp UNCONN 0      0      127.0.0.11:34081 0.0.0.0:*                                                      \ntcp LISTEN 0      4096   127.0.0.11:42511 0.0.0.0:*                                                      \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=107,fd=3),(\"systemd\",pid=1,fd=54))\ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=107,fd=4),(\"systemd\",pid=1,fd=55))\n",
+      "stdout": "udp UNCONN 0      0      127.0.0.11:42496 0.0.0.0:*                                                      \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=112,fd=3),(\"systemd\",pid=1,fd=54))\ntcp LISTEN 0      4096   127.0.0.11:38199 0.0.0.0:*                                                      \ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=112,fd=4),(\"systemd\",pid=1,fd=55))\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1005,6 +1005,20 @@
       "command": "sshd -T",
       "exit": 0,
       "stdout": "port 22\naddressfamily any\nlistenaddress [::]:22\nlistenaddress 0.0.0.0:22\nusepam yes\npamservicename sshd\nlogingracetime 120\nx11displayoffset 10\nmaxauthtries 6\nmaxsessions 10\nclientaliveinterval 0\nclientalivecountmax 3\nrequiredrsasize 1024\nstreamlocalbindmask 0177\nunusedconnectiontimeout none\npermitrootlogin prohibit-password\nignorerhosts yes\nignoreuserknownhosts no\nhostbasedauthentication no\nhostbasedusesnamefrompacketonly no\npubkeyauthentication yes\nkerberosauthentication no\nkerberosorlocalpasswd yes\nkerberosticketcleanup yes\ngssapiauthentication no\ngssapicleanupcredentials yes\ngssapistrictacceptorcheck yes\ngssapikeyexchange no\ngssapistorecredentialsonrekey no\ngssapikexalgorithms gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-\npasswordauthentication yes\nkbdinteractiveauthentication no\nprintmotd no\nprintlastlog yes\nx11forwarding yes\nx11uselocalhost yes\npermittty yes\npermituserrc yes\nstrictmodes yes\ntcpkeepalive yes\npermitemptypasswords no\ncompression yes\ngatewayports no\nusedns no\nallowtcpforwarding yes\nallowagentforwarding yes\ndisableforwarding no\nallowstreamlocalforwarding yes\nstreamlocalbindunlink no\nfingerprinthash SHA256\nexposeauthinfo no\nrefuseconnection no\ndebianbanner yes\npidfile /run/sshd.pid\nmodulifile /etc/ssh/moduli\nxauthlocation /usr/bin/xauth\nciphers chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr\nmacs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1\nbanner none\nforcecommand none\nchrootdirectory none\ntrustedusercakeys none\nrevokedkeys none\nsecuritykeyprovider internal\nauthorizedprincipalsfile none\nversionaddendum none\nauthorizedkeyscommand none\nauthorizedkeyscommanduser none\nauthorizedprincipalscommand none\nauthorizedprincipalscommanduser none\nhostkeyagent none\nkexalgorithms mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521\ncasignaturealgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostbasedacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\npubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nsshdsessionpath /usr/lib/openssh/sshd-session\nsshdauthpath /usr/lib/openssh/sshd-auth\npersourcepenaltyexemptlist none\nloglevel INFO\nsyslogfacility AUTH\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\nhostkey /etc/ssh/ssh_host_rsa_key\nhostkey /etc/ssh/ssh_host_ecdsa_key\nhostkey /etc/ssh/ssh_host_ed25519_key\nacceptenv LANG\nacceptenv LC_*\nacceptenv COLORTERM\nacceptenv NO_COLOR\nauthenticationmethods any\nchanneltimeout none\nsubsystem sftp /usr/lib/openssh/sftp-server\nmaxstartups 10:30:100\npersourcemaxstartups none\npersourcenetblocksize 32:128\npermittunnel no\nipqos ef cs0\nrekeylimit 0 0\npermitopen any\npermitlisten any\npermituserenvironment no\npubkeyauthoptions none\npersourcepenalties crash:90 authfail:5 noauth:1 grace-exceeded:10 refuseconnection:10 max:600 min:15 max-sources4:65536 max-sources6:65536 overflow:permissive overflow6:permissive\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "[ -r /etc/ssh/sshd_config ] || exit 1; for file in /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf; do [ -e \"$file\" ] || [ -L \"$file\" ] || continue; awk 'tolower($1)==\"include\" || tolower($1)==\"match\" {print}' \"$file\" || exit 1; done",
+      "exit": 0,
+      "stdout": "Include /etc/ssh/sshd_config.d/*.conf\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1044,9 +1058,58 @@
       "stdin_sha256": null
     },
     {
-      "command": "find /home /root -maxdepth 4 -type f -path '*/.ssh/authorized_keys' -print",
+      "command": "cat /etc/shells",
+      "exit": 0,
+      "stdout": "# /etc/shells: valid login shells\n/bin/sh\n/usr/bin/sh\n/bin/bash\n/usr/bin/bash\n/bin/rbash\n/usr/bin/rbash\n/usr/bin/dash\n/usr/bin/screen\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "getent passwd | while IFS=: read -r name pass uid gid gecos home shell; do if runuser -u \"$name\" -- test -r \"$home/.ssh/authorized_keys\" 2>/dev/null; then printf '%s\\n' \"$home/.ssh/authorized_keys\"; fi; done",
       "exit": 0,
       "stdout": "/root/.ssh/authorized_keys\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "printenv SSH_CONNECTION",
+      "exit": 0,
+      "stdout": "192.168.164.7 45346 192.168.164.6 22\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "sshd -T -C user=root,host=192.168.164.7,addr=192.168.164.7,laddr=192.168.164.6,lport=22",
+      "exit": 0,
+      "stdout": "port 22\naddressfamily any\nlistenaddress [::]:22\nlistenaddress 0.0.0.0:22\nusepam yes\npamservicename sshd\nlogingracetime 120\nx11displayoffset 10\nmaxauthtries 6\nmaxsessions 10\nclientaliveinterval 0\nclientalivecountmax 3\nrequiredrsasize 1024\nstreamlocalbindmask 0177\nunusedconnectiontimeout none\npermitrootlogin prohibit-password\nignorerhosts yes\nignoreuserknownhosts no\nhostbasedauthentication no\nhostbasedusesnamefrompacketonly no\npubkeyauthentication yes\nkerberosauthentication no\nkerberosorlocalpasswd yes\nkerberosticketcleanup yes\ngssapiauthentication no\ngssapicleanupcredentials yes\ngssapistrictacceptorcheck yes\ngssapikeyexchange no\ngssapistorecredentialsonrekey no\ngssapikexalgorithms gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-\npasswordauthentication yes\nkbdinteractiveauthentication no\nprintmotd no\nprintlastlog yes\nx11forwarding yes\nx11uselocalhost yes\npermittty yes\npermituserrc yes\nstrictmodes yes\ntcpkeepalive yes\npermitemptypasswords no\ncompression yes\ngatewayports no\nusedns no\nallowtcpforwarding yes\nallowagentforwarding yes\ndisableforwarding no\nallowstreamlocalforwarding yes\nstreamlocalbindunlink no\nfingerprinthash SHA256\nexposeauthinfo no\nrefuseconnection no\ndebianbanner yes\npidfile /run/sshd.pid\nmodulifile /etc/ssh/moduli\nxauthlocation /usr/bin/xauth\nciphers chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr\nmacs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1\nbanner none\nforcecommand none\nchrootdirectory none\ntrustedusercakeys none\nrevokedkeys none\nsecuritykeyprovider internal\nauthorizedprincipalsfile none\nversionaddendum none\nauthorizedkeyscommand none\nauthorizedkeyscommanduser none\nauthorizedprincipalscommand none\nauthorizedprincipalscommanduser none\nhostkeyagent none\nkexalgorithms mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521\ncasignaturealgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostbasedacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\npubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nsshdsessionpath /usr/lib/openssh/sshd-session\nsshdauthpath /usr/lib/openssh/sshd-auth\npersourcepenaltyexemptlist none\nloglevel INFO\nsyslogfacility AUTH\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\nhostkey /etc/ssh/ssh_host_rsa_key\nhostkey /etc/ssh/ssh_host_ecdsa_key\nhostkey /etc/ssh/ssh_host_ed25519_key\nacceptenv LANG\nacceptenv LC_*\nacceptenv COLORTERM\nacceptenv NO_COLOR\nauthenticationmethods any\nchanneltimeout none\nsubsystem sftp /usr/lib/openssh/sftp-server\nmaxstartups 10:30:100\npersourcemaxstartups none\npersourcenetblocksize 32:128\npermittunnel no\nipqos ef cs0\nrekeylimit 0 0\npermitopen any\npermitlisten any\npermituserenvironment no\npubkeyauthoptions none\npersourcepenalties crash:90 authfail:5 noauth:1 grace-exceeded:10 refuseconnection:10 max:600 min:15 max-sources4:65536 max-sources6:65536 overflow:permissive overflow6:permissive\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "sshd -T -C user=ubuntu,host=192.168.164.7,addr=192.168.164.7,laddr=192.168.164.6,lport=22",
+      "exit": 0,
+      "stdout": "port 22\naddressfamily any\nlistenaddress [::]:22\nlistenaddress 0.0.0.0:22\nusepam yes\npamservicename sshd\nlogingracetime 120\nx11displayoffset 10\nmaxauthtries 6\nmaxsessions 10\nclientaliveinterval 0\nclientalivecountmax 3\nrequiredrsasize 1024\nstreamlocalbindmask 0177\nunusedconnectiontimeout none\npermitrootlogin prohibit-password\nignorerhosts yes\nignoreuserknownhosts no\nhostbasedauthentication no\nhostbasedusesnamefrompacketonly no\npubkeyauthentication yes\nkerberosauthentication no\nkerberosorlocalpasswd yes\nkerberosticketcleanup yes\ngssapiauthentication no\ngssapicleanupcredentials yes\ngssapistrictacceptorcheck yes\ngssapikeyexchange no\ngssapistorecredentialsonrekey no\ngssapikexalgorithms gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-\npasswordauthentication yes\nkbdinteractiveauthentication no\nprintmotd no\nprintlastlog yes\nx11forwarding yes\nx11uselocalhost yes\npermittty yes\npermituserrc yes\nstrictmodes yes\ntcpkeepalive yes\npermitemptypasswords no\ncompression yes\ngatewayports no\nusedns no\nallowtcpforwarding yes\nallowagentforwarding yes\ndisableforwarding no\nallowstreamlocalforwarding yes\nstreamlocalbindunlink no\nfingerprinthash SHA256\nexposeauthinfo no\nrefuseconnection no\ndebianbanner yes\npidfile /run/sshd.pid\nmodulifile /etc/ssh/moduli\nxauthlocation /usr/bin/xauth\nciphers chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr\nmacs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1\nbanner none\nforcecommand none\nchrootdirectory none\ntrustedusercakeys none\nrevokedkeys none\nsecuritykeyprovider internal\nauthorizedprincipalsfile none\nversionaddendum none\nauthorizedkeyscommand none\nauthorizedkeyscommanduser none\nauthorizedprincipalscommand none\nauthorizedprincipalscommanduser none\nhostkeyagent none\nkexalgorithms mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521\ncasignaturealgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostbasedacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\npubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nsshdsessionpath /usr/lib/openssh/sshd-session\nsshdauthpath /usr/lib/openssh/sshd-auth\npersourcepenaltyexemptlist none\nloglevel INFO\nsyslogfacility AUTH\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\nhostkey /etc/ssh/ssh_host_rsa_key\nhostkey /etc/ssh/ssh_host_ecdsa_key\nhostkey /etc/ssh/ssh_host_ed25519_key\nacceptenv LANG\nacceptenv LC_*\nacceptenv COLORTERM\nacceptenv NO_COLOR\nauthenticationmethods any\nchanneltimeout none\nsubsystem sftp /usr/lib/openssh/sftp-server\nmaxstartups 10:30:100\npersourcemaxstartups none\npersourcenetblocksize 32:128\npermittunnel no\nipqos ef cs0\nrekeylimit 0 0\npermitopen any\npermitlisten any\npermituserenvironment no\npubkeyauthoptions none\npersourcepenalties crash:90 authfail:5 noauth:1 grace-exceeded:10 refuseconnection:10 max:600 min:15 max-sources4:65536 max-sources6:65536 overflow:permissive overflow6:permissive\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1172,7 +1235,7 @@
     {
       "command": "iptables-save",
       "exit": 0,
-      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Sat Oct 31 05:14:55 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:42511\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:34081\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 42511 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 34081 -j SNAT --to-source :53\nCOMMIT\n# Completed on Sat Oct 31 05:14:55 2026\n",
+      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Sun Nov  1 06:51:09 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:38199\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:42496\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 38199 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 42496 -j SNAT --to-source :53\nCOMMIT\n# Completed on Sun Nov  1 06:51:09 2026\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1270,7 +1333,7 @@
     {
       "command": "find /var/log/unattended-upgrades -maxdepth 1 -type f -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1",
       "exit": 0,
-      "stdout": "1793423691.9348829280 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
+      "stdout": "1793515865.6310181070 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1284,7 +1347,7 @@
     {
       "command": "tail -n 60 '/var/log/unattended-upgrades/unattended-upgrades-shutdown.log'",
       "exit": 0,
-      "stdout": "2026-10-31 05:14:51,935 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-10-31 05:14:51,935 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
+      "stdout": "2026-11-01 06:51:05,631 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-11-01 06:51:05,631 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
       "truncated": false,
       "stdin_sha256": null
     },

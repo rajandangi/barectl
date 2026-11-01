@@ -147,6 +147,36 @@ unnamed:x:1001:1001::/home/unnamed:/bin/sh
     def test_socket_listen_stream_ports(self) -> None:
         self.assertEqual(observation.parse_socket_ports("ListenStream=[::]:22\n"), (22,))
 
+    def test_match_contexts_cover_every_login_account_and_exclude_nologin(self) -> None:
+        names = observation.parse_login_accounts(
+            "root:x:0:0::/root:/bin/bash\n"
+            "deploy:x:1000:1000::/home/deploy:/bin/sh\n"
+            "site:x:900:900::/srv/site:/usr/sbin/nologin\n"
+            "fish:x:1001:1001::/home/fish:/usr/bin/fish\n",
+            frozenset({"/bin/bash", "/bin/sh", "/usr/bin/fish"}),
+        )
+        self.assertEqual(names, ("deploy", "fish", "root"))
+        self.assertEqual(
+            observation.sshd_match_command("deploy", "192.0.2.4", "192.0.2.8", "22"),
+            "sshd -T -C user=deploy,host=192.0.2.4,addr=192.0.2.4,laddr=192.0.2.8,lport=22",
+        )
+
+    def test_context_dependent_match_cannot_claim_key_only_sign_in(self) -> None:
+        standard = "Include /etc/ssh/sshd_config.d/*.conf\n"
+        self.assertTrue(
+            observation.parse_ssh_grammar(
+                standard + "Match User deploy Group operators # account-only\nMatch all\n"
+            )
+        )
+        for line in (
+            "Match Address 203.0.113.0/24",
+            "Match Host office.example.com",
+            "Match User deploy LocalPort 2222",
+            "Include /etc/ssh/other/*.conf",
+        ):
+            with self.subTest(line=line):
+                self.assertFalse(observation.parse_ssh_grammar(standard + line + "\n"))
+
 
 class UpdateParserTests(SimpleTestCase):
     SIMULATION = """\

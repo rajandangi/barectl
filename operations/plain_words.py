@@ -332,6 +332,24 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Back to Security",
         after_home=Home.SERVER_SECURITY,
     ),
+    "require_key_sign_in": ChangeWords(
+        title="Require key sign-in on {server}",
+        summary=(
+            "Barectl changes SSH sign-in, then opens a new key connection to confirm access.",
+            "If that fails, the server puts the previous settings back on its own.",
+            f"A restart inside the {revert.WINDOW_MINUTES}-minute window keeps the new settings.",
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the server",
+            "preimage": "Saving the previous settings",
+            "apply": "Changing sign-in",
+            "verify": "Checking key sign-in",
+        },
+        home=Home.SERVER_SECURITY,
+        after="Back to Security",
+        after_home=Home.SERVER_SECURITY,
+    ),
     "check_for_ubuntu_updates": ChangeWords(
         title="Check for Ubuntu updates",
         summary=(

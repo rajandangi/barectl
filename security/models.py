@@ -54,6 +54,10 @@ class SecurityObservation(models.Model):
     socket_ports = models.TextField(blank=True)
     accounts_without_keys = models.TextField(blank=True)
     per_source_penalties = models.CharField(max_length=20, blank=True)
+    ssh_match_overrides = models.TextField(blank=True)
+    ssh_contexts_checked = models.BooleanField(default=False)
+    ssh_accounts_readable = models.BooleanField(default=False)
+    ssh_login_accounts = models.TextField(blank=True)
     # Automatic security updates.
     auto_updates_enabled = models.BooleanField(null=True, blank=True)
     list_update_timer = models.CharField(max_length=20, blank=True)

@@ -2,10 +2,10 @@
 
 A server's **Security** section, beside Sites, Activity, Settings and Advanced, reports what
 Barectl could read about its exposure. The standard firewall can be turned on and extra
-ports allowed or removed, automatic security updates can be turned on or off, and Ubuntu
-updates can be checked for and installed from the section. Every other check action is
-disabled with "Not available yet" (the Web runtimes check links to the existing catalog
-update in Advanced), and those changes arrive in later Phase E slices.
+ports allowed or removed, key sign-in required, automatic security updates turned on or
+off, and Ubuntu updates checked for and installed from the section. Restart remains a
+later Phase E slice. The Web runtimes check links to the existing catalog update in
+Advanced.
 
 ## What it reads
 
@@ -17,7 +17,7 @@ check" with that reason. It never prompts and never falls back to an unprivilege
 | --- | --- |
 | Firewall | UFW package and service state, `ufw status verbose`, `ufw show added`, `ufw.conf`, the IPv6 setting and digests of `before.rules` and `after.rules`; firewalld, Docker, nftables and iptables for another manager. |
 | Firewall listeners | `ss -Hlnptu` listeners, compared with the effective SSH ports, 80/tcp, 443/tcp and 443/udp, as part of the Firewall check. |
-| SSH sign-in | `sshd -T` effective settings, `ssh.socket` listen values, accounts with a login shell and no readable `authorized_keys`, and OpenSSH's per-source penalties. |
+| SSH sign-in | `sshd -T` effective settings and `sshd -T -C` for each login account on this connection, `ssh.socket` listen values, accounts with a login shell and no `authorized_keys` readable to that account, and OpenSSH's per-source penalties. |
 | Automatic security updates | `apt-config dump`, the two `apt-daily` timers, the `50unattended-upgrades` conffile digest and the newest unattended-upgrades log. |
 | Ubuntu updates | `apt-get -s upgrade --with-new-pkgs`, `apt-cache policy`, `apt-mark showhold` and the newest package-list index time, without refreshing the lists. |
 | Restart needed | `/run/reboot-required` and `/run/reboot-required.pkgs`. |
@@ -92,6 +92,33 @@ Every change payload refuses while a revert timer is active, its service is runn
 failed, or a preimage remains. A restart inside the window keeps the new firewall and loses
 only the automatic put-back.
 
+## SSH sign-in
+
+**Require key sign-in** writes `/etc/ssh/sshd_config.d/00-barectl-sign-in.conf` as
+root:root 0644. It sets `PasswordAuthentication no`,
+`KbdInteractiveAuthentication no` and `PermitRootLogin prohibit-password`. When the
+verified Barectl connection signs in as a non-root user with the required sudo access,
+it sets `PermitRootLogin no` instead. It does not change ports, listen addresses, users
+or keys. OpenSSH's `PerSourcePenalties` remains at its default.
+
+Preparation reads the effective `sshd -T` settings and checks `sshd -T -C` for each
+account with a login shell using the current connection's client and server addresses
+and port. It accepts the packaged `sshd_config.d/*.conf` include and `Match` conditions
+limited to User, Group or all. Other includes or address, host and port dependent
+conditions leave the SSH check unknown and refuse the change, because one controller
+address cannot establish the policy for every connection. The confirm screen lists
+login accounts whose `authorized_keys` is unreadable to that account. Site accounts
+with `nologin` do not appear. Barectl refuses when it cannot read the accounts or check
+their effective sign-in settings. An earlier drop-in that wins, or a supported `Match`
+block that still allows passwords, makes verification fail.
+
+This is a Shared server change in the same five-minute [confirm-or-revert](#confirm-or-revert)
+window as the firewall. The body saves the prior drop-in or its absence, arms the timer,
+writes the fixed file, runs `sshd -t`, and reloads an active `ssh.service`. If the body
+or a new key connection cannot confirm the policy, the revert service restores the
+prior file, runs `sshd -t` and reloads SSH. Both `ssh.socket` and `ssh.service` may be
+enabled on Ubuntu 26.04; no socket restart is needed for this policy.
+
 ## Automatic security updates
 
 Ubuntu's standard is its own package, enabled by default:
@@ -163,10 +190,9 @@ waiting updates and any restart Ubuntu asks for from the server alone.
 
 - The checks are a snapshot, not live status. A later failed or running connection check
   marks them stale without discarding the last readable evidence.
-- The firewall, automatic security updates and Ubuntu package updates can be changed here.
-  SSH sign-in and restart actions are later Phase E slices
-  ([#301](https://github.com/rajandangi/barectl/issues/301)); SSH sign-in reuses the same
-  confirm-or-revert window.
+- The firewall, SSH sign-in, automatic security updates and Ubuntu package updates can be
+  changed here. Restart is a later Phase E slice
+  ([#301](https://github.com/rajandangi/barectl/issues/301)).
 - A firewall whose revert service fails is left for ordinary administration: every later
   change refuses while the failed service or its preimage remains, and Barectl never retries
   the revert.

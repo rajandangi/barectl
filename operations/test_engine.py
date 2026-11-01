@@ -169,6 +169,15 @@ class AccessChangeWindowTests(ChangeTestCase):
         self.assertEqual(run.window_outcome, "not_known")
         self.assertIn("could not confirm access", run.failure)
 
+    def test_failed_policy_verification_leaves_revert_armed(self) -> None:
+        failing = replace(ACCESS_KIND, verify=lambda shell, review: False)
+        engine.register_kind(failing)
+        self.systemd.window = "kept"
+        run = self.apply(self.change("fixture_access"))
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.verification, Verification.FAILED)
+        self.assertEqual(self.systemd.confirmations, [])
+
 
 class EngineAdapterTests(SimpleTestCase):
     def test_unanswered_root_reads_never_become_closure_probe_evidence(self) -> None:

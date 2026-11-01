@@ -441,6 +441,7 @@ def server_page(
                 updates_check_url=reverse("security_updates_check_prepare", args=[server.pk]),
                 updates_install_url=reverse("security_updates_install_prepare", args=[server.pk]),
                 firewall_url=firewall_url,
+                sign_in_url=reverse("security_sign_in_prepare", args=[server.pk]),
                 can_change=can_change_security,
             )
             if state.snapshot is not None

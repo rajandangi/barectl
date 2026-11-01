@@ -12,9 +12,11 @@ class SecurityConfig(AppConfig):
 
         from .change import SET_AUTOMATIC_SECURITY_UPDATES
         from .firewall import MANAGE_FIREWALL
+        from .sign_in import REQUIRE_KEY_SIGN_IN
         from .updates import CHECK_FOR_UPDATES, INSTALL_UPDATES
 
         register_kind(SET_AUTOMATIC_SECURITY_UPDATES)
         register_kind(MANAGE_FIREWALL)
+        register_kind(REQUIRE_KEY_SIGN_IN)
         register_kind(CHECK_FOR_UPDATES)
         register_kind(INSTALL_UPDATES)

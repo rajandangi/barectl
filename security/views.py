@@ -22,6 +22,7 @@ from .change import SLUG, STATES
 from .firewall import ACTIONS as FIREWALL_ACTIONS
 from .firewall import PROTOCOLS as FIREWALL_PROTOCOLS
 from .firewall import SLUG as FIREWALL_SLUG
+from .sign_in import SLUG as SIGN_IN_SLUG
 from .updates import CHECK_SLUG, INSTALL_SLUG, SELECTIONS
 
 
@@ -52,6 +53,22 @@ def prepare_firewall(request: HttpRequest, pk: int) -> HttpResponse:
         inputs,
         "This server has no current manageable observation. Run a connection check and "
         "resolve any findings before changing the firewall.",
+    )
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, CHANGE_SHARED), raise_exception=True)
+def prepare_sign_in(request: HttpRequest, pk: int) -> HttpResponse:
+    """Prepare the fixed key-only sign-in policy."""
+    if request.POST.get("selection") != "on":
+        return _redirect_problem(request, pk, "Choose Require key sign-in to continue.")
+    return _prepare(
+        request,
+        pk,
+        SIGN_IN_SLUG,
+        {"version": 1, "selection": "on"},
+        "Run a connection check and resolve the server's findings before changing sign-in.",
     )
 
 

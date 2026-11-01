@@ -42,6 +42,7 @@ class RecordedSecurityTests(SimpleTestCase):
         if checks.ssh.value is None:
             self.fail("The SSH check was not read.")
         self.assertIn(checks.ssh.value.password_authentication, {"yes", "no"})
+        self.assertTrue(checks.ssh.value.per_source_penalties.startswith("crash:"))
         if checks.auto_updates.value is None:
             self.fail("The automatic updates check was not read.")
         self.assertTrue(checks.auto_updates.value.enabled)
@@ -55,3 +56,6 @@ class RecordedSecurityTests(SimpleTestCase):
         checks = present(collected, datetime(2026, 10, 31, 12, 0, tzinfo=UTC))
         self.assertEqual(len(checks), 6)
         self.assertNotIn(UNKNOWN, [check.state for check in checks])
+        ssh = next(check for check in checks if check.name == "SSH sign-in")
+        self.assertIn("by default", " ".join(ssh.details))
+        self.assertNotIn("has it off", " ".join(ssh.details))

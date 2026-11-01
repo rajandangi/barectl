@@ -99,6 +99,7 @@ def present(
     updates_check_url: str = "",
     updates_install_url: str = "",
     firewall_url: str = "",
+    sign_in_url: str = "",
     can_change: bool = False,
 ) -> tuple[ShownCheck, ...]:
     """The checks, in the section's fixed order."""
@@ -117,7 +118,7 @@ def present(
         )
     return (
         _firewall(state.firewall, state.listeners, state.ssh, read_at, firewall_url, can_change),
-        _ssh(state.ssh, read_at),
+        _ssh(state.ssh, read_at, sign_in_url, can_change),
         _auto_updates(state.auto_updates, read_at, auto_updates_url, can_change),
         _updates(
             state.updates,
@@ -397,22 +398,37 @@ def _listeners(
     )
 
 
-def _ssh(check: Check[SshState], read_at: datetime) -> ShownCheck:
+def _ssh(  # noqa: C901 - one projection of the SSH check's observed states
+    check: Check[SshState], read_at: datetime, action_url: str = "", can_change: bool = False
+) -> ShownCheck:
     why = "A guessed password can sign in; a key cannot be guessed."
     if not check.observed or check.value is None:
         return _could_not("SSH sign-in", check, why, read_at)
+    if check.warning:
+        return _could_not("SSH sign-in", check, why, read_at)
     state = check.value
+    if not state.contexts_checked or not state.accounts_readable:
+        return ShownCheck(
+            "SSH sign-in",
+            UNKNOWN,
+            "Could not check sign-in for every login account. Run a connection check.",
+            why,
+            read_at,
+            _NOT_AVAILABLE,
+        )
     passwords = (
         state.password_authentication == "yes"  # noqa: S105 - a setting name, not a secret
         or state.keyboard_interactive == "yes"
     )
     root_password = state.permit_root_login == "yes"
-    if passwords or root_password:
+    if passwords or root_password or state.match_overrides:
         parts = []
         if passwords:
             parts.append("passwords can sign in")
         if root_password:
-            parts.append("the root account can sign in with a password")
+            parts.append("root sign-in is unrestricted")
+        if state.match_overrides:
+            parts.append("some accounts have sign-in exceptions")
         what = "Sign-in settings are weak: " + " and ".join(parts) + "."
         return ShownCheck(
             "SSH sign-in",
@@ -420,13 +436,27 @@ def _ssh(check: Check[SshState], read_at: datetime) -> ShownCheck:
             what,
             why,
             read_at,
-            _NOT_AVAILABLE,
+            "Require key sign-in" if can_change and state.contexts_checked else _NOT_AVAILABLE,
+            action_form=action_url if can_change and state.contexts_checked else "",
+            action_value="on",
+            action_name="selection",
             details=tuple(
                 f"{name} can sign in but has no authorized key."
                 for name in state.accounts_without_keys
             )
-            if state.accounts_without_keys
-            else (),
+            + tuple(
+                f"{name} has a sign-in exception outside the reviewed policy."
+                for name in state.match_overrides
+            )
+            + (
+                ("OpenSSH slows repeated failed attempts by default.",)
+                if state.per_source_penalties and state.per_source_penalties != "no"
+                else (
+                    ("OpenSSH's default slows repeated failed attempts; this server has it off.",)
+                    if state.per_source_penalties == "no"
+                    else ("Barectl could not read OpenSSH's repeated-attempt protection.",)
+                )
+            ),
         )
     details = []
     if state.accounts_without_keys:
@@ -435,8 +465,10 @@ def _ssh(check: Check[SshState], read_at: datetime) -> ShownCheck:
             + ", ".join(state.accounts_without_keys)
             + "."
         )
-    if state.per_source_penalties == "yes":
+    if state.per_source_penalties and state.per_source_penalties != "no":
         details.append("Repeated failed attempts are slowed down.")
+    elif state.per_source_penalties == "no":
+        details.append("OpenSSH's default slows repeated failed attempts; this server has it off.")
     if state.socket_ports and set(state.socket_ports) != set(state.ports):
         details.append(
             "The SSH listener and its configuration name different ports; Barectl will not "

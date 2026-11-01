@@ -38,7 +38,22 @@ STATE = SecurityState(
         )
     ),
     listeners=check((Listener(ALL_INTERFACES, 443, "tcp", "caddy", True),)),
-    ssh=check(SshState("no", "no", "prohibit-password", (22,), (22,), ("deploy",), "yes")),
+    ssh=check(
+        SshState(
+            "no",
+            "no",
+            "prohibit-password",
+            (22,),
+            (22,),
+            ("deploy",),
+            "yes",
+            (),
+            ("deploy",),
+            True,
+            True,
+            ("deploy", "root"),
+        )
+    ),
     auto_updates=check(
         AutoUpdatesState(
             True,
