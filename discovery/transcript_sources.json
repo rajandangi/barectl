@@ -70,7 +70,7 @@
     "security/bodies/install_updates.sh": "4628e84c90456ce3aea5b497109c1f48a8523c939fccb6b4d791f9b141f0f0a9",
     "security/change.py": "ce5d36bbe65d142ed566908b02c0a530598713e6d975595840b7bb2000a6a32e",
     "security/firewall.py": "ea060991ad0bb971b4e1eff9c8c5f8353c3a42cd3f170cf3aeee9a193f3b0f9c",
-    "security/observation.py": "970fa6f44664bb87ada06f68c3c3574ba4d2bc2952f6e5e16cba9c4cadf3d43a",
+    "security/observation.py": "c45003db1769376ceb6700504238769319a4c581ffb78bc703fe09d7ecff90fd",
     "security/updates.py": "58896bad83754dac76f4741a04a117f0a4f1c4f006dc7c2cc0c7b25e550a6489",
     "sites/bodies/admission.py": "4d0901b9b088660d518ec3c234a9c9557a9e15c7460ed44f6c0dd597141974dc",
     "sites/bodies/client_change.py": "52f484adbeca2ba866dcd01aaba6a7f2cc949437a5c1cc50b8808adb65813e29",

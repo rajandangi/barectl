@@ -905,7 +905,7 @@ def summarize(
         if not outcome.passed:
             text = outcome.log.read_text(encoding="utf-8", errors="replace")
             output.say(f"{'=' * 60}\n{outcome.scenario.label}: {outcome.reason}")
-            output.say("\n".join(text.splitlines()[-60:]))
+            output.say("\n".join(line[:400] for line in text.splitlines()[-60:]))
     finished = {outcome.scenario.label for outcome in outcomes}
     unfinished = [scenario.label for scenario in planned if scenario.label not in finished]
     if unfinished:

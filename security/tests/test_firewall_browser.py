@@ -1,5 +1,6 @@
-"""The extra-port controls work by keyboard at a phone width (Phase E #306, #179)."""
+"""The firewall controls work by keyboard and from their rendered forms (Phase E #306, #179)."""
 
+import re
 import tempfile
 from dataclasses import replace
 from typing import override
@@ -13,8 +14,10 @@ from dashboard.browser_testing import BrowserTestCase
 from discovery.fakes import COLLECTED
 from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.snapshot import Observation, save_snapshot
+from operations.models import ChangePreparation
 from security.observation import (
     FirewallState,
+    SecurityState,
     SshState,
     parse_ufw_added,
 )
@@ -57,15 +60,20 @@ class FirewallPanelBrowserTests(BrowserTestCase):
             ),
             (22,),
         )
-        state = replace(
-            ok_state(),
-            firewall=check(
-                FirewallState(
-                    True, True, "deny", "allow", "deny", True, "on (low)", rules, (), True
-                )
-            ),
-            ssh=check(SshState("no", "no", "prohibit-password", (22,), (), (), "yes", (22,))),
+        self._store(
+            replace(
+                ok_state(),
+                firewall=check(
+                    FirewallState(
+                        True, True, "deny", "allow", "deny", True, "on (low)", rules, (), True
+                    )
+                ),
+                ssh=check(SshState("no", "no", "prohibit-password", (22,), (), (), "yes", (22,))),
+            )
         )
+        self.sign_in()
+
+    def _store(self, state: SecurityState) -> None:
         attempt = DiscoveryAttempt.objects.create(
             server=self.server,
             ssh_alias=self.server.ssh_alias,
@@ -79,7 +87,6 @@ class FirewallPanelBrowserTests(BrowserTestCase):
             ),
             timezone.now(),
         )
-        self.sign_in()
 
     def test_the_extra_port_controls_work_by_keyboard_at_320_pixels(self) -> None:
         page = self.page
@@ -99,3 +106,23 @@ class FirewallPanelBrowserTests(BrowserTestCase):
             ),
             0,
         )
+
+    def test_the_rendered_turn_on_firewall_form_creates_a_preparation(self) -> None:
+        self._store(
+            replace(
+                ok_state(),
+                firewall=check(
+                    FirewallState(
+                        True, False, "deny", "allow", "deny", True, "on (low)", (), (), True
+                    )
+                ),
+                ssh=check(SshState("no", "no", "prohibit-password", (22,), (), (), "yes", (22,))),
+            )
+        )
+        page = self.page
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/security/")
+        page.get_by_role("button", name="Turn on firewall", exact=True).click()
+        expect(page).to_have_url(re.compile(r"/changes/\d+/$"))
+        preparation = ChangePreparation.objects.get(server=self.server)
+        self.assertEqual(preparation.kind_slug, "manage_firewall")
+        self.assertEqual(preparation.inputs, {"version": 1, "selection": "on"})
