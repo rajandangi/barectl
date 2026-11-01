@@ -102,6 +102,67 @@ class SiteKindTestCase(ChangeTestCase):
         super().assert_read_only()
 
 
+def _access_review(evidence: object, inputs: PreparationInputs) -> engine.ReviewDraft:
+    return replace(_fixture_review(evidence, inputs), kind="fixture_access")
+
+
+ACCESS_KIND = engine.ChangeKind(
+    slug="fixture_access",
+    label="Fixture access change",
+    inspect=lambda shell, inputs: None,
+    review=_access_review,
+    body=_fixture_body,
+    verify=lambda shell, review: True,
+    access_changing=True,
+)
+
+
+class AccessChangeWindowTests(ChangeTestCase):
+    """docs/adr/0023: a new connection confirms access, and native evidence names the window."""
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        engine.register_kind(ACCESS_KIND)
+        self.addCleanup(engine._KINDS.pop, "fixture_access", None)
+        from discovery.ssh import CommandResult
+
+        self.remote.results[SITES_READ] = CommandResult(0, SITES_OUTPUT)
+        self.enterContext(mock.patch.object(engine, "WINDOW_SETTLE_SECONDS", 0))
+
+    @override
+    def assert_read_only(self) -> None:
+        self.remote.commands[:] = [
+            command for command in self.remote.commands if command != SITES_READ
+        ]
+        super().assert_read_only()
+
+    def test_a_confirmed_change_is_kept(self) -> None:
+        self.systemd.window = "kept"
+        run = self.apply(self.change("fixture_access"))
+        self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
+        self.assertEqual(run.window_outcome, "kept")
+        from operations.presentation import run_view
+
+        self.assertEqual(run_view(run).window_label, "Kept")
+        self.assertEqual(run_view(run).window_minutes, 5)
+        self.assertEqual(len(self.systemd.confirmations), 1)
+
+    def test_a_started_revert_is_put_back_and_fails_the_run(self) -> None:
+        self.systemd.window = "put_back"
+        run = self.apply(self.change("fixture_access"))
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.window_outcome, "put_back")
+        self.assertIn("put the change back", run.failure)
+
+    def test_an_unconfirmed_window_is_not_known_and_fails_the_run(self) -> None:
+        self.systemd.window = "not_known"
+        run = self.apply(self.change("fixture_access"))
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.window_outcome, "not_known")
+        self.assertIn("could not confirm access", run.failure)
+
+
 class EngineAdapterTests(SimpleTestCase):
     def test_unanswered_root_reads_never_become_closure_probe_evidence(self) -> None:
         remote = FakeServer()
@@ -845,6 +906,9 @@ class EnginePayloadTests(SimpleTestCase):
         self.assertLess(lock, apt)
         self.assertLess(apt, body)
         self.assertIn('"reason":"apt_active"', payload)
+        self.assertIn('"reason":"revert_active"', payload)
+        self.assertIn("barectl-revert-*.timer", payload)
+        self.assertIn("/run/barectl/revert-*", payload)
         self.assertIn('"class":"refused","reason":"affected_sites"', payload)
         self.assertIn('"class":"lock_busy"', payload)
         self.assertEqual(ADMISSION_CENTISECONDS, 15 * 60 * 100)

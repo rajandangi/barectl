@@ -9,12 +9,15 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
+from operations import revert
+
 
 class Home(StrEnum):
     """Where a change starts, so its confirm screen can go back there."""
 
     SERVER = "server"
     SERVER_SITES = "server_sites"
+    SERVER_SECURITY = "server_security"
     SERVER_SETTINGS = "server_settings"
     SERVER_SITE_CREATE = "server_site_create"
     SITE = "site"
@@ -45,6 +48,11 @@ class ChangeWords:
 
 
 _ENGINE_LABELS: Final[dict[str, str]] = {"mariadb": "MariaDB", "postgresql": "PostgreSQL"}
+_FIREWALL_LABELS: Final[dict[str, str]] = {
+    "on": "Turn on the standard firewall",
+    "add": "Allow a port",
+    "remove": "Remove a port allowance",
+}
 
 _BACK_UP_STEPS: Final = {
     "preflight": "Checking the site",
@@ -112,6 +120,8 @@ def selection_label(selection: str) -> str:
         return f"PHP {selection[3]}.{selection[4]}"
     if selection.startswith("nodejs_"):
         return f"Node.js {selection.removeprefix('nodejs_')}"
+    if selection in _FIREWALL_LABELS:
+        return _FIREWALL_LABELS[selection]
     return _ENGINE_LABELS.get(selection, selection)
 
 
@@ -291,6 +301,36 @@ _WORDS: Final[dict[str, ChangeWords]] = {
         after="Create site",
         after_home=Home.SERVER_SITE_CREATE,
         after_permission="operations.change_site",
+    ),
+    "manage_firewall": ChangeWords(
+        title="{selection} on {server}",
+        summary=(
+            (
+                f"Barectl keeps the firewall's previous settings for "
+                f"{revert.WINDOW_MINUTES} minutes, then opens a new connection to confirm "
+                "access."
+            ),
+            (
+                "If that connection fails, the server puts the previous firewall back on its "
+                "own, and the change does not stay."
+            ),
+            f"A restart inside those {revert.WINDOW_MINUTES} minutes keeps the new rules.",
+            (
+                "80/tcp serves certificate challenges and redirects visitors to HTTPS; "
+                "443/udp serves HTTP/3."
+            ),
+        ),
+        action="Continue",
+        steps={
+            "preflight": "Checking the server",
+            "install": "Installing the firewall",
+            "preimage": "Saving the previous settings",
+            "apply": "Changing the firewall",
+            "verify": "Checking it answers",
+        },
+        home=Home.SERVER_SECURITY,
+        after="Back to Security",
+        after_home=Home.SERVER_SECURITY,
     ),
     "check_for_ubuntu_updates": ChangeWords(
         title="Check for Ubuntu updates",

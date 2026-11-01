@@ -153,6 +153,9 @@ class ReplayShell:
         for command, result in transcript.commands:
             self._remaining.setdefault(command, deque()).append(result)
         self.host_key = transcript.host_key
+        # Recorded output does not carry the connection's port; a transcript describes the
+        # server, not one controller's SSH configuration.
+        self.port = 22
         self.commands: list[str] = []
 
     def run(self, command: str, stdin: bytes | None = None) -> CommandResult:

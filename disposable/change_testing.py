@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 
 from discovery.ssh import RemoteShell
-from operations import engine, native
+from operations import engine, native, revert
 from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 
@@ -117,6 +117,31 @@ def wait_result(
         # same end; a read taken while the unit still holds the lock reports "could not read"
         # instead of the postcondition.
         wait_inactive(shell, submitted.unit)
+
+
+def confirm_window(test: ScenarioTestCase, submitted: Submitted) -> revert.Window:
+    """The worker's fixed confirmation over a new connection, as the engine runs it."""
+    with test.shell() as shell:
+        result = shell.run(shlex.join(revert.confirmation(submitted.unit)))
+        window = revert.parse_window(result.stdout)
+        if window is None:
+            test.fail(f"The confirmation gave no window outcome: {result.stdout}")
+        if result.exit_status != 0 and window is not revert.Window.NOT_KNOWN:
+            test.fail(f"The confirmation failed: {result.stdout}")
+        return window
+
+
+def wait_window(test: ScenarioTestCase, submitted: Submitted, timeout: float = 30) -> revert.Window:
+    """Read the window's native evidence, waiting for a started revert to finish."""
+    with test.shell() as shell:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            result = shell.run(shlex.join(revert.evidence_command(submitted.unit)))
+            window = revert.parse_window(result.stdout)
+            if window is revert.Window.PUT_BACK:
+                return window
+            time.sleep(0.1)
+    return revert.Window.NOT_KNOWN
 
 
 def wait_inactive(shell: RemoteShell, unit: str, timeout: float = 30) -> None:

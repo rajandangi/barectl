@@ -52,14 +52,16 @@
           {% elif check.action_form %}
             <form method="post" action="{{ check.action_form }}">
               {% csrf_token %}
-              <input type="hidden" name="state" value="{{ check.action_value }}">
+              <input type="hidden"
+                     name="{{ check.action_name }}"
+                     value="{{ check.action_value }}">
               <button class="usa-button usa-button--outline"
                       type="submit">{{ check.action }}</button>
             </form>
           {% elif check.action_url %}
             <a class="usa-button usa-button--outline"
                href="{{ check.action_url }}">{{ check.action }}</a>
-          {% else %}
+          {% elif check.action %}
             <button class="usa-button usa-button--outline"
                     type="button"
                     disabled>{{ check.action }}</button>
@@ -68,6 +70,9 @@
       </section>
     {% endfor %}
   </div>
+  {% if firewall_panel %}
+    {% include "servers/_firewall_ports.html" %}
+  {% endif %}
   <p class="barectl-note">
     Engine detail, such as service state and configuration files, stays in
     <a href="{% url 'server_advanced' server.pk %}">Advanced</a>.

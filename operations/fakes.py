@@ -160,6 +160,11 @@ class EngineSystemd:
     staged_secrets: dict[str, bytes] = field(default_factory=dict)
     secret_removals: list[str] = field(default_factory=list)
     secret_digests: list[str] = field(default_factory=list)
+    # docs/adr/0023: the window a new connection's confirmation reports, and the later
+    # evidence read when the confirmation says Not known.
+    window: str = "kept"
+    window_evidence: str = ""
+    confirmations: list[str] = field(default_factory=list)
     remote: FakeServer | None = None
 
     def answer(self, remote: FakeServer) -> None:
@@ -172,6 +177,7 @@ class EngineSystemd:
             self._identity_answer,
             self._staging_answer,
             self._evidence_answer,
+            self._revert_answer,
             self._execution_answer,
         ):
             if (result := answer(command)) is not None:
@@ -221,6 +227,14 @@ class EngineSystemd:
             )
         ):
             return self._journal(command)
+        return None
+
+    def _revert_answer(self, command: str) -> CommandResult | None:
+        if "# barectl-revert-confirm" in command:
+            self.confirmations.append(command)
+            return CommandResult(0, f"{self.window}\n")
+        if "# barectl-revert-evidence" in command:
+            return CommandResult(0, f"{self.window_evidence}\n")
         return None
 
     def _execution_answer(self, command: str) -> CommandResult | None:

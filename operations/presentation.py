@@ -12,7 +12,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.urls import reverse
 from django.utils import timezone
 
-from . import engine, plain_words
+from . import engine, plain_words, revert
 from .consent import Scope, permissions_for
 from .models import (
     ChangePreparation,
@@ -22,6 +22,7 @@ from .models import (
     RemoteOperation,
     Result,
     Verification,
+    WindowOutcome,
 )
 
 if TYPE_CHECKING:
@@ -130,6 +131,8 @@ def _home_url(home: plain_words.Home, server_id: int | None, identifier: str) ->
         return reverse("server_site_create", args=[server_id])
     if home is plain_words.Home.SERVER_SETTINGS:
         return reverse("server_settings", args=[server_id])
+    if home is plain_words.Home.SERVER_SECURITY:
+        return reverse("server_security", args=[server_id])
     if home is plain_words.Home.SITE:
         return (
             reverse("site_detail", args=[server_id, identifier])
@@ -546,6 +549,10 @@ class RunView:
     consent_label: str
     requested_by: str
     plain: PlainRun = field(default_factory=lambda: PlainRun("", "", "", ()))
+    # Kept, Put back or Not known for an access-changing run (docs/adr/0023), and the
+    # policy window its page states.
+    window_label: str = ""
+    window_minutes: int = 0
 
     @property
     def succeeded(self) -> bool:
@@ -629,6 +636,8 @@ def run_view(run: ChangeRun) -> RunView:
         consent_label=Consent(run.review.consent).label,
         requested_by=run.requested_by_name,
         plain=plain_run(run, outcome, kind_label),
+        window_label=WindowOutcome(run.window_outcome).label if run.window_outcome else "",
+        window_minutes=revert.WINDOW_MINUTES if run.window_outcome else 0,
     )
 
 

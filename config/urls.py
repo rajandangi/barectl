@@ -43,6 +43,7 @@ from operations.views import (
 from runtimes.defaults_views import prepare_default
 from security.views import (
     prepare_auto_updates,
+    prepare_firewall,
     prepare_updates_check,
     prepare_updates_install,
 )
@@ -156,6 +157,11 @@ urlpatterns = [
         "servers/<int:pk>/security/automatic-updates/prepare/",
         prepare_auto_updates,
         name="security_auto_updates_prepare",
+    ),
+    path(
+        "servers/<int:pk>/security/firewall/prepare/",
+        prepare_firewall,
+        name="security_firewall_prepare",
     ),
     path(
         "servers/<int:pk>/security/updates/check/prepare/",

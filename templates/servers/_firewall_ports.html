@@ -1,0 +1,79 @@
+{% if firewall_panel %}
+  <section id="firewall-ports"
+           class="margin-top-3"
+           aria-labelledby="firewall-ports-heading">
+    <h3 id="firewall-ports-heading">Extra ports</h3>
+    <p class="barectl-note">
+      Ports you allow here stay open in addition to SSH and web traffic. Each change is
+      checked for {{ firewall_panel.window_minutes }} minutes, and the server puts the
+      previous firewall back if Barectl cannot reach it from a new connection.
+    </p>
+    {% if firewall_panel.rules %}
+      <ul class="usa-list barectl-firewall-rules">
+        {% for rule in firewall_panel.rules %}
+          <li>
+            {{ rule.label }}
+            {% if firewall_panel.can_change %}
+              <form class="usa-form usa-form--inline"
+                    method="post"
+                    action="{{ firewall_panel.prepare_url }}">
+                {% csrf_token %}
+                <input type="hidden" name="selection" value="remove">
+                <input type="hidden" name="port" value="{{ rule.port }}">
+                <input type="hidden" name="protocol" value="{{ rule.protocol }}">
+                <input type="hidden" name="network" value="{{ rule.network }}">
+                <button class="usa-button usa-button--unstyled" type="submit">Remove</button>
+              </form>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if firewall_panel.can_change %}
+      <details>
+        <summary>Allow another port</summary>
+        <form class="usa-form"
+              method="post"
+              action="{{ firewall_panel.prepare_url }}">
+          {% csrf_token %}
+          <input type="hidden" name="selection" value="add">
+          <div class="usa-form-group">
+            <label class="usa-label" for="firewall-port">Port or range</label>
+            <p class="usa-hint" id="firewall-port-hint">
+              One port from 1 to 65535, or a range such as 8000:8010.
+            </p>
+            <input class="usa-input"
+                   id="firewall-port"
+                   name="port"
+                   type="text"
+                   inputmode="numeric"
+                   autocomplete="off"
+                   aria-describedby="firewall-port-hint"
+                   required>
+          </div>
+          <div class="usa-form-group">
+            <label class="usa-label" for="firewall-protocol">Protocol</label>
+            <select class="usa-select" id="firewall-protocol" name="protocol">
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+            </select>
+          </div>
+          <div class="usa-form-group">
+            <label class="usa-label" for="firewall-network">From</label>
+            <p class="usa-hint" id="firewall-network-hint">
+              Leave this blank for anywhere. Otherwise give one IPv4 or IPv6 network, such
+              as 203.0.113.0/24.
+            </p>
+            <input class="usa-input"
+                   id="firewall-network"
+                   name="network"
+                   type="text"
+                   autocomplete="off"
+                   aria-describedby="firewall-network-hint">
+          </div>
+          <button class="usa-button usa-button--outline" type="submit">Allow port</button>
+        </form>
+      </details>
+    {% endif %}
+  </section>
+{% endif %}

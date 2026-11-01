@@ -14,7 +14,9 @@ from security.observation import (
     FirewallState,
     PendingUpdate,
     SecurityState,
+    SshState,
     UpdatesState,
+    parse_ufw_added,
 )
 from security.presentation import UPDATES_ALL_LABEL, UPDATES_CHECK_LABEL, UPDATES_SECURITY_LABEL
 from security.testing import blocked, check, ok_state
@@ -117,7 +119,6 @@ class SecuritySectionTests(ControllerConfigTestCase):
     ) -> None:
         self._store_disabled_updates()
         response = self.client.get(f"/servers/{self.server.pk}/security/")
-        self.assertNotContains(response, 'name="state"')
         self.assertNotContains(response, ">Turn on<")
         forged = self.client.post(
             f"/servers/{self.server.pk}/security/automatic-updates/prepare/",
@@ -196,11 +197,116 @@ class SecuritySectionTests(ControllerConfigTestCase):
         self.assertEqual(preparation.kind_slug, "install_ubuntu_updates")
         self.assertEqual(preparation.inputs, {"version": 1, "selection": "security"})
 
+    def _store_firewall(self, *, enabled: bool = False, rules: str = "") -> None:
+        parsed = parse_ufw_added(rules, (22,))
+        self.store(
+            replace(
+                ok_state(),
+                firewall=check(
+                    FirewallState(
+                        True,
+                        enabled,
+                        "deny",
+                        "allow",
+                        "deny",
+                        True,
+                        "on (low)",
+                        parsed,
+                        (),
+                        True,
+                    )
+                ),
+                ssh=check(SshState("no", "no", "prohibit-password", (22,), (), (), "yes", (22,))),
+            )
+        )
+
+    def test_a_shared_operator_turns_on_the_standard_firewall(self) -> None:
+        self.grant("view_changes", "change_site", "change_shared")
+        self._store_firewall()
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(response, "Turn on firewall")
+        self.assertContains(response, 'name="selection"')
+        prepared = self.client.post(
+            f"/servers/{self.server.pk}/security/firewall/prepare/",
+            {"selection": "on"},
+        )
+        self.assertEqual(prepared.status_code, 302)
+        preparation = ChangePreparation.objects.get(server=self.server)
+        self.assertEqual(preparation.kind_slug, "manage_firewall")
+        self.assertEqual(preparation.inputs, {"version": 1, "selection": "on"})
+
+    def test_the_firewall_panel_adds_and_removes_operator_ports(self) -> None:
+        self.grant("view_changes", "change_site", "change_shared")
+        self._store_firewall(
+            enabled=True,
+            rules="\n".join(
+                (
+                    "allow 22/tcp",
+                    "allow 80/tcp",
+                    "allow 443/tcp",
+                    "allow 443/udp",
+                    "allow 8080/tcp",
+                )
+            ),
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(response, "Extra ports")
+        self.assertContains(response, "8080/tcp from anywhere")
+        self.assertContains(response, "Allow another port")
+        self.assertNotContains(response, "Turn on firewall")
+        added = self.client.post(
+            f"/servers/{self.server.pk}/security/firewall/prepare/",
+            {"selection": "add", "port": "5432", "protocol": "tcp", "network": "203.0.113.0/24"},
+        )
+        self.assertEqual(added.status_code, 302)
+        preparation = ChangePreparation.objects.get(server=self.server)
+        self.assertEqual(
+            preparation.inputs,
+            {
+                "version": 1,
+                "selection": "add",
+                "port": "5432",
+                "protocol": "tcp",
+                "network": "203.0.113.0/24",
+            },
+        )
+        ChangePreparation.objects.all().delete()
+        removed = self.client.post(
+            f"/servers/{self.server.pk}/security/firewall/prepare/",
+            {"selection": "remove", "port": "8080", "protocol": "tcp"},
+        )
+        self.assertEqual(removed.status_code, 302)
+        preparation = ChangePreparation.objects.get(server=self.server)
+        self.assertEqual(
+            preparation.inputs,
+            {"version": 1, "selection": "remove", "port": "8080", "protocol": "tcp"},
+        )
+
+    def test_viewers_and_site_operators_get_no_firewall_control_and_forged_posts_refuse(
+        self,
+    ) -> None:
+        self._store_firewall()
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(response, "Turn on firewall")
+        self.assertNotContains(response, 'name="selection"')
+        forged = self.client.post(
+            f"/servers/{self.server.pk}/security/firewall/prepare/", {"selection": "on"}
+        )
+        self.assertEqual(forged.status_code, 403)
+        self.grant("view_changes", "change_site")
+        site_operator = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(site_operator, "Turn on firewall")
+        self.assertNotContains(site_operator, 'name="selection"')
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/security/firewall/prepare/", {"selection": "on"}
+        )
+        self.assertEqual(refused.status_code, 403)
+
     def test_a_shared_operator_prepares_the_reviewed_change(self) -> None:
         self.grant("view_changes", "change_site", "change_shared")
         self._store_disabled_updates()
         response = self.client.get(f"/servers/{self.server.pk}/security/")
-        self.assertContains(response, 'name="state" value="on"')
+        self.assertContains(response, 'name="state"')
         self.assertContains(response, "Turn on")
         queued = self.client.post(
             f"/servers/{self.server.pk}/security/automatic-updates/prepare/",

@@ -177,6 +177,14 @@ class Verification(models.TextChoices):
     NOT_APPLICABLE = "not_applicable", "Not applicable: the change did not succeed"
 
 
+class WindowOutcome(models.TextChoices):
+    """docs/adr/0023: what native evidence established about an access change's window."""
+
+    KEPT = "kept", "Kept"
+    PUT_BACK = "put_back", "Put back"
+    NOT_KNOWN = "not_known", "Not known"
+
+
 class ChangeRecord(models.Model):
     """A record the engine stores once and never edits."""
 
@@ -379,6 +387,9 @@ class ChangeRun(RemoteOperation):
     verification = models.CharField(
         max_length=20, choices=Verification, default=Verification.PENDING
     )
+    # An access-changing run's five-minute window, from the native timer, service and
+    # preimage evidence. Empty for every other kind.
+    window_outcome = models.CharField(max_length=10, choices=WindowOutcome, blank=True)
     # A Shared change's operator acknowledged the listed affected sites when requesting it.
     sites_acknowledged_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"

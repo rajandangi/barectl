@@ -425,11 +425,13 @@ def server_page(
     if section == "advanced":
         context["presented"] = state.presentation
     if section == "security":
+        from security.presentation import firewall_panel
         from security.presentation import present as present_security
 
         can_change_security = state.can_prepare_changes and request.user.has_perms(
             (*PREPARE_PERMISSIONS, CHANGE_SHARED)
         )
+        firewall_url = reverse("security_firewall_prepare", args=[server.pk])
         context["security_checks"] = (
             present_security(
                 state.snapshot.collected,
@@ -438,10 +440,18 @@ def server_page(
                 auto_updates_url=reverse("security_auto_updates_prepare", args=[server.pk]),
                 updates_check_url=reverse("security_updates_check_prepare", args=[server.pk]),
                 updates_install_url=reverse("security_updates_install_prepare", args=[server.pk]),
+                firewall_url=firewall_url,
                 can_change=can_change_security,
             )
             if state.snapshot is not None
             else ()
+        )
+        context["firewall_panel"] = firewall_panel(
+            state.snapshot.collected.security.value
+            if state.snapshot is not None and state.snapshot.collected.security.observed
+            else None,
+            prepare_url=firewall_url,
+            can_change=can_change_security,
         )
     standing = state.snapshot.collected.standing if state.snapshot else None
     target_host = (
