@@ -1,6 +1,8 @@
 import json
 import os
 import tempfile
+import urllib.error
+from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +13,24 @@ from . import mirror
 
 def entry(path: str = "nar/x.nar", architecture: str = "aarch64-linux") -> mirror.Entry:
     return mirror.Entry("cache.nixos.org", path, "a" * 64, 3, architecture)
+
+
+class DownloadTests(SimpleTestCase):
+    def test_a_transient_5xx_is_retried_before_the_entry_fails(self) -> None:
+        with (
+            patch("disposable.mirror.time.sleep") as sleep,
+            patch("disposable.mirror.urllib.request.urlopen") as urlopen,
+        ):
+            response = urlopen.return_value.__enter__.return_value
+            response.read.return_value = b"payload"
+            response.__enter__.return_value = response
+            error = urllib.error.HTTPError(
+                "https://example.test/x", 503, "unavailable", Message(), None
+            )
+            urlopen.side_effect = [error, response]
+            self.assertEqual(mirror.download("https://example.test/x"), b"payload")
+            self.assertEqual(urlopen.call_count, 2)
+            sleep.assert_called_once()
 
 
 class ManifestTests(SimpleTestCase):
