@@ -1,6 +1,6 @@
 # Test budget qualification
 
-[#479](https://github.com/rajandangi/barectl/issues/479) owns this work. The targets in [quality](quality.md#test-time-budget) remain 60 seconds for the joint fast stage, 90 seconds for controller-fast, 180 seconds per native item, and 300 seconds for a full local build or complete hosted shard, with the 900-second build hard limit. This record is in progress. Revision `7c14bed` passed all 31 real transcript captures and the 292-second strict local build recorded below. The later runtime, fence and scheduling candidate also passed all 31 fresh captures and a 293-second strict local build. Exact-head hosted qualification remains open.
+[#479](https://github.com/rajandangi/barectl/issues/479) owns this work. The targets in [quality](quality.md#test-time-budget) remain 60 seconds for the joint fast stage, 90 seconds for controller-fast, 180 seconds per native item, and 300 seconds for a full local build or complete hosted shard, with the 900-second build hard limit. Revision `d5186fb` passed all 31 fresh native captures, the 293-second strict local build, and all eleven hosted native phase targets below. This qualifies the merge workflow with exact-key snapshots. The historical all-cache-miss result is retained as an unqualified setup measurement. The final measured timing-record refresh is also subject to required checks before merge.
 
 ## Local measurements
 
@@ -77,15 +77,15 @@ After all 31 real state captures and a successful recorder `--check`, the uninst
 | Native build stage | 250 s | All 87 items passed; runner 247 s |
 | Complete strict build | 292 s | Below 300 s |
 
-Ruff, strict mypy on 619 files, Vulture, template formatting/lint, shell checks, Django checks, migration consistency, frontend checks, production asset build and dependency audits passed. No required test was removed. Independent final reviews and exact-head required CI remain to be recorded.
+Ruff, strict mypy on 619 files, Vulture, template formatting/lint, shell checks, Django checks, migration consistency, frontend checks, production asset build and dependency audits passed. No required test was removed. The later qualification below records the independent final reviews and exact-head required CI.
 
-## Hosted qualification still required
+## Hosted budget coverage
 
 Legacy cold hosted run [41308365324](https://github.com/rajandangi/barectl/actions/runs/41308365324), shard 3, spent about 882 seconds in its native step. About 81.5 seconds preceded the old runner timer, missing-layer preparation took about 364.5 seconds of wall time, scenario execution about 413.2 seconds, and post-summary archives about 22.8 seconds. The new clock includes those actual native costs. That legacy cold result is a target miss, not qualified evidence, and warm reuse must not be described as proof of a cold 300-second phase.
 
 The complete hosted phase now charges actual shared CA preparation, image work, missing-layer setup, validators and egress control on shard 1, scenarios and cleanup to the unchanged target. Boundary tests execute the actual workflow shell and prove 299/300 seconds pass, 301 seconds fails, previous failure statuses survive, invalid preparation durations fail, and a real child is interrupted at its remaining hard deadline.
 
-Exact-head hosted cold and reused-snapshot results, cache identities, final strict local results, independent reviews and the merged revision will be added before completion.
+The snapshot-backed qualification below records actual complete phases and cache identities. It does not claim that the historical all-cache-miss setup met 300 seconds.
 
 ## Hosted measurements at `7c14bed`
 
@@ -117,7 +117,31 @@ A controlled counterexample showed a legitimate new PHP85 cron invocation beginn
 
 Five runtime-only reads in three methods now use the existing `collect(sites=False)` path. The same standing and runtime readers still run. Both recorded-state reads, passive-safety cases, direct unbound reload and constrained-host discovery remain full reads. All 15 native tests passed before and after, at 30.9 and 27.9 seconds locally. This is a modest paired observation, not hosted qualification.
 
-The next hosted candidate uses three lanes on each of the same eleven standard runners. [GitHub specifies four CPUs and 16 GB for this public repository's standard runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories); no hardware or matrix capacity was added. All 87 item weights now come from the successful first hosted attempt at `7c14bed`, with explicit sources. First-shard stage weights use the measured 104-second validator and 8-second egress commands from the fully restored `63205bd` run. The existing 90-second measured scheduling allowance remains unchanged. Predictions do not replace complete-phase and per-item qualification on the new head. After final source freeze, all 31 real states were freshly captured again and recorder `--check` passed. The frozen candidate then passed the strict local build in 293 seconds: controller-fast 30 seconds with all 2,091 tests and the existing one skip, all 25 validators in a 42-second joint stage, all 102 browser tests in 106 seconds, and all 87 native items in a 251-second native stage, 249 seconds in its runner. The updated five-case PHP fence took 79.4 seconds under the full build load; the 15-case runtime item took 58.8 seconds. Verification recorded unchanged source identity. Exact-head hosted qualification on the three-lane candidate remains required.
+The `d5186fb` candidate used three lanes on each of the same eleven standard runners. [GitHub specifies four CPUs and 16 GB for this public repository's standard runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories); no hardware or matrix capacity was added. Its 87 item weights came from the successful first hosted attempt at `7c14bed`, with explicit sources; the final refresh below replaces them with measured three-lane times. First-shard stage weights use the measured 104-second validator and 8-second egress commands from the fully restored `63205bd` run. The existing 90-second measured scheduling allowance remains unchanged. Predictions do not replace complete-phase and per-item qualification on the new head. After final source freeze, all 31 real states were freshly captured again and recorder `--check` passed. The frozen candidate then passed the strict local build in 293 seconds: controller-fast 30 seconds with all 2,091 tests and the existing one skip, all 25 validators in a 42-second joint stage, all 102 browser tests in 106 seconds, and all 87 native items in a 251-second native stage, 249 seconds in its runner. The updated five-case PHP fence took 79.4 seconds under the full build load; the 15-case runtime item took 58.8 seconds. Verification recorded unchanged source identity. The exact-head hosted result on the three-lane candidate follows below.
+
+## Hosted qualification at `d5186fb`
+
+[Native run 41343892143](https://github.com/rajandangi/barectl/actions/runs/41343892143) passed all eleven complete phase targets and all 87 required items, with no duplicate or omitted item names. The CA preparation charge was one second on each phase. Every shard used three lanes on the same standard runner and restored the same mirror, fixture and L0–L5 exact keys. This is a snapshot-hit run, not a cold setup result.
+
+| Shard | Complete phase | Items passed |
+| ---: | ---: | ---: |
+| 1 | 270 s | 6/6 |
+| 2 | 300 s | 9/9 |
+| 3 | 247 s | 9/9 |
+| 4 | 288 s | 8/8 |
+| 5 | 217 s | 7/7 |
+| 6 | 237 s | 7/7 |
+| 7 | 263 s | 9/9 |
+| 8 | 246 s | 7/7 |
+| 9 | 274 s | 7/7 |
+| 10 | 230 s | 9/9 |
+| 11 | 252 s | 9/9 |
+
+The longest item was FirewallLifecycle at 178.6 seconds, below the unchanged 180-second limit. RuntimeNativeBehavior passed all 15 tests in a 170.3-second item; PHPFence passed all five in 101.3 seconds. Shard 1 retained all six validator classes and 25 tests and its expected egress-refusal control. Controller, browser, frontend and dependency checks passed. Fresh independent Standards and Spec reviews found no actionable source issue.
+
+The final `disposable/shard_times.json` refresh uses these 87 successful three-lane measurements, each tied to this run and revision. The earlier measured 104-second validator and 8-second egress stage weights and the 90-second scheduling allowance remain. The refreshed packing predicts a maximum 284 seconds; prediction is not qualification. Required checks must pass on the resulting head before merge.
+
+A separate external host-only preparation-read experiment passed its semantic guard and five unchanged cache cases but improved 32.0 to 28.6 seconds in one pair, below its adoption threshold. No product collector or observation contract was changed.
 
 ## Guidance and decisions
 
