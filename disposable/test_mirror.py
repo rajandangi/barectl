@@ -385,6 +385,79 @@ class FixtureCAWorkflowTests(SimpleTestCase):
         self.assertLess(steps.index(mirror_restore), steps.index(ca_restore))
 
 
+class SpecialSnapshotCacheTests(SimpleTestCase):
+    def test_special_layers_discard_legacy_copies_and_cache_independently(
+        self,
+    ) -> None:
+        workflow = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
+        )
+        steps = workflow["jobs"]["scenarios"]["steps"]
+        keys = next(step for step in steps if step.get("id") == "keys")
+        l0 = next(step for step in steps if step.get("id") == "l0")
+        discard = next(step for step in steps if step.get("name", "").startswith("Discard special"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("standing-26.04.tar", "l0-24.04.tar", "l0.tar", "l1.tar", "fixture.tar"):
+                (root / name).write_text("legacy")
+            subprocess.run(  # noqa: S603 - actual workflow shell, isolated cache directory
+                ["/bin/bash", "-e", "-c", discard["run"]],
+                check=True,
+                env={**os.environ, "BARECTL_NATIVE_L0_CACHE": directory},
+            )
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()), ["fixture.tar", "l0.tar", "l1.tar"]
+            )
+        self.assertLess(steps.index(l0), steps.index(discard))
+        for identifier, layer, archive in (
+            ("standing", "L0-standing", "standing-26.04.tar"),
+            ("ubuntu24", "L0-24.04", "l0-24.04.tar"),
+        ):
+            with self.subTest(layer=layer):
+                self.assertIn(f"cache-key --layer {layer}", keys["run"])
+                restore = next(step for step in steps if step.get("id") == identifier)
+                self.assertLess(steps.index(discard), steps.index(restore))
+                self.assertEqual(restore["uses"], "actions/cache/restore@v6.1.0")
+                self.assertEqual(
+                    restore["with"]["path"], "${{ env.BARECTL_NATIVE_L0_CACHE }}/" + archive
+                )
+                self.assertIn("steps.keys.outputs." + identifier, restore["with"]["key"])
+                self.assertNotIn("restore-keys", restore["with"])
+                gate = next(step for step in steps if step.get("id") == f"{identifier}-archive")
+                self.assertEqual(
+                    gate["if"], f"always() && steps.{identifier}.outputs.cache-hit != 'true'"
+                )
+                save = next(
+                    step for step in steps if step.get("name") == f"Save the {layer} snapshot"
+                )
+                self.assertEqual(save["uses"], "actions/cache/save@v6.1.0")
+                self.assertEqual(save["with"]["path"], restore["with"]["path"])
+                self.assertEqual(
+                    save["with"]["key"], "${{ steps." + identifier + ".outputs.cache-primary-key }}"
+                )
+                self.assertEqual(
+                    save["if"], f"always() && steps.{identifier}-archive.outputs.present == 'true'"
+                )
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    output = root / "output"
+                    (root / (archive + ".partial")).write_text("incomplete")
+                    for present in (False, True):
+                        if present:
+                            (root / archive).write_text("complete")
+                        output.write_text("")
+                        subprocess.run(  # noqa: S603 - actual workflow archive gate, controlled files
+                            ["/bin/bash", "-e", "-c", gate["run"]],
+                            check=True,
+                            env={
+                                **os.environ,
+                                "BARECTL_NATIVE_L0_CACHE": directory,
+                                "GITHUB_OUTPUT": str(output),
+                            },
+                        )
+                        self.assertEqual(output.read_text(), "present=true\n" if present else "")
+
+
 class MirrorLeafCoherenceTests(SimpleTestCase):
     def test_rotating_the_fixture_ca_cannot_reuse_a_leaf_from_the_old_mirror_cache(self) -> None:
         with (

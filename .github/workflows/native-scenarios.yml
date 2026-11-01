@@ -105,6 +105,8 @@ jobs:
       - id: keys
         run: |
           echo "l0=$(uv run python -m disposable.images cache-key)" >> "$GITHUB_OUTPUT"
+          echo "standing=$(uv run python -m disposable.images cache-key --layer L0-standing)" >> "$GITHUB_OUTPUT"
+          echo "ubuntu24=$(uv run python -m disposable.images cache-key --layer L0-24.04)" >> "$GITHUB_OUTPUT"
           echo "l1=$(uv run python -m disposable.images cache-key --layer L1)" >> "$GITHUB_OUTPUT"
           echo "l2=$(uv run python -m disposable.images cache-key --layer L2)" >> "$GITHUB_OUTPUT"
           echo "l3=$(uv run python -m disposable.images cache-key --layer L3)" >> "$GITHUB_OUTPUT"
@@ -130,6 +132,20 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
           key: native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
+      - name: Discard special snapshots from the legacy L0 directory cache
+        run: rm -f -- "$BARECTL_NATIVE_L0_CACHE/standing-26.04.tar" "$BARECTL_NATIVE_L0_CACHE/l0-24.04.tar"
+      - name: Restore the L0-standing snapshot
+        id: standing
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+          key: native-standing-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.standing }}
+      - name: Restore the L0-24.04 snapshot
+        id: ubuntu24
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
+          key: native-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.ubuntu24 }}
       - name: Restore the L1 snapshot
         id: l1
         uses: actions/cache/restore@v6.1.0
@@ -238,6 +254,30 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
           key: ${{ steps.l0.outputs.cache-primary-key }}
+      - id: standing-archive
+        if: always() && steps.standing.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/standing-26.04.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L0-standing snapshot
+        if: always() && steps.standing-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+          key: ${{ steps.standing.outputs.cache-primary-key }}
+      - id: ubuntu24-archive
+        if: always() && steps.ubuntu24.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l0-24.04.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L0-24.04 snapshot
+        if: always() && steps.ubuntu24-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
+          key: ${{ steps.ubuntu24.outputs.cache-primary-key }}
       - id: l1-archive
         if: always() && steps.l1.outputs.cache-hit != 'true'
         run: |
