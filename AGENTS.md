@@ -44,7 +44,7 @@ Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push 
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-Keep new tests inside the [test time budget](docs/quality.md#test-time-budget). Start anything longer than a minute with `docker/disposable-server/quiet-run.sh start LOG -- CMD`, block on `quiet-run.sh wait LOG`, and watch a pull request with `gh pr checks <n> --watch` ([long-running commands](docs/agents/orchestration.md#long-running-commands)). A full local build is `docker/disposable-server/build.sh`; it holds the same lock for its stages. Browser tests need Chromium: `uv run playwright install chromium`, or `BARECTL_BROWSER_EXECUTABLE` ([native layer](docs/quality.md#native-layer)).
+Keep new tests inside the [test time budget](docs/quality.md#test-time-budget). Start anything longer than a minute with `docker/disposable-server/quiet-run.sh start LOG -- CMD`, block on `quiet-run.sh wait LOG`, and watch a pull request with `scripts/watch-checks.sh <n> "$NOTES/pr-checks.log"` ([long-running commands](docs/agents/orchestration.md#long-running-commands)). A full local build is `docker/disposable-server/build.sh`; it holds the same lock for its stages. Browser tests need Chromium: `uv run playwright install chromium`, or `BARECTL_BROWSER_EXECUTABLE` ([native layer](docs/quality.md#native-layer)).
 
 ## Project boundaries
 

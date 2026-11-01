@@ -125,6 +125,8 @@ The fast layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)
 
 Each transcript is one JSON file per server state in `discovery/transcripts/<state>.json`, with the pins its server was built from. Search one with `uv run python -m discovery.recorded TEXT`, which prints the state and the matching command line; a repository-wide text search reads every recorded body and result, including several-hundred-kilobyte bodies. `docker/disposable-server/pins.json` holds the current pin set, which is the digest of the Ubuntu base image today; the Nix release, nixpkgs revision and catalog lock join it as they arrive. A fast test fails when any transcript was recorded with other pins, so moving a pin means recording again in the same change. Another fast test reads every transcript and fails if one holds the secret every recording seeds on its server or a command naming a secret location.
 
+The scheduled `Native mirror cache` workflow fetches the checked-in mirror on the default branch and saves it under the same cache key the native scenarios restore. A pull request can then use the cached mirror when `snapshot.ubuntu.com` is unavailable, instead of failing before any scenario runs.
+
 A staged body and a fixed read share their source: `sites/bodies/common.py` is part of the site read's program, and `laravel/bodies/common.py` part of the Laravel read's. Editing either changes the recorded command, so record every state whose read embeds it again in the same change rather than patching a transcript ([automation](automation.md#fencing-site-changes) did this for #395).
 
 When a shared read source changes on the integration branch, record every declared state in one pass:
