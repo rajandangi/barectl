@@ -26,12 +26,15 @@ jobs:
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
-      BARECTL_NATIVE_L0_CACHE: ${{ runner.temp }}/native-images
+      BARECTL_NATIVE_LANES: "3"
     outputs:
       phase-started: ${{ steps.phase.outputs.started }}
       ca-seconds: ${{ steps.ca-preparation.outputs.seconds }}
       prepare-seconds: ${{ steps.prepare.outputs.seconds }}
     steps:
+      - run: |
+          echo "BARECTL_NATIVE_L0_CACHE=$RUNNER_TEMP/native-images" >> "$GITHUB_ENV"
+          echo "BARECTL_DISPOSABLE_LOGS=$RUNNER_TEMP/native/logs" >> "$GITHUB_ENV"
       - id: phase
         run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7.0.1
@@ -41,6 +44,12 @@ jobs:
         with:
           python-version: "3.14"
       - run: uv sync --locked
+      - name: Restore the mirror
+        id: mirror
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
       - id: ca-key
         env:
           CACHE_NAMESPACE: ${{ inputs.cache-namespace }}
@@ -74,12 +83,6 @@ jobs:
           path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           if-no-files-found: error
           retention-days: 1
-      - name: Restore the mirror
-        id: mirror
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: ~/.cache/barectl/native/mirror
-          key: ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
       # The L1 key hashes the rendered foundation payload, the catalog lock and the base
       # digest (disposable/images.py), so a hit is exactly the snapshot S1 would commit.
       - id: keys
@@ -165,31 +168,72 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
           key: ${{ inputs.cache-namespace }}native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
-      # The preparation phase charges the mirror fetch and every image build it performs;
-      # cache restores above are transport and stay outside the measurement.
-      - id: prepare-start
-        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
-      - name: Fetch the mirror
-        id: mirror-fetch
+      - name: Require a genuinely cold cache
+        if: inputs.cache-namespace != ''
         run: |
-          if ! docker/disposable-server/mirror.sh -- fetch; then
-            if [ "${{ steps.mirror.outputs.cache-hit }}" = "true" ]; then
-              echo "::warning::The mirror fetch failed; using the restored mirror with the same manifest."
-            else
+          for hit in \
+            "${{ steps.mirror.outputs.cache-hit }}" \
+            "${{ steps.ca.outputs.cache-hit }}" \
+            "${{ steps.fixture.outputs.cache-hit }}" \
+            "${{ steps.l0.outputs.cache-hit }}" \
+            "${{ steps.standing.outputs.cache-hit }}" \
+            "${{ steps.ubuntu24.outputs.cache-hit }}" \
+            "${{ steps.l1.outputs.cache-hit }}" \
+            "${{ steps.l2.outputs.cache-hit }}" \
+            "${{ steps.l3.outputs.cache-hit }}" \
+            "${{ steps.l4.outputs.cache-hit }}" \
+            "${{ steps.l5.outputs.cache-hit }}"; do
+            if [ "$hit" = "true" ]; then
+              echo "Cold qualification restored an existing cache; use a fresh namespace." >&2
               exit 1
             fi
-          fi
+          done
+      # The preparation phase charges the mirror fetch, the fixture CA and every image
+      # build it performs; cache restores above are transport and stay outside.
+      - id: prepare-start
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
       - name: Prepare missing snapshots
         id: prepare
         run: |
           started=${{ steps.prepare-start.outputs.started }}
+          ca_seconds=${{ steps.ca-preparation.outputs.seconds }}
+          deadline=$(( started + 900 ))
+          remaining() { echo $(( deadline - $(date +%s) )); }
+          result=0
+          mirror=1
           set +e
-          timeout --signal=TERM --kill-after=10s 900s \
-            docker/disposable-server/run-scenarios.sh -- --prepare-all --time-limit 900
-          result=$?
+          budget=$(remaining)
+          if [ "$budget" -gt 0 ]; then
+            timeout --signal=TERM --kill-after=10s "${budget}s" \
+              docker/disposable-server/mirror.sh -- fetch
+            fetch=$?
+          else
+            fetch=124
+          fi
+          if [ "$fetch" -ne 0 ]; then
+            mirror=0
+            if [ "${{ steps.mirror.outputs.cache-hit }}" = "true" ]; then
+              echo "::warning::The mirror fetch failed; using the restored mirror with the same manifest."
+            else
+              result=$fetch
+            fi
+          fi
+          if [ "$result" -eq 0 ]; then
+            budget=$(remaining)
+            if [ "$budget" -gt 0 ]; then
+              timeout --signal=TERM --kill-after=10s "${budget}s" \
+                docker/disposable-server/run-scenarios.sh -- --prepare-all --time-limit "$budget"
+              result=$?
+            else
+              result=124
+            fi
+          fi
           set -e
-          seconds=$(( $(date +%s) - started ))
+          seconds=$(( $(date +%s) - started + ca_seconds ))
           echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+          echo "mirror=$mirror" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/native"
+          printf '{"seconds": %s}\n' "$seconds" > "$RUNNER_TEMP/native/prepare.json"
           printf 'Complete snapshot preparation phase: %ss against the 300s target and 900s hard limit.\n' "$seconds"
           if [ "$seconds" -gt 300 ]; then
             echo "Snapshot preparation phase target missed" >&2
@@ -197,7 +241,7 @@ jobs:
           fi
           exit "$result"
       - name: Save the mirror
-        if: always() && steps.mirror.outputs.cache-hit != 'true' && steps.mirror-fetch.outcome == 'success'
+        if: always() && steps.mirror.outputs.cache-hit != 'true' && steps.prepare.outputs.mirror == '1'
         uses: actions/cache/save@v6.1.0
         with:
           path: ~/.cache/barectl/native/mirror
@@ -220,6 +264,8 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
           key: ${{ steps.l0.outputs.cache-primary-key }}
       - id: standing-archive
         if: always() && steps.standing.outputs.cache-hit != 'true'
@@ -317,6 +363,12 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
           key: ${{ steps.fixture.outputs.cache-primary-key }}
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-prepare-${{ inputs.runner }}
+          path: ${{ runner.temp }}/native
+          if-no-files-found: ignore
   scenarios:
     needs: prepare
     name: scenarios (${{ matrix.shard }}/11)
@@ -329,10 +381,12 @@ jobs:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
       BARECTL_NATIVE_LANES: "3"
-      BARECTL_NATIVE_L0_CACHE: ${{ runner.temp }}/native-images
       BARECTL_NATIVE_PHASE_STARTED: ${{ needs.prepare.outputs.phase-started }}
-      BARECTL_NATIVE_CA_SECONDS: ${{ needs.prepare.outputs.ca-seconds }}
+      # The shared preparation phase is charged the fixture CA; a shard measures only its
+      # own stages (docs/quality.md#test-time-budget).
+      BARECTL_NATIVE_CA_SECONDS: "0"
     steps:
+      - run: echo "BARECTL_NATIVE_L0_CACHE=$RUNNER_TEMP/native-images" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.ref || github.sha }}
@@ -523,6 +577,8 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
           key: ${{ steps.l0.outputs.cache-primary-key }}
       - id: standing-archive
         if: always() && steps.standing.outputs.cache-hit != 'true'

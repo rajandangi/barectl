@@ -1032,6 +1032,7 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
         or options.shard
         or options.check_egress
         or options.breadth
+        or options.quarantined
     ):
         parser.error("--prepare-all is its own stage; it selects no scenarios")
     return options
@@ -1055,7 +1056,7 @@ _PREPARATIONS = {
     "L4": ("L3", "disposable.test_prepared_wordpress.PrepareWordPressCache"),
     "L5": ("L1", "disposable.test_prepared_laravel.PrepareLaravel"),
 }
-PREPARATION_LAYERS = ("L1", "L2", "L3", "L4", "L5")
+PREPARATION_LAYERS = tuple(_PREPARATIONS)
 SPECIAL_LAYERS = ("L0-standing", "L0-24.04")
 
 
@@ -1246,7 +1247,56 @@ def _store_layer(layer: str) -> None:
     images.store(layer)
 
 
-def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output) -> int:  # noqa: C901
+def _prepare_all_stage(options: argparse.Namespace, lanes: int, output: Output) -> int:
+    """Build every missing snapshot once, then stop; a fully archived run loads nothing."""
+    started = time.monotonic()
+    required = ("L0", "fixture", *SPECIAL_LAYERS, *PREPARATION_LAYERS)
+    if all(images.archived(layer) for layer in required):
+        print(f"Prepared snapshots: 0 of 0 passed in {time.monotonic() - started:.0f} s")  # noqa: T201
+        return 0
+    # The special images are plain Docker targets, independent of the product flows; one
+    # builder thread stays within the measured lane capacity (docs/quality.md#native-layer).
+    special_pool = ThreadPoolExecutor(1)
+    specials = [special_pool.submit(_store_layer, layer) for layer in SPECIAL_LAYERS]
+    try:
+        with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
+            work = Path(directory)
+            image = images.ensure()
+            fixture_image = images.ensure("fixture")
+            images.store("fixture")
+            key = controller_key(work)
+            runner = Runner(
+                output, work, record="", keep_failed=options.keep_failed,
+                quarantined=False, fixture_image=fixture_image,
+            )  # fmt: skip
+            remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+            prepared = prepare_layers(
+                runner,
+                [],
+                image,
+                key,
+                remaining,
+                output,
+                layers=PREPARATION_LAYERS,
+                lanes=lanes,
+            )
+            for layer in ("L0", "fixture", *PREPARATION_LAYERS):
+                images.store(layer)
+            for future in specials:
+                future.result()
+            for layer in SPECIAL_LAYERS:
+                images.store(layer)
+            seconds = time.monotonic() - started
+            passed = sum(1 for outcome in prepared if outcome.passed)
+            print(f"Prepared snapshots: {passed} of {len(prepared)} passed in {seconds:.0f} s")  # noqa: T201
+            write_results(prepared, work)
+            keep_logs(work, output)
+            return 0 if passed == len(prepared) else 1
+    finally:
+        special_pool.shutdown(wait=True)
+
+
+def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output) -> int:
     started = time.monotonic()
     if options.validators:
         # Two validator lanes keep the six classes under the joint-fast target; each lane
@@ -1257,83 +1307,49 @@ def _run(options: argparse.Namespace, scenarios: list[Scenario], output: Output)
     else:
         lanes = options.lanes or default_lanes()
     lanes = _breadth_lanes(lanes, options)
+    if options.prepare_all:
+        return _prepare_all_stage(options, lanes, output)
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
-        special_pool = None
-        specials: list[Future[None]] = []
-        if options.prepare_all:
-            # The special images are plain Docker targets, independent of the product flows;
-            # build them alongside L0 and the foundation (docs/quality.md#native-layer).
-            mirror.fixture_ca()
-            special_pool = ThreadPoolExecutor(len(SPECIAL_LAYERS))
-            specials = [special_pool.submit(_store_layer, layer) for layer in SPECIAL_LAYERS]
-        try:
-            image = images.ensure()
-            fixture_image = images.ensure("fixture")
-            images.store("fixture")
-            key = controller_key(work)
-            runner = Runner(
-                output, work, record=options.record, keep_failed=options.keep_failed,
-                quarantined=options.quarantined, fixture_image=fixture_image,
-            )  # fmt: skip
-            if options.prepare_all:
-                remaining = max(0.0, options.time_limit - (time.monotonic() - started))
-                prepared = prepare_layers(
-                    runner,
-                    [],
-                    image,
-                    key,
-                    remaining,
-                    output,
-                    layers=PREPARATION_LAYERS,
-                    lanes=lanes,
-                )
-                for layer in ("L0", "fixture", *PREPARATION_LAYERS):
-                    images.store(layer)
-                for future in specials:
-                    future.result()
-                for layer in SPECIAL_LAYERS:
-                    images.store(layer)
-                seconds = time.monotonic() - started
-                passed = sum(1 for outcome in prepared if outcome.passed)
-                print(f"Prepared snapshots: {passed} of {len(prepared)} passed in {seconds:.0f} s")  # noqa: T201
-                write_results(prepared, work)
-                keep_logs(work, output)
-                return 0 if passed == len(prepared) else 1
-            remaining = max(0.0, options.time_limit - (time.monotonic() - started))
-            prepare_layers(runner, scenarios, image, key, remaining, output, lanes=lanes)
-            completed = {outcome.scenario.label for outcome in runner.outcomes}
-            remaining_scenarios = [
-                scenario for scenario in scenarios if scenario.label not in completed
-            ]
-            weights = None
-            if options.validators:
-                weights = validator_weights(remaining_scenarios)
-            elif not (options.breadth or options.check_egress or options.record):
-                record = (
-                    shard_times.Record.load()
-                    if options.shard
-                    else shard_times.Record.load(Path(__file__).with_name("local_times.json"))
-                )
-                weights = record.scenarios
-            units = plan(
-                remaining_scenarios,
-                lanes,
-                weights=weights,
+        image = images.ensure()
+        fixture_image = images.ensure("fixture")
+        images.store("fixture")
+        key = controller_key(work)
+        runner = Runner(
+            output, work, record=options.record, keep_failed=options.keep_failed,
+            quarantined=options.quarantined, fixture_image=fixture_image,
+        )  # fmt: skip
+        remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+        prepare_layers(runner, scenarios, image, key, remaining, output, lanes=lanes)
+        completed = {outcome.scenario.label for outcome in runner.outcomes}
+        remaining_scenarios = [
+            scenario for scenario in scenarios if scenario.label not in completed
+        ]
+        weights = None
+        if options.validators:
+            weights = validator_weights(remaining_scenarios)
+        elif not (options.breadth or options.check_egress or options.record):
+            record = (
+                shard_times.Record.load()
+                if options.shard
+                else shard_times.Record.load(Path(__file__).with_name("local_times.json"))
             )
-            remaining = max(0.0, options.time_limit - (time.monotonic() - started))
-            execute(runner, units, image, key, lanes, remaining, output)
-            for layer in ("L1", "L2", "L3", "L4", "L5"):
-                images.store(layer)
-            seconds = time.monotonic() - started
-            summarize(runner.outcomes, scenarios, seconds, output, validators=options.validators)
-            write_results(runner.outcomes, work)
-            keep_logs(work, output)
-            if options.check_egress:
-                return _egress_control(runner.outcomes, output)
-        finally:
-            if special_pool is not None:
-                special_pool.shutdown(wait=True)
+            weights = record.scenarios
+        units = plan(
+            remaining_scenarios,
+            lanes,
+            weights=weights,
+        )
+        remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+        execute(runner, units, image, key, lanes, remaining, output)
+        for layer in PREPARATION_LAYERS:
+            images.store(layer)
+        seconds = time.monotonic() - started
+        summarize(runner.outcomes, scenarios, seconds, output, validators=options.validators)
+        write_results(runner.outcomes, work)
+        keep_logs(work, output)
+        if options.check_egress:
+            return _egress_control(runner.outcomes, output)
     finished = {outcome.scenario.label for outcome in runner.outcomes}
     complete = all(scenario.label in finished for scenario in scenarios)
     return 0 if complete and all(o.passed for o in runner.outcomes) else 1

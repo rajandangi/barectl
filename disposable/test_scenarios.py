@@ -315,6 +315,7 @@ class ArgumentsTests(SimpleTestCase):
             ["--shard", "1/11"],
             ["--check-egress"],
             ["--breadth"],
+            ["--quarantined"],
         ):
             with (
                 self.subTest(argument=argument),
@@ -632,11 +633,57 @@ class BuildStopTests(SimpleTestCase):
                 10,
                 scenarios.Output(io.StringIO()),
                 layers=scenarios.PREPARATION_LAYERS,
+                lanes=3,
             )
         self.assertEqual(
             [[[layer for _, layer in unit] for unit in wave] for wave in waves],
             [[["L1"]], [["L3", "L4"], ["L2"], ["L5"]]],
         )
+
+    def test_preparation_waves_use_one_lane_per_unit(self) -> None:
+        calls: list[int] = []
+
+        def execute(
+            runner: scenarios.Runner,
+            units: list[scenarios._Unit],
+            image: str,
+            key: Path,
+            lanes: int,
+            limit: float,
+            output: scenarios.Output,
+        ) -> None:
+            calls.append(lanes)
+            for unit in units:
+                for item in unit.scenarios:
+                    runner.outcomes.append(
+                        scenarios.Outcome(item, True, 1, 1.0, Path("result.log"), "")
+                    )
+
+        with (
+            patch.object(
+                scenarios,
+                "discover",
+                side_effect=lambda labels, **_: [scenario(labels[0], layer="L1")],
+            ),
+            patch.object(scenarios, "execute", side_effect=execute),
+            patch("disposable.images.exists", return_value=True),
+            patch("disposable.images.tag", return_value="image"),
+            patch("disposable.images.store"),
+        ):
+            runner = self.runner(io.StringIO())
+            scenarios._prepare_units(
+                runner, [[("foundation", "L1")]], "image", Path("key"), 10, runner.output, 3
+            )
+            scenarios._prepare_units(
+                runner,
+                [[("wordpress", "L3"), ("cache", "L4")], [("sites", "L2")], [("laravel", "L5")]],
+                "image",
+                Path("key"),
+                10,
+                runner.output,
+                3,
+            )
+        self.assertEqual(calls, [1, 3])
 
 
 class PreparationReuseTests(SimpleTestCase):
@@ -824,6 +871,7 @@ class PrepareAllTests(SimpleTestCase):
             return []
 
         with (
+            patch("disposable.images.archived", return_value=False),
             patch("disposable.images.ensure", side_effect=ensure),
             patch("disposable.images.store", side_effect=store),
             patch("disposable.scenarios.mirror.fixture_ca"),
@@ -850,6 +898,21 @@ class PrepareAllTests(SimpleTestCase):
             self.assertIn(layer, stored)
         for layer in scenarios.SPECIAL_LAYERS:
             self.assertIn(layer, ensured)
+
+    def test_a_fully_archived_run_loads_nothing(self) -> None:
+        with (
+            patch("disposable.images.archived", return_value=True),
+            patch("disposable.images.ensure") as ensure,
+            patch.object(scenarios, "prepare_layers") as prepare,
+        ):
+            result = scenarios._run(
+                scenarios.arguments(["--prepare-all", "--lanes", "3"]),
+                [],
+                scenarios.Output(io.StringIO()),
+            )
+        self.assertEqual(result, 0)
+        ensure.assert_not_called()
+        prepare.assert_not_called()
 
 
 class UnknownLabelTests(SimpleTestCase):
