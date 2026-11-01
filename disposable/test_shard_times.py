@@ -140,6 +140,12 @@ class PartitionTests(SimpleTestCase):
 
 
 class ShardSelectionTests(SimpleTestCase):
+    def test_the_partition_uses_the_workflows_actual_lane_count(self) -> None:
+        text, _ = hosted()
+        self.assertEqual(
+            re.findall(r'BARECTL_NATIVE_LANES: "(\d+)"', text), [str(shard_times.LANES)]
+        )
+
     def test_the_shards_partition_the_discovered_scenarios(self) -> None:
         discovered = scenarios.discover()
         _, count = hosted()

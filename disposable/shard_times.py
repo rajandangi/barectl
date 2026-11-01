@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 RECORD = Path(__file__).with_name("shard_times.json")
-# The hosted workflow gives each shard two lanes: `.github/workflows/native-scenarios.yml`.
-LANES = 2
+# The hosted workflow gives each shard three lanes: `.github/workflows/native-scenarios.yml`.
+LANES = 3
 # A lane's start, each item's server boot and residue check, and the scheduling tail,
 # measured by the hosted runs (docs/phase-b-qualification.md#the-balanced-run). The Phase C
 # 14-shard trial was slower than nine, so the matrix returned to nine; the hosted target is

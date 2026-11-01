@@ -19,6 +19,7 @@ FORMAT = 1
 # docs/quality.md#recorded-transcripts lists the recording pass.
 COMMAND_SOURCES = (
     "disposable/foundation_testing.py",
+    "disposable/test_fence.py",
     "disposable/wordpress_testing.py",
     "databases/packages.py",
     "discovery/observations/__init__.py",

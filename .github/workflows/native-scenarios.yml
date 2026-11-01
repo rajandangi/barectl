@@ -1,5 +1,5 @@
 name: Native scenarios
-# docs/quality.md#native-layer: the native scenarios in 11 shards of 2 lanes, balanced by
+# docs/quality.md#native-layer: the native scenarios in 11 shards of 3 lanes, balanced by
 # their recorded item times, called by the required Native workflow on amd64 and by
 # Native weekly on arm64.
 on:
@@ -67,7 +67,7 @@ jobs:
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
-      BARECTL_NATIVE_LANES: "2"
+      BARECTL_NATIVE_LANES: "3"
       BARECTL_NATIVE_PHASE_STARTED: ${{ needs.fixture-ca.outputs.phase-started }}
       BARECTL_NATIVE_CA_SECONDS: ${{ needs.fixture-ca.outputs.ca-seconds }}
     steps:
