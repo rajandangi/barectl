@@ -54,14 +54,15 @@ class SitePHPServing(ScenarioTestCase):
         self.assertFalse(self.native("find /etc/php-fpm/php84/pools -name s339serve.conf").strip())
 
         self.native(
-            "cat > /var/www/s339serve/current/public/index.php <<'PHP'\n"
+            "set -e\ncat > /var/www/s339serve/current/public/index.php <<'PHP'\n"
             "<?php echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION.'|'."
             "($_SERVER['PATH_INFO'] ?? '').'|'.($_GET['abc'] ?? '').'|'."
             "($_SERVER['HTTP_PROXY'] ?? '').'|'.($_SERVER['HTTP_X_TEST'] ?? '');\nPHP\n"
-            # OPcache keeps serving a script cached by the create-site verification until
-            # the file is older than opcache.file_update_protection, two seconds.
+            # Backdating permits cache insertion; a previously cached script may still
+            # await its next OPcache timestamp revalidation.
             "touch -d '-1 minute' /var/www/s339serve/current/public/index.php"
         )
+        self.native("systemctl restart php-fpm-site-php84@s339serve.service")
         self.assertEqual(
             self.native(
                 "curl --fail --silent -H 'Host: s339serve.example.com' "
