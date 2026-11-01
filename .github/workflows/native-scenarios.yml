@@ -81,7 +81,7 @@ jobs:
       - run: uv sync --locked
       - name: Restore the mirror
         id: mirror
-        uses: actions/cache@v6.1.0
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/barectl/native/mirror
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
@@ -91,6 +91,7 @@ jobs:
           name: native-fixture-ca-${{ inputs.runner }}
           path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
       - name: Fetch the mirror
+        id: mirror-fetch
         run: |
           if ! docker/disposable-server/mirror.sh -- fetch; then
             if [ "${{ steps.mirror.outputs.cache-hit }}" = "true" ]; then
@@ -117,7 +118,8 @@ jobs:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
           key: native-fixture-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.fixture }}
       - name: Restore the L0 snapshot
-        uses: actions/cache@v6.1.0
+        id: l0
+        uses: actions/cache/restore@v6.1.0
         with:
           path: |
             ${{ env.BARECTL_NATIVE_L0_CACHE }}
@@ -211,6 +213,31 @@ jobs:
             run_native --check-egress
           fi
           run_native --shard ${{ matrix.shard }}/11
+      - name: Save the mirror
+        if: always() && steps.mirror.outputs.cache-hit != 'true' && steps.mirror-fetch.outcome == 'success'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: ${{ steps.mirror.outputs.cache-primary-key }}
+      - id: l0-archive
+        if: always() && steps.l0.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l0.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L0 snapshot
+        if: always() && steps.l0-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ${{ env.BARECTL_NATIVE_L0_CACHE }}
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+          key: ${{ steps.l0.outputs.cache-primary-key }}
       - id: l1-archive
         if: always() && steps.l1.outputs.cache-hit != 'true'
         run: |

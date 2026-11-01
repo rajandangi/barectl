@@ -87,6 +87,28 @@ The complete hosted phase now charges actual shared CA preparation, image work, 
 
 Exact-head hosted cold and reused-snapshot results, cache identities, final strict local results, independent reviews and the merged revision will be added before completion.
 
+## Hosted measurements at `7c14bed`
+
+The first hosted attempt passed all 87 required native items. Every complete cold phase missed 300 seconds. The same-head repeat restored fixture and L1–L5, but still rebuilt L0. It passed 86 of 87 items; the 15-method runtime class reached its unchanged 180-second limit after 14 methods passed. Its first-attempt duration was 166.3 seconds. The retained logs do not identify a hung call.
+
+| Shard | Cold complete phase | Cold items passed |
+| ---: | ---: | ---: |
+| 1 | 304 s | 6/6 |
+| 2 | 571 s | 8/8 |
+| 3 | 745 s | 8/8 |
+| 4 | 522 s | 8/8 |
+| 5 | 357 s | 9/9 |
+| 6 | 549 s | 8/8 |
+| 7 | 411 s | 8/8 |
+| 8 | 645 s | 8/8 |
+| 9 | 597 s | 8/8 |
+| 10 | 732 s | 8/8 |
+| 11 | 551 s | 8/8 |
+
+The second attempt hit the same fixture CA and L1–L5 keys. L0 and mirror misses persisted because the combined cache action saves only on job success, and all first-attempt jobs failed their targets. The sole successful second-attempt shard finally saved those caches. [The version-matched action definition](https://github.com/actions/cache/blob/v6.1.0/action.yml) uses `post-if: success()`. The candidate now uses split restore/save steps with `always()`, requires a complete L0 archive, and saves a missed mirror only after successful fetch. Native preparation and Docker archive creation remain inside the existing timer. Hosted qualification remains incomplete.
+
+The unchanged Integrity A/B/B/A fixture comparison passed all four runs but saved only 0.7 seconds on average, within noise. No fixture selection change was adopted from that warm result.
+
 ## Guidance and decisions
 
 The project follows [Django's class-level parallel test guidance](https://docs.djangoproject.com/en/6.1/ref/django-admin/#cmdoption-test-parallel). Snapshot reuse uses existing [Actions cache scoping and exact keys](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching), [same-run artifact sharing](https://docs.github.com/en/actions/tutorials/store-and-share-data#passing-data-between-jobs-in-a-workflow) and [explicit cache save](https://github.com/actions/cache/tree/main/save#always-save-cache). Leaf coordination reuses [Python 3.14 flock](https://docs.python.org/3.14/library/fcntl.html#fcntl.flock), and build command deadlines use [BSD timeout](https://man.freebsd.org/cgi/man.cgi?query=timeout&sektion=1&format=html) and [GNU timeout](https://www.gnu.org/software/coreutils/manual/html_node/timeout-invocation.html). No new package, certificate client, execution path or scheduler was added.
