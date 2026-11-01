@@ -1,0 +1,28 @@
+name: Native mirror cache
+# docs/quality.md#native-layer: seed the default-branch mirror cache so a pull request can
+# restore it when snapshot.ubuntu.com is unavailable. Scheduled and by dispatch; never a
+# required check.
+on:
+  schedule:
+    - cron: "7 5 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mirror:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - name: Restore the mirror
+        id: mirror
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+      - name: Fetch the mirror
+        if: steps.mirror.outputs.cache-hit != 'true'
+        run: docker/disposable-server/mirror.sh -- fetch
