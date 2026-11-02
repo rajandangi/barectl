@@ -564,3 +564,27 @@ class SecuritySectionBrowserTests(BrowserTestCase):
             0,
         )
         self.assert_no_native_terms()
+
+    def test_the_restart_action_works_by_keyboard_at_320_px(self) -> None:
+        for codename in ("view_changes", "change_site", "change_shared"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.store(
+            replace(
+                _security_ok(),
+                restart=_security_check(RestartState(True, ("linux-image-generic",))),
+            )
+        )
+        page = self.page
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/security/")
+        button = page.get_by_role("button", name="Restart server", exact=True)
+        expect(button).to_be_visible()
+        button.focus()
+        expect(button).to_be_focused()
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+        self.assert_no_native_terms()

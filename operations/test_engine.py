@@ -10,6 +10,7 @@ new harness replaces them.
 import hashlib
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import timedelta
 from typing import override
@@ -1189,3 +1190,104 @@ class PlannedSiteMembershipTests(SiteKindTestCase):
         self.assertEqual(review.affected_sites, ["shop"])
         self.assertEqual(review.sites_digest, hashlib.sha256(b"").hexdigest())
         self.assertEqual(review.document["current_sites"], [])
+
+
+SECOND_BOOT_ID = "7a2d5f2b-4b9f-4c60-8e3f-8d1c9b0e2f34"
+
+
+def _restart_review(evidence: object, inputs: PreparationInputs) -> engine.ReviewDraft:
+    return replace(_fixture_review(evidence, inputs), kind="fixture_restart")
+
+
+RESTART_KIND = engine.ChangeKind(
+    slug="fixture_restart",
+    label="Fixture restart",
+    inspect=lambda shell, inputs: None,
+    review=_restart_review,
+    body=_fixture_body,
+    verify=lambda shell, review: True,
+    restarts_host=True,
+)
+
+
+class RestartChangeTests(ChangeTestCase):
+    """docs/security.md#restart: a new boot on a fresh connection, or an unknown outcome."""
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        engine.register_kind(RESTART_KIND)
+        self.addCleanup(engine._KINDS.pop, "fixture_restart", None)
+        from contextlib import contextmanager
+
+        from discovery.ssh import CommandResult
+
+        self.remote.results[SITES_READ] = CommandResult(0, SITES_OUTPUT)
+        self.enterContext(mock.patch.object(engine, "REBOOT_POLL_SECONDS", 0))
+
+        @contextmanager
+        def connection(operation: ChangeRun) -> Iterator[FakeServer]:
+            yield self.remote
+
+        from discovery import ssh as ssh_module
+
+        self.enterContext(mock.patch.object(ssh_module, "connect_operation", connection))
+
+    @override
+    def assert_read_only(self) -> None:
+        self.remote.commands[:] = [
+            command
+            for command in self.remote.commands
+            if command not in {SITES_READ, "cat /proc/sys/kernel/random/boot_id"}
+        ]
+        super().assert_read_only()
+
+    def test_a_new_boot_on_a_fresh_connection_is_success(self) -> None:
+        from discovery.ssh import CommandResult
+
+        self.remote.results["cat /proc/sys/kernel/random/boot_id"] = CommandResult(
+            0, f"{SECOND_BOOT_ID}\n"
+        )
+        run = self.apply(self.change("fixture_restart"))
+        self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
+        self.assertEqual(run.verification, Verification.PASSED)
+        self.assertEqual(len(self.systemd.submissions), 1)
+
+    def test_a_same_boot_is_never_success_and_is_unknown_after_ten_minutes(self) -> None:
+        self.enterContext(mock.patch.object(engine, "REBOOT_TIMEOUT_SECONDS", 0.01))
+        run = self.apply(self.change("fixture_restart"))
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Result.OUTCOME_UNKNOWN)
+        self.assertEqual(run.verification, Verification.UNAVAILABLE)
+        self.assertIn("provider's console", run.failure)
+        self.assertIn("does not try the restart again", run.failure)
+        self.assertEqual(len(self.systemd.submissions), 1)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, "Outcome unknown")
+        self.assertContains(page, "Open the server")
+        self.assertContains(page, "does not try the restart again")
+        self.assertNotContains(page, "Nothing changed")
+
+    def test_a_connection_that_never_returns_is_unknown_without_retry(self) -> None:
+        self.enterContext(mock.patch.object(engine, "REBOOT_TIMEOUT_SECONDS", 0.01))
+        from contextlib import contextmanager
+
+        from discovery.ssh import ConnectionFailed
+
+        self.down = False
+
+        @contextmanager
+        def connection(operation: ChangeRun) -> Iterator[FakeServer]:
+            if self.down:
+                raise ConnectionFailed("The server is down.")
+            yield self.remote
+
+        from discovery import ssh as ssh_module
+
+        self.enterContext(mock.patch.object(ssh_module, "connect_operation", connection))
+        self.systemd.on_submit = lambda: setattr(self, "down", True)
+        run = self.apply(self.change("fixture_restart"))
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Result.OUTCOME_UNKNOWN)
+        self.assertIn("provider's console", run.failure)
+        self.assertEqual(len(self.systemd.submissions), 1)

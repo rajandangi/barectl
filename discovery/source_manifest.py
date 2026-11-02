@@ -31,6 +31,7 @@ COMMAND_SOURCES = (
     "security/change.py",
     "security/firewall.py",
     "security/observation.py",
+    "security/restart.py",
     "security/sign_in.py",
     "security/updates.py",
 )
@@ -98,6 +99,7 @@ SOURCES = (
     "security/bodies/automatic_updates.sh",
     "security/bodies/check_updates.sh",
     "security/bodies/firewall.sh",
+    "security/bodies/restart.sh",
     "security/bodies/sign_in.sh",
     "security/bodies/install_updates.sh",
     "sites/bodies/admission.py",

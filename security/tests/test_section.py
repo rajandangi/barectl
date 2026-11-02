@@ -13,6 +13,7 @@ from security.observation import (
     AutoUpdatesState,
     FirewallState,
     PendingUpdate,
+    RestartState,
     SecurityState,
     SshState,
     UpdatesState,
@@ -368,3 +369,36 @@ class SecuritySectionTests(ControllerConfigTestCase):
         preparation = ChangePreparation.objects.get(server=self.server)
         self.assertEqual(preparation.kind_slug, "set_automatic_security_updates")
         self.assertEqual(preparation.inputs, {"version": 1, "selection": "on"})
+
+    def test_restart_control_requires_shared_permission_and_posts_to_preparation(self) -> None:
+        self.store(
+            replace(
+                ok_state(),
+                restart=check(RestartState(True, ("linux-image-generic",))),
+            )
+        )
+        url = f"/servers/{self.server.pk}/security/restart/prepare/"
+        viewer = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(viewer, "Restart server")
+        self.assertEqual(self.client.post(url, {"selection": "on"}).status_code, 403)
+        self.grant("view_changes", "change_site")
+        site_operator = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(site_operator, "Restart server")
+        self.assertEqual(self.client.post(url, {"selection": "on"}).status_code, 403)
+        self.grant("change_shared")
+        owner = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(owner, f'action="{url}"')
+        self.assertContains(owner, 'name="selection"')
+        queued = self.client.post(url, {"selection": "on"})
+        self.assertEqual(queued.status_code, 302)
+        self.assertEqual(
+            ChangePreparation.objects.get(server=self.server).kind_slug,
+            "restart_server",
+        )
+
+    def test_a_server_that_does_not_need_a_restart_offers_no_restart_control(self) -> None:
+        self.grant("view_changes", "change_site", "change_shared")
+        self.store(ok_state())
+        response = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(response, "The server does not need a restart")
+        self.assertNotContains(response, "Restart server")

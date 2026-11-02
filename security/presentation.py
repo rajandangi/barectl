@@ -100,6 +100,7 @@ def present(
     updates_install_url: str = "",
     firewall_url: str = "",
     sign_in_url: str = "",
+    restart_url: str = "",
     can_change: bool = False,
 ) -> tuple[ShownCheck, ...]:
     """The checks, in the section's fixed order."""
@@ -127,7 +128,7 @@ def present(
             updates_install_url,
             can_change,
         ),
-        _restart(state.restart, read_at),
+        _restart(state.restart, read_at, restart_url, can_change),
         _runtimes(collected, read_at, advanced_url),
     )
 
@@ -671,7 +672,12 @@ def _classification_line(name: str, count: int) -> str:
     return f"{count} {label} update{'s' if count != 1 else ''}."
 
 
-def _restart(check: Check[RestartState], read_at: datetime) -> ShownCheck:
+def _restart(
+    check: Check[RestartState],
+    read_at: datetime,
+    action_url: str = "",
+    can_change: bool = False,
+) -> ShownCheck:
     why = "A kernel or library fix is not active until the server starts again."
     if not check.observed or check.value is None:
         return _could_not("Restart needed", check, why, read_at)
@@ -685,14 +691,24 @@ def _restart(check: Check[RestartState], read_at: datetime) -> ShownCheck:
             read_at,
             _NOT_AVAILABLE,
         )
+    action = "Restart server" if can_change and action_url else _NOT_AVAILABLE
     return ShownCheck(
         "Restart needed",
         ATTENTION,
         "The server needs a restart before some fixes take effect.",
         why,
         read_at,
-        _NOT_AVAILABLE,
-        details=tuple(f"{name} needs the restart." for name in state.packages),
+        action,
+        action_form=action_url if action != _NOT_AVAILABLE else "",
+        action_value="on",
+        action_name="selection",
+        details=(
+            *(f"{name} needs the restart." for name in state.packages),
+            (
+                "Sites are unavailable until the server returns. Scheduled tasks and queue "
+                "workers stop and start again."
+            ),
+        ),
     )
 
 

@@ -3,9 +3,8 @@
 A server's **Security** section, beside Sites, Activity, Settings and Advanced, reports what
 Barectl could read about its exposure. The standard firewall can be turned on and extra
 ports allowed or removed, key sign-in required, automatic security updates turned on or
-off, and Ubuntu updates checked for and installed from the section. Restart remains a
-later Phase E slice. The Web runtimes check links to the existing catalog update in
-Advanced.
+off, Ubuntu updates checked for and installed, and the server restarted. The Web runtimes
+check links to the existing catalog update in Advanced.
 
 ## What it reads
 
@@ -186,13 +185,32 @@ Verification reads every installed version, `dpkg --audit`, the foundation's pro
 and each site's [readiness](sites.md#readiness). Discovery then reads the versions, the
 waiting updates and any restart Ubuntu asks for from the server alone.
 
+## Restart
+
+**Restart server** is offered on the Restart needed check when `/run/reboot-required` is
+present. Its review names the packages in
+`/run/reboot-required.pkgs`, the sites, the services that stop and start, the expected
+downtime and the provider-console fallback. It is a Shared server change, so its site list
+is rechecked under the mutation lock.
+
+Under the lock the body re-reads the restart-needed packages and refuses if they changed.
+It also refuses while another Barectl change, a site backup, copy, integrity check or
+cleanup, or `apt-daily.service` or `apt-daily-upgrade.service` still has processes.
+Scheduled site tasks and queue workers do not block: they stop with the server and start
+again after boot. The body writes its one result line and then runs `systemctl reboot`.
+
+Success means a **new boot identity** on a fresh verified connection. Verification then
+requires the web server, every site's proxy and PHP, the database engine and every enabled
+object cache to be running, and every site to answer its readiness path. No verified
+connection within ten minutes closes the run as outcome unknown with provider-console
+guidance. Barectl never retries a restart, so a broken boot is not made worse.
+
 ## Limits
 
 - The checks are a snapshot, not live status. A later failed or running connection check
   marks them stale without discarding the last readable evidence.
-- The firewall, SSH sign-in, automatic security updates and Ubuntu package updates can be
-  changed here. Restart is a later Phase E slice
-  ([#301](https://github.com/rajandangi/barectl/issues/301)).
+- The firewall, SSH sign-in, automatic security updates, Ubuntu package updates and a
+  server restart can be changed here.
 - A firewall whose revert service fails is left for ordinary administration: every later
   change refuses while the failed service or its preimage remains, and Barectl never retries
   the revert.

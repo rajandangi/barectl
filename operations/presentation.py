@@ -296,7 +296,8 @@ def _run_words(
     if outcome == RunOutcome.UNKNOWN:
         return (
             "Outcome unknown",
-            "Barectl lost contact while this was running. It may have changed the server.",
+            run.failure
+            or "Barectl lost contact while this was running. It may have changed the server.",
         )
     if run.execution in Result.refused_before_changes():
         return "Nothing changed", f"Nothing changed: {run.failure}"
