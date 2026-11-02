@@ -21,7 +21,9 @@ jobs:
         id: mirror
         uses: actions/cache@v6.1.0
         with:
-          path: ~/.cache/barectl/native/mirror
+          path: |
+            ~/.cache/barectl/native/mirror
+            !~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
       - id: ca-key
         run: echo "key=$(uv run python -m disposable.mirror fixture-ca-key)" >> "$GITHUB_OUTPUT"

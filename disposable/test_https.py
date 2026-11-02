@@ -222,6 +222,7 @@ class HttpsSite(ScenarioTestCase):
         # HTTPS transition is covered by the fast review tests.
         from sites import domains_change
 
+        self.wait_for_sites_read()
         apply_change(
             self,
             domains_change.SET_SITE_DOMAINS,

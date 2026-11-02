@@ -105,6 +105,20 @@ class ScenarioTestCase(TestCase):
         """Run a harness command in the server container (teardown, probes)."""
         return docker("exec", _setting("CONTAINER"), "sh", "-c", command, timeout=timeout)
 
+    def wait_for_sites_read(self, *, timeout: float = 30) -> None:
+        """Wait until the server's sites are readable before submitting a reviewed change."""
+        from discovery.observations import collect
+
+        end = time.monotonic() + timeout
+        while True:
+            with self.shell() as shell:
+                observed = collect(shell)
+            if observed.sites.observed:
+                return
+            if time.monotonic() >= end:
+                self.fail("The server's sites could not be read.")
+            time.sleep(0.5)
+
     def assert_default_server_packages(self) -> None:
         """The default server packages and update units (docs/bootstrap.md#host-standing)."""
         status = self.native(

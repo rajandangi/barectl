@@ -724,16 +724,17 @@ def fixture_ca() -> tuple[Path, Path]:
     directory = cache_root() / FIXTURE_CA
     certificate = directory / CA_CERTIFICATE
     key = directory / CA_KEY
-    if not certificate.exists() or not key.exists():
-        directory.mkdir(parents=True, exist_ok=True)
-        _openssl(
-            "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-            "-nodes", "-keyout", str(key), "-out", str(certificate), "-days", "3650",
-            "-subj", f"/CN={FIXTURE_CA}",
-            "-addext", "basicConstraints=critical,CA:TRUE",
-            "-addext", "keyUsage=critical,keyCertSign,cRLSign",
-            "-addext", "subjectKeyIdentifier=hash",
-        )  # fmt: skip
+    with file_lock(directory / ".lock"):
+        if not certificate.exists() or not key.exists():
+            directory.mkdir(parents=True, exist_ok=True)
+            _openssl(
+                "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+                "-nodes", "-keyout", str(key), "-out", str(certificate), "-days", "3650",
+                "-subj", f"/CN={FIXTURE_CA}",
+                "-addext", "basicConstraints=critical,CA:TRUE",
+                "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+                "-addext", "subjectKeyIdentifier=hash",
+            )  # fmt: skip
     return certificate, key
 
 

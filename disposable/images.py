@@ -290,6 +290,12 @@ def store(layer: str) -> None:
         Path(partial).unlink(missing_ok=True)
 
 
+def archived(layer: str = "L0") -> bool:
+    """Whether the keyed archive exists, without loading it into Docker."""
+    archive = _archive(layer)
+    return archive is not None and archive.exists()
+
+
 def ensure(layer: str = "L0") -> str:
     """The keyed image for this host, loading it from the cache archive or building it."""
     image = tag(layer)
