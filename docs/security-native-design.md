@@ -1,87 +1,186 @@
 # Security native contract
 
-> Requirement input for Phase E of the [roadmap](../ROADMAP.md). The firewall, SSH sign-in and the confirm-or-revert window are implemented as [security](security.md#firewall); the remaining slices are not. The [target architecture](target-architecture.md) and its ADRs supersede this document's Nginx, Certbot, APT PHP, shared PHP-FPM and rclone mechanics where they conflict.
-
-Accepted design supporting [v0.9](v0.9.md). Implementation and qualification remain pending. This document owns the fixed native grammar, upstream reuse decisions and recovery limits. Values marked as policy are Barectl's choices, not upstream requirements. Facts marked "verify" must be confirmed against both supported releases in the slice that depends on them, with the result recorded in its issue.
+This document owns the fixed native grammar, the upstream operations Barectl reuses and the
+recovery limits of the server's [Security section](security.md). It describes what Phase E
+([#301](https://github.com/rajandangi/barectl/issues/301)) implements for fresh Ubuntu 26.04
+servers on amd64 and arm64 ([ADR 0026](adr/0026-manage-fresh-hosts-on-one-target-stack.md)).
+The [target architecture](target-architecture.md) and its ADRs own the surrounding stack;
+[ADR 0023](adr/0023-change-server-access-with-native-confirm-or-revert.md) and
+[ADR 0024](adr/0024-admit-exact-reviewed-upgrade-transactions.md) own the window and the
+package transaction.
 
 ## Reuse
 
 | Need | Upstream operation | Barectl adds |
 | --- | --- | --- |
 | Firewall | UFW 0.36.2 on Ubuntu 26.04: `ufw --force enable`, `ufw default`, `ufw allow`, `ufw delete`, `ufw logging`, `ufw --dry-run`, `ufw status verbose`, `ufw show added`. | Admission of the one standard and the confirm-or-revert window. Rule files are never edited directly. |
-| SSH policy | OpenSSH drop-ins in `/etc/ssh/sshd_config.d/`, included at the top of `sshd_config` so the first value read wins; `sshd -t` and `sshd -T`. | One fixed drop-in, validation and the confirm-or-revert window. |
-| Automatic updates | unattended-upgrades as configured by Ubuntu; `dpkg-reconfigure -f noninteractive unattended-upgrades` with the package's debconf answer; `apt-daily.timer` and `apt-daily-upgrade.timer`. | Observation and a reviewed enable or disable. No second scheduler. |
-| Package updates | APT and the existing package engine and guard ([ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md), [ADR 0024](adr/0024-admit-exact-reviewed-upgrade-transactions.md)); `apt-get -s` simulation; needrestart's packaged behavior. | Selection, disclosure and verification. |
-| Restart | `systemctl reboot`; `/run/reboot-required` and `/run/reboot-required.pkgs` (verify `.pkgs` on Ubuntu 26.04). | Refusal under active work, fresh-boot verification. |
-| Revert timer | `systemd-run --on-active=` transient timer and service, `systemctl stop` of the timer. | Fixed payloads only. |
+| SSH policy | OpenSSH 10.2 drop-ins in `/etc/ssh/sshd_config.d/`, included at the top of `sshd_config` so the first value read wins; `sshd -t` and `sshd -T`. | One fixed drop-in, validation and the confirm-or-revert window. |
+| Automatic updates | unattended-upgrades as configured by Ubuntu; `debconf-set-selections` and `dpkg-reconfigure -f noninteractive unattended-upgrades`; `apt-daily.timer` and `apt-daily-upgrade.timer`. | Observation and a reviewed enable or disable. No second scheduler. |
+| Package updates | APT and the package engine and guard ([ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md), [ADR 0024](adr/0024-admit-exact-reviewed-upgrade-transactions.md)); `apt-get -s`, `apt-cache policy`, `dpkg --audit`, needrestart. | Selection, disclosure and verification. |
+| Restart | `systemctl reboot`; `/run/reboot-required` and `/run/reboot-required.pkgs`, shipped by `update-notifier-common`. | Refusal under active work and fresh-boot verification. |
+| Confirm-or-revert | `systemd-run --on-active=` transient timer and service, `systemctl stop` of the timer, `flock -w`. | Fixed payloads only. |
 
-Rejected: fail2ban and CrowdSec (another daemon and rule set, unnecessary with key-only sign-in), a Barectl watchdog or agent, editing `user.rules`, writing `20auto-upgrades` by hand, `apt-get upgrade` without exact admission, scheduled reboots and Livepatch.
+Rejected: fail2ban and CrowdSec, a Barectl watchdog or agent, editing `user.rules` or
+`before.rules`, writing the automatic-update files by hand, `apt-get upgrade` without exact
+admission, scheduled reboots and Livepatch.
 
 ## Firewall standard
 
 | Element | Fixed value |
 | --- | --- |
-| Package and service | `ufw` installed from the release, `ufw.service` enabled, `ENABLED=yes` in `/etc/ufw/ufw.conf`. A missing package is installed through a reviewed bootstrap package profile first. |
-| IPv6 | `IPV6=yes` in `/etc/default/ufw` (the package default). Any other value does not follow the standard. |
+| Package and service | `ufw` 0.36.2 from the Ubuntu archive, active and enabled at boot, `ENABLED=yes` in `/etc/ufw/ufw.conf`. A missing package is installed through the exact APT transaction. |
+| IPv6 | `IPV6=yes` in `/etc/default/ufw`. |
 | Defaults | incoming deny, outgoing allow, routed deny; logging low. |
-| SSH ports | The effective `sshd -T` `port` lines, the `ListenStream` values of `ssh.socket` where it is enabled, and the ports sshd actually listens on must agree, and the verified connection's port must be one of them; otherwise every firewall action refuses. |
-| Standard rules | `allow <port>/tcp` for every SSH port, `allow 80/tcp`, `allow 443/tcp`, each for IPv4 and IPv6. |
-| Operator rules | `allow [proto tcp|udp] from <network> to any port <port[:port]>` or `allow <port[:port]>/<tcp|udp>`; one network per rule, a valid IPv4 or IPv6 CIDR. No deny, reject, limit, interface, route or application-profile rules. |
-| Not following | Any other `ufw show added` line, edited `before.rules`/`after.rules` compared with the package's conffile digest, an active nftables or iptables ruleset not produced by UFW, `firewalld` active, or Docker installed. |
+| SSH ports | The effective `sshd -T` `port` lines, the `ListenStream` values of `ssh.socket` and the ports sshd actually listens on must agree, and the verified connection's server-side port must be one of them; otherwise every firewall action refuses. |
+| Standard rules | `allow <port>/tcp` for every SSH port, `allow 80/tcp`, `allow 443/tcp` and `allow 443/udp`, on IPv4 and IPv6. |
+| Operator rules | `allow <port[:port]>/<tcp|udp>` or `allow [proto tcp|udp] from <network> to any port <port[:port]>`; one IPv4 or IPv6 CIDR. No deny, reject, limit, interface, route or application-profile rules. |
+| Not following | Any other `ufw show added` line, edited `before.rules` or `after.rules` compared with the package's conffile digest, an active non-UFW nftables or iptables filter ruleset, `firewalld` active, or Docker installed. |
 
-Docker publishes ports through its own chains ahead of UFW's rules, so a server with Docker refuses every firewall action ([Docker packet filtering](https://docs.docker.com/engine/network/packet-filtering-firewalls/)). Provider firewalls and security groups are invisible to the server and are named as such in the review.
+Docker publishes ports through its own chains ahead of UFW, so a Docker host refuses every
+firewall action ([Docker packet filtering](https://docs.docker.com/engine/network/packet-filtering-firewalls/)).
+Provider firewalls and security groups are invisible to the server and are named as such.
 
-The plan runs `ufw --dry-run` for each command during preparation and records the result digest. The payload revalidates the effective SSH ports, UFW state and rule list under the lock before applying.
+Preparation runs each rule command with `ufw --dry-run` and records its digest. It does not
+dry-run `ufw --force enable`: ufw 0.36.2 writes `ENABLED=yes` even under `--dry-run`, so the
+body enables and validates the result under the lock. The body re-reads UFW's state and rule
+list, applies only the reviewed commands, and verifies the standard.
+
+The listener read flags any public listener outside SSH, 80/tcp, 443/tcp and 443/udp, naming
+the process. Database engines, Valkey, PHP-FPM and HAProxy are expected on loopback or Unix
+sockets.
 
 ## SSH sign-in policy
 
 | Element | Fixed value |
 | --- | --- |
-| Drop-in | `/etc/ssh/sshd_config.d/00-barectl-sign-in.conf` (policy), root:root 0644, exactly the lines below. It sorts before cloud-init's `50-cloud-init.conf`, which may set `PasswordAuthentication yes`. |
-| Content | `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password` or `PermitRootLogin no`. |
-| Root choice | `no` only when the verified connection signs in as a non-root user with the sudo rights Barectl already requires; otherwise `prohibit-password`. |
-| Holds when | `sshd -T` reports `passwordauthentication no`, `kbdinteractiveauthentication no` and the chosen `permitrootlogin`. A `Match` block that re-enables passwords is reported through `sshd -T -C` for the accounts listed in the review. |
+| Drop-in | `/etc/ssh/sshd_config.d/00-barectl-sign-in.conf`, root:root 0644, sorted before cloud-init's `50-cloud-init.conf`. |
+| Content | `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password`, or `PermitRootLogin no` when the verified connection signs in as a non-root user with the sudo authorization Barectl already requires. |
+| Holds when | `sshd -T` reports the reviewed values, every listed login account's `sshd -T -C` result agrees, the accounts are readable and there is no unverifiable include or `Match` condition. |
 
-The payload writes the drop-in, runs `sshd -t`, and reloads `ssh.service` when it is active. On Ubuntu 26.04 SSH is socket-activated; a daemon started later reads the new file. Port and `ListenAddress` changes, which need the socket generator and `ssh.socket` restart, are outside the standard. The review lists accounts with a login shell and no readable `authorized_keys` as accounts that will lose password sign-in.
+The review lists accounts with a login shell and no readable `authorized_keys`. Phase A site
+accounts use `/usr/sbin/nologin` and do not appear. Port, listen address, user, key and
+multi-factor sign-in are outside this contract.
 
-OpenSSH 10.2 on Ubuntu 26.04 enables `PerSourcePenalties` by default ([release 9.8](https://www.openssh.org/txt/release-9.8)).
+The body writes the drop-in, runs `sshd -t`, and reloads `ssh.service` when it is active.
+Both `ssh.socket` and `ssh.service` are enabled on 26.04; this policy needs no socket
+restart. OpenSSH 10.2 enables `PerSourcePenalties` by default; the section shows it and leaves
+it unchanged.
 
 ## Confirm-or-revert window
 
-[ADR 0023](adr/0023-change-server-access-with-native-confirm-or-revert.md) applies to firewall and SSH plans.
+[ADR 0023](adr/0023-change-server-access-with-native-confirm-or-revert.md) applies to
+firewall and SSH changes. Under the mutation lock the body:
 
-1. Under the shared mutation lock and the [ADR 0006](adr/0006-use-native-bootstrap-execution.md) checks, copy each file the change can touch (`/etc/ufw/user.rules`, `user6.rules`, `ufw.conf`, `/etc/default/ufw`, or the SSH drop-in and its absence) into a root-only recovery preimage directory named after the run's unit under `/run/barectl` (verify the exact UFW file set on Ubuntu 26.04).
-2. Arm `barectl-revert-<run>.timer` with `systemd-run --on-active=300` (policy: five minutes). Its service waits up to two minutes for the mutation lock (`flock -w 120`, the only waiting acquisition) and is restarted on failure up to three times, so a running renewal or backup delays the revert instead of cancelling it. It restores the preimage, then runs `ufw --force disable` when the preimage has `ENABLED=no` (UFW skips `reload` while disabled, which would leave the new rules loaded), otherwise `ufw reload`; for SSH it runs `sshd -t` and reloads SSH.
-3. Apply and validate the change, then exit. The timer remains.
-4. The worker opens a new verified SSH connection with the registration's normal settings and runs one fixed confirmation under the mutation lock: stop the timer, then remove the preimage only when the revert service has no invocation ID and an empty control group. If the revert service has started, the confirmation leaves everything in place and reports the window as reverted or reverting.
+1. copies each file the change can touch into a root-only preimage under
+   `/run/barectl/revert-<run>` (`/etc/ufw/user.rules`, `user6.rules`, `ufw.conf`,
+   `/etc/default/ufw`, or the SSH drop-in and its absence), and records whether UFW was
+   enabled;
+2. arms `barectl-revert-<run>.timer` with `systemd-run --on-active=300`;
+3. applies and validates the change;
+4. exits, leaving the timer armed.
 
-The window is reported as confirmed, reverted, or unknown. Every mutation payload, including the restart, refuses while any `barectl-revert-*.timer` is active, any `barectl-revert-*.service` is running or failed, or a preimage directory under `/run/barectl` remains; a failed revert needs ordinary administration, which the run's guidance describes. A reboot inside the window loses the transient timer and `/run`, so the new persistent configuration stays; the review says so. Precedents: [netplan try](https://manpages.ubuntu.com/manpages/noble/en/man8/netplan-try.8.html) and [iptables-apply](https://manpages.ubuntu.com/manpages/noble/en/man8/iptables-apply.8.html).
+After a successful run the worker opens a **new** verified connection, not the one that
+watched the run, and runs one fixed confirmation under the mutation lock. It stops the timer
+and removes the preimage only when the revert service has no invocation and an empty control
+group. A started revert is left alone. The page reports **Kept**, **Put back** or **Not
+known** from the timer, service, preimage and journal.
+
+The revert service is the only lock acquisition that waits: `flock -w 120`, restarted on
+failure up to three times. It restores the preimage and runs `ufw --force disable` when UFW
+was disabled before, otherwise `ufw reload`; for SSH it runs `sshd -t` and reloads. Every
+engine payload refuses while a `barectl-revert-*` timer is active, its service is running or
+failed, or a preimage remains. A restart inside the window keeps the new persistent
+configuration and loses only the automatic put-back; the review says so.
 
 ## Automatic security updates
 
-Ubuntu installs unattended-upgrades and enables security updates by default through `/etc/apt/apt.conf.d/20auto-upgrades` with `APT::Periodic::Update-Package-Lists "1"` and `APT::Periodic::Unattended-Upgrade "1"`; `Unattended-Upgrade::Automatic-Reboot` defaults to false ([Ubuntu automatic updates](https://ubuntu.com/server/docs/how-to/software/automatic-updates/)). The standard is exactly that state. Observation reads `apt-config dump` for effective values, timer enablement, the package's conffile digest for `50unattended-upgrades` and the latest log under `/var/log/unattended-upgrades/`. Changed allowed origins, package blacklists, automatic reboot or a disabled timer are reported and left alone; enabling refuses them.
+Ubuntu's standard is its own package, enabled by default: `unattended-upgrades` installed,
+`APT::Periodic::Update-Package-Lists "1"` and `APT::Periodic::Unattended-Upgrade "1"`, the
+package's allowed origins, no package blacklist, `Unattended-Upgrade::Automatic-Reboot` false,
+and both `apt-daily.timer` and `apt-daily-upgrade.timer` enabled. Observation reads
+`apt-config dump`, the two timers, the `50unattended-upgrades` conffile digest and the newest
+log under `/var/log/unattended-upgrades/`.
 
-Turn on and Turn off set `unattended-upgrades/enable_auto_updates` through `debconf-set-selections` and run `dpkg-reconfigure -f noninteractive unattended-upgrades`. The package's config script reads the current `20auto-upgrades` before asking its question, so the body first installs the package's own shipped enabled or disabled file through `ucf`, the mechanism the package's `postinst` uses; a noninteractive reconfigure alone cannot change the answer. Verification reads the effective values back. Implemented behavior: [security](security.md#automatic-security-updates).
+Turn on and Turn off set `unattended-upgrades/enable_auto_updates` through
+`debconf-set-selections` and run `dpkg-reconfigure -f noninteractive unattended-upgrades`.
+The package's config script reads the current `20auto-upgrades` file before asking its
+question, so the body first installs the package's own shipped enabled or disabled file
+through `ucf`; a noninteractive reconfigure alone cannot change the answer. A missing
+package is installed first through the exact APT transaction. Customized allowed origins, a
+package blacklist, automatic reboot or a disabled timer are reported and left unchanged;
+Turn on refuses them, while Turn off is offered because it only stops Ubuntu's own work.
+Verification reads the effective values back.
+
+`unattended-upgrades.service` is the distribution's shutdown helper, not update work. Every
+payload's admission watches only `apt-daily.service` and `apt-daily-upgrade.service`
+([#411](https://github.com/rajandangi/barectl/issues/411)).
 
 ## Pending updates and Install updates
 
-Pending updates come from `apt-get -s -o APT::Get::Show-Versions=1 upgrade --with-new-pkgs` and `apt-cache policy` against current lists without refreshing them, with list age from the newest index time. Security means a candidate from the release's `-security` suite. Phased candidates kept back by APT are "waiting for Ubuntu's rollout"; security updates are never phased ([phased updates](https://ubuntu.com/server/docs/explanation/software/about-apt-upgrade-and-phased-updates/)).
+Pending updates come from `apt-get -s -o APT::Get::Show-Versions=1 upgrade --with-new-pkgs`
+and `apt-cache policy` against the current lists, without refreshing them. The list age comes
+from the newest index time. A candidate from the release's `-security` suite is a security
+update even when Ubuntu also copies it into `-updates`. Phased candidates kept back by APT
+are waiting for Ubuntu's rollout; held and blocked updates are shown but never installed.
 
-The plan installs with the existing engine's `apt-get install --only-upgrade <package>=<version>…`, the inline guard admitting exactly the reviewed upgrade and new-package lines. It refuses held packages, any removal, a package whose installed conffiles differ from dpkg's recorded digests (`dpkg-query -W -f='${Conffiles}'`) or whose ucf-managed files differ from `/var/lib/ucf/hashfile`, pending states and candidates outside the release's Ubuntu origins.
+**Check for updates** runs `apt-get update` under the lock, changes no installed package, and
+refreshes discovery. **Install updates** extends the same package engine rather than adding a
+second path. The review names each selected package at its candidate version with
+`--only-upgrade` and every new dependency. The inline guard admits only upgrade lines whose
+old and new versions, architectures and archive match the review exactly. Removals,
+downgrades, held packages, phased candidates, pending dpkg states and conffiles that differ
+from dpkg's or ucf's recorded digests refuse before dpkg changes anything. Only the
+authenticated Ubuntu 26.04 archive suites are accepted.
 
-needrestart on Ubuntu 26.04 restarts affected services automatically in unattended runs, as it has since Ubuntu 24.04 ([needrestart changes](https://discourse.ubuntu.com/t/needrestart-changes-in-ubuntu-24-04-service-restarts/44671)); the review lists the active services of a package in the transaction, and the libraries known to restart Ubuntu's database engine, object cache and SSH, with the sites they serve. Barectl does not change needrestart's configuration. Implemented behavior: [security](security.md#ubuntu-updates).
+needrestart 3.11 or maintainer scripts may restart APT-owned services such as the database
+engine, Valkey instances and SSH. The review names the active services and the sites they
+serve, and states that Caddy, HAProxy and the PHP masters come from Nix and are not restarted
+by Ubuntu updates. Barectl does not change needrestart's configuration.
+
+Verification checks installed versions, `dpkg --audit`, the profile units, Caddy routing and
+each site's readiness, then queues discovery and shows any new restart-needed evidence.
 
 ## Restart
 
-The payload, under the mutation lock, refuses while any finite unit has processes: `barectl-apply-*`, `barectl-revert-*` (timer or service), `certbot.service`, a site backup or `s<identifier>-backup-retention.service`, a Laravel scheduler invocation, `apt-daily.service` or `apt-daily-upgrade.service`. Long-running Laravel queue workers do not block; the review discloses that systemd stops them within their stop budget and starts them after boot. It records nothing on the server, then runs `systemctl reboot`. The worker waits, then connects with the registration's normal settings and verified host key. A different boot ID, the profile units active and site serving readiness close the run as verified. No connection within ten minutes (policy) leaves the run as outcome unknown; Check outcome may later observe the new boot.
+The review names `/run/reboot-required.pkgs`, the affected sites and services, the expected
+downtime, and that scheduled site tasks and queue workers stop and start again. Under the
+mutation lock the body re-reads the restart-needed packages and refuses if they changed. It
+also refuses while another `barectl-apply-*` unit, a `barectl-revert-*` timer or service, a
+site backup, copy, integrity check or cleanup, or `apt-daily.service` or
+`apt-daily-upgrade.service` has processes. Scheduled tasks and queue workers do not block:
+they tick every minute ([ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md)),
+so a refusal would almost never clear, and their jobs tolerate being stopped.
 
-## Exclusion
+The body writes its one result line, which persistent journald keeps, then runs
+`systemctl reboot`. The engine gains one kind-level option: success means a **new boot ID**.
+After submission it opens a fresh verified connection and waits up to ten minutes. On a new
+boot it reads the journal's result line and verifies that Caddy, each site's HAProxy and PHP
+master, the database engine and every enabled Valkey instance are active, then each site's
+readiness. With no connection it closes the run as outcome unknown with provider-console
+guidance. Nothing is retried, so a broken boot is not made worse.
 
-Every mutation payload adds two refusals beside the Certbot check: a populated `apt-daily.service` or `apt-daily-upgrade.service` control group, and an active `barectl-revert-*.timer`. Exit codes are assigned in the implementing slice and recorded with ADR 0006's table. unattended-upgrades does not take the Barectl lock; dpkg's frontend lock remains the package-level exclusion and existing payloads already fail at once on it. The other direction is not fenced: an unattended upgrade that starts during a v0.5 release activation or a v0.6 full capture or restore can restart PHP-FPM or Nginx through needrestart or maintainer scripts. Those workflows must recheck that the apt-daily units are idle and their drained services are still stopped before reading data and before resuming; until they do, this is a documented limit in their reviews.
+## Exclusion and recovery limits
 
-## Recovery limits
+Every payload refuses while `apt-daily.service` or `apt-daily-upgrade.service` has processes,
+and while a confirm-or-revert window is open or its put-back failed. Unattended upgrades do
+not take the Barectl lock; dpkg's frontend lock remains the package-level exclusion. An
+unattended upgrade can restart MariaDB, PostgreSQL or Valkey through needrestart, so a Deploy
+or a capture that loses its database connection must fail honestly rather than retry blindly.
 
-- A reverted change restores files and reloads the service; connections the change dropped are not restored.
-- Install updates is not reversible. Downgrades are refused, so recovery is ordinary administration or a backup.
-- A restart that does not return needs the provider console. Barectl never retries it.
-- Changes made with ordinary tools during the window are overwritten by a revert of the same files; the review says so.
+A reverted change restores files and reloads the service; connections it dropped are not
+restored. Install updates is not reversible; recovery is ordinary administration or a
+backup. A server that does not return from a restart needs the provider console, and Barectl
+never retries it.
+
+## Cloud-image VM lane
+
+A container shares the Docker host's kernel, so its boot ID cannot change and its defaults
+are the image's, not a cloud image's. The scheduled **Native VM** workflow
+(`.github/workflows/native-vm.yml`) boots the official Ubuntu 26.04 cloud image, pinned by
+SHA-256 and size in `docker/disposable-server/cloud-image.json`, under QEMU and drives it over
+SSH with the same `BARECTL_SSH_TEST_*` contract as the native scenarios. QEMU user networking
+runs with `restrict=on`; the guest reaches only a NoCloud seed and the local mirror through
+`guestfwd` proxies. The lane proves a real kernel reboot changes
+`/proc/sys/kernel/random/boot_id` and that SSH returns, and it is the home of the real-restart
+scenario. It is never a required check and adds nothing to the merge build. See
+[quality](quality.md#the-cloud-image-vm-lane).

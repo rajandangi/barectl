@@ -393,6 +393,29 @@ _WORDS: Final[dict[str, ChangeWords]] = {
             "verify": "Checking the packages and sites",
         },
     ),
+    "restart_server": ChangeWords(
+        title="Restart {server}",
+        summary=(
+            (
+                "Barectl stops and starts {server}. Sites, scheduled tasks and queue workers "
+                "pause until it returns."
+            ),
+            (
+                "If the server does not answer within ten minutes, Barectl reports that it "
+                "does not know and never tries again. Your provider's console is the fallback."
+            ),
+            "The web server and PHP versions do not change.",
+        ),
+        action="Restart server",
+        steps={
+            "preflight": "Checking the server",
+            "restart": "Restarting",
+            "verify": "Checking it came back",
+        },
+        home=Home.SERVER_SECURITY,
+        after="Back to Security",
+        after_home=Home.SERVER_SECURITY,
+    ),
     "install_valkey": ChangeWords(
         title="Install Valkey on {server}",
         summary=(

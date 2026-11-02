@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "release": "26.04",
+  "images": {
+    "amd64": {
+      "url": "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img",
+      "sha256": "5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5",
+      "size": 859090944
+    },
+    "arm64": {
+      "url": "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-arm64.img",
+      "sha256": "8eb876c2ccc4b6ff89e4a65d511815923b285e04503ba465809bf587f763da24",
+      "size": 940373504
+    }
+  }
+}

@@ -123,6 +123,7 @@ def discover(
     validators: bool = False,
     preparations: bool = False,
     breadth: bool = False,
+    vm: bool = False,
 ) -> list[Scenario]:
     from django.test.runner import DiscoverRunner
 
@@ -146,6 +147,7 @@ def discover(
             validators=validators,
             preparations=preparations,
             breadth=breadth,
+            vm=vm,
         )
     ]
     return sorted(scenarios, key=lambda scenario: scenario.label)
@@ -195,12 +197,17 @@ def _wanted(
     validators: bool = False,
     preparations: bool = False,
     breadth: bool = False,
+    vm: bool = False,
 ) -> bool:
     if bool(getattr(cls, "preparation", False)) != preparations:
         return False
     if bool(getattr(cls, "validator", False)) != validators:
         return False
     if bool(getattr(cls, "egress_control", False)) != egress_control:
+        return False
+    # The cloud-image VM lane selects its classes through ``manage.py test --tag vm``; they
+    # never join a lane, the merge build or the scheduled breadth job.
+    if bool(getattr(cls, "vm", False)) != vm:
         return False
     # The scheduled breadth job is selected only by ``--breadth``; the merge build never
     # pays for a reboot, a long scheduler run or a memory-class boot (docs/quality.md).
