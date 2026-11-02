@@ -143,11 +143,12 @@ each site's readiness, then queues discovery and shows any new restart-needed ev
 ## Restart
 
 The review names `/run/reboot-required.pkgs`, the affected sites and services, the expected
-downtime, and that scheduled site tasks and queue workers stop and start again. Under the
-mutation lock the body re-reads the restart-needed packages and refuses if they changed. It
-also refuses while another `barectl-apply-*` unit, a `barectl-revert-*` timer or service, a
-site backup, copy, integrity check or cleanup, or `apt-daily.service` or
-`apt-daily-upgrade.service` has processes. Scheduled tasks and queue workers do not block:
+downtime, and that scheduled site tasks and queue workers stop and start again. The engine's
+shared admission already refuses while another `barectl-apply-*` unit or a
+`barectl-revert-*` timer or service is active. Under the mutation lock the body re-reads the
+restart-needed packages and refuses if they changed, and refuses while a site backup, copy,
+integrity check or cleanup, or `apt-daily.service` or `apt-daily-upgrade.service` has
+processes. Scheduled tasks and queue workers do not block:
 they tick every minute ([ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md)),
 so a refusal would almost never clear, and their jobs tolerate being stopped.
 

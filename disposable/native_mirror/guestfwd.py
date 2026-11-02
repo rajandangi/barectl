@@ -61,7 +61,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError as error:
         sys.stderr.write(f"guestfwd: could not reach {options.connect}: {error}\n")
         return 1
-    with upstream, contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
+    with upstream, contextlib.suppress(OSError):
         _pump(0, 1, upstream)
     return 0
 

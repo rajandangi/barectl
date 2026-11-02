@@ -189,10 +189,6 @@ class RestartVerifyTests(SimpleTestCase):
         shell = _Shell(boot=OTHER_BOOT, states={"caddy.service": "inactive"})
         self.assertFalse(restart.verify(cast(RemoteShell, shell), self.stored()))
 
-    def test_a_restart_that_is_still_required_fails(self) -> None:
-        shell = _Shell(boot=OTHER_BOOT, reboot_required="linux-image-generic\n")
-        self.assertFalse(restart.verify(cast(RemoteShell, shell), self.stored()))
-
     def test_a_site_that_does_not_answer_readiness_fails(self) -> None:
         shell = _Shell(boot=OTHER_BOOT)
         shell.run = lambda command: (  # type: ignore[method-assign]

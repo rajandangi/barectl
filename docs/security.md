@@ -193,10 +193,11 @@ present. Its review names the packages in
 downtime and the provider-console fallback. It is a Shared server change, so its site list
 is rechecked under the mutation lock.
 
-Under the lock the body re-reads the restart-needed packages and refuses if they changed.
-It also refuses while another Barectl change, a site backup, copy, integrity check or
-cleanup, or `apt-daily.service` or `apt-daily-upgrade.service` still has processes.
-Scheduled site tasks and queue workers do not block: they stop with the server and start
+The engine's shared admission refuses while another Barectl change or a confirm-or-revert
+window is active. Under the lock the body re-reads the restart-needed packages and refuses
+if they changed. It also refuses while a site backup, copy, integrity check or cleanup, or
+`apt-daily.service` or `apt-daily-upgrade.service` still has processes. Scheduled site tasks
+and queue workers do not block: they stop with the server and start
 again after boot. The body writes its one result line and then runs `systemctl reboot`.
 
 Success means a **new boot identity** on a fresh verified connection. Verification then

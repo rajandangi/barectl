@@ -850,6 +850,11 @@ RESTART_UNKNOWN = (
     "minutes of the restart, so Barectl cannot tell whether it came back. Use your server "
     "provider's console to check it. Barectl does not try the restart again."
 )
+RESTART_NO_RESULT = (
+    "Outcome unknown. The server answered on a new boot, but Barectl found no result line "
+    "from the restart, so it cannot tell what happened. Check the server through ordinary "
+    "administration; Barectl does not try the restart again."
+)
 RESTART_VERIFICATION_FAILED = (
     "The server came back with a new boot, but its web, PHP, database or cache services, or "
     "one of its sites, did not answer as expected. Check the server through ordinary "
@@ -1184,7 +1189,6 @@ RESULT_REASONS: Final = frozenset(
         "restart_work",
         "restart_evidence",
         "restart_apply",
-        "restart_verify",
     }
 )
 
@@ -1921,7 +1925,7 @@ def _watch_reboot(run: ChangeRun, kind: ChangeKind) -> None:
                         time.sleep(JOURNAL_SETTLE_SECONDS)
                         line = read_result(shell, run.unit_name)
                     if line is None:
-                        _reboot_unknown(run)
+                        _reboot_unknown(run, failure=RESTART_NO_RESULT)
                         return
                     _conclude(shell, run, kind, None, line, Status.RUNNING)
                     return
@@ -1938,9 +1942,9 @@ def _boot_id(shell: RemoteShell) -> str:
     return result.stdout.strip()
 
 
-def _reboot_unknown(run: ChangeRun) -> None:
+def _reboot_unknown(run: ChangeRun, *, failure: str = RESTART_UNKNOWN) -> None:
     with transaction.atomic():
-        if lifecycle.finish(run.pk, Status.RUNNING, succeeded=False, failure=RESTART_UNKNOWN):
+        if lifecycle.finish(run.pk, Status.RUNNING, succeeded=False, failure=failure):
             ChangeRun.objects.filter(pk=run.pk).update(
                 execution=Result.OUTCOME_UNKNOWN,
                 verification=Verification.UNAVAILABLE,

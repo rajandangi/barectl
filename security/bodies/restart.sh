@@ -1,9 +1,6 @@
 #!/bin/sh
 # shellcheck shell=sh
-# Restart the server for the reviewed reason. docs/security.md#restart.
-# Under the engine's mutation lock the body re-reads the packages that asked for a restart,
-# refuses while finite managed work still has processes, writes its one result line while
-# the journal is still available, then asks systemd to restart the host.
+# docs/security.md#restart
 set -eu
 reported=0
 result() { reported=1; printf 'barectl-result %s\n' "$1"; }
@@ -50,7 +47,7 @@ busy() {
   [ -r "$events" ] && grep -qx 'populated 1' "$events"
 }
 
-for role in backup cleanup cleanupoffsite check checkoffsite; do
+for role in backup copy cleanup cleanupoffsite check checkoffsite; do
   for unit in $(systemctl list-units --all --plain --no-legend --type=service \
       "barectl-site-*-${role}.service" 2>/dev/null | cut -d' ' -f1); do
     if busy "$unit"; then refused restart_work; fi

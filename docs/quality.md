@@ -227,7 +227,9 @@ so a test reboot returns to SSH without repeating the image's network wait.
 `disposable/test_vm_lane.py` holds the `vm`-tagged scenarios. `VmReboot` reads
 `/proc/sys/kernel/random/boot_id`, runs `systemctl reboot` through the SSH shell, waits for
 SSH to return within a bounded time, and asserts the boot ID changed; it also proves the
-mirror answers over HTTPS while an external address and an unknown name do not. `VmRestart`
+mirror answers over HTTPS while an external address and an unknown name do not; when no
+snapshot index is cached, that one check is skipped and the native mirror lane remains the
+package-serving proof. `VmRestart`
 submits the Restart server body with a reviewed document naming one reboot-required package
 and SSH, then requires a new boot ID, a succeeded result line and the fresh-connection
 verification. Both classes connect as root with the lane's controller key, like the container
@@ -238,8 +240,8 @@ QEMU, mirror and test logs, and uploads them as an artifact. A failure opens or 
 `Native VM lane failed` issue, as the drift job does. The lane is never a required check and
 adds nothing to the merge build or the [test time budget](#test-time-budget).
 
-Run it locally on macOS arm64 with HVF or on a Linux host with `/dev/kvm` (TCG is the
-fallback when neither is available):
+Run it locally on macOS arm64 with HVF or on a Linux host with accessible `/dev/kvm` (TCG is
+the fallback when KVM is absent or its device is not accessible, as on some hosted runners):
 
 ```bash
 docker/disposable-server/mirror.sh --env-file .env -- fetch

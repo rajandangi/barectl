@@ -22,6 +22,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils
+      - name: Allow the runner to use KVM when the device exists
+        run: sudo chmod 666 /dev/kvm || true
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -32,7 +34,11 @@ jobs:
         with:
           path: ~/.cache/barectl/native/mirror
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+      # The upstream snapshot can be unavailable; the lane still proves the real reboot
+      # and the restart body from the restored cache. The native mirror lane owns package
+      # serving, and the VM smoke test skips the mirror fetch when no index is cached.
       - run: docker/disposable-server/mirror.sh -- fetch
+        continue-on-error: true
       - name: Restore the pinned cloud image
         uses: actions/cache@v6.1.0
         with:
@@ -44,7 +50,7 @@ jobs:
           set +e
           work="$RUNNER_TEMP/native-vm"
           mkdir -p "$work/logs"
-          uv run python -m disposable.vm_lane --work-dir "$work" > "$work/logs/lane.txt" 2>&1
+          uv run python -m disposable.vm_lane --keep --work-dir "$work" > "$work/logs/lane.txt" 2>&1
           code=$?
           cat "$work/logs/lane.txt"
           echo "code=$code" >> "$GITHUB_OUTPUT"
