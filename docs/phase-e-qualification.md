@@ -19,7 +19,7 @@ hosted amd64 run belongs to the pull request whose checks are recorded in [Hando
 | --- | --- |
 | Restart kind, engine reboot outcome, fast and native regression | `4969b7ea` (#305) |
 | Cloud-image VM lane, pinned image, workflow | `5b1c9dfc` (#414) |
-| Qualification documents, VM restart item, DHCP-listener fix | `92cc9229` (#415) |
+| Qualification documents and VM restart item | `92cc9229` (#415) |
 | Hosted amd64 Native workflow and VM lane | the pull request head |
 
 ## Environments

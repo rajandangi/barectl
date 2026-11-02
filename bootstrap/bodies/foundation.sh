@@ -195,9 +195,7 @@ systemctl is-active --quiet caddy.service
 [ "$(stat -c '%a' /run/caddy/admin.sock)" = 600 ]
 [ "$(stat -c '%a' /run/caddy)" = 700 ]
 [ -z "$(ss -Hlnpt '( sport = :2019 )')" ]
-# A cloud image's DHCP client binds its own interface address on UDP 68 or 546; it is a
-# client socket, not a public service. Every other non-loopback listener is foreign.
-for address in $(ss -Hlnptu | awk '$1 != "udp" || $5 !~ /:(68|546)$/ {print $5}'); do
+for address in $(ss -Hlnptu | awk '{print $5}'); do
   case "$address" in 127.*|\[::1\]:*|\[::ffff:127.*) continue ;; esac
   case "${address##*:}" in 22|80|443) ;; *) refused foreign_stack ;; esac
 done
