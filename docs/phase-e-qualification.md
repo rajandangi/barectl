@@ -30,7 +30,7 @@ hosted amd64 run belongs to the pull request whose checks are recorded in [Hando
 | Cloud-image VM lane | arm64 | The same host; QEMU 11.1.3 with HVF | The official `resolute-server-cloudimg-arm64.img`, SHA-256 `8eb876c2…63da24`, 940,373,504 bytes |
 | Full local build | arm64 | The same host; 8 lanes | The same container image |
 | Hosted Native workflow | amd64 | GitHub `ubuntu-26.04` runner | The same container image |
-| Hosted VM lane | amd64 | GitHub `ubuntu-26.04` runner with KVM | The official `resolute-server-cloudimg-amd64.img`, SHA-256 `5645d031…b7eb5`, 859,090,944 bytes |
+| Hosted VM lane | amd64 | GitHub `ubuntu-26.04` runner; KVM when its device is accessible, TCG otherwise | The official `resolute-server-cloudimg-amd64.img`, SHA-256 `5645d031…b7eb5`, 859,090,944 bytes |
 
 The controller runs Python 3.14 and Django 6.1.1. Container servers are offline: the lane
 serves the pinned Ubuntu snapshot, the Nix binary cache and the other fixture upstreams. The
