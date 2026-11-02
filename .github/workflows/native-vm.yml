@@ -1,0 +1,70 @@
+name: Native VM
+# docs/quality.md#the-cloud-image-vm-lane: a real Ubuntu cloud image, a real kernel reboot
+# and real cloud-image defaults, on a schedule. Never a required check, so it never blocks
+# a merge and adds nothing to the merge build's time.
+on:
+  schedule:
+    - cron: "13 4 * * 0"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  vm:
+    runs-on: ubuntu-26.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+    steps:
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - name: Restore the mirror
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+      - run: docker/disposable-server/mirror.sh -- fetch
+      - name: Restore the pinned cloud image
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/cloud-images
+          key: native-cloud-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/cloud-image.json') }}
+      - id: lane
+        name: Run the VM lane
+        run: |
+          set +e
+          work="$RUNNER_TEMP/native-vm"
+          mkdir -p "$work/logs"
+          uv run python -m disposable.vm_lane --work-dir "$work" > "$work/logs/lane.txt" 2>&1
+          code=$?
+          cat "$work/logs/lane.txt"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-vm
+          path: ${{ runner.temp }}/native-vm
+          if-no-files-found: ignore
+      - if: steps.lane.outputs.code != '0'
+        run: |
+          title="Native VM lane failed"
+          existing=$(gh issue list --repo "$GH_REPO" --state open \
+            --search "$title in:title" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GH_REPO" \
+              --body-file "$RUNNER_TEMP/native-vm/logs/lane.txt"
+          else
+            gh issue create --repo "$GH_REPO" --title "$title" \
+              --body-file "$RUNNER_TEMP/native-vm/logs/lane.txt"
+          fi
+      - if: steps.lane.outputs.code != '0'
+        run: exit 1
