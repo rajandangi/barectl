@@ -50,7 +50,7 @@ jobs:
           set +e
           work="$RUNNER_TEMP/native-vm"
           mkdir -p "$work/logs"
-          uv run python -m disposable.vm_lane --work-dir "$work" > "$work/logs/lane.txt" 2>&1
+          uv run python -m disposable.vm_lane --keep --work-dir "$work" > "$work/logs/lane.txt" 2>&1
           code=$?
           cat "$work/logs/lane.txt"
           echo "code=$code" >> "$GITHUB_OUTPUT"

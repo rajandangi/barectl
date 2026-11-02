@@ -206,8 +206,11 @@ The integration branch merged as pull request
 [#483](https://github.com/rajandangi/barectl/pull/483) at `95500402`. The required `Native`
 check on the PR head `cd503bbe` passed all 11 amd64 shards in run
 [41414796825](https://github.com/rajandangi/barectl/actions/runs/41414796825); `browser`,
-`check`, `frontend`, `dependency-audit` and `paths` passed in the same run pair. The hosted
-`Native VM` lane was dispatched from `main` after the merge as run
-[41415913245](https://github.com/rajandangi/barectl/actions/runs/41415913245); its result is
-recorded in the run and the issue. The local arm64 build, the four container scenarios and
-the arm64 VM lane are evidence above, not substitutes for that hosted required check.
+`check`, `frontend`, `dependency-audit` and `paths` passed in the same run pair.
+
+The review follow-up is pull request
+[#484](https://github.com/rajandangi/barectl/pull/484). Its hosted `Native VM` dispatch
+[41535980241](https://github.com/rajandangi/barectl/actions/runs/41535980241) passed on
+amd64 at `37c7c4c4` in 4 m 47 s, including the KVM boot, the real reboot, the restart body
+and the fresh-connection verification. The local arm64 build, the four container scenarios
+and the arm64 VM lane are evidence above, not substitutes for that hosted required check.
