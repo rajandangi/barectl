@@ -20,7 +20,8 @@ hosted amd64 run belongs to the pull request whose checks are recorded in [Hando
 | Restart kind, engine reboot outcome, fast and native regression | `4969b7ea` (#305) |
 | Cloud-image VM lane, pinned image, workflow | `5b1c9dfc` (#414) |
 | Qualification documents and VM restart item | `92cc9229` (#415) |
-| Hosted amd64 Native workflow and VM lane | the pull request head |
+| Hosted amd64 Native workflow | PR #484 head `67719d9f` |
+| Hosted amd64 VM lane | `main` at `0a4703b2` |
 
 ## Environments
 
@@ -90,8 +91,10 @@ in one arm64 pass: **4 of 4 passed in 49 s**.
 
 The VM lane ran both classes and the mirror proof in **55.5 s of tests**; the complete lane,
 including boot and cloud-init, took **222 s** on the local arm64 host. On the hosted amd64
-lane the mirror fetch is best-effort: a missing snapshot cache skips the mirror check, while
-the real reboot and restart body still run; the native mirror scenario owns package serving. The smoke run before
+lane the same three tests passed in **57.1 s** (`VmRestart` 43.7 s, `VmReboot` 12.9 s,
+mirror 0.4 s) and the complete lane took **232 s**. The mirror fetch is best-effort: a
+missing snapshot cache skips the mirror check, while the real reboot and restart body still
+run; the native mirror scenario owns package serving. The smoke run before
 the final lane changes passed the same reboot path in 37.3 s. The final lane's exit was 0.
 
 `VmRestart` submits the restart body with a reviewed document naming one reboot-required
@@ -179,8 +182,6 @@ that a different, longer qualification (see [Not qualified](#not-qualified)).
 
 ## Not qualified
 
-- **Hosted amd64 evidence** is recorded in [Handoff](#handoff) when the pull request checks
-  finish. If that section says pending, the amd64 path is not qualified.
 - **The cloud-image foundation** was exercised locally and reached the foundation body, but
   preparing the full foundation on the cloud image is not qualified. The image's auxiliary
   daemons, virtual DHCP and abrupt teardown make it a separate lane; the container scenarios
@@ -198,7 +199,6 @@ that a different, longer qualification (see [Not qualified](#not-qualified)).
 - **Cloud and provider firewalls, Docker hosts, fail2ban/CrowdSec, CIS/Lynis scores, Ubuntu
   Pro, release upgrades, scheduled restarts and fleet-wide patching** are outside Phase E and
   are not qualified here.
-- **Real reboot on amd64** depends on the hosted VM lane; the local run was arm64.
 
 ## Handoff
 
@@ -209,8 +209,9 @@ check on the PR head `cd503bbe` passed all 11 amd64 shards in run
 `check`, `frontend`, `dependency-audit` and `paths` passed in the same run pair.
 
 The review follow-up is pull request
-[#484](https://github.com/rajandangi/barectl/pull/484). Its hosted `Native VM` dispatch
-[41535980241](https://github.com/rajandangi/barectl/actions/runs/41535980241) passed on
-amd64 at `37c7c4c4` in 4 m 47 s, including the KVM boot, the real reboot, the restart body
-and the fresh-connection verification. The local arm64 build, the four container scenarios
-and the arm64 VM lane are evidence above, not substitutes for that hosted required check.
+[#484](https://github.com/rajandangi/barectl/pull/484), merged at `0a4703b2`. Its hosted
+`Native` run and the final `main` `Native VM` dispatch
+[41538241820](https://github.com/rajandangi/barectl/actions/runs/41538241820) passed on
+amd64; the VM job took 4 m 52 s, ran all three tests in 57.1 s and uploaded its console,
+QEMU, mirror and test logs. The local arm64 build, the four container scenarios and the
+arm64 VM lane are evidence above, not substitutes for the hosted required checks.
