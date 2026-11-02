@@ -19,9 +19,17 @@ from unittest.mock import patch
 import yaml
 from django.test import SimpleTestCase, tag
 
+from bootstrap import foundation
+from bootstrap.standing import Standing
 from discovery import ssh
+from discovery.observations import collect
+from operations import engine
+from operations.inputs import PreparationInputs
+from runtimes import change
+from security import restart
 
 from . import mirror, scenarios, vm, vm_lane
+from .change_testing import apply_change, submit_change
 from .native_mirror import guestfwd
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
@@ -87,6 +95,56 @@ class VmReboot(ScenarioTestCase):
             self.assertNotEqual(refused.exit_status, 0)
             unresolved = shell.run("getent hosts example.com")
             self.assertNotEqual(unresolved.exit_status, 0)
+
+
+@tag(SCENARIO_TAG, VM_TAG)
+class VmRestart(ScenarioTestCase):
+    """The restart kind on the real cloud image: a new boot and running services."""
+
+    vm = True
+    layer = "L0"
+    exclusive = True
+    prefix = "vmrestart"
+
+    @override
+    def native(self, command: str, *, timeout: float = 300) -> str:
+        with self.shell() as shell:
+            return shell.run(command).stdout
+
+    def test_a_reviewed_restart_returns_with_a_new_boot_and_running_services(self) -> None:
+        # The cloud image enables the daily timers; a restart review must not race them.
+        self.native("systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true")
+        apply_change(self, foundation.HOST_FOUNDATION, PreparationInputs(), timeout=600)
+        for entry in ("php84", "php85"):
+            apply_change(self, change.ADD_RUNTIME, PreparationInputs(entry), timeout=600)
+        with self.shell() as shell:
+            observed = collect(shell)
+            before = shell.run("cat /proc/sys/kernel/random/boot_id").stdout.strip()
+        if observed.standing is None:
+            self.fail("The guest did not report host standing after its foundation.")
+        self.assertEqual(
+            observed.standing.standing, Standing.TARGET_STACK, observed.standing.reasons
+        )
+        submitted = submit_change(self, restart.RESTART_SERVER, PreparationInputs("on"))
+        deadline = time.monotonic() + 300
+        after = ""
+        while time.monotonic() < deadline:
+            time.sleep(2)
+            try:
+                with self.shell() as shell:
+                    current = shell.run("cat /proc/sys/kernel/random/boot_id").stdout.strip()
+                    if current and current != before:
+                        after = current
+                        break
+            except ssh.ConnectionFailed:
+                continue
+        self.assertNotEqual(after, before, "the guest did not restart")
+        with self.shell() as shell:
+            line = engine.read_result(shell, submitted.unit)
+            if line is None:
+                self.fail("The restart run reported no native result line.")
+            self.assertEqual(line.result_class, "succeeded", line.reason)
+            self.assertTrue(restart.verify(shell, submitted.review))
 
 
 class CloudImagePinTests(SimpleTestCase):
