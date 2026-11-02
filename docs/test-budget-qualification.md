@@ -1,6 +1,6 @@
 # Test budget qualification
 
-[#479](https://github.com/rajandangi/barectl/issues/479) brought the snapshot-backed merge workflow within the targets; [#481](https://github.com/rajandangi/barectl/issues/481) owns the remaining cold-cache qualification. The targets in [quality](quality.md#test-time-budget) remain 60 seconds for the joint fast stage, 90 seconds for controller-fast, 180 seconds per native item, and 300 seconds for a full local build, the shared hosted snapshot preparation phase, or a complete hosted shard, with the 900-second hard limit. Revision `e655e6be` passed all 31 fresh native captures, the 289-second strict local build, and all eleven hosted native phase targets with exact-key snapshots in run 41351088130, attempt 2. This qualifies the snapshot-backed merge workflow. The historical all-cache-miss result and the special-image first-fill misses remained unqualified setup measurements; the [cold-cache work](#cold-cache-qualification) below supersedes that limitation. Required checks on the merge head repeat these budgets.
+[#479](https://github.com/rajandangi/barectl/issues/479) brought the snapshot-backed merge workflow within the targets; [#481](https://github.com/rajandangi/barectl/issues/481) owns the remaining cold-cache qualification. The targets in [quality](quality.md#test-time-budget) remain 60 seconds for the joint fast stage, 90 seconds for controller-fast, 180 seconds per native item, and 300 seconds for a full local build, the shared hosted snapshot preparation phase, or a complete hosted shard, with the 900-second hard limit. Revision `e655e6be` passed all 31 fresh native captures, the 289-second strict local build, and all eleven hosted native phase targets with exact-key snapshots in run 41351088130, attempt 2. This qualifies the snapshot-backed merge workflow. The historical all-cache-miss result and the special-image first-fill misses remained unqualified setup measurements until the genuine cold run at `34b7c7e7` passed the shared preparation phase and all eleven shards in run 41370790485. The [cold-cache qualification](#cold-cache-qualification) below records that pass, its cache namespace and its remaining margins. Required checks on the merge head repeat these budgets.
 
 ## Local measurements
 
@@ -181,6 +181,59 @@ A controlled same-head run tests the newly saved exact keys separately. It does 
 All 87 unique required items passed, with no duplicates or omissions. The longest item was FirewallLifecycle at 177.0 seconds, below the unchanged 180-second limit. The five special-layer server replacements took 5.691–7.914 seconds after restore, compared with 36.155–65.265 seconds during first fill. Those stage observations include server replacement and image work; they do not isolate a Docker component or remove run-to-run variation. Controller, browser, frontend and dependency checks passed on this head. Final independent Standards and Spec reviews found no issues, including the actual CLI execution and failure-propagation regressions, the re-audited narrow future transcript exclusion, and the new real capture receipts. The final documentation-only publication retains this qualified source and remains subject to required checks before merge.
 
 A separate external host-only preparation-read experiment passed its semantic guard and five unchanged cache cases but improved 32.0 to 28.6 seconds in one pair, below its adoption threshold. No product collector or observation contract was changed.
+
+## Cold-cache qualification
+
+[#481](https://github.com/rajandangi/barectl/issues/481) owns this work. The snapshot-backed result at `e655e6be` covered a run whose exact-key archives already existed; it did not cover a default-branch miss. The post-merge `main` Native run [41353087933](https://github.com/rajandangi/barectl/actions/runs/41353087933) at `0f519ba2d5f1f3d3bbcb4c2216778736e4ddd987` failed all eleven shards. Its complete phases were 392, 435, 475, 482, 493, 518, 535, 549, 549, 633 and 456 seconds. All 87 scenario items passed.
+
+### What was absent
+
+That run missed the fixture-CA key `native-fixture-ca-v1-ec-prime256v1-x509-ca-3650` and all nine snapshot keys: `l0-f97115caf70d`, `l1-cc84b49a802c`, `l2-d167a6648a59`, `l3-5df4fd22de87`, `l4-75bf5386e19b`, `l5-20fca979b79d`, `standing-26.04-34b1b5fd99c8`, `l0-24.04-1f55fcdcd859` and `fixture-8c4f70dc318a`. The CA cache is branch-scoped, so a default-branch run cannot restore a pull request's CA. The CA certificate is an input to every image key, so the miss rotated every snapshot key as well.
+
+The run then exposed the scheduling defect: after `images.ensure` built L0, `prepare_layers` prepared L1, L2, L3, L4 and L5 one at a time on one lane before any scenario. Every shard repeated the layers it needed. The corrected special-image first fill at `e655e6be` showed the smaller version of the same problem: five shards independently built the same standing image for 36.2 to 65.3 seconds each.
+
+### Shared preparation
+
+The candidate adds one required `prepare` job before the eleven shards. It restores the fixture CA, mirror and all nine snapshot keys, fetches the mirror, and runs `run-scenarios.sh -- --prepare-all`. Missing foundation preparation runs first; L2, L3 and L5 then share one wave across the measured three lanes, and L4 follows L3 on the same lane. The mirror fetch and the fixture image build overlap the L0 image build; one builder thread prepares the special `L0-standing` and `L0-24.04` Docker targets alongside the product flows. The job saves the exact-key archives and reports `Complete snapshot preparation phase` against the unchanged 300-second target and 900-second hard limit. Each shard then restores those keys and reports its own `Complete native phase`; shard 1 still carries the validators and the egress control.
+
+A `cache-namespace` dispatch input prefixes every CA, mirror and snapshot key. A qualification dispatch therefore misses every cache in an isolated namespace without deleting or rewriting unrelated entries. In a namespace the preparation job fails before any build if one restore reports a hit, so an attempt that reuses an earlier attempt's caches cannot be presented as the cold pass. The preparation clock starts at the mirror fetch and includes the fixture CA and every image build and archive it performs; cache transport, checkout and dependency setup stay outside the measurement, as [quality](quality.md#the-required-check) defines. The same dependency waves serve any layer an ordinary shard still needs when a cache is absent.
+
+### First cold attempt at `93f1712d`
+
+Namespace `cold-93f1712d-`; all eleven restores missed and the cold guard passed. The prepare job built all five layers (5 of 5 passed) but took **315 seconds**, missing the target. The preparation command was 290 seconds, the mirror fetch 24 seconds and the CA 1 second. Inside the command, L0 and the fixture image took 74 seconds, L1 took 67, the descendant wave took 120 (L3 57.9, L4 51.0, L5 110.0) and archiving plus cleanup took 15. The shards were skipped because the prepare job failed, so no scenario item ran. The completed archives were saved under the namespace. This is a recorded miss, not a pass; it is why the mirror fetch and fixture build were moved onto the L0 build.
+
+### Local measurements at `34b7c7e7`
+
+With the nine exact image tags moved aside and a fresh archive directory, the preparation pass built all layers in **79 seconds**, 5 of 5 preparations passed. That elapsed time includes the L0, fixture and both special image builds, the L1 to L5 product flows, and their archives. It is a local arm64 measurement on the 14-CPU controller, not a hosted budget claim. The strict local build passed in **294 seconds**: controller-fast 30 seconds with all 2,107 tests and the existing one skip, all 25 validators in a 41-second joint stage, all 102 browser tests in 105 seconds, and all 87 native items in a 252-second native stage. Source identity was unchanged and no required test was removed.
+
+### Hosted cold qualification at `34b7c7e7`
+
+[Run 41370790485](https://github.com/rajandangi/barectl/actions/runs/41370790485) at `34b7c7e709db0cf083d1dcccab770cff5923e9e6` is the first genuine cold run with the shared preparation job. It used namespace `cold-34b7c7e7-`. All eleven cache restores in the preparation job missed and the cold-mode guard passed; the job then saved every exact key under the namespace. The run completed successfully.
+
+| Phase | Complete target |
+| --- | ---: |
+| Shared snapshot preparation | 275 s |
+| Shard 1 | 259 s |
+| Shard 2 | 261 s |
+| Shard 3 | 276 s |
+| Shard 4 | 269 s |
+| Shard 5 | 222 s |
+| Shard 6 | 273 s |
+| Shard 7 | 270 s |
+| Shard 8 | 291 s |
+| Shard 9 | 291 s |
+| Shard 10 | 254 s |
+| Shard 11 | 299 s |
+
+The preparation job built all five layers (5 of 5 passed) and saved the mirror, CA and nine snapshot archives. The exact keys were `cold-34b7c7e7-native-mirror-Linux-X64-645955d868c8ef1ccf830d831223b83fd4f92e1ed67fbbbb2118a2570b3ae40c`, `cold-34b7c7e7-native-fixture-ca-v1-ec-prime256v1-x509-ca-3650`, `...fixture-4d5e5f275315`, `...l0-6731b02e908c`, `...standing-26.04-c29b024603b3`, `...l0-24.04-706b26630388`, `...l1-afe3699c0b52`, `...l2-335b2b50ff87`, `...l3-b3b44c6ffae0`, `...l4-3430d9492f51` and `...l5-f4229ee36aa0`. Every shard restored those keys.
+
+Shard 1 retained all six validator classes, all 25 tests in 140 seconds, and the expected egress refusal. The eleven shard summaries contain 87 distinct scenario names, all passed with no duplicates or omissions. The longest item was FirewallLifecycle at 171.1 seconds, below the unchanged 180-second limit. The complete workflow's `native` aggregate passed. The implementation caches were removed after the run; no unrelated cache was deleted or rewritten.
+
+The 299-second shard 11 leaves one second of margin. That is a recorded limitation of this single cold run, not a promise of future margin; the shard weights remain the measured hosted values and were not changed to fit this run.
+
+### Limitations
+
+A cold run is longer end to end than a warm run because the shared preparation phase precedes the shards; each measured phase remains under the unchanged target and each command under the 900-second hard limit. The ten non-validator shards still fetch the mirror from the network in an isolated cold namespace because only the prepare job's mirror is cached. That fetch is outside the shard phase timer and is a remaining optimization, not a claimed pass. The qualification uses an isolated cache namespace, fails on any unexpected hit, and deletes only its own namespace caches afterwards; it never deletes or rewrites unrelated caches.
 
 ## Guidance and decisions
 
