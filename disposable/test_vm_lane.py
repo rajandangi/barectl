@@ -33,20 +33,37 @@ VM_TAG = "vm"
 WORKFLOW = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "native-vm.yml"
 
 
-@tag(SCENARIO_TAG, VM_TAG)
-class VmReboot(ScenarioTestCase):
-    """A real kernel reboot changes the boot ID and the guest answers SSH again."""
+class _VmCase(ScenarioTestCase):
+    """Shared VM harness: no container, and one bounded wait for a new boot."""
 
     vm = True
     layer = "L0"
     exclusive = True
-    prefix = "vm"
 
     @override
     def native(self, command: str, *, timeout: float = 300) -> str:
-        """The VM lane has no container; every harness command runs over its SSH shell."""
         with self.shell() as shell:
             return shell.run(command).stdout
+
+    def wait_for_new_boot(self, before: str, *, timeout: float = 300) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            time.sleep(2)
+            try:
+                with self.shell() as shell:
+                    current = shell.run("cat /proc/sys/kernel/random/boot_id").stdout.strip()
+                    if current and current != before:
+                        return current
+            except ssh.ConnectionFailed:
+                continue
+        return ""
+
+
+@tag(SCENARIO_TAG, VM_TAG)
+class VmReboot(_VmCase):
+    """A real kernel reboot changes the boot ID and the guest answers SSH again."""
+
+    prefix = "vm"
 
     def test_a_real_reboot_changes_the_boot_id_and_ssh_returns(self) -> None:
         with self.shell() as shell:
@@ -55,24 +72,23 @@ class VmReboot(ScenarioTestCase):
             with contextlib.suppress(ssh.ConnectionFailed):
                 result = shell.run("sudo systemctl reboot --no-block")
                 self.assertEqual(result.exit_status, 0, result.stdout)
-        deadline = time.monotonic() + 240
-        after = ""
-        while time.monotonic() < deadline:
-            time.sleep(2)
-            try:
-                with self.shell() as shell:
-                    current = shell.run("cat /proc/sys/kernel/random/boot_id").stdout.strip()
-                    if current and current != before:
-                        after = current
-                        break
-            except ssh.ConnectionFailed:
-                continue
+        after = self.wait_for_new_boot(before, timeout=240)
         self.assertNotEqual(after, before, "the guest did not reboot")
         with self.shell() as shell:
             state = shell.run("systemctl is-system-running || true").stdout.strip()
             self.assertIn(state, {"running", "degraded"})
 
     def test_the_guest_reaches_the_mirror_and_nothing_else(self) -> None:
+        inrelease = (
+            mirror.cache_root()
+            / mirror.SNAPSHOT_HOST
+            / mirror.SNAPSHOT_ROOT
+            / "dists"
+            / mirror.SNAPSHOT_SUITES[0]
+            / "InRelease"
+        )
+        if not inrelease.is_file():
+            self.skipTest("the local mirror has no snapshot index to serve")
         with self.shell() as shell:
             resolved = shell.run("getent hosts snapshot.ubuntu.com").stdout.split()
             self.assertIn(vm.SEED_HOST, resolved)
@@ -94,18 +110,10 @@ class VmReboot(ScenarioTestCase):
 
 
 @tag(SCENARIO_TAG, VM_TAG)
-class VmRestart(ScenarioTestCase):
+class VmRestart(_VmCase):
     """The restart body and verification on the real cloud image."""
 
-    vm = True
-    layer = "L0"
-    exclusive = True
     prefix = "vmrestart"
-
-    @override
-    def native(self, command: str, *, timeout: float = 300) -> str:
-        with self.shell() as shell:
-            return shell.run(command).stdout
 
     def test_a_reviewed_restart_returns_with_a_new_boot_and_running_services(self) -> None:
         # The review and consent path is proven in the fast layer. This item proves the
@@ -143,18 +151,7 @@ class VmRestart(ScenarioTestCase):
                 },
             )
             submitted = submit_draft(self, shell, restart.RESTART_SERVER, draft)
-        deadline = time.monotonic() + 300
-        after = ""
-        while time.monotonic() < deadline:
-            time.sleep(2)
-            try:
-                with self.shell() as shell:
-                    current = shell.run("cat /proc/sys/kernel/random/boot_id").stdout.strip()
-                    if current and current != before:
-                        after = current
-                        break
-            except ssh.ConnectionFailed:
-                continue
+        after = self.wait_for_new_boot(before)
         self.assertNotEqual(after, before, "the guest did not restart")
         with self.shell() as shell:
             line = engine.read_result(shell, submitted.unit)

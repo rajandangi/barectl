@@ -1,9 +1,10 @@
 """Restart the server and confirm it came back (Phase E #305).
 
 docs/security.md#restart. The review names the packages that asked for a restart and the
-services and sites a restart pauses. The body refuses while another managed operation, a
-site backup, or Ubuntu's package maintenance still has processes, writes its one result
-line, then asks systemd to restart the host. The engine treats success as a new boot ID on
+services and sites a restart pauses. The engine's shared admission refuses while another
+apply or revert unit is active; the body refuses while a site backup or Ubuntu's package
+maintenance still has processes, writes its one result line, then asks systemd to restart
+the host. The engine treats success as a new boot ID on
 a fresh verified connection; no connection within ten minutes leaves the outcome unknown
 and nothing is retried.
 """
@@ -168,21 +169,21 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RestartEvidence:
     sites, targets = _sites(observed)
     services = _services(observed)
     return RestartEvidence(
-        restart.value if restart is not None and restart.observed else None,
-        restart.warning if restart is not None else "",
-        observed.standing.standing.value if observed.standing else "",
-        observed.architecture.value or "",
-        values.get("boot", ""),
-        int(values["uptime"]) if values.get("uptime", "").isdigit() else None,
-        values.get("apt", ""),
-        values.get("dpkg", ""),
-        values.get("systemd", ""),
-        sites,
-        targets,
-        services,
-        _active_states(shell, services),
-        int(values["disk"]) if values.get("disk", "").isdigit() else None,
-        int(values["memory"]) if values.get("memory", "").isdigit() else None,
+        restart=restart.value if restart is not None and restart.observed else None,
+        restart_warning=restart.warning if restart is not None else "",
+        standing=observed.standing.standing.value if observed.standing else "",
+        machine=observed.architecture.value or "",
+        boot_id=values.get("boot", ""),
+        uptime_centiseconds=(int(values["uptime"]) if values.get("uptime", "").isdigit() else None),
+        apt=values.get("apt", ""),
+        dpkg=values.get("dpkg", ""),
+        systemd=values.get("systemd", ""),
+        sites=sites,
+        targets=targets,
+        services=services,
+        active=_active_states(shell, services),
+        disk_bytes=int(values["disk"]) if values.get("disk", "").isdigit() else None,
+        memory_kib=int(values["memory"]) if values.get("memory", "").isdigit() else None,
     )
 
 
@@ -366,20 +367,17 @@ def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
         return None
     if boot.stdout.strip() == document["boot_id"]:
         return False
-    required = run_root(shell, "cat /run/reboot-required 2>/dev/null || true")
-    if required.exit_status != 0 or required.truncated:
-        return None
-    if required.stdout.strip():
-        return False
     services = document.get("services")
     if not isinstance(services, list) or not services:
         return False
     quoted = " ".join(shlex.quote(str(unit)) for unit in services)
     states = shell.run(f"systemctl is-active {quoted}")
-    if states.exit_status != 0 or states.truncated:
-        return False
+    if states.truncated:
+        return None
     rows = states.stdout.splitlines()
-    if len(rows) != len(services) or any(state != "active" for state in rows):
+    if len(rows) != len(services):
+        return None
+    if any(state != "active" for state in rows):
         return False
     return _readiness(shell, document)
 

@@ -68,8 +68,10 @@ budget](quality.md#test-time-budget) defines them.
 
 #415 adds one `vm`-tagged class and fast configuration tests only. The VM class is excluded
 from every ordinary native selection and from the merge build; its lane is outside the
-[test time budget](quality.md#test-time-budget). The fast gate moved from 2128 to 2145 tests
-in 30 s on the qualification branch.
+[test time budget](quality.md#test-time-budget). The standalone fast gate moved from 2128 to
+2145 tests and ran in 30 s on the qualification branch; the build stage above includes its
+own startup and measured 46 s. The wall target miss is 12 s with native at 256 s and browser
+at 126 s on a loaded host, not a raised target.
 
 ## Security lifecycle
 
@@ -87,7 +89,9 @@ in one arm64 pass: **4 of 4 passed in 49 s**.
 | Restart body and verification | `VmRestart` | 40.8 s | The restart body writes its result, the guest restarts, a fresh connection reports a new boot, and verification passes. |
 
 The VM lane ran both classes and the mirror proof in **55.5 s of tests**; the complete lane,
-including boot and cloud-init, took **222 s** on the local arm64 host. The smoke run before
+including boot and cloud-init, took **222 s** on the local arm64 host. On the hosted amd64
+lane the mirror fetch is best-effort: a missing snapshot cache skips the mirror check, while
+the real reboot and restart body still run; the native mirror scenario owns package serving. The smoke run before
 the final lane changes passed the same reboot path in 37.3 s. The final lane's exit was 0.
 
 `VmRestart` submits the restart body with a reviewed document naming one reboot-required
@@ -198,7 +202,12 @@ that a different, longer qualification (see [Not qualified](#not-qualified)).
 
 ## Handoff
 
-The final head and its pull request are named in the pull request description. The required
-`Native` check, the hosted `Native VM` dispatch and the exact head are recorded there and in
-the issue closure. A green local build, the four container scenarios and the arm64 VM lane
-are not a substitute for the hosted required check.
+The integration branch merged as pull request
+[#483](https://github.com/rajandangi/barectl/pull/483) at `95500402`. The required `Native`
+check on the PR head `cd503bbe` passed all 11 amd64 shards in run
+[41414796825](https://github.com/rajandangi/barectl/actions/runs/41414796825); `browser`,
+`check`, `frontend`, `dependency-audit` and `paths` passed in the same run pair. The hosted
+`Native VM` lane was dispatched from `main` after the merge as run
+[41415913245](https://github.com/rajandangi/barectl/actions/runs/41415913245); its result is
+recorded in the run and the issue. The local arm64 build, the four container scenarios and
+the arm64 VM lane are evidence above, not substitutes for that hosted required check.

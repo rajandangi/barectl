@@ -678,19 +678,6 @@ class Vm:
         hosts = manifest.hosts()
         certificate, certificate_key = mirror.mirror_certificate(hosts)
         mirror_root = mirror.cache_root()
-        inrelease = (
-            mirror_root
-            / mirror.SNAPSHOT_HOST
-            / mirror.SNAPSHOT_ROOT
-            / "dists"
-            / mirror.SNAPSHOT_SUITES[0]
-            / "InRelease"
-        )
-        if not inrelease.is_file():
-            raise VmError(
-                "The local mirror is missing its snapshot index. "
-                "Run docker/disposable-server/mirror.sh -- fetch first."
-            )
         fixture_ca, _ = mirror.fixture_ca()
         seed_directory = work / "seed"
         seed_directory.mkdir()
