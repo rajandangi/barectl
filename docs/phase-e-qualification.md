@@ -52,19 +52,19 @@ cloud-image guest is offline except for the image download: QEMU user networking
 
 ## Build budget
 
-`docker/disposable-server/build.sh --env-file .env` at the integration tip before #415's
-document changes, with the four stages as [the test time budget](quality.md#test-time-budget)
-defines them.
+`docker/disposable-server/build.sh --env-file .env` at `1ac5c273`, the qualification tip
+after the foundation body was left unchanged, with the four stages as [the test time
+budget](quality.md#test-time-budget) defines them.
 
 | Stage | Measured | Target | Limit | Result |
 | --- | --- | --- | --- | --- |
-| Controller fast tests, 2128 tests with `--parallel` | 34 s | 90 s | | Meets the target |
-| Fast snapshot validators | 42 s | (the joint stage) | | The validators have no separate target |
-| Joint fast stage, as the build measures it | 42 s | 60 s | | Meets the target |
-| Browser tests | 110 s | | | |
-| Native lifecycle scenarios, 87 of 87 passed, 8 lanes | 271 s | 300 s | 900 s | Meets the target |
-| Longest native item | 140.4 s (`WordPressServerCron`) | | 180 s | Within the item limit |
-| Full local build, wall time | 313 s | 300 s | 900 s | **Missed by 13 s**, inside run-to-run noise of the recorded Phase D baseline |
+| Controller fast tests, 2145 tests with `--parallel` | 46 s | 90 s | | Meets the target |
+| Fast snapshot validators | 56 s | (the joint stage) | | The validators have no separate target |
+| Joint fast stage, as the build measures it | 56 s | 60 s | | Meets the target |
+| Browser tests | 126 s | | | |
+| Native lifecycle scenarios, 87 of 87 passed, 8 lanes | 256 s | 300 s | 900 s | Meets the target |
+| Longest native item | 130.8 s (`Retention`) | | 180 s | Within the item limit |
+| Full local build, wall time | 312 s | 300 s | 900 s | **Missed by 12 s**, inside run-to-run noise of the recorded Phase D baseline |
 
 #415 adds one `vm`-tagged class and fast configuration tests only. The VM class is excluded
 from every ordinary native selection and from the merge build; its lane is outside the
