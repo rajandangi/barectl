@@ -47,7 +47,7 @@ FORMAT = 1
 RELEASE = "26.04"
 CACHE = "cloud-images"
 SEED_HOST = "10.0.2.100"
-SSH_USER = "ubuntu"
+SSH_USER = "root"
 SSH_PORT = 22
 DOWNLOAD_ATTEMPTS = 4
 DOWNLOAD_CHUNK = 4 * 1024 * 1024
@@ -252,7 +252,14 @@ def user_data(
 set -eu
 rm -f /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list
 systemctl disable --now systemd-resolved 2>/dev/null || true
+# The cloud image runs auxiliary daemons the native server images do not: chrony and
+# snapd expose listeners the foundation's public-listener check refuses. The lane keeps
+# the image's kernel and package defaults but removes these non-managed services.
+systemctl stop chrony.service snapd.service snapd.socket multipathd.service 2>/dev/null || true
+systemctl disable chrony.service snapd.service snapd.socket multipathd.service 2>/dev/null || true
 systemctl mask apt-news.service esm-cache.service apt-news.timer 2>/dev/null || true
+systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+systemctl mask apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
 systemctl mask apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
 rm -f /etc/resolv.conf
 printf 'nameserver 127.0.0.1\\n' >/etc/resolv.conf
@@ -272,11 +279,16 @@ systemctl mask systemd-networkd-wait-online.service 2>/dev/null || true
 hostname: barectl-vm
 manage_etc_hosts: false
 ssh_pwauth: false
-disable_root: true
+disable_root: false
 package_update: false
 package_upgrade: false
 ssh_authorized_keys:
   - {public_key.strip()}
+users:
+  - default
+  - name: root
+    ssh_authorized_keys:
+      - {public_key.strip()}
 write_files:
   - path: /etc/sudoers.d/90-barectl-vm
     permissions: '0440'
@@ -534,11 +546,6 @@ def wait_for_cloud_init(
     while time.monotonic() < deadline:
         try:
             with _client(port=port, key=key, known_hosts=known_hosts) as client:
-                _run(
-                    client,
-                    "cloud-init status --wait >/dev/null 2>&1 || true",
-                    timeout=max(1.0, deadline - time.monotonic()),
-                )
                 _, detail, detail_error = _run(
                     client, "cloud-init status --long 2>&1 || true", timeout=30
                 )
@@ -554,7 +561,7 @@ def wait_for_cloud_init(
                         f"{report.strip()}\n"
                         f"apt-get update:\n{apt.strip()}\n{apt_error.strip()}"
                     )
-                if re.search(r"^status: done$", report, re.MULTILINE):
+                if re.search(r"^status: (done|disabled)$", report, re.MULTILINE):
                     return report
                 time.sleep(2)
         except paramiko.SSHException, OSError, EOFError:

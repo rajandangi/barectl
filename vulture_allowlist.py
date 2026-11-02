@@ -136,7 +136,7 @@ if TYPE_CHECKING:
     from disposable.test_target_race import TwoControllerNativeLock
     from disposable.test_target_reconstruction import FreshControllerReconstruction
     from disposable.test_target_shape import JudgeByShape
-    from disposable.test_vm_lane import VmReboot
+    from disposable.test_vm_lane import VmReboot, VmRestart
     from disposable.test_wordpress_create import WordPressCreateMariaDB
     from laravel import configuration as laravel_configuration
     from laravel.apps import LaravelConfig
@@ -439,6 +439,7 @@ if TYPE_CHECKING:
         PassiveFoundationDiscovery,
         # The VM lane selects this class through ``manage.py test --tag vm``.
         VmReboot,
+        VmRestart,
         HostFoundation,
         RuntimeNativeBehavior,
         RuntimeDefaultValidators,

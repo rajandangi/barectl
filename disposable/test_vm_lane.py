@@ -20,8 +20,12 @@ import yaml
 from django.test import SimpleTestCase, tag
 
 from discovery import ssh
+from operations import engine
+from operations.consent import DeclaredEffect, Scope
+from security import restart
 
 from . import mirror, scenarios, vm, vm_lane
+from .change_testing import submit_draft
 from .native_mirror import guestfwd
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
@@ -87,6 +91,77 @@ class VmReboot(ScenarioTestCase):
             self.assertNotEqual(refused.exit_status, 0)
             unresolved = shell.run("getent hosts example.com")
             self.assertNotEqual(unresolved.exit_status, 0)
+
+
+@tag(SCENARIO_TAG, VM_TAG)
+class VmRestart(ScenarioTestCase):
+    """The restart body and verification on the real cloud image."""
+
+    vm = True
+    layer = "L0"
+    exclusive = True
+    prefix = "vmrestart"
+
+    @override
+    def native(self, command: str, *, timeout: float = 300) -> str:
+        with self.shell() as shell:
+            return shell.run(command).stdout
+
+    def test_a_reviewed_restart_returns_with_a_new_boot_and_running_services(self) -> None:
+        # The review and consent path is proven in the fast layer. This item proves the
+        # native body, the real kernel reboot and the fresh-connection verification.
+        with self.shell() as shell:
+            before = shell.run("cat /proc/sys/kernel/random/boot_id").stdout.strip()
+            uptime = int(shell.run("cut -d' ' -f1 /proc/uptime | tr -d .").stdout.strip())
+            self.assertEqual(
+                shell.run("printf 'test-package\\n' > /run/reboot-required.pkgs").exit_status,
+                0,
+            )
+            draft = engine.ReviewDraft(
+                kind=restart.SLUG,
+                intent="Restart the server.",
+                effects=(
+                    DeclaredEffect(
+                        Scope.SERVER,
+                        "Restart the server. Sites, scheduled tasks and queue workers stop "
+                        "and start again.",
+                        (),
+                    ),
+                ),
+                stages=restart.STAGES,
+                postconditions=("The server returns with a new boot identity.",),
+                boot_id=before,
+                uptime_centiseconds=uptime,
+                document={
+                    "version": 1,
+                    "body_sha256": restart.BODY_SHA256,
+                    "boot_id": before,
+                    "packages": ["test-package"],
+                    "sites": [],
+                    "services": ["ssh.service"],
+                    "details": [],
+                },
+            )
+            submitted = submit_draft(self, shell, restart.RESTART_SERVER, draft)
+        deadline = time.monotonic() + 300
+        after = ""
+        while time.monotonic() < deadline:
+            time.sleep(2)
+            try:
+                with self.shell() as shell:
+                    current = shell.run("cat /proc/sys/kernel/random/boot_id").stdout.strip()
+                    if current and current != before:
+                        after = current
+                        break
+            except ssh.ConnectionFailed:
+                continue
+        self.assertNotEqual(after, before, "the guest did not restart")
+        with self.shell() as shell:
+            line = engine.read_result(shell, submitted.unit)
+            if line is None:
+                self.fail("The restart run reported no native result line.")
+            self.assertEqual(line.result_class, "succeeded", line.reason)
+            self.assertTrue(restart.verify(shell, submitted.review))
 
 
 class CloudImagePinTests(SimpleTestCase):
@@ -268,7 +343,7 @@ class LaneCliTests(SimpleTestCase):
             environment = vm_lane.environment(machine)
         self.assertEqual(environment["BARECTL_SSH_TEST_HOST"], "127.0.0.1")
         self.assertEqual(environment["BARECTL_SSH_TEST_PORT"], "2222")
-        self.assertEqual(environment["BARECTL_SSH_TEST_USER"], "ubuntu")
+        self.assertEqual(environment["BARECTL_SSH_TEST_USER"], "root")
         self.assertEqual(environment["BARECTL_SCENARIO_ARCH"], "aarch64")
         self.assertEqual(environment["BARECTL_SCENARIO_RELEASE"], "26.04")
 

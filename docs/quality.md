@@ -224,12 +224,17 @@ disabled, and nothing but the image download needs the internet. The lane waits 
 `cloud-init status --wait` before running tests; cloud-init is then disabled for later boots,
 so a test reboot returns to SSH without repeating the image's network wait.
 
-`disposable/test_vm_lane.py` holds the `vm`-tagged smoke scenario. It reads
+`disposable/test_vm_lane.py` holds the `vm`-tagged scenarios. `VmReboot` reads
 `/proc/sys/kernel/random/boot_id`, runs `systemctl reboot` through the SSH shell, waits for
 SSH to return within a bounded time, and asserts the boot ID changed; it also proves the
-mirror answers over HTTPS while an external address and an unknown name do not. The lane
-runs `manage.py test --tag vm`, always tears the guest down, keeps the console, QEMU, mirror
-and test logs, and uploads them as an artifact. A failure opens or comments on the
+mirror answers over HTTPS while an external address and an unknown name do not. `VmRestart`
+submits the Restart server body with a reviewed document naming one reboot-required package
+and SSH, then requires a new boot ID, a succeeded result line and the fresh-connection
+verification. Both classes connect as root with the lane's controller key, like the container
+scenarios. The review, consent and foundation path are covered by the fast layer and the
+container scenarios; preparing the whole foundation on a cloud image is not part of this
+lane. The lane runs `manage.py test --tag vm`, always tears the guest down, keeps the console,
+QEMU, mirror and test logs, and uploads them as an artifact. A failure opens or comments on the
 `Native VM lane failed` issue, as the drift job does. The lane is never a required check and
 adds nothing to the merge build or the [test time budget](#test-time-budget).
 

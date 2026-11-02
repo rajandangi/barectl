@@ -468,26 +468,34 @@ _Avoid_: Security score, audit, compliance check
 One of the six findings in the Security checks with its state, why it matters, when it was read and at most one next action. Unreadable evidence is "Could not check", never a passing result.
 _Avoid_: Vulnerability, alert
 
-**Firewall standard** (planned):
+**Firewall standard** (implemented):
 UFW active with IPv6, default deny incoming, allow outgoing and deny routed, allowing each effective SSH port, HTTP and HTTPS, plus operator port rules from anywhere or one network. Any other rule or packet-filter manager does not follow the standard.
 _Avoid_: Security group, cloud firewall
 
-**SSH sign-in policy** (planned):
+**SSH sign-in policy** (implemented):
 The fixed sshd drop-in that requires key sign-in and limits root to keys, or refuses root when Barectl does not connect as root. The effective `sshd -T` result decides whether it holds.
 _Avoid_: SSH hardening, key management
 
-**Confirm-or-revert window** (planned):
+**Confirm-or-revert window** (implemented):
 The fixed period after a firewall or SSH change during which a transient systemd timer restores the recovery preimage unless a new verified connection from the controller confirms access. Other Barectl mutations refuse while it is open.
 _Avoid_: Rollback, grace period
 
-**Automatic security updates** (planned):
+**Automatic security updates** (implemented):
 Ubuntu's standard unattended-upgrades configuration: daily list refresh and unattended installation from the distribution's allowed origins, without automatic reboot. Barectl enables it but never runs it.
 _Avoid_: Auto-patching, Barectl updates
 
-**Pending update** (planned):
+**Pending update** (implemented):
 An installed package with a newer candidate in the server's current package lists, marked as security, other, phased, held or blocked. The list is only as current as its last refresh.
 _Avoid_: Available upgrade, outdated package
 
-**Restart required** (planned):
+**Restart required** (implemented):
 Ubuntu's `/run/reboot-required` evidence that installed packages take effect only after a reboot, with the packages that requested it.
 _Avoid_: Reboot pending, unhealthy server
+
+**Restart server** (implemented):
+The Shared change that reboots the whole host after the reviewed evidence, refuses while managed work runs, and succeeds only when a fresh verified connection reports a new boot identity with the services and sites answering. A server that does not return within ten minutes is reported as outcome unknown and is never retried ([security](docs/security.md#restart)).
+_Avoid_: Reboot, power cycle, restart node
+
+**Cloud-image VM lane** (implemented):
+The scheduled QEMU lane that boots the pinned official Ubuntu 26.04 cloud image and drives it over SSH, proving a real kernel reboot and cloud-image defaults outside the merge build ([quality](docs/quality.md#the-cloud-image-vm-lane)).
+_Avoid_: Virtual test server, emulated host
