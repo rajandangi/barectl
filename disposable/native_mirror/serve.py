@@ -61,11 +61,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--key", required=True, type=Path)
     parser.add_argument("--host", action="append", required=True)
     parser.add_argument("--port", type=int, default=443)
+    parser.add_argument(
+        "--address",
+        default="0.0.0.0",  # noqa: S104 - the default is the lane's internal network
+        help="bind address; the VM lane keeps the mirror on the host's loopback",
+    )
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(options.certificate, options.key)
-    server = _Server(("0.0.0.0", options.port), options.root, frozenset(options.host))  # noqa: S104
+    server = _Server((options.address, options.port), options.root, frozenset(options.host))
     server.socket = context.wrap_socket(server.socket, server_side=True)
     server.serve_forever()
     return 0

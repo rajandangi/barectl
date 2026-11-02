@@ -103,7 +103,7 @@ This section is the single source of truth for test time. Adding code must not a
 
 A cold hosted run has two required measured phases: the shared snapshot preparation job and each scenario shard. Both use the same target and hard limit. Preparation runs first and saves each exact-key snapshot; the shards restore those archives, so a shard never repeats the same product flow as another shard. The shard phase no longer contains missing-layer preparation on a cold run because the previous required phase performed it. The preparation phase's own duration is reported, and the workflow keeps the unchanged 900-second hard limit. A cold qualification reports both phase lists; neither may exceed 300 seconds.
 
-The build limit counts from the runner's start, including any S1 preparation of L1. `build.sh` and `disposable/scenarios.py` report each measured time against its target and limit. The [scheduled breadth job](#the-scheduled-breadth-job) is outside this budget: it is never a required check, and it adds no time to a merge build.
+The build limit counts from the runner's start, including any S1 preparation of L1. `build.sh` and `disposable/scenarios.py` report each measured time against its target and limit. The [scheduled breadth job](#the-scheduled-breadth-job) and the [cloud-image VM lane](#the-cloud-image-vm-lane) are outside this budget: they are never required checks, and they add no time to a merge build.
 
 The baseline is the [Phase A qualification record](phase-a-qualification.md#build-budget): a cold local full build in 159 s, the fast gate in 22 s, the joint fast stage in 88 s while it prepares L1 (about 35 s with L1 present), browser tests in 42 s, the longest item at 40.7 s locally and the longest hosted shard at 412 s of scenario time. A newer measurement replaces it there.
 
@@ -204,6 +204,51 @@ memory class is a cgroup limit, not a whole 1/2/4 GiB host. The
 [Phase C qualification record](phase-c-qualification.md#not-qualified) states both gaps; the
 job prints one `BREADTH_MEMORY` line per class and copies it into the run summary.
 
+### The cloud-image VM lane
+
+`Native VM` (`.github/workflows/native-vm.yml`) runs weekly and on dispatch. It boots the
+official Ubuntu 26.04 cloud image, pinned by SHA-256 and size in
+`docker/disposable-server/cloud-image.json`, under QEMU and drives it over SSH with the same
+`BARECTL_SSH_TEST_*` contract the native scenarios use. It is the only lane with a real
+kernel reboot and real cloud-image defaults; a container shares its host's kernel, so its
+boot ID cannot change. The image is fetched into
+`~/.cache/barectl/native/cloud-images` and verified before use.
+
+The guest is real but isolated. A NoCloud seed served from the host installs the lane's
+generated controller key and disables password SSH; the lane pins the guest's generated host
+key on its first localhost-only connection. The seed also aliases every mirrored host to the
+QEMU gateway, trusts the fixture CA and points APT at the same snapshot the
+[native mirror](#the-local-mirror) serves. QEMU user networking runs with `restrict=on`; the
+guest reaches only the seed and the mirror through `guestfwd` proxies to the host, DNS is
+disabled, and nothing but the image download needs the internet. The lane waits for
+`cloud-init status --wait` before running tests; cloud-init is then disabled for later boots,
+so a test reboot returns to SSH without repeating the image's network wait.
+
+`disposable/test_vm_lane.py` holds the `vm`-tagged smoke scenario. It reads
+`/proc/sys/kernel/random/boot_id`, runs `systemctl reboot` through the SSH shell, waits for
+SSH to return within a bounded time, and asserts the boot ID changed; it also proves the
+mirror answers over HTTPS while an external address and an unknown name do not. The lane
+runs `manage.py test --tag vm`, always tears the guest down, keeps the console, QEMU, mirror
+and test logs, and uploads them as an artifact. A failure opens or comments on the
+`Native VM lane failed` issue, as the drift job does. The lane is never a required check and
+adds nothing to the merge build or the [test time budget](#test-time-budget).
+
+Run it locally on macOS arm64 with HVF or on a Linux host with `/dev/kvm` (TCG is the
+fallback when neither is available):
+
+```bash
+docker/disposable-server/mirror.sh --env-file .env -- fetch
+uv run --env-file .env python -m disposable.vm_lane
+```
+
+The first run downloads the pinned image; `--keep` keeps the work directory, `--image`
+uses a local base image, `--arch` chooses the pinned architecture, and `--ssh-port`,
+`--seed-port` and `--mirror-port` choose ports. Logs are kept under
+`~/.cache/barectl/native/vm-logs` or `BARECTL_DISPOSABLE_LOGS`. A `vm` class carries both
+the `scenario` tag so the fast gate excludes it and the `vm` tag the lane selects; the native
+runner excludes `vm` classes from every ordinary selection, so it needs only its
+`vulture_allowlist.py` registration.
+
 ### Fast snapshot validators
 
 `run-scenarios.sh -- --validators` selects the six fast native validator classes and packs them across two isolated L1 lanes using their recorded durations. They check actual Caddy/PHP-FPM validators, Node selection, automation, runtime defaults, journal reads and the supported per-site log rotation file with real `logrotate --debug`, including before-effect scratch refusals and safe publication baselines. Ordinary lifecycle discovery, list, shard and recording selections exclude these classes; validator mode refuses shard, recording and egress options. They retain the `scenario` exclusion tag so ordinary controller tests never require Docker. Missing keyed L1 uses the minimal verified preparation described above, without another key or higher item/build limits.
@@ -251,9 +296,10 @@ A test that fails intermittently is never retried; it is marked with `disposable
 docker/disposable-server/mirror.sh --env-file .env -- fetch
 docker/disposable-server/run-scenarios.sh --env-file .env -- --validators
 docker/disposable-server/run-scenarios.sh --env-file .env
+uv run --env-file .env python -m disposable.vm_lane
 ```
 
-The runner takes the host-wide native lock itself (`disposable/locking.py`), so a second suite waits instead of sharing lanes; `build.sh` holds that lock once across its validator and lifecycle stages and passes `--no-lock`. `-- --help` lists the runner's options (`--validators`, `--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`, `--no-lock`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`.
+The runner takes the host-wide native lock itself (`disposable/locking.py`), so a second suite waits instead of sharing lanes; `build.sh` holds that lock once across its validator and lifecycle stages and passes `--no-lock`. `-- --help` lists the runner's options (`--validators`, `--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`, `--no-lock`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`. The VM lane is separate from the runner and does not take the native lock: it owns its own QEMU guest.
 
 `docker/disposable-server/build.sh` starts controller-fast with `--parallel`, fast snapshot validators and browser tests together. Native lifecycle work starts after both fast gates finish, while browser work continues. This prevents native startup from delaying the joint fast stage. The full-build clock starts before every gate and includes that wait; native receives only the remaining part of the original 900-second deadline. Each fixed build gate also uses the system `timeout` utility with that remaining deadline, so Docker setup is bounded before scenario execution begins. GNU and BSD `timeout` are supported; the general foreground runner and transcript passes remain unbounded. The report keeps each stage's own time, the joint fast time and the complete wall time against the unchanged targets and limits. Unsharded native work orders its isolated units by the actual local measurements in `disposable/local_times.json`; hosted shards retain their separate hosted timing record.
 
@@ -267,7 +313,7 @@ The shared preparation phase includes the mirror fetch, the fixture CA and every
 
 ### Drift and the weekly jobs
 
-`Native drift` (`.github/workflows/native-drift.yml`) runs daily and on dispatch: `mirror.sh -- drift` against the live upstreams, opening an issue when a manifest hash no longer matches. `Native weekly` (`.github/workflows/native-weekly.yml`) runs the same eleven scenario shards on arm64 and the quarantined scenarios on amd64. Neither blocks a merge.
+`Native drift` (`.github/workflows/native-drift.yml`) runs daily and on dispatch: `mirror.sh -- drift` against the live upstreams, opening an issue when a manifest hash no longer matches. `Native weekly` (`.github/workflows/native-weekly.yml`) runs the same eleven scenario shards on arm64 and the quarantined scenarios on amd64. `Native VM` (`.github/workflows/native-vm.yml`) runs the [cloud-image VM lane](#the-cloud-image-vm-lane) weekly and on dispatch. None of them blocks a merge.
 
 ### Runtime catalog lock
 
