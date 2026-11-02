@@ -206,30 +206,32 @@ Namespace `cold-93f1712d-`; all eleven restores missed and the cold guard passed
 
 With the nine exact image tags moved aside and a fresh archive directory, the preparation pass built all layers in **79 seconds**, 5 of 5 preparations passed. That elapsed time includes the L0, fixture and both special image builds, the L1 to L5 product flows, and their archives. It is a local arm64 measurement on the 14-CPU controller, not a hosted budget claim. The strict local build passed in **294 seconds**: controller-fast 30 seconds with all 2,107 tests and the existing one skip, all 25 validators in a 41-second joint stage, all 102 browser tests in 105 seconds, and all 87 native items in a 252-second native stage. Source identity was unchanged and no required test was removed.
 
-### Hosted cold qualification at `34b7c7e7`
+### Hosted cold qualification at `8415169e`
 
-[Run 41370790485](https://github.com/rajandangi/barectl/actions/runs/41370790485) at `34b7c7e709db0cf083d1dcccab770cff5923e9e6` is the first genuine cold run with the shared preparation job. It used namespace `cold-34b7c7e7-`. All eleven cache restores in the preparation job missed and the cold-mode guard passed; the job then saved every exact key under the namespace. The run completed successfully.
+The first hosted attempt with the shared preparation job, [run 41370790485](https://github.com/rajandangi/barectl/actions/runs/41370790485) at `34b7c7e7` in namespace `cold-34b7c7e7-`, met every published phase target: preparation 275 seconds and shards 222 to 299 seconds. Review then found that its L0 restore and save path lists differed by the two special-image exclusions. GitHub hashes the path list into the cache version, so every shard's L0 restore missed the archive the preparation job had just saved, and all eleven shards rebuilt L0 inside their measured phases. That run is retained as a measured near pass, not as the final evidence.
+
+The next attempt, [run 41378277314](https://github.com/rajandangi/barectl/actions/runs/41378277314) at `819c73b8` in namespace `cold-819c73b8-`, matched the L0 path lists: the preparation phase was 278 seconds, every shard restored all eleven exact keys, and the shard phases were 192 to 254 seconds. Two items failed, so it is not a pass: WordPressServerCron reached the 180-second item limit on shard 3, and HttpsSite's alias change refused an unreadable sites read on shard 6. The HttpsSite test now waits for the sites read before submitting.
+
+The final cold run, [run 41383473546](https://github.com/rajandangi/barectl/actions/runs/41383473546) at `8415169e3f84619ac9b4c3f638bf624e23c3e695` in namespace `cold-8415169e-`, passed every job. All eleven preparation restores missed and the cold-mode guard passed; the shared preparation phase took **229 seconds** and saved every exact key. Every shard restored all eleven keys: 121 successful restores and zero shard cache misses.
 
 | Phase | Complete target |
 | --- | ---: |
-| Shared snapshot preparation | 275 s |
-| Shard 1 | 259 s |
-| Shard 2 | 261 s |
-| Shard 3 | 276 s |
-| Shard 4 | 269 s |
-| Shard 5 | 222 s |
-| Shard 6 | 273 s |
-| Shard 7 | 270 s |
-| Shard 8 | 291 s |
-| Shard 9 | 291 s |
-| Shard 10 | 254 s |
-| Shard 11 | 299 s |
+| Shared snapshot preparation | 229 s |
+| Shard 1 | 219 s |
+| Shard 2 | 209 s |
+| Shard 3 | 252 s |
+| Shard 4 | 199 s |
+| Shard 5 | 252 s |
+| Shard 6 | 252 s |
+| Shard 7 | 247 s |
+| Shard 8 | 253 s |
+| Shard 9 | 251 s |
+| Shard 10 | 238 s |
+| Shard 11 | 225 s |
 
-The preparation job built all five layers (5 of 5 passed) and saved the mirror, CA and nine snapshot archives. The exact keys were `cold-34b7c7e7-native-mirror-Linux-X64-645955d868c8ef1ccf830d831223b83fd4f92e1ed67fbbbb2118a2570b3ae40c`, `cold-34b7c7e7-native-fixture-ca-v1-ec-prime256v1-x509-ca-3650`, `...fixture-4d5e5f275315`, `...l0-6731b02e908c`, `...standing-26.04-c29b024603b3`, `...l0-24.04-706b26630388`, `...l1-afe3699c0b52`, `...l2-335b2b50ff87`, `...l3-b3b44c6ffae0`, `...l4-3430d9492f51` and `...l5-f4229ee36aa0`. Every shard restored those keys.
+The exact keys were `cold-8415169e-native-mirror-Linux-X64-645955d868c8ef1ccf830d831223b83fd4f92e1ed67fbbbb2118a2570b3ae40c`, `cold-8415169e-native-fixture-ca-v1-ec-prime256v1-x509-ca-3650`, `...fixture-ee2335cbaaad`, `...l0-d728ea6b030d`, `...standing-26.04-06cae572b583`, `...l0-24.04-ed3a4e502c2c`, `...l1-5b9713ee90fe`, `...l2-92b77254fcd4`, `...l3-bd89dfbc37bf`, `...l4-4323202355de` and `...l5-56f01c6cb7a5`. Every shard restored those keys.
 
-Shard 1 retained all six validator classes, all 25 tests in 140 seconds, and the expected egress refusal. The eleven shard summaries contain 87 distinct scenario names, all passed with no duplicates or omissions. The longest item was FirewallLifecycle at 171.1 seconds, below the unchanged 180-second limit. The complete workflow's `native` aggregate passed. The implementation caches were removed after the run; no unrelated cache was deleted or rewritten.
-
-The 299-second shard 11 leaves one second of margin. That is a recorded limitation of this single cold run, not a promise of future margin; the shard weights remain the measured hosted values and were not changed to fit this run.
+Shard 1 retained all six validator classes, all 25 tests in 100 seconds, and the expected egress refusal. The eleven shard summaries contain 87 distinct scenario names, all passed with no duplicates or omissions. The longest item was RuntimeNativeBehavior at 172.7 seconds, below the unchanged 180-second limit. The complete workflow's `native` aggregate passed. The namespace caches were deleted after the run; no unrelated cache was deleted or rewritten.
 
 ### Limitations
 
