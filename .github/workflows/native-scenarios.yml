@@ -200,32 +200,38 @@ jobs:
           deadline=$(( started + 900 ))
           remaining() { echo $(( deadline - $(date +%s) )); }
           result=0
-          mirror=1
           set +e
           budget=$(remaining)
+          fetch_pid=""
+          fetch=0
           if [ "$budget" -gt 0 ]; then
+            # The L0 image build needs about a minute before the first preparation lane
+            # reads the mirror, so fetch it alongside that build instead of serially.
             timeout --signal=TERM --kill-after=10s "${budget}s" \
-              docker/disposable-server/mirror.sh -- fetch
-            fetch=$?
+              docker/disposable-server/mirror.sh -- fetch &
+            fetch_pid=$!
           else
             fetch=124
           fi
+          budget=$(remaining)
+          if [ "$budget" -gt 0 ]; then
+            timeout --signal=TERM --kill-after=10s "${budget}s" \
+              docker/disposable-server/run-scenarios.sh -- --prepare-all --time-limit "$budget"
+            result=$?
+          else
+            result=124
+          fi
+          if [ -n "$fetch_pid" ]; then
+            wait "$fetch_pid"
+            fetch=$?
+          fi
+          mirror=1
           if [ "$fetch" -ne 0 ]; then
             mirror=0
             if [ "${{ steps.mirror.outputs.cache-hit }}" = "true" ]; then
               echo "::warning::The mirror fetch failed; using the restored mirror with the same manifest."
-            else
+            elif [ "$result" -eq 0 ]; then
               result=$fetch
-            fi
-          fi
-          if [ "$result" -eq 0 ]; then
-            budget=$(remaining)
-            if [ "$budget" -gt 0 ]; then
-              timeout --signal=TERM --kill-after=10s "${budget}s" \
-                docker/disposable-server/run-scenarios.sh -- --prepare-all --time-limit "$budget"
-              result=$?
-            else
-              result=124
             fi
           fi
           set -e

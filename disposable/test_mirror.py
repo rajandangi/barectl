@@ -681,8 +681,8 @@ class SnapshotPreparationPhaseTests(SimpleTestCase):
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertIn(f"Complete snapshot preparation phase: {seconds}s", result.stdout)
                 self.assertEqual(len(calls), 2)
-                self.assertIn("mirror.sh -- fetch", calls[0])
-                self.assertIn("--prepare-all --time-limit", calls[1])
+                self.assertTrue(any("mirror.sh -- fetch" in call for call in calls))
+                self.assertTrue(any("--prepare-all --time-limit" in call for call in calls))
                 self.assertEqual("target missed" in result.stderr, seconds > 300)
 
     def test_the_fixture_ca_is_charged_to_the_preparation_phase(self) -> None:
@@ -696,11 +696,11 @@ class SnapshotPreparationPhaseTests(SimpleTestCase):
                 result, _ = self.run_prepare(seconds, result=7)
                 self.assertEqual(result.returncode, 7, result.stderr)
 
-    def test_a_failed_fetch_stops_before_preparation(self) -> None:
+    def test_a_failed_fetch_fails_the_phase(self) -> None:
         result, calls = self.run_prepare(1, fetch=7)
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(len(calls), 1)
-        self.assertIn("mirror.sh -- fetch", calls[0])
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any("mirror.sh -- fetch" in call for call in calls))
 
 
 class SpecialSnapshotCacheTests(SimpleTestCase):

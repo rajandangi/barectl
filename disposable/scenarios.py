@@ -1257,12 +1257,13 @@ def _prepare_all_stage(options: argparse.Namespace, lanes: int, output: Output) 
     # The special images are plain Docker targets, independent of the product flows; one
     # builder thread stays within the measured lane capacity (docs/quality.md#native-layer).
     special_pool = ThreadPoolExecutor(1)
+    fixture = special_pool.submit(images.ensure, "fixture")
     specials = [special_pool.submit(_store_layer, layer) for layer in SPECIAL_LAYERS]
     try:
         with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
             work = Path(directory)
             image = images.ensure()
-            fixture_image = images.ensure("fixture")
+            fixture_image = fixture.result()
             images.store("fixture")
             key = controller_key(work)
             runner = Runner(
