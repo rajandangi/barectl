@@ -64,6 +64,9 @@ JOURNAL_SETTLE_SECONDS = 3.0
 # exits. This is the bounded chance the worker gives the page to say Put back.
 WINDOW_SETTLE_SECONDS = 10.0
 STALE_AFTER = timedelta(minutes=10)
+# docs/security.md#restart: policy, ten minutes. A restart never retries itself.
+REBOOT_TIMEOUT_SECONDS = 600
+REBOOT_POLL_SECONDS = 3.0
 
 UNEXPECTED_FAILURE = (
     "Applying stopped because of an unexpected error. Barectl did not record the error "
@@ -407,6 +410,19 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
     "updates_failed": (
         "The updates change stopped before reporting its outcome. Read the server again "
         "before preparing a new review that proposes only what remains."
+    ),
+    "restart_work": (
+        "A site backup, copy, check or cleanup, or Ubuntu's package maintenance, still had "
+        "processes on the server, so the restart stopped before changing anything. Prepare "
+        "a new review after it finishes."
+    ),
+    "restart_evidence": (
+        "The packages that asked for a restart changed after the review, so the restart "
+        "stopped before changing anything. Read the server again and prepare a new review."
+    ),
+    "restart_apply": (
+        "The restart stopped before asking the server to start again. Read the server "
+        "through ordinary administration and prepare a new review."
     ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
@@ -829,6 +845,16 @@ WINDOW_NOT_CONFIRMED = (
     "unless a new verified connection confirms it. Check the server through ordinary "
     "administration, then prepare a new review."
 )
+RESTART_UNKNOWN = (
+    "Outcome unknown. The server did not answer over a new verified connection within ten "
+    "minutes of the restart, so Barectl cannot tell whether it came back. Use your server "
+    "provider's console to check it. Barectl does not try the restart again."
+)
+RESTART_VERIFICATION_FAILED = (
+    "The server came back with a new boot, but its web, PHP, database or cache services, or "
+    "one of its sites, did not answer as expected. Check the server through ordinary "
+    "administration before preparing another change."
+)
 
 # Why a closure attempt left the run reconciling. Acknowledging again asks for another.
 CLOSURE_ACCOUNT = (
@@ -940,6 +966,10 @@ class ChangeKind:
     # preimage and arms the five-minute revert timer, and after success the worker confirms
     # access over a new verified connection (docs/adr/0023).
     access_changing: bool = False
+    # The kind restarts the host, so the connection that watched the run ends with it.
+    # Success means a new boot ID on a fresh verified connection, and no connection within
+    # the ten-minute policy leaves the outcome unknown (docs/security.md#restart).
+    restarts_host: bool = False
 
 
 _KINDS: dict[str, ChangeKind] = {}
@@ -1151,6 +1181,10 @@ RESULT_REASONS: Final = frozenset(
         "updates_pending",
         "updates_verify",
         "updates_failed",
+        "restart_work",
+        "restart_evidence",
+        "restart_apply",
+        "restart_verify",
     }
 )
 
@@ -1793,32 +1827,41 @@ def _apply(run: ChangeRun) -> None:
     secret, plaintext = _confidential_value(run, review)
     staged_secret = secret_path(run.unit_name) if review.writes_secrets else ""
     submission = _reviewed_submission(run, review, kind, staged_secret, secret)
-    with ssh.connect_operation(run) as shell:
-        if shell.host_key != review.host_key:
-            raise OperationRefused(HOST_KEY_FAILURE)
-        root = _admit(
-            shell,
-            submission.stage,
-            submission.submit,
-            submission.remove,
-            submission.result,
-            kind,
-            submission.secret_stage,
-            (
+    try:
+        with ssh.connect_operation(run) as shell:
+            if shell.host_key != review.host_key:
+                raise OperationRefused(HOST_KEY_FAILURE)
+            root = _admit(
+                shell,
+                submission.stage,
+                submission.submit,
+                submission.remove,
+                submission.result,
+                kind,
+                submission.secret_stage,
                 (
-                    revert.confirmation(run.unit_name),
-                    revert.evidence_command(run.unit_name),
-                )
-                if kind.access_changing
-                else ()
-            ),
-        )
-        _stage_payloads(shell, root, submission, secret, run.pk)
-        # Recorded before anything is sent; a recovery that already failed the run wins.
-        if not lifecycle.dispatch(run.pk, host_key=shell.host_key):
-            _remove_body(shell, *submission.paths, root=root)
-            return
-        _submit_and_watch(shell, run, kind, submission, root)
+                    (
+                        revert.confirmation(run.unit_name),
+                        revert.evidence_command(run.unit_name),
+                    )
+                    if kind.access_changing
+                    else ()
+                ),
+            )
+            _stage_payloads(shell, root, submission, secret, run.pk)
+            # Recorded before anything is sent; a recovery that already failed the run wins.
+            if not lifecycle.dispatch(run.pk, host_key=shell.host_key):
+                _remove_body(shell, *submission.paths, root=root)
+                return
+            _submit_and_watch(shell, run, kind, submission, root)
+    except ConnectionFailed:
+        # A restart ends the watching connection. If the run already has an outcome the
+        # closed connection is part of the change, not a reason to report a new failure.
+        still_active = ChangeRun.objects.filter(
+            pk=run.pk, status__in=RemoteOperation.ACTIVE
+        ).exists()
+        if not kind.restarts_host or still_active:
+            raise
     _scrub_run(run.pk, plaintext)
 
 
@@ -1828,6 +1871,12 @@ def _submit_and_watch(
     try:
         result = shell.run(native.privileged(submission.submit, root=root))
     except ConnectionFailed:
+        if kind.restarts_host:
+            # The restart can end this connection just after systemd accepts the unit.
+            # The fresh connection and the journal decide the outcome; nothing is retried.
+            _record(run.pk, Status.RUNNING, execution=Result.SUBMITTED)
+            _watch_reboot(run, kind)
+            return
         lifecycle.reconcile(run.pk, f"{LOST_ACKNOWLEDGEMENT} {UNCERTAIN}")
         return
     acknowledged = result.exit_status == 0
@@ -1839,7 +1888,64 @@ def _submit_and_watch(
         execution=Result.SUBMITTED,
         acknowledged_at=timezone.now() if acknowledged else None,
     )
+    if kind.restarts_host:
+        if acknowledged:
+            _watch_reboot(run, kind)
+        else:
+            _conclude_rejected(run)
+        return
     _watch(shell, run, kind, acknowledged=acknowledged)
+
+
+def _watch_reboot(run: ChangeRun, kind: ChangeKind) -> None:
+    """Wait for a new boot over a fresh verified connection, within the ten-minute policy.
+
+    The body writes its result line before asking the server to restart, so the journal is
+    the run's evidence after the watching connection ends. A connection on the old boot is
+    not evidence that the restart finished, and a missing one is never reported as success.
+    """
+    review = run.review
+    deadline = time.monotonic() + REBOOT_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            with ssh.connect_operation(run) as shell:
+                if shell.host_key != review.host_key:
+                    _reboot_unknown(run)
+                    return
+                boot_id = _boot_id(shell)
+                if boot_id and boot_id != review.boot_id:
+                    line = read_result(shell, run.unit_name)
+                    if line is None:
+                        # The unit's journal may still be publishing its last line as the
+                        # server boots; give it one short settle before calling it unknown.
+                        time.sleep(JOURNAL_SETTLE_SECONDS)
+                        line = read_result(shell, run.unit_name)
+                    if line is None:
+                        _reboot_unknown(run)
+                        return
+                    _conclude(shell, run, kind, None, line, Status.RUNNING)
+                    return
+        except ConnectionFailed:
+            pass
+        time.sleep(REBOOT_POLL_SECONDS)
+    _reboot_unknown(run)
+
+
+def _boot_id(shell: RemoteShell) -> str:
+    result = shell.run("cat /proc/sys/kernel/random/boot_id")
+    if result.exit_status != 0 or result.truncated:
+        return ""
+    return result.stdout.strip()
+
+
+def _reboot_unknown(run: ChangeRun) -> None:
+    with transaction.atomic():
+        if lifecycle.finish(run.pk, Status.RUNNING, succeeded=False, failure=RESTART_UNKNOWN):
+            ChangeRun.objects.filter(pk=run.pk).update(
+                execution=Result.OUTCOME_UNKNOWN,
+                verification=Verification.UNAVAILABLE,
+            )
+    logger.info("Restart run %s closed as outcome unknown", run.pk)
 
 
 def _confidential_value(
@@ -2044,7 +2150,7 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
             None: Verification.UNAVAILABLE,
         }[passed]
         if verification == Verification.FAILED:
-            failure = VERIFICATION_FAILED
+            failure = RESTART_VERIFICATION_FAILED if kind.restarts_host else VERIFICATION_FAILED
         elif verification == Verification.UNAVAILABLE:
             failure = VERIFICATION_UNAVAILABLE
         if kind.access_changing:

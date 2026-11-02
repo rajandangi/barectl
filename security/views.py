@@ -22,6 +22,7 @@ from .change import SLUG, STATES
 from .firewall import ACTIONS as FIREWALL_ACTIONS
 from .firewall import PROTOCOLS as FIREWALL_PROTOCOLS
 from .firewall import SLUG as FIREWALL_SLUG
+from .restart import SLUG as RESTART_SLUG
 from .sign_in import SLUG as SIGN_IN_SLUG
 from .updates import CHECK_SLUG, INSTALL_SLUG, SELECTIONS
 
@@ -87,6 +88,23 @@ def prepare_auto_updates(request: HttpRequest, pk: int) -> HttpResponse:
         {"version": 1, "selection": state},
         "This server has no current manageable observation. Run a connection check and "
         "resolve any findings before changing automatic updates.",
+    )
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, CHANGE_SHARED), raise_exception=True)
+def prepare_restart(request: HttpRequest, pk: int) -> HttpResponse:
+    """Prepare a reviewed restart of the whole server."""
+    if request.POST.get("selection") != "on":
+        return _redirect_problem(request, pk, "Choose Restart server to continue.")
+    return _prepare(
+        request,
+        pk,
+        RESTART_SLUG,
+        {"version": 1, "selection": "on"},
+        "This server has no current manageable observation. Run a connection check and "
+        "resolve any findings before restarting it.",
     )
 
 
