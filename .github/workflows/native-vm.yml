@@ -22,6 +22,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils
+      - name: Allow the runner to use KVM when the device exists
+        run: sudo chmod 666 /dev/kvm || true
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0
         with:
