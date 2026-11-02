@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import timedelta
 from typing import override
 
+from django.test import Client
 from django.utils import timezone
 
 from discovery.fakes import COLLECTED, record_attempt
@@ -402,3 +403,18 @@ class SecuritySectionTests(ControllerConfigTestCase):
         response = self.client.get(f"/servers/{self.server.pk}/security/")
         self.assertContains(response, "The server does not need a restart")
         self.assertNotContains(response, "Restart server")
+
+    def test_a_restart_preparation_post_without_a_csrf_token_is_refused(self) -> None:
+        self.grant("view_changes", "change_site", "change_shared")
+        self.store(
+            replace(
+                ok_state(),
+                restart=check(RestartState(True, ("linux-image-generic",))),
+            )
+        )
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        response = client.post(
+            f"/servers/{self.server.pk}/security/restart/prepare/", {"selection": "on"}
+        )
+        self.assertEqual(response.status_code, 403)
