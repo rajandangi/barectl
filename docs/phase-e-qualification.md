@@ -10,30 +10,92 @@ passing is not qualified.
 
 ## Revisions
 
-<!-- FILL: tested revisions and the integration branch tip. -->
+The integration branch is `feat/301-phase-e-security`. It merged #305 at `4969b7ea` and #414
+at `5b1c9dfc`; the qualification code and documents are the `security/415-qualification`
+head that follows `92cc9229`. The local measurements below belong to that branch. The
+hosted amd64 run belongs to the pull request whose checks are recorded in [Handoff](#handoff).
+
+| Evidence | Revision |
+| --- | --- |
+| Restart kind, engine reboot outcome, fast and native regression | `4969b7ea` (#305) |
+| Cloud-image VM lane, pinned image, workflow | `5b1c9dfc` (#414) |
+| Qualification documents, VM restart item, DHCP-listener fix | `92cc9229` (#415) |
+| Hosted amd64 Native workflow and VM lane | the pull request head |
 
 ## Environments
 
-<!-- FILL: local arm64 host, hosted amd64 GitHub runner, server image digests and versions. -->
+| Environment | Architecture | Host | Server |
+| --- | --- | --- | --- |
+| Container security scenarios | arm64 | Apple M4 Pro, 14 CPUs, 64 GiB host memory; 8 lanes | Ubuntu 26.04.1 LTS by the digest in `docker/disposable-server/pins.json`; systemd 259.5; the kernel shared with the Docker VM |
+| Cloud-image VM lane | arm64 | The same host; QEMU 11.1.3 with HVF | The official `resolute-server-cloudimg-arm64.img`, SHA-256 `8eb876c2…63da24`, 940,373,504 bytes |
+| Full local build | arm64 | The same host; 8 lanes | The same container image |
+| Hosted Native workflow | amd64 | GitHub `ubuntu-26.04` runner | The same container image |
+| Hosted VM lane | amd64 | GitHub `ubuntu-26.04` runner with KVM | The official `resolute-server-cloudimg-amd64.img`, SHA-256 `5645d031…b7eb5`, 859,090,944 bytes |
+
+The controller runs Python 3.14 and Django 6.1.1. Container servers are offline: the lane
+serves the pinned Ubuntu snapshot, the Nix binary cache and the other fixture upstreams. The
+cloud-image guest is offline except for the image download: QEMU user networking runs with
+`restrict=on`, and the guest reaches only the NoCloud seed and the same mirror through
+`guestfwd` proxies.
+
+### Supply versions
+
+| Part | Version | Carrier |
+| --- | --- | --- |
+| UFW | 0.36.2 | The Ubuntu archive |
+| OpenSSH | 10.2p1 | The Ubuntu archive |
+| unattended-upgrades | 2.12 | The Ubuntu archive |
+| needrestart | 3.11 | The Ubuntu archive |
+| APT / dpkg / systemd | 3.2 / 1.23 / 259 | The Ubuntu 26.04 archive and image |
+| Caddy / HAProxy / PHP | The pinned catalog lock | `runtimes/catalog_lock.json` |
+| QEMU | 11.1.3 | The local VM lane host; the hosted runner installs `qemu-system-x86` |
 
 ## Build budget
 
-<!-- FILL: measured fast gate, joint fast stage, browser, native stage, longest item and wall
-time against the table in quality.md#test-time-budget. -->
+`docker/disposable-server/build.sh --env-file .env` at the integration tip before #415's
+document changes, with the four stages as [the test time budget](quality.md#test-time-budget)
+defines them.
+
+| Stage | Measured | Target | Limit | Result |
+| --- | --- | --- | --- | --- |
+| Controller fast tests, 2128 tests with `--parallel` | 34 s | 90 s | | Meets the target |
+| Fast snapshot validators | 42 s | (the joint stage) | | The validators have no separate target |
+| Joint fast stage, as the build measures it | 42 s | 60 s | | Meets the target |
+| Browser tests | 110 s | | | |
+| Native lifecycle scenarios, 87 of 87 passed, 8 lanes | 271 s | 300 s | 900 s | Meets the target |
+| Longest native item | 140.4 s (`WordPressServerCron`) | | 180 s | Within the item limit |
+| Full local build, wall time | 313 s | 300 s | 900 s | **Missed by 13 s**, inside run-to-run noise of the recorded Phase D baseline |
+
+#415 adds one `vm`-tagged class and fast configuration tests only. The VM class is excluded
+from every ordinary native selection and from the merge build; its lane is outside the
+[test time budget](quality.md#test-time-budget). The fast gate moved from 2128 to 2145 tests
+in 30 s on the qualification branch.
 
 ## Security lifecycle
 
-The section's lifecycle is proven by the existing target-stack scenarios, each on a set-up
-server with sites. They run in the required Native workflow on amd64 and in Native weekly on
-arm64.
+The section's lifecycle is proven by the target-stack scenarios below, each on a set-up
+server with sites, plus the cloud-image restart item. The container scenarios ran together
+in one arm64 pass: **4 of 4 passed in 49 s**.
 
-| Scenario | Class | What it proves |
-| --- | --- | --- |
-| Security checks | `SecurityChecks` | Every check is read from ordinary discovery, the default view shows tasks without native terms, and a fresh controller reconstructs the checks after equivalent and conflicting ordinary changes. |
-| Firewall | `FirewallLifecycle` | Turn on the standard, add and remove operator ports, keep and put back the window, a second controller refusing, a held lock, and a rule that blocks the new connection. |
-| SSH sign-in | `SignInLifecycle` | Require key-only sign-in, the confirm-or-revert window, account disclosure and recovery. |
-| Ubuntu updates | `SecurityUpdates` | Check for updates, install an exact reviewed security update from the dated snapshot, and refuse a stale review, unreviewed dependency, hold and modified conffile. |
-| Restart | `VmRestart` | A real kernel reboot changes the boot ID, SSH returns, services and sites answer, and a stopped guest closes as outcome unknown. |
+| Scenario | Class | arm64 | What it proves |
+| --- | --- | --- | --- |
+| Security checks | `SecurityChecks` | 13.4 s | Every check is read from ordinary discovery, the default view shows tasks without native terms, and a fresh controller reconstructs the checks after equivalent and conflicting ordinary changes. |
+| SSH sign-in | `SignInLifecycle` | 18.1 s | Require key-only sign-in, the confirm-or-revert window, account disclosure and recovery. |
+| Ubuntu updates | `SecurityUpdates` | 31.2 s | Check for updates, install an exact reviewed security update from the dated snapshot, and refuse a stale review, unreviewed dependency, hold and modified conffile. |
+| Firewall | `FirewallLifecycle` | 38.1 s | Turn on the standard, add and remove operator ports, keep and put back the window, a second controller refusing, a held lock, and a rule that blocks the new connection. |
+| Restart, real kernel | `VmReboot` | 14.5 s | A real kernel reboot changes `/proc/sys/kernel/random/boot_id` and SSH returns; the guest reaches the mirror and no external address. |
+| Restart body and verification | `VmRestart` | 40.8 s | The restart body writes its result, the guest restarts, a fresh connection reports a new boot, and verification passes. |
+
+The VM lane ran both classes and the mirror proof in **55.5 s of tests**; the complete lane,
+including boot and cloud-init, took **222 s** on the local arm64 host. The smoke run before
+the final lane changes passed the same reboot path in 37.3 s. The final lane's exit was 0.
+
+`VmRestart` submits the restart body with a reviewed document naming one reboot-required
+package and `ssh.service`. The review, consent and refusal path are covered by the fast
+layer and the container scenarios; the lane exists to prove the native body, the real kernel
+reboot and the fresh-connection verification. Preparing the whole foundation on a cloud image
+is not part of this lane because the cloud image's auxiliary daemons and virtual network make
+that a different, longer qualification (see [Not qualified](#not-qualified)).
 
 ## What the section proves
 
@@ -80,12 +142,63 @@ arm64.
 
 ## Acceptance criteria
 
-<!-- FILL: one row or bullet per acceptance criterion with the evidence. -->
+- **#411.** The update guard watches only `apt-daily.service` and
+  `apt-daily-upgrade.service`; `unattended-upgrades.service` is the shutdown helper and is
+  active on a 26.04 host. The S2 refusal scenario and the fast probe tests pass, and the
+  container image now carries the cloud image's packages.
+- **#302.** The six checks, their stored snapshot rows, the no-SSH GET path, the freshness
+  notice, the out-of-shape report and the fresh-controller reconstruction are proven by
+  `SecurityChecks` and the fast section tests.
+- **#306.** The UFW standard, operator ports, the confirm-or-revert window, the second
+  controller's refusal, the held lock and the blocking-rule put-back are proven by
+  `FirewallLifecycle` on both architectures in the required/weekly Native jobs.
+- **#308.** The fixed drop-in, root policy, account disclosure, `sshd -t`, reload and window
+  recovery are proven by `SignInLifecycle`.
+- **#303.** Automatic updates on and off, the package's debconf path, the customized-settings
+  refusal and the native history read are proven by the automatic-updates tests and the
+  scenario's fresh discovery.
+- **#304.** Check for updates and Install updates are proven by `SecurityUpdates`, including
+  the exact transaction, the stale review, the unreviewed dependency, the hold and the edited
+  conffile.
+- **#414.** The scheduled and dispatchable `Native VM` workflow boots the pinned cloud image
+  under QEMU, waits for cloud-init, runs the `vm` tag over SSH, uploads logs and opens or
+  comments on `Native VM lane failed` on failure. It never runs on a pull request and adds no
+  merge time. The arm64 lane passed locally; the hosted amd64 run is recorded in
+  [Handoff](#handoff).
+- **#305.** Review details, the body's refusals, the new-boot success rule, the ten-minute
+  unknown outcome and the no-retry rule are proven by the fast engine and restart tests, the
+  body's shellcheck and `VmRestart`. The section's control, permission refusal, CSRF,
+  banned-terms and 320 px checks are proven by the Django and browser tests.
+- **#415.** This record, the rewritten current-behavior documents, the amended ADRs and the
+  updated glossary are the qualification artifacts. The full local build and the four
+  security scenarios are recorded above; the hosted runs and any gap are below.
 
 ## Not qualified
 
-<!-- FILL: real gaps only, including any architecture or lane not run. -->
+- **Hosted amd64 evidence** is recorded in [Handoff](#handoff) when the pull request checks
+  finish. If that section says pending, the amd64 path is not qualified.
+- **The cloud-image foundation** was exercised locally and reached the foundation body, but
+  preparing the full foundation on the cloud image is not qualified. The image's auxiliary
+  daemons, virtual DHCP and abrupt teardown make it a separate lane; the container scenarios
+  remain the foundation qualification. The lane's smoke and restart body are qualified without
+  it.
+- **Restart outcome unknown and refusal under active work** on a real VM are fast-layer and
+  container-engine evidence, not VM-lane evidence. The VM lane proves the successful reboot
+  and verification; it does not stop a guest and wait ten minutes.
+- **Two-controller exclusion across every security change** is proven at the engine's shared
+  preamble and in the firewall and sign-in scenarios. Each kind inherits the same preamble;
+  there is no separate two-controller run for every kind.
+- **Automatic-update restarts of MariaDB, PostgreSQL or Valkey** are disclosed by the reviews
+  and covered by the update scenario's services list. A Deploy or capture that loses its
+  database connection to such a restart is Phase B/D evidence, not this record.
+- **Cloud and provider firewalls, Docker hosts, fail2ban/CrowdSec, CIS/Lynis scores, Ubuntu
+  Pro, release upgrades, scheduled restarts and fleet-wide patching** are outside Phase E and
+  are not qualified here.
+- **Real reboot on amd64** depends on the hosted VM lane; the local run was arm64.
 
 ## Handoff
 
-<!-- FILL: final head, PR, and checks. -->
+The final head and its pull request are named in the pull request description. The required
+`Native` check, the hosted `Native VM` dispatch and the exact head are recorded there and in
+the issue closure. A green local build, the four container scenarios and the arm64 VM lane
+are not a substitute for the hosted required check.
