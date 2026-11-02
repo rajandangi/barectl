@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -327,9 +328,9 @@ class FixtureCAWorkflowTests(SimpleTestCase):
     def test_every_matrix_shard_gets_the_producers_ca_before_computing_image_keys(self) -> None:
         path = mirror.REPOSITORY / ".github/workflows/native-scenarios.yml"
         workflow = yaml.safe_load(path.read_text())
-        producer = workflow["jobs"]["fixture-ca"]
+        producer = workflow["jobs"]["prepare"]
         consumer = workflow["jobs"]["scenarios"]
-        self.assertEqual(consumer["needs"], "fixture-ca")
+        self.assertEqual(consumer["needs"], "prepare")
         shared = next(
             step
             for step in producer["steps"]
@@ -353,10 +354,231 @@ class FixtureCAWorkflowTests(SimpleTestCase):
         )
         self.assertLess(producer["steps"].index(ensure), producer["steps"].index(shared))
         self.assertNotIn("if", ensure)
-        self.assertEqual(producer["steps"][0]["id"], "phase")
+        self.assertIn("BARECTL_NATIVE_L0_CACHE", producer["steps"][0]["run"])
+        self.assertIn("BARECTL_DISPOSABLE_LOGS", producer["steps"][0]["run"])
         self.assertIn("phase-started", consumer["env"]["BARECTL_NATIVE_PHASE_STARTED"])
-        self.assertIn("ca-seconds", consumer["env"]["BARECTL_NATIVE_CA_SECONDS"])
+        self.assertEqual(consumer["env"]["BARECTL_NATIVE_CA_SECONDS"], "0")
         self.assertEqual(ensure["id"], "ca-preparation")
+        mirror_restore = next(step for step in producer["steps"] if step.get("id") == "mirror")
+        self.assertLess(producer["steps"].index(mirror_restore), producer["steps"].index(ensure))
+
+    def test_shared_preparation_builds_missing_snapshots_once_before_shards(self) -> None:
+        workflow = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
+        )
+        prepare = workflow["jobs"]["prepare"]
+        scenarios = workflow["jobs"]["scenarios"]
+        self.assertEqual(scenarios["needs"], "prepare")
+        step = next(item for item in prepare["steps"] if item.get("id") == "prepare")
+        self.assertIn("--prepare-all", step["run"])
+        self.assertIn("deadline=$(( started + 900 ))", step["run"])
+        self.assertIn("mirror.sh -- fetch", step["run"])
+        self.assertIn("ca_seconds=${{ steps.ca-preparation.outputs.seconds }}", step["run"])
+        self.assertIn("300s target and 900s hard limit", step["run"])
+        self.assertIn("Snapshot preparation phase target missed", step["run"])
+        self.assertIn("prepare-seconds", prepare["outputs"])
+        self.assertIn("steps.prepare.outputs.seconds", prepare["outputs"]["prepare-seconds"])
+        self.assertIn("BARECTL_NATIVE_L0_CACHE", prepare["steps"][0]["run"])
+        self.assertIn("BARECTL_DISPOSABLE_LOGS", prepare["steps"][0]["run"])
+        for layer, archive in (
+            ("L0", "l0.tar"),
+            ("L0-standing", "standing-26.04.tar"),
+            ("L0-24.04", "l0-24.04.tar"),
+            ("L1", "l1.tar"),
+            ("L2", "l2.tar"),
+            ("L3", "l3.tar"),
+            ("L4", "l4.tar"),
+            ("L5", "l5.tar"),
+            ("fixture", "fixture.tar"),
+        ):
+            with self.subTest(layer=layer):
+                save = next(
+                    item
+                    for item in prepare["steps"]
+                    if item.get("name") == f"Save the {layer} snapshot"
+                )
+                self.assertTrue(save["if"].startswith("always()"))
+                if layer == "L0":
+                    self.assertIn("BARECTL_NATIVE_L0_CACHE", save["with"]["path"])
+                    self.assertIn("standing-26.04.tar", save["with"]["path"])
+                    self.assertIn("l0-24.04.tar", save["with"]["path"])
+                else:
+                    self.assertIn(archive, save["with"]["path"])
+        mirror_save = next(
+            item for item in prepare["steps"] if item.get("name") == "Save the mirror"
+        )
+        self.assertTrue(mirror_save["if"].startswith("always()"))
+        start = next(item for item in prepare["steps"] if item.get("id") == "prepare-start")
+        self.assertLess(prepare["steps"].index(start), prepare["steps"].index(step))
+        upload = next(
+            item
+            for item in prepare["steps"]
+            if item.get("uses", "").startswith("actions/upload-artifact@")
+            and item["with"]["name"] == "native-prepare-${{ inputs.runner }}"
+        )
+        self.assertEqual(upload["with"]["path"], "${{ runner.temp }}/native")
+
+    def test_cold_cache_namespace_prefixes_every_native_key(self) -> None:
+        workflow = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
+        )
+        prefix = "${{ inputs.cache-namespace }}"
+        for job_name in ("prepare", "scenarios"):
+            steps = workflow["jobs"][job_name]["steps"]
+            for identifier in (
+                "mirror",
+                "fixture",
+                "l0",
+                "standing",
+                "ubuntu24",
+                "l1",
+                "l2",
+                "l3",
+                "l4",
+                "l5",
+            ):
+                with self.subTest(job=job_name, step=identifier):
+                    restore = next(item for item in steps if item.get("id") == identifier)
+                    key = restore["with"]["key"]
+                    if identifier == "mirror":
+                        self.assertIn(prefix + "native-mirror-", key)
+                    else:
+                        self.assertIn(prefix + "native-", key)
+        ca_key = next(
+            item for item in workflow["jobs"]["prepare"]["steps"] if item.get("id") == "ca-key"
+        )
+        self.assertIn("${CACHE_NAMESPACE}", ca_key["run"])
+        self.assertEqual(ca_key["env"]["CACHE_NAMESPACE"], prefix)
+        native = yaml.safe_load((mirror.REPOSITORY / ".github/workflows/native.yml").read_text())
+        dispatch = native[True]["workflow_dispatch"]["inputs"]
+        self.assertIn("cache-namespace", dispatch)
+        consumer = native["jobs"]["scenarios"]["with"]
+        self.assertEqual(consumer["cache-namespace"], prefix)
+        for job_name in ("prepare", "scenarios"):
+            steps = workflow["jobs"][job_name]["steps"]
+            for name in ("Save the L1 snapshot", "Save the L5 snapshot"):
+                save = next(item for item in steps if item.get("name") == name)
+                self.assertTrue(save["if"].startswith("always()"))
+            l0_save = next(item for item in steps if item.get("name") == "Save the L0 snapshot")
+            self.assertIn("standing-26.04.tar", l0_save["with"]["path"])
+            self.assertIn("l0-24.04.tar", l0_save["with"]["path"])
+        prepare_keys = next(
+            item for item in workflow["jobs"]["prepare"]["steps"] if item.get("id") == "keys"
+        )
+        shard_keys = next(
+            item for item in workflow["jobs"]["scenarios"]["steps"] if item.get("id") == "keys"
+        )
+        self.assertEqual(prepare_keys["run"], shard_keys["run"])
+        guard = next(
+            item
+            for item in workflow["jobs"]["prepare"]["steps"]
+            if item.get("name") == "Require a genuinely cold cache"
+        )
+        self.assertEqual(guard["if"], "inputs.cache-namespace != ''")
+
+    def test_cold_mode_refuses_a_restored_cache(self) -> None:
+        workflow = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
+        )
+        guard = next(
+            item
+            for item in workflow["jobs"]["prepare"]["steps"]
+            if item.get("name") == "Require a genuinely cold cache"
+        )
+        for hit in (
+            "mirror",
+            "ca",
+            "fixture",
+            "l0",
+            "standing",
+            "ubuntu24",
+            "l1",
+            "l2",
+            "l3",
+            "l4",
+            "l5",
+        ):
+            with self.subTest(hit=hit):
+
+                def hit_value(match: re.Match[str], chosen: str = hit) -> str:
+                    return "true" if match.group(1) == chosen else ""
+
+                command = re.sub(
+                    r"\$\{\{ steps\.([a-z0-9]+)\.outputs\.cache-hit \}\}",
+                    hit_value,
+                    guard["run"],
+                )
+                completed = subprocess.run(  # noqa: S603 - actual workflow shell, controlled values
+                    ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", command],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                self.assertIn("Cold qualification restored", completed.stderr)
+        with self.subTest(hit=None):
+            command = re.sub(r"\$\{\{ steps\.[a-z0-9]+\.outputs\.cache-hit \}\}", "", guard["run"])
+            completed = subprocess.run(  # noqa: S603 - actual workflow shell, controlled values
+                ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", command],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_cache_namespace_guard_rejects_invalid_prefixes(self) -> None:
+        workflow = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
+        )
+        step = next(
+            item for item in workflow["jobs"]["prepare"]["steps"] if item.get("id") == "ca-key"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "bin"
+            binary.mkdir()
+            uv = binary / "uv"
+            uv.write_text("#!/bin/sh\nprintf '%s\\n' fixture-ca-policy\n", encoding="utf-8")
+            uv.chmod(0o700)
+            output = root / "output"
+            for namespace, expected in (
+                ("bad name", 2),
+                ("bad/name", 2),
+                ("", 0),
+                ("cold-abc_1.2-", 0),
+            ):
+                with self.subTest(namespace=namespace):
+                    output.write_text("", encoding="utf-8")
+                    completed = subprocess.run(  # noqa: S603 - actual workflow shell, controlled stub
+                        [
+                            "/bin/bash",
+                            "--noprofile",
+                            "--norc",
+                            "-e",
+                            "-o",
+                            "pipefail",
+                            "-c",
+                            step["run"],
+                        ],
+                        cwd=root,
+                        env={
+                            **os.environ,
+                            "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+                            "CACHE_NAMESPACE": namespace,
+                            "GITHUB_OUTPUT": str(output),
+                        },
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    self.assertEqual(completed.returncode, expected, completed.stderr)
+                    if expected:
+                        self.assertEqual(output.read_text(), "")
+                    else:
+                        self.assertEqual(output.read_text(), f"key={namespace}fixture-ca-policy\n")
 
     def test_default_branch_seeding_and_mirror_restore_share_the_same_ca_policy(self) -> None:
         directory = mirror.REPOSITORY / ".github/workflows"
@@ -365,7 +587,7 @@ class FixtureCAWorkflowTests(SimpleTestCase):
         self.assertEqual(native[True]["push"]["branches"], ["main"])
         scenarios = yaml.safe_load((directory / "native-scenarios.yml").read_text())
         scheduled = yaml.safe_load((directory / "native-mirror.yml").read_text())
-        for job in (scenarios["jobs"]["fixture-ca"], scheduled["jobs"]["mirror"]):
+        for job in (scenarios["jobs"]["prepare"], scheduled["jobs"]["mirror"]):
             steps = job["steps"]
             key = next(step for step in steps if step.get("id") == "ca-key")
             self.assertIn("disposable.mirror fixture-ca-key", key["run"])
@@ -383,6 +605,102 @@ class FixtureCAWorkflowTests(SimpleTestCase):
         mirror_restore = next(step for step in steps if step.get("id") == "mirror")
         ca_restore = next(step for step in steps if step.get("id") == "ca")
         self.assertLess(steps.index(mirror_restore), steps.index(ca_restore))
+
+
+class SnapshotPreparationPhaseTests(SimpleTestCase):
+    def run_prepare(
+        self, seconds: int, result: int = 0, *, ca: int = 0, fetch: int = 0
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        workflow = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
+        )
+        step = next(
+            item for item in workflow["jobs"]["prepare"]["steps"] if item.get("id") == "prepare"
+        )
+        command = (
+            step["run"]
+            .replace("${{ steps.prepare-start.outputs.started }}", "0")
+            .replace("${{ steps.ca-preparation.outputs.seconds }}", str(ca))
+            .replace("${{ steps.mirror.outputs.cache-hit }}", "")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "bin"
+            binary.mkdir()
+            dates = binary / "date"
+            dates.write_text('#!/bin/sh\ncat "$TEST_CLOCK"\n', encoding="utf-8")
+            timeout = binary / "timeout"
+            timeout.write_text(
+                "#!/bin/sh\n"
+                'printf "%s\\n" "$*" >> "$TEST_CALLS"\n'
+                'echo "$TEST_ELAPSED" > "$TEST_CLOCK"\n'
+                'case "$*" in *mirror.sh*) exit "${TEST_FETCH_RESULT:-0}" ;; esac\n'
+                'exit "$TEST_RESULT"\n',
+                encoding="utf-8",
+            )
+            mirror_script = root / "docker/disposable-server/mirror.sh"
+            mirror_script.parent.mkdir(parents=True)
+            mirror_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            runner = root / "docker/disposable-server/run-scenarios.sh"
+            runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            for path in (dates, timeout, mirror_script, runner):
+                path.chmod(0o700)
+            clock = root / "clock"
+            clock.write_text("0", encoding="utf-8")
+            calls = root / "calls"
+            calls.write_text("", encoding="utf-8")
+            output = root / "output"
+            output.write_text("", encoding="utf-8")
+            runner_temp = root / "runner-temp"
+            runner_temp.mkdir()
+            completed = subprocess.run(  # noqa: S603 - actual workflow shell, controlled stubs
+                ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", command],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+                    "TEST_CLOCK": str(clock),
+                    "TEST_CALLS": str(calls),
+                    "TEST_ELAPSED": str(seconds),
+                    "TEST_FETCH_RESULT": str(fetch),
+                    "TEST_RESULT": str(result),
+                    "RUNNER_TEMP": str(runner_temp),
+                    "GITHUB_OUTPUT": str(output),
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            return completed, calls.read_text().splitlines()
+
+    def test_target_boundary(self) -> None:
+        for seconds, expected in ((299, 0), (300, 0), (301, 1)):
+            with self.subTest(seconds=seconds):
+                result, calls = self.run_prepare(seconds)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertIn(f"Complete snapshot preparation phase: {seconds}s", result.stdout)
+                self.assertEqual(len(calls), 2)
+                self.assertIn("mirror.sh -- fetch", calls[0])
+                self.assertIn("--prepare-all --time-limit", calls[1])
+                self.assertEqual("target missed" in result.stderr, seconds > 300)
+
+    def test_the_fixture_ca_is_charged_to_the_preparation_phase(self) -> None:
+        result, _ = self.run_prepare(279, ca=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Complete snapshot preparation phase: 299s", result.stdout)
+
+    def test_a_failed_preparation_is_preserved_even_when_the_target_is_met(self) -> None:
+        for seconds in (1, 301):
+            with self.subTest(seconds=seconds):
+                result, _ = self.run_prepare(seconds, result=7)
+                self.assertEqual(result.returncode, 7, result.stderr)
+
+    def test_a_failed_fetch_stops_before_preparation(self) -> None:
+        result, calls = self.run_prepare(1, fetch=7)
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("mirror.sh -- fetch", calls[0])
 
 
 class SpecialSnapshotCacheTests(SimpleTestCase):

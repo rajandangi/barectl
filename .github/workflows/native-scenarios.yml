@@ -1,7 +1,8 @@
 name: Native scenarios
 # docs/quality.md#native-layer: the native scenarios in 11 shards of 3 lanes, balanced by
 # their recorded item times, called by the required Native workflow on amd64 and by
-# Native weekly on arm64.
+# Native weekly on arm64. A cold cache is prepared once, in dependency order, before the
+# shards restore the exact-key snapshots (docs/test-budget-qualification.md).
 on:
   workflow_call:
     inputs:
@@ -11,15 +12,29 @@ on:
       ref:
         type: string
         required: false
+      cache-namespace:
+        type: string
+        required: false
+        default: ""
 permissions:
   contents: read
 jobs:
-  fixture-ca:
+  # The shared preparation phase. All eleven shards need the same snapshots; building each
+  # missing layer here once replaces eleven independent, serial preparations.
+  prepare:
     runs-on: ${{ inputs.runner }}
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      BARECTL_NATIVE_LANES: "3"
     outputs:
       phase-started: ${{ steps.phase.outputs.started }}
       ca-seconds: ${{ steps.ca-preparation.outputs.seconds }}
+      prepare-seconds: ${{ steps.prepare.outputs.seconds }}
     steps:
+      - run: |
+          echo "BARECTL_NATIVE_L0_CACHE=$RUNNER_TEMP/native-images" >> "$GITHUB_ENV"
+          echo "BARECTL_DISPOSABLE_LOGS=$RUNNER_TEMP/native/logs" >> "$GITHUB_ENV"
       - id: phase
         run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7.0.1
@@ -29,8 +44,20 @@ jobs:
         with:
           python-version: "3.14"
       - run: uv sync --locked
+      - name: Restore the mirror
+        id: mirror
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
       - id: ca-key
-        run: echo "key=$(uv run python -m disposable.mirror fixture-ca-key)" >> "$GITHUB_OUTPUT"
+        env:
+          CACHE_NAMESPACE: ${{ inputs.cache-namespace }}
+        run: |
+          case "$CACHE_NAMESPACE" in
+            *[!A-Za-z0-9._-]*) echo "Invalid cache namespace" >&2; exit 2 ;;
+          esac
+          echo "key=${CACHE_NAMESPACE}$(uv run python -m disposable.mirror fixture-ca-key)" >> "$GITHUB_OUTPUT"
       - name: Restore the fixture CA
         id: ca
         uses: actions/cache/restore@v6.1.0
@@ -56,8 +83,294 @@ jobs:
           path: ~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           if-no-files-found: error
           retention-days: 1
+      # The L1 key hashes the rendered foundation payload, the catalog lock and the base
+      # digest (disposable/images.py), so a hit is exactly the snapshot S1 would commit.
+      - id: keys
+        run: |
+          snapshot_key=$(uv run python -m disposable.images cache-key)
+          echo "l0=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L0-standing)
+          echo "standing=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L0-24.04)
+          echo "ubuntu24=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L1)
+          echo "l1=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L2)
+          echo "l2=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L3)
+          echo "l3=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L4)
+          echo "l4=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer L5)
+          echo "l5=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer fixture)
+          echo "fixture=$snapshot_key" >> "$GITHUB_OUTPUT"
+      - name: Restore the fixture snapshot
+        id: fixture
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+          key: ${{ inputs.cache-namespace }}native-fixture-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.fixture }}
+      - name: Restore the L0 snapshot
+        id: l0
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: |
+            ${{ env.BARECTL_NATIVE_L0_CACHE }}
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+          key: ${{ inputs.cache-namespace }}native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
+      - name: Discard special snapshots from the legacy L0 directory cache
+        run: rm -f -- "$BARECTL_NATIVE_L0_CACHE/standing-26.04.tar" "$BARECTL_NATIVE_L0_CACHE/l0-24.04.tar"
+      - name: Restore the L0-standing snapshot
+        id: standing
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+          key: ${{ inputs.cache-namespace }}native-standing-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.standing }}
+      - name: Restore the L0-24.04 snapshot
+        id: ubuntu24
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
+          key: ${{ inputs.cache-namespace }}native-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.ubuntu24 }}
+      - name: Restore the L1 snapshot
+        id: l1
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+          key: ${{ inputs.cache-namespace }}native-l1-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l1 }}
+      - name: Restore the L2 snapshot
+        id: l2
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
+          key: ${{ inputs.cache-namespace }}native-l2-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l2 }}
+      - name: Restore the L3 snapshot
+        id: l3
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
+          key: ${{ inputs.cache-namespace }}native-l3-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l3 }}
+      - name: Restore the L4 snapshot
+        id: l4
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
+          key: ${{ inputs.cache-namespace }}native-l4-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l4 }}
+      - name: Restore the L5 snapshot
+        id: l5
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+          key: ${{ inputs.cache-namespace }}native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
+      - name: Require a genuinely cold cache
+        if: inputs.cache-namespace != ''
+        run: |
+          for hit in \
+            "${{ steps.mirror.outputs.cache-hit }}" \
+            "${{ steps.ca.outputs.cache-hit }}" \
+            "${{ steps.fixture.outputs.cache-hit }}" \
+            "${{ steps.l0.outputs.cache-hit }}" \
+            "${{ steps.standing.outputs.cache-hit }}" \
+            "${{ steps.ubuntu24.outputs.cache-hit }}" \
+            "${{ steps.l1.outputs.cache-hit }}" \
+            "${{ steps.l2.outputs.cache-hit }}" \
+            "${{ steps.l3.outputs.cache-hit }}" \
+            "${{ steps.l4.outputs.cache-hit }}" \
+            "${{ steps.l5.outputs.cache-hit }}"; do
+            if [ "$hit" = "true" ]; then
+              echo "Cold qualification restored an existing cache; use a fresh namespace." >&2
+              exit 1
+            fi
+          done
+      # The preparation phase charges the mirror fetch, the fixture CA and every image
+      # build it performs; cache restores above are transport and stay outside.
+      - id: prepare-start
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Prepare missing snapshots
+        id: prepare
+        run: |
+          started=${{ steps.prepare-start.outputs.started }}
+          ca_seconds=${{ steps.ca-preparation.outputs.seconds }}
+          deadline=$(( started + 900 ))
+          remaining() { echo $(( deadline - $(date +%s) )); }
+          result=0
+          mirror=1
+          set +e
+          budget=$(remaining)
+          if [ "$budget" -gt 0 ]; then
+            timeout --signal=TERM --kill-after=10s "${budget}s" \
+              docker/disposable-server/mirror.sh -- fetch
+            fetch=$?
+          else
+            fetch=124
+          fi
+          if [ "$fetch" -ne 0 ]; then
+            mirror=0
+            if [ "${{ steps.mirror.outputs.cache-hit }}" = "true" ]; then
+              echo "::warning::The mirror fetch failed; using the restored mirror with the same manifest."
+            else
+              result=$fetch
+            fi
+          fi
+          if [ "$result" -eq 0 ]; then
+            budget=$(remaining)
+            if [ "$budget" -gt 0 ]; then
+              timeout --signal=TERM --kill-after=10s "${budget}s" \
+                docker/disposable-server/run-scenarios.sh -- --prepare-all --time-limit "$budget"
+              result=$?
+            else
+              result=124
+            fi
+          fi
+          set -e
+          seconds=$(( $(date +%s) - started + ca_seconds ))
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+          echo "mirror=$mirror" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/native"
+          printf '{"seconds": %s}\n' "$seconds" > "$RUNNER_TEMP/native/prepare.json"
+          printf 'Complete snapshot preparation phase: %ss against the 300s target and 900s hard limit.\n' "$seconds"
+          if [ "$seconds" -gt 300 ]; then
+            echo "Snapshot preparation phase target missed" >&2
+            if [ "$result" -eq 0 ]; then result=1; fi
+          fi
+          exit "$result"
+      - name: Save the mirror
+        if: always() && steps.mirror.outputs.cache-hit != 'true' && steps.prepare.outputs.mirror == '1'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: ${{ steps.mirror.outputs.cache-primary-key }}
+      - id: l0-archive
+        if: always() && steps.l0.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l0.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L0 snapshot
+        if: always() && steps.l0-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ${{ env.BARECTL_NATIVE_L0_CACHE }}
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
+          key: ${{ steps.l0.outputs.cache-primary-key }}
+      - id: standing-archive
+        if: always() && steps.standing.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/standing-26.04.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L0-standing snapshot
+        if: always() && steps.standing-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+          key: ${{ steps.standing.outputs.cache-primary-key }}
+      - id: ubuntu24-archive
+        if: always() && steps.ubuntu24.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l0-24.04.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L0-24.04 snapshot
+        if: always() && steps.ubuntu24-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
+          key: ${{ steps.ubuntu24.outputs.cache-primary-key }}
+      - id: l1-archive
+        if: always() && steps.l1.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l1.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L1 snapshot
+        if: always() && steps.l1-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+          key: ${{ steps.l1.outputs.cache-primary-key }}
+      - id: l2-archive
+        if: always() && steps.l2.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l2.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L2 snapshot
+        if: always() && steps.l2-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
+          key: ${{ steps.l2.outputs.cache-primary-key }}
+      - id: l3-archive
+        if: always() && steps.l3.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l3.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L3 snapshot
+        if: always() && steps.l3-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
+          key: ${{ steps.l3.outputs.cache-primary-key }}
+      - id: l4-archive
+        if: always() && steps.l4.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l4.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L4 snapshot
+        if: always() && steps.l4-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
+          key: ${{ steps.l4.outputs.cache-primary-key }}
+      - id: l5-archive
+        if: always() && steps.l5.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l5.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L5 snapshot
+        if: always() && steps.l5-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+          key: ${{ steps.l5.outputs.cache-primary-key }}
+      - id: fixture-archive
+        if: always() && steps.fixture.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/fixture.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the fixture snapshot
+        if: always() && steps.fixture-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+          key: ${{ steps.fixture.outputs.cache-primary-key }}
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-prepare-${{ inputs.runner }}
+          path: ${{ runner.temp }}/native
+          if-no-files-found: ignore
   scenarios:
-    needs: fixture-ca
+    needs: prepare
     name: scenarios (${{ matrix.shard }}/11)
     runs-on: ${{ inputs.runner }}
     strategy:
@@ -68,8 +381,10 @@ jobs:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
       BARECTL_NATIVE_LANES: "3"
-      BARECTL_NATIVE_PHASE_STARTED: ${{ needs.fixture-ca.outputs.phase-started }}
-      BARECTL_NATIVE_CA_SECONDS: ${{ needs.fixture-ca.outputs.ca-seconds }}
+      BARECTL_NATIVE_PHASE_STARTED: ${{ needs.prepare.outputs.phase-started }}
+      # The shared preparation phase is charged the fixture CA; a shard measures only its
+      # own stages (docs/quality.md#test-time-budget).
+      BARECTL_NATIVE_CA_SECONDS: "0"
     steps:
       - run: echo "BARECTL_NATIVE_L0_CACHE=$RUNNER_TEMP/native-images" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
@@ -84,7 +399,7 @@ jobs:
         uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/barectl/native/mirror
-          key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+          key: ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
       - name: Use this run's shared fixture CA
         uses: actions/download-artifact@v8.0.2
         with:
@@ -127,7 +442,7 @@ jobs:
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
-          key: native-fixture-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.fixture }}
+          key: ${{ inputs.cache-namespace }}native-fixture-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.fixture }}
       - name: Restore the L0 snapshot
         id: l0
         uses: actions/cache/restore@v6.1.0
@@ -140,7 +455,7 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
-          key: native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
+          key: ${{ inputs.cache-namespace }}native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
       - name: Discard special snapshots from the legacy L0 directory cache
         run: rm -f -- "$BARECTL_NATIVE_L0_CACHE/standing-26.04.tar" "$BARECTL_NATIVE_L0_CACHE/l0-24.04.tar"
       - name: Restore the L0-standing snapshot
@@ -148,48 +463,43 @@ jobs:
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
-          key: native-standing-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.standing }}
+          key: ${{ inputs.cache-namespace }}native-standing-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.standing }}
       - name: Restore the L0-24.04 snapshot
         id: ubuntu24
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
-          key: native-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.ubuntu24 }}
+          key: ${{ inputs.cache-namespace }}native-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.ubuntu24 }}
       - name: Restore the L1 snapshot
         id: l1
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
-          key: native-l1-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l1 }}
-      # L2 is L1 plus a site the product's Create site change made; restoring it skips
-      # rebuilding the prepared site in a shard that needs it.
+          key: ${{ inputs.cache-namespace }}native-l1-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l1 }}
       - name: Restore the L2 snapshot
         id: l2
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
-          key: native-l2-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l2 }}
-      # L3 is L1 plus the database engine and WordPress site every cache scenario needs.
+          key: ${{ inputs.cache-namespace }}native-l2-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l2 }}
       - name: Restore the L3 snapshot
         id: l3
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
-          key: native-l3-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l3 }}
-      # L4 is L3 plus Valkey and the site's PHP client, so a cache scenario is a small item.
+          key: ${{ inputs.cache-namespace }}native-l3-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l3 }}
       - name: Restore the L4 snapshot
         id: l4
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
-          key: native-l4-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l4 }}
-      # L5 is L1 plus the deployed Laravel queue-worker fixture and its cache prerequisites.
+          key: ${{ inputs.cache-namespace }}native-l4-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l4 }}
       - name: Restore the L5 snapshot
         id: l5
         uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
-          key: native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
+          key: ${{ inputs.cache-namespace }}native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
       # One 900 s build stop covers every native stage of the shard.
       - run: |
           ca_seconds=${BARECTL_NATIVE_CA_SECONDS-}
@@ -219,6 +529,11 @@ jobs:
             result=$?
             elapsed=$(( $(date +%s) - started + ca_seconds ))
             printf 'Complete native phase: %ss against the 300s target and 900s hard limit.\n' "$elapsed"
+            phase_started=${BARECTL_NATIVE_PHASE_STARTED-}
+            case "$phase_started" in
+              ''|*[!0-9]*) ;;
+              *) printf 'Complete native coverage: %ss from shared preparation start through this shard.\n' "$(( $(date +%s) - phase_started ))" ;;
+            esac
             if [ "$elapsed" -gt 300 ]; then
               echo "Native phase target missed" >&2
               if [ "$result" -eq 0 ]; then result=1; fi
@@ -262,6 +577,8 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
           key: ${{ steps.l0.outputs.cache-primary-key }}
       - id: standing-archive
         if: always() && steps.standing.outputs.cache-hit != 'true'

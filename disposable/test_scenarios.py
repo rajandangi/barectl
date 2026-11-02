@@ -307,6 +307,24 @@ class ArgumentsTests(SimpleTestCase):
         self.assertEqual(scenarios.arguments([]).time_limit, 900.0)
         self.assertEqual(scenarios.ITEM_LIMIT, 180.0)
 
+    def test_prepare_all_is_its_own_stage(self) -> None:
+        self.assertTrue(scenarios.arguments(["--prepare-all"]).prepare_all)
+        for argument in (
+            ["--validators"],
+            ["--record", "state"],
+            ["--shard", "1/11"],
+            ["--check-egress"],
+            ["--breadth"],
+            ["--quarantined"],
+        ):
+            with (
+                self.subTest(argument=argument),
+                patch("sys.stderr"),
+                self.assertRaises(SystemExit) as refused,
+            ):
+                scenarios.arguments(["--prepare-all", *argument])
+            self.assertEqual(refused.exception.code, 2)
+
     def test_the_egress_control_passes_only_when_the_item_failed_by_name(self) -> None:
         import io
         import tempfile
@@ -430,7 +448,7 @@ class BuildStopTests(SimpleTestCase):
         prepared_limits: list[float] = []
         stored: list[str] = []
 
-        def prepare(*arguments: object) -> None:
+        def prepare(*arguments: object, **options: object) -> None:
             nonlocal clock
             prepared_limits.append(float(arguments[4]))  # type: ignore[arg-type]
             clock += 3
@@ -476,16 +494,19 @@ class BuildStopTests(SimpleTestCase):
     def test_each_cold_layer_spends_the_same_preparation_limit(self) -> None:
         clock = 0.0
         limits: list[float] = []
+        waves: list[list[list[tuple[str, str]]]] = []
 
-        def prepare(*arguments: object) -> None:
+        def prepare(*arguments: object) -> list[object]:
             nonlocal clock
-            limits.append(float(arguments[5]))  # type: ignore[arg-type]
+            limits.append(float(arguments[4]))  # type: ignore[arg-type]
+            waves.append(arguments[1])  # type: ignore[arg-type]
             clock += 3
+            return []
 
         with (
             patch("disposable.scenarios.time.monotonic", side_effect=lambda: clock),
             patch("disposable.images.load", return_value=False),
-            patch.object(scenarios, "_prepare", side_effect=prepare),
+            patch.object(scenarios, "_prepare_units", side_effect=prepare),
         ):
             scenarios.prepare_layers(
                 self.runner(io.StringIO()),
@@ -496,11 +517,18 @@ class BuildStopTests(SimpleTestCase):
                 scenarios.Output(io.StringIO()),
             )
         self.assertEqual(limits, [10, 7])
+        self.assertEqual(
+            [[unit[0][0] for unit in wave] for wave in waves],
+            [
+                ["disposable.test_prepared_foundation.PrepareFoundation"],
+                ["disposable.test_prepared_laravel.PrepareLaravel"],
+            ],
+        )
 
     def test_a_cached_descendant_needs_no_ancestor_archives(self) -> None:
         with (
             patch("disposable.images.load", return_value=True) as load,
-            patch.object(scenarios, "_prepare") as prepare,
+            patch.object(scenarios, "_prepare_units") as prepare,
         ):
             scenarios.prepare_layers(
                 self.runner(io.StringIO()),
@@ -514,9 +542,15 @@ class BuildStopTests(SimpleTestCase):
         prepare.assert_not_called()
 
     def test_a_cached_parent_prepares_only_the_missing_child(self) -> None:
+        waves: list[list[list[tuple[str, str]]]] = []
+
+        def prepare(*arguments: object) -> list[object]:
+            waves.append(arguments[1])  # type: ignore[arg-type]
+            return []
+
         with (
             patch("disposable.images.load", side_effect=lambda layer: layer == "L3") as load,
-            patch.object(scenarios, "_prepare") as prepare,
+            patch.object(scenarios, "_prepare_units", side_effect=prepare),
         ):
             scenarios.prepare_layers(
                 self.runner(io.StringIO()),
@@ -527,12 +561,21 @@ class BuildStopTests(SimpleTestCase):
                 scenarios.Output(io.StringIO()),
             )
         self.assertEqual([call.args[0] for call in load.call_args_list], ["L4", "L3"])
-        self.assertEqual([call.args[2] for call in prepare.call_args_list], ["L4"])
+        self.assertEqual(
+            [[[layer for _, layer in unit] for unit in wave] for wave in waves],
+            [[["L4"]]],
+        )
 
     def test_cold_branches_prepare_every_missing_layer_once(self) -> None:
+        waves: list[list[list[tuple[str, str]]]] = []
+
+        def prepare(*arguments: object) -> list[object]:
+            waves.append(arguments[1])  # type: ignore[arg-type]
+            return []
+
         with (
             patch("disposable.images.load", return_value=False),
-            patch.object(scenarios, "_prepare") as prepare,
+            patch.object(scenarios, "_prepare_units", side_effect=prepare),
         ):
             scenarios.prepare_layers(
                 self.runner(io.StringIO()),
@@ -542,14 +585,23 @@ class BuildStopTests(SimpleTestCase):
                 10,
                 scenarios.Output(io.StringIO()),
             )
+        prepared = [layer for wave in waves for unit in wave for _, layer in unit]
+        self.assertEqual(prepared, ["L1", "L3", "L4", "L5"])
         self.assertEqual(
-            [call.args[2] for call in prepare.call_args_list], ["L1", "L3", "L4", "L5"]
+            [[[layer for _, layer in unit] for unit in wave] for wave in waves],
+            [[["L1"]], [["L3", "L4"], ["L5"]]],
         )
 
     def test_an_explicit_l2_request_still_prepares_it(self) -> None:
+        waves: list[list[list[tuple[str, str]]]] = []
+
+        def prepare(*arguments: object) -> list[object]:
+            waves.append(arguments[1])  # type: ignore[arg-type]
+            return []
+
         with (
             patch("disposable.images.load", return_value=False),
-            patch.object(scenarios, "_prepare") as prepare,
+            patch.object(scenarios, "_prepare_units", side_effect=prepare),
         ):
             scenarios.prepare_layers(
                 self.runner(io.StringIO()),
@@ -559,9 +611,79 @@ class BuildStopTests(SimpleTestCase):
                 10,
                 scenarios.Output(io.StringIO()),
             )
+        prepared = [layer for wave in waves for unit in wave for _, layer in unit]
+        self.assertEqual(prepared, ["L1", "L3", "L4", "L2"])
+
+    def test_sibling_descendants_share_one_wave_without_waiting_for_each_other(self) -> None:
+        waves: list[list[list[tuple[str, str]]]] = []
+
+        def prepare(*arguments: object) -> list[object]:
+            waves.append(arguments[1])  # type: ignore[arg-type]
+            return []
+
+        with (
+            patch("disposable.images.load", return_value=False),
+            patch.object(scenarios, "_prepare_units", side_effect=prepare),
+        ):
+            scenarios.prepare_layers(
+                self.runner(io.StringIO()),
+                [],
+                "image",
+                Path("key"),
+                10,
+                scenarios.Output(io.StringIO()),
+                layers=scenarios.PREPARATION_LAYERS,
+                lanes=3,
+            )
         self.assertEqual(
-            [call.args[2] for call in prepare.call_args_list], ["L1", "L2", "L3", "L4"]
+            [[[layer for _, layer in unit] for unit in wave] for wave in waves],
+            [[["L1"]], [["L3", "L4"], ["L2"], ["L5"]]],
         )
+
+    def test_preparation_waves_use_one_lane_per_unit(self) -> None:
+        calls: list[int] = []
+
+        def execute(
+            runner: scenarios.Runner,
+            units: list[scenarios._Unit],
+            image: str,
+            key: Path,
+            lanes: int,
+            limit: float,
+            output: scenarios.Output,
+        ) -> None:
+            calls.append(lanes)
+            for unit in units:
+                for item in unit.scenarios:
+                    runner.outcomes.append(
+                        scenarios.Outcome(item, True, 1, 1.0, Path("result.log"), "")
+                    )
+
+        with (
+            patch.object(
+                scenarios,
+                "discover",
+                side_effect=lambda labels, **_: [scenario(labels[0], layer="L1")],
+            ),
+            patch.object(scenarios, "execute", side_effect=execute),
+            patch("disposable.images.exists", return_value=True),
+            patch("disposable.images.tag", return_value="image"),
+            patch("disposable.images.store"),
+        ):
+            runner = self.runner(io.StringIO())
+            scenarios._prepare_units(
+                runner, [[("foundation", "L1")]], "image", Path("key"), 10, runner.output, 3
+            )
+            scenarios._prepare_units(
+                runner,
+                [[("wordpress", "L3"), ("cache", "L4")], [("sites", "L2")], [("laravel", "L5")]],
+                "image",
+                Path("key"),
+                10,
+                runner.output,
+                3,
+            )
+        self.assertEqual(calls, [1, 3])
 
 
 class PreparationReuseTests(SimpleTestCase):
@@ -590,13 +712,21 @@ class PreparationReuseTests(SimpleTestCase):
             ([replace(full, tests=("different.test",)), self.dependent], minimal),
         ):
             runner = self.runner()
+            waves: list[list[list[tuple[str, str]]]] = []
+
+            def prepare(
+                *arguments: object, captured: list[list[list[tuple[str, str]]]] = waves
+            ) -> list[object]:
+                captured.append(arguments[1])  # type: ignore[arg-type]
+                return []
+
             with (
                 self.subTest(selected=selected),
                 patch("disposable.images.load", return_value=False),
-                patch.object(scenarios, "_prepare") as prepare,
+                patch.object(scenarios, "_prepare_units", side_effect=prepare),
             ):
                 scenarios.prepare_layers(runner, selected, "image", Path("key"), 10, runner.output)
-            self.assertEqual([call.args[1] for call in prepare.call_args_list], [expected])
+            self.assertEqual(waves[0][0][0][0], expected)
 
     def test_only_an_exact_selected_scenario_gets_completion_credit(self) -> None:
         for selected, expected in (
@@ -607,12 +737,13 @@ class PreparationReuseTests(SimpleTestCase):
             with self.subTest(selected=selected):
                 runner = self.runner()
 
-                def prepare(*arguments: object, target: scenarios.Runner = runner) -> None:
+                def prepare(*arguments: object, target: scenarios.Runner = runner) -> list[object]:
                     target.outcomes.append(self.outcome(self.foundation))
+                    return []
 
                 with (
                     patch("disposable.images.load", return_value=False),
-                    patch.object(scenarios, "_prepare", side_effect=prepare),
+                    patch.object(scenarios, "_prepare_units", side_effect=prepare),
                 ):
                     scenarios.prepare_layers(
                         runner, selected, "image", Path("key"), 10, runner.output
@@ -623,8 +754,10 @@ class PreparationReuseTests(SimpleTestCase):
         for cached in (False, True):
             executed: list[str] = []
 
-            def prepare(runner: scenarios.Runner, *arguments: object) -> None:
-                runner.outcomes.append(self.outcome(self.foundation))
+            def prepare(runner: scenarios.Runner, *arguments: object) -> list[object]:
+                outcome = self.outcome(self.foundation)
+                runner.outcomes.append(outcome)
+                return [outcome]
 
             def execute(
                 runner: scenarios.Runner,
@@ -643,7 +776,7 @@ class PreparationReuseTests(SimpleTestCase):
                 patch("disposable.images.store"),
                 patch("disposable.images.load", return_value=cached),
                 patch.object(scenarios, "controller_key", return_value=Path("key")),
-                patch.object(scenarios, "_prepare", side_effect=prepare),
+                patch.object(scenarios, "_prepare_units", side_effect=prepare),
                 patch.object(scenarios, "execute", side_effect=execute),
                 patch.object(scenarios, "summarize"),
                 patch.object(scenarios, "write_results"),
@@ -679,8 +812,14 @@ class PreparationReuseTests(SimpleTestCase):
                 patch.object(scenarios, "keep_logs"),
                 self.assertRaises(SystemExit),
             ):
-                scenarios._prepare(
-                    runner, self.foundation.label, "L1", "image", Path("key"), 10, runner.output
+                scenarios._prepare_units(
+                    runner,
+                    [[(self.foundation.label, "L1")]],
+                    "image",
+                    Path("key"),
+                    10,
+                    runner.output,
+                    1,
                 )
 
     def test_a_successful_preparation_preserves_its_actual_outcome(self) -> None:
@@ -696,10 +835,84 @@ class PreparationReuseTests(SimpleTestCase):
             patch("disposable.images.exists", return_value=True),
             patch("disposable.images.tag", return_value="image"),
         ):
-            scenarios._prepare(
-                runner, self.foundation.label, "L1", "image", Path("key"), 10, runner.output
+            resulting = scenarios._prepare_units(
+                runner,
+                [[(self.foundation.label, "L1")]],
+                "image",
+                Path("key"),
+                10,
+                runner.output,
+                1,
             )
+        self.assertEqual(resulting, [expected])
         self.assertEqual(runner.outcomes, [expected])
+
+
+class PrepareAllTests(SimpleTestCase):
+    def test_prepare_all_prepares_every_layer_and_special_image(self) -> None:
+        ensured: list[str] = []
+        stored: list[str] = []
+        prepared: dict[str, object] = {}
+
+        def ensure(layer: str = "L0") -> str:
+            ensured.append(layer)
+            return "image"
+
+        def store(layer: str) -> None:
+            stored.append(layer)
+
+        def prepare(*arguments: object, **options: object) -> list[object]:
+            layers = options["layers"]
+            if not isinstance(layers, (set, frozenset, list, tuple)):
+                raise TypeError("layers must be a collection")
+            prepared["layers"] = set(layers)
+            prepared["lanes"] = options["lanes"]
+            prepared["scenarios"] = arguments[1]
+            return []
+
+        with (
+            patch("disposable.images.archived", return_value=False),
+            patch("disposable.images.ensure", side_effect=ensure),
+            patch("disposable.images.store", side_effect=store),
+            patch("disposable.scenarios.mirror.fixture_ca"),
+            patch.object(scenarios, "controller_key", return_value=Path("key")),
+            patch.object(scenarios, "prepare_layers", side_effect=prepare),
+            patch.object(scenarios, "write_results"),
+            patch.object(scenarios, "keep_logs"),
+        ):
+            result = scenarios._run(
+                scenarios.arguments(["--prepare-all", "--lanes", "3"]),
+                [],
+                scenarios.Output(io.StringIO()),
+            )
+        self.assertEqual(result, 0)
+        self.assertEqual(prepared["layers"], set(scenarios.PREPARATION_LAYERS))
+        self.assertEqual(prepared["lanes"], 3)
+        self.assertEqual(prepared["scenarios"], [])
+        for layer in (
+            "L0",
+            "fixture",
+            *scenarios.PREPARATION_LAYERS,
+            *scenarios.SPECIAL_LAYERS,
+        ):
+            self.assertIn(layer, stored)
+        for layer in scenarios.SPECIAL_LAYERS:
+            self.assertIn(layer, ensured)
+
+    def test_a_fully_archived_run_loads_nothing(self) -> None:
+        with (
+            patch("disposable.images.archived", return_value=True),
+            patch("disposable.images.ensure") as ensure,
+            patch.object(scenarios, "prepare_layers") as prepare,
+        ):
+            result = scenarios._run(
+                scenarios.arguments(["--prepare-all", "--lanes", "3"]),
+                [],
+                scenarios.Output(io.StringIO()),
+            )
+        self.assertEqual(result, 0)
+        ensure.assert_not_called()
+        prepare.assert_not_called()
 
 
 class UnknownLabelTests(SimpleTestCase):
