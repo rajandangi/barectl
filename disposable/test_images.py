@@ -42,6 +42,20 @@ class SnapshotArchiveTests(SimpleTestCase):
             loaded.clear()
             self.assertTrue(images.load("L1"))
 
+    def test_archived_reports_a_keyed_archive_without_loading_it(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"BARECTL_NATIVE_L0_CACHE": directory}),
+            mock.patch.object(images, "tag", return_value="barectl-disposable-l0:26.04-key"),
+            mock.patch.object(images, "docker") as docker,
+        ):
+            self.assertFalse(images.archived("L1"))
+            (Path(directory) / "l1.tar").write_bytes(b"image")
+            self.assertTrue(images.archived("L1"))
+            docker.assert_not_called()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(images.archived("L1"))
+
 
 class PreparedSitesLayerTests(SimpleTestCase):
     def test_the_prepared_sites_layer_key_follows_the_site_body(self) -> None:

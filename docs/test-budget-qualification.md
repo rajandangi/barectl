@@ -233,7 +233,7 @@ The 299-second shard 11 leaves one second of margin. That is a recorded limitati
 
 ### Limitations
 
-A cold run is longer end to end than a warm run because the shared preparation phase precedes the shards; each measured phase remains under the unchanged target and each command under the 900-second hard limit. The ten non-validator shards still fetch the mirror from the network in an isolated cold namespace because only the prepare job's mirror is cached. That fetch is outside the shard phase timer and is a remaining optimization, not a claimed pass. The qualification uses an isolated cache namespace, fails on any unexpected hit, and deletes only its own namespace caches afterwards; it never deletes or rewrites unrelated caches.
+A cold run is longer end to end than a warm run because the shared preparation phase precedes the shards; each measured phase remains under the unchanged target and each command under the 900-second hard limit. The ten non-validator shards restore the mirror cache; their `mirror.sh -- fetch` is a verification when that restore hits, and it runs outside the shard phase timer. If a future restore misses, that network preparation would fall outside the shard timer, so the preparation phase carries the cold mirror fetch and the shard-side gap remains a documented limitation. The qualification uses an isolated cache namespace, fails on any unexpected hit, and deletes only its own namespace caches afterwards; it never deletes or rewrites unrelated caches.
 
 ## Guidance and decisions
 

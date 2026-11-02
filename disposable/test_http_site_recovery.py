@@ -125,16 +125,21 @@ class HttpSiteControllerRecovery(ScenarioTestCase):
                     'while [ "$(systemctl show -p MainPID --value '
                     + shlex.quote(str(unit))
                     + ')" = 0 ]; do [ $(date +%s) -lt $deadline ] || exit 1; sleep .02; done; '
-                    "systemctl kill --kill-whom=all --signal=STOP " + shlex.quote(str(unit)),
-                    timeout=35,
+                    "pid=$(systemctl show -p MainPID --value " + shlex.quote(str(unit)) + "); "
+                    "systemctl kill --kill-whom=all --signal=STOP " + shlex.quote(str(unit)) + "; "
+                    "stop_deadline=$(( $(date +%s) + 10 )); "
+                    "while :; do "
+                    "state=$(sed -n 's/^State:[[:space:]]*\\([A-Z]\\).*/\\1/p' "
+                    "/proc/$pid/status 2>/dev/null); "
+                    '[ "$state" = T ] && exit 0; '
+                    'kill -0 "$pid" 2>/dev/null || '
+                    '{ echo "process exited before SIGSTOP"; exit 1; }; '
+                    "[ $(date +%s) -lt $stop_deadline ] || "
+                    '{ echo "process did not stop"; exit 1; }; '
+                    "sleep .02; done",
+                    timeout=45,
                 )
                 stopped = True
-                self.native(
-                    "pid=$(systemctl show -p MainPID --value "
-                    + shlex.quote(str(unit))
-                    + "); test \"$(sed -n 's/^State:[[:space:]]*\\([A-Z]\\).*/\\1/p' "
-                    '/proc/$pid/status)" = T'
-                )
                 from operations import engine
 
                 with self.shell() as shell:

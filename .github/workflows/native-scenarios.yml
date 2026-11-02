@@ -48,7 +48,9 @@ jobs:
         id: mirror
         uses: actions/cache/restore@v6.1.0
         with:
-          path: ~/.cache/barectl/native/mirror
+          path: |
+            ~/.cache/barectl/native/mirror
+            !~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           key: ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
       - id: ca-key
         env:
@@ -123,6 +125,8 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
           key: ${{ inputs.cache-namespace }}native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
       - name: Discard special snapshots from the legacy L0 directory cache
         run: rm -f -- "$BARECTL_NATIVE_L0_CACHE/standing-26.04.tar" "$BARECTL_NATIVE_L0_CACHE/l0-24.04.tar"
@@ -197,22 +201,40 @@ jobs:
         run: |
           started=${{ steps.prepare-start.outputs.started }}
           ca_seconds=${{ steps.ca-preparation.outputs.seconds }}
-          deadline=$(( started + 900 ))
+          deadline=$(( started + 900 - ca_seconds ))
           remaining() { echo $(( deadline - $(date +%s) )); }
           result=0
           set +e
+          mkdir -p "$RUNNER_TEMP/native"
+          ready="$RUNNER_TEMP/native/mirror-ready"
+          code="$RUNNER_TEMP/native/mirror-code"
+          rm -f "$ready" "$code"
           budget=$(remaining)
           fetch_pid=""
           fetch=0
           if [ "$budget" -gt 0 ]; then
-            # The L0 image build needs about a minute before the first preparation lane
-            # reads the mirror, so fetch it alongside that build instead of serially.
-            timeout --signal=TERM --kill-after=10s "${budget}s" \
-              docker/disposable-server/mirror.sh -- fetch &
+            # The mirrors are written in place, so the preparation lanes wait for the
+            # ready marker before they read any file; the L0 build runs in the meantime.
+            (
+              if timeout --signal=TERM --kill-after=10s "${budget}s" \
+                docker/disposable-server/mirror.sh -- fetch; then
+                echo 0 > "$code"
+                echo 0 > "$ready"
+              else
+                echo "$?" > "$code"
+                if [ "${{ steps.mirror.outputs.cache-hit }}" = "true" ]; then
+                  echo 0 > "$ready"
+                else
+                  echo 1 > "$ready"
+                fi
+              fi
+            ) &
             fetch_pid=$!
           else
             fetch=124
+            echo 1 > "$ready"
           fi
+          export BARECTL_MIRROR_MARKER="$ready"
           budget=$(remaining)
           if [ "$budget" -gt 0 ]; then
             timeout --signal=TERM --kill-after=10s "${budget}s" \
@@ -223,7 +245,7 @@ jobs:
           fi
           if [ -n "$fetch_pid" ]; then
             wait "$fetch_pid"
-            fetch=$?
+            fetch=$(cat "$code" 2>/dev/null || echo 1)
           fi
           mirror=1
           if [ "$fetch" -ne 0 ]; then
@@ -250,7 +272,9 @@ jobs:
         if: always() && steps.mirror.outputs.cache-hit != 'true' && steps.prepare.outputs.mirror == '1'
         uses: actions/cache/save@v6.1.0
         with:
-          path: ~/.cache/barectl/native/mirror
+          path: |
+            ~/.cache/barectl/native/mirror
+            !~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           key: ${{ steps.mirror.outputs.cache-primary-key }}
       - id: l0-archive
         if: always() && steps.l0.outputs.cache-hit != 'true'
@@ -404,7 +428,9 @@ jobs:
         id: mirror
         uses: actions/cache/restore@v6.1.0
         with:
-          path: ~/.cache/barectl/native/mirror
+          path: |
+            ~/.cache/barectl/native/mirror
+            !~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           key: ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
       - name: Use this run's shared fixture CA
         uses: actions/download-artifact@v8.0.2
@@ -461,6 +487,8 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
           key: ${{ inputs.cache-namespace }}native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
       - name: Discard special snapshots from the legacy L0 directory cache
         run: rm -f -- "$BARECTL_NATIVE_L0_CACHE/standing-26.04.tar" "$BARECTL_NATIVE_L0_CACHE/l0-24.04.tar"
@@ -563,7 +591,9 @@ jobs:
         if: always() && steps.mirror.outputs.cache-hit != 'true' && steps.mirror-fetch.outcome == 'success'
         uses: actions/cache/save@v6.1.0
         with:
-          path: ~/.cache/barectl/native/mirror
+          path: |
+            ~/.cache/barectl/native/mirror
+            !~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           key: ${{ steps.mirror.outputs.cache-primary-key }}
       - id: l0-archive
         if: always() && steps.l0.outputs.cache-hit != 'true'

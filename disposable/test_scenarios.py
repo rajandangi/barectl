@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import tempfile
 import time
 from dataclasses import replace
@@ -898,6 +899,37 @@ class PrepareAllTests(SimpleTestCase):
             self.assertIn(layer, stored)
         for layer in scenarios.SPECIAL_LAYERS:
             self.assertIn(layer, ensured)
+
+    def test_prepare_all_waits_for_the_mirror_marker(self) -> None:
+        for content, proceeds in (("0", True), ("1", False)):
+            with tempfile.TemporaryDirectory() as directory:
+                marker = Path(directory) / "mirror-ready"
+                marker.write_text(content, encoding="utf-8")
+                with (
+                    self.subTest(content=content),
+                    patch.dict(os.environ, {"BARECTL_MIRROR_MARKER": str(marker)}),
+                    patch("disposable.images.archived", return_value=False),
+                    patch("disposable.images.ensure", return_value="image"),
+                    patch("disposable.images.store"),
+                    patch.object(scenarios, "controller_key", return_value=Path("key")),
+                    patch.object(scenarios, "prepare_layers", return_value=[]),
+                    patch.object(scenarios, "write_results"),
+                    patch.object(scenarios, "keep_logs"),
+                ):
+                    if proceeds:
+                        result = scenarios._run(
+                            scenarios.arguments(["--prepare-all", "--lanes", "3"]),
+                            [],
+                            scenarios.Output(io.StringIO()),
+                        )
+                        self.assertEqual(result, 0)
+                    else:
+                        with self.assertRaises(scenarios.ScenarioError):
+                            scenarios._run(
+                                scenarios.arguments(["--prepare-all", "--lanes", "3"]),
+                                [],
+                                scenarios.Output(io.StringIO()),
+                            )
 
     def test_a_fully_archived_run_loads_nothing(self) -> None:
         with (

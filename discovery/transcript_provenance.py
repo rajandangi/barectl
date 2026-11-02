@@ -100,7 +100,7 @@ def _resource_consumers_proven() -> bool:
     return consumers == {"security/sign_in.py"}
 
 
-AUDITED_INPUT_DIGEST = "03af4b86e29fb8d7d887d8e5227bef04dcc36c533897ca581f81cd0e8a4c5aa3"
+AUDITED_INPUT_DIGEST = "2295de22774dee9b99679e7a68e9e02b037d00fd50f22bca084470d67dde9610"
 
 
 def audit_digest(values: dict[str, str]) -> str:

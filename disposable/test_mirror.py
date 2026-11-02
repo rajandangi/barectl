@@ -360,7 +360,11 @@ class FixtureCAWorkflowTests(SimpleTestCase):
         self.assertEqual(consumer["env"]["BARECTL_NATIVE_CA_SECONDS"], "0")
         self.assertEqual(ensure["id"], "ca-preparation")
         mirror_restore = next(step for step in producer["steps"] if step.get("id") == "mirror")
-        self.assertLess(producer["steps"].index(mirror_restore), producer["steps"].index(ensure))
+        ca_restore = next(step for step in producer["steps"] if step.get("id") == "ca")
+        self.assertLess(
+            producer["steps"].index(mirror_restore), producer["steps"].index(ca_restore)
+        )
+        self.assertLess(producer["steps"].index(ca_restore), producer["steps"].index(ensure))
 
     def test_shared_preparation_builds_missing_snapshots_once_before_shards(self) -> None:
         workflow = yaml.safe_load(
@@ -371,7 +375,10 @@ class FixtureCAWorkflowTests(SimpleTestCase):
         self.assertEqual(scenarios["needs"], "prepare")
         step = next(item for item in prepare["steps"] if item.get("id") == "prepare")
         self.assertIn("--prepare-all", step["run"])
-        self.assertIn("deadline=$(( started + 900 ))", step["run"])
+        self.assertIn("deadline=$(( started + 900 - ca_seconds ))", step["run"])
+        self.assertIn("mirror.sh -- fetch", step["run"])
+        self.assertIn("BARECTL_MIRROR_MARKER", step["run"])
+        self.assertIn("mirror-ready", step["run"])
         self.assertIn("mirror.sh -- fetch", step["run"])
         self.assertIn("ca_seconds=${{ steps.ca-preparation.outputs.seconds }}", step["run"])
         self.assertIn("300s target and 900s hard limit", step["run"])
@@ -459,9 +466,21 @@ class FixtureCAWorkflowTests(SimpleTestCase):
             for name in ("Save the L1 snapshot", "Save the L5 snapshot"):
                 save = next(item for item in steps if item.get("name") == name)
                 self.assertTrue(save["if"].startswith("always()"))
+            l0_restore = next(item for item in steps if item.get("id") == "l0")
             l0_save = next(item for item in steps if item.get("name") == "Save the L0 snapshot")
+            self.assertEqual(l0_restore["with"]["path"], l0_save["with"]["path"])
             self.assertIn("standing-26.04.tar", l0_save["with"]["path"])
             self.assertIn("l0-24.04.tar", l0_save["with"]["path"])
+            mirror_restore = next(item for item in steps if item.get("id") == "mirror")
+            self.assertIn("barectl-native-fixture-ca", mirror_restore["with"]["path"])
+            self.assertIn("!", mirror_restore["with"]["path"])
+        scheduled = yaml.safe_load(
+            (mirror.REPOSITORY / ".github/workflows/native-mirror.yml").read_text()
+        )
+        scheduled_mirror = next(
+            item for item in scheduled["jobs"]["mirror"]["steps"] if item.get("id") == "mirror"
+        )
+        self.assertIn("barectl-native-fixture-ca", scheduled_mirror["with"]["path"])
         prepare_keys = next(
             item for item in workflow["jobs"]["prepare"]["steps"] if item.get("id") == "keys"
         )
@@ -609,8 +628,8 @@ class FixtureCAWorkflowTests(SimpleTestCase):
 
 class SnapshotPreparationPhaseTests(SimpleTestCase):
     def run_prepare(
-        self, seconds: int, result: int = 0, *, ca: int = 0, fetch: int = 0
-    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        self, seconds: int, result: int = 0, *, ca: int = 0, fetch: int = 0, cache_hit: bool = False
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
         workflow = yaml.safe_load(
             (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
         )
@@ -621,7 +640,7 @@ class SnapshotPreparationPhaseTests(SimpleTestCase):
             step["run"]
             .replace("${{ steps.prepare-start.outputs.started }}", "0")
             .replace("${{ steps.ca-preparation.outputs.seconds }}", str(ca))
-            .replace("${{ steps.mirror.outputs.cache-hit }}", "")
+            .replace("${{ steps.mirror.outputs.cache-hit }}", "true" if cache_hit else "")
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -672,35 +691,48 @@ class SnapshotPreparationPhaseTests(SimpleTestCase):
                 check=False,
                 timeout=5,
             )
-            return completed, calls.read_text().splitlines()
+            ready_path = runner_temp / "native/mirror-ready"
+            return (
+                completed,
+                calls.read_text().splitlines(),
+                ready_path.read_text(encoding="utf-8").strip() if ready_path.exists() else "",
+            )
 
     def test_target_boundary(self) -> None:
         for seconds, expected in ((299, 0), (300, 0), (301, 1)):
             with self.subTest(seconds=seconds):
-                result, calls = self.run_prepare(seconds)
+                result, calls, ready = self.run_prepare(seconds)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertIn(f"Complete snapshot preparation phase: {seconds}s", result.stdout)
                 self.assertEqual(len(calls), 2)
                 self.assertTrue(any("mirror.sh -- fetch" in call for call in calls))
                 self.assertTrue(any("--prepare-all --time-limit" in call for call in calls))
+                self.assertEqual(ready, "0")
                 self.assertEqual("target missed" in result.stderr, seconds > 300)
 
     def test_the_fixture_ca_is_charged_to_the_preparation_phase(self) -> None:
-        result, _ = self.run_prepare(279, ca=20)
+        result, _, _ = self.run_prepare(279, ca=20)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Complete snapshot preparation phase: 299s", result.stdout)
 
     def test_a_failed_preparation_is_preserved_even_when_the_target_is_met(self) -> None:
         for seconds in (1, 301):
             with self.subTest(seconds=seconds):
-                result, _ = self.run_prepare(seconds, result=7)
+                result, _, _ = self.run_prepare(seconds, result=7)
                 self.assertEqual(result.returncode, 7, result.stderr)
 
     def test_a_failed_fetch_fails_the_phase(self) -> None:
-        result, calls = self.run_prepare(1, fetch=7)
+        result, calls, ready = self.run_prepare(1, fetch=7)
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(len(calls), 2)
         self.assertTrue(any("mirror.sh -- fetch" in call for call in calls))
+        self.assertEqual(ready, "1")
+
+    def test_a_failed_fetch_uses_a_restored_mirror(self) -> None:
+        result, calls, ready = self.run_prepare(1, fetch=7, cache_hit=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(ready, "0")
 
 
 class SpecialSnapshotCacheTests(SimpleTestCase):
@@ -879,6 +911,22 @@ class MirrorLeafCoherenceTests(SimpleTestCase):
                 results = list(pool.map(first_use, range(8)))
             self.assertTrue(all(result == results[0] for result in results))
             mirror._openssl("verify", "-CAfile", str(ca_certificate), str(results[0][0]))
+
+    def test_concurrent_first_use_creates_one_fixture_ca(self) -> None:
+        barrier = threading.Barrier(8)
+
+        def first_use(_: int) -> tuple[Path, Path]:
+            barrier.wait(timeout=5)
+            return mirror.fixture_ca()
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, {"XDG_CACHE_HOME": directory}),
+            ThreadPoolExecutor(8) as pool,
+        ):
+            results = list(pool.map(first_use, range(8)))
+            self.assertEqual(len({result[0].read_bytes() for result in results}), 1)
+            self.assertEqual(len({result[1].read_bytes() for result in results}), 1)
 
     def test_failed_leaf_signing_does_not_publish_an_incomplete_pair(self) -> None:
         original = mirror._openssl

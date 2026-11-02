@@ -1265,6 +1265,16 @@ def _prepare_all_stage(options: argparse.Namespace, lanes: int, output: Output) 
             image = images.ensure()
             fixture_image = fixture.result()
             images.store("fixture")
+            marker = os.environ.get("BARECTL_MIRROR_MARKER")
+            if marker:
+                ready = Path(marker)
+                deadline = time.monotonic() + max(
+                    0.0, options.time_limit - (time.monotonic() - started)
+                )
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                if not ready.exists() or ready.read_text(encoding="utf-8").strip() != "0":
+                    raise ScenarioError("the mirror fetch did not complete before preparation.")
             key = controller_key(work)
             runner = Runner(
                 output, work, record="", keep_failed=options.keep_failed,
