@@ -364,11 +364,21 @@ def _free_port(used: set[int]) -> int:
             return port
 
 
+def _kvm_usable() -> bool:
+    """Present is not enough: hosted runners often expose /dev/kvm without access."""
+    try:
+        descriptor = os.open("/dev/kvm", os.O_RDWR)
+    except OSError:
+        return False
+    os.close(descriptor)
+    return True
+
+
 def accelerator() -> str:
     configured = os.environ.get("BARECTL_VM_ACCEL")
     if configured:
         return configured
-    if Path("/dev/kvm").exists():
+    if _kvm_usable():
         return "kvm"
     if platform.system() == "Darwin":
         return "hvf"
