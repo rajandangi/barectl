@@ -161,9 +161,7 @@ class SecurityUpdates(ScenarioTestCase):
             submitted = submit_draft(self, shell, INSTALL_UPDATES, draft, acknowledge=False)
         wait_result(self, submitted, timeout=120)
         self.assertEqual(self._version("openssl"), SECURITY_OPENSSL)
-        expected = (
-            'barectl-result {"change_kind":"install_ubuntu_updates","sites":[],"class":"succeeded"}'
-        )
+        expected = '"change_kind":"install_ubuntu_updates"'
         # journald publishes a unit's last lines a moment after the run's reader saw them.
         end = time.monotonic() + 5
         read = f"journalctl -u {submitted.unit} --no-pager -o cat --grep '^barectl-result '"
@@ -171,7 +169,9 @@ class SecurityUpdates(ScenarioTestCase):
         while expected not in output and time.monotonic() < end:
             time.sleep(0.1)
             output = self.native(read)
+        # The review names the sites a restart may pause, so the list is not always empty.
         self.assertIn(expected, output)
+        self.assertIn('"class":"succeeded"', output)
 
     def _router(self, shell: RemoteShell) -> None:
         write(self, shell, "/etc/apt/sources.list.d/barectl-fixture.sources", mirror.apt_sources())
