@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -120,6 +121,10 @@ apt-get install -y {extra} --print-uris --no-install-recommends {packages} 2>/de
 
 class MirrorError(Exception):
     """A mirror entry could not be fetched or verified."""
+
+
+class MirrorUnavailable(MirrorError):
+    """An upstream did not answer: a transient outage, not a change to the manifest bytes."""
 
 
 class _StoreFn(Protocol):
@@ -289,10 +294,23 @@ def download(url: str, *, attempts: int = 8) -> bytes:
                 body: bytes = response.read()
                 return body
         except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            if not _transient(error):
+                raise MirrorError(f"Could not fetch {url}: {error}") from error
             last = error
             if attempt + 1 < attempts:
                 time.sleep(min(30.0, 2.0**attempt))
-    raise MirrorError(f"Could not fetch {url}: {last}")
+    raise MirrorUnavailable(f"Could not fetch {url}: {last}") from last
+
+
+def _transient(error: BaseException) -> bool:
+    """Whether an upstream failure may pass, rather than a file gone from the manifest.
+
+    docs/quality.md#the-local-mirror: a 5xx, 408 or 429 and any connection-level failure are
+    outages. Other HTTP responses, such as a removed file's 404 or 410, are real drift.
+    """
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in {408, 429} or error.code >= 500
+    return True
 
 
 def sha256(data: bytes) -> str:
@@ -697,18 +715,30 @@ def fetch(manifest: Manifest, root: Path, *, architectures: Sequence[str] | None
     return len(entries)
 
 
-def drift(manifest: Manifest) -> list[str]:
-    """The entries whose upstream bytes no longer match the manifest, by URL."""
+@dataclass(frozen=True)
+class DriftReport:
+    """What ``drift`` found: real differences, and entries upstream could not answer for."""
+
+    changed: tuple[str, ...]
+    unavailable: tuple[str, ...]
+
+
+def drift(manifest: Manifest) -> DriftReport:
+    """Compare each entry with upstream, telling real drift from a transient outage."""
     changed: list[str] = []
+    unavailable: list[str] = []
     for entry in manifest.entries:
         try:
             digest = sha256(download(entry.url))
+        except MirrorUnavailable as error:
+            unavailable.append(f"{entry.url}: {error}")
+            continue
         except MirrorError as error:
             changed.append(f"{entry.url}: {error}")
             continue
         if digest != entry.sha256:
             changed.append(f"{entry.url}: upstream {digest}, manifest {entry.sha256}")
-    return changed
+    return DriftReport(tuple(changed), tuple(unavailable))
 
 
 # The fixture CA the servers and mirrors trust (docs/quality.md#native-layer).
@@ -791,19 +821,29 @@ def _openssl(*arguments: str, stdin: str | None = None) -> None:
 # The entry point.
 
 
-def _print_drift(changed: Sequence[str]) -> int:
-    if not changed:
-        print("mirror: every manifest hash matches upstream.")  # noqa: T201
+def _print_drift(report: DriftReport) -> int:
+    if report.unavailable:
+        print(  # noqa: T201 - the operator's record of what was not checked
+            f"mirror: warning: {len(report.unavailable)} entries could not be checked"
+            " because upstream was unavailable:",
+            file=sys.stderr,
+        )
+        for line in report.unavailable:
+            print(f"  {line}", file=sys.stderr)  # noqa: T201
+    if not report.changed:
+        if report.unavailable:
+            print("mirror: no drift in the entries upstream answered for.")  # noqa: T201
+        else:
+            print("mirror: every manifest hash matches upstream.")  # noqa: T201
         return 0
-    print(f"mirror: {len(changed)} entries drifted from upstream:")  # noqa: T201
-    for line in changed:
+    print(f"mirror: {len(report.changed)} entries drifted from upstream:")  # noqa: T201
+    for line in report.changed:
         print(f"  {line}")  # noqa: T201
     return 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     import argparse
-    import sys
 
     parser = argparse.ArgumentParser(prog="mirror", description=__doc__)
     parser.add_argument(
@@ -838,6 +878,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    import sys
-
     sys.exit(main())
