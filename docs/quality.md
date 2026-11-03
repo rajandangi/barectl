@@ -243,8 +243,9 @@ QEMU, mirror and test logs, and uploads them as an artifact. A failure opens or 
 `Native VM lane failed` issue, as the drift job does. The lane is never a required check and
 adds nothing to the merge build or the [test time budget](#test-time-budget).
 
-Run it locally on macOS arm64 with HVF or on a Linux host with accessible `/dev/kvm` (TCG is
-the fallback when KVM is absent or its device is not accessible, as on some hosted runners):
+Run it locally on macOS arm64 with HVF or on a Linux host with a usable `/dev/kvm`. The lane
+probes the KVM API (`KVM_GET_API_VERSION` and `KVM_CREATE_VM`) before selecting KVM, so a
+hosted runner that exposes a device it cannot actually use falls back to TCG:
 
 ```bash
 docker/disposable-server/mirror.sh --env-file .env -- fetch
