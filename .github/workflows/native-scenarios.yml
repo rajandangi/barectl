@@ -196,6 +196,18 @@ jobs:
       # build it performs; cache restores above are transport and stay outside.
       - id: prepare-start
         run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Diagnose native layer archives
+        run: |
+          for layer in l1 l2 l3 l4 l5; do
+            printf '== %s: ' "$layer"
+            tar -xOf "$BARECTL_NATIVE_L0_CACHE/$layer.tar" manifest.json 2>/dev/null | head -c 300 || true
+            echo
+          done
+          uv run python - <<'PY'
+          from disposable import images
+          for layer in ("L1", "L2", "L3", "L4", "L5"):
+              print(layer, images.tag(layer))
+          PY
       - name: Prepare missing snapshots
         id: prepare
         run: |
@@ -534,6 +546,18 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
           key: ${{ inputs.cache-namespace }}native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
+      - name: Diagnose native layer archives
+        run: |
+          for layer in l1 l2 l3 l4 l5; do
+            printf '== %s: ' "$layer"
+            tar -xOf "$BARECTL_NATIVE_L0_CACHE/$layer.tar" manifest.json 2>/dev/null | head -c 300 || true
+            echo
+          done
+          uv run python - <<'PY'
+          from disposable import images
+          for layer in ("L1", "L2", "L3", "L4", "L5"):
+              print(layer, images.tag(layer))
+          PY
       # One 900 s build stop covers every native stage of the shard.
       - run: |
           ca_seconds=${BARECTL_NATIVE_CA_SECONDS-}

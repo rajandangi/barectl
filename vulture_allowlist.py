@@ -138,6 +138,11 @@ if TYPE_CHECKING:
     from disposable.test_target_shape import JudgeByShape
     from disposable.test_vm_lane import VmReboot, VmRestart
     from disposable.test_wordpress_create import WordPressCreateMariaDB
+    from jobs.apps import JobsConfig
+    from jobs.automatic import AutomaticRow
+    from jobs.backups import BackupRunRow
+    from jobs.models import Coverage
+    from jobs.presentation import JobRow, JobsView
     from laravel import configuration as laravel_configuration
     from laravel.apps import LaravelConfig
     from laravel.bodies import settings as laravel_settings_body
@@ -588,6 +593,16 @@ if TYPE_CHECKING:
         AutomationConfig,
         ScheduleView("", "", "", "", None, "", False, False).last_run,
     )
+    # The Jobs section is rendered by Django templates, which read these fields by name;
+    # the app config is Django's, and two coverage states are written as strings by the
+    # reader so the stored choice still covers them.
+    _jobs_templates_and_config = (
+        JobsConfig,
+        JobsView(None, True, True).automatic_empty,
+        JobRow("", "", (), "", "", "", "", "", None, None).detail_lines,
+        Coverage.ACCESS_DENIED,
+        Coverage.READ_FAILED,
+    )
     # Django's form validation calls the settings form's clean_<field> by name, and the
     # settings bodies are read as resources by their change kinds.
     _settings_form_and_bodies = (
@@ -644,3 +659,6 @@ if TYPE_CHECKING:
     # Server Settings > Backup storage renders the panel's provider label in its template.
     _backup_storage_panel = BackupStoragePanel(False, False, "", "", "", "", "", "", False, (), "")
     _backup_storage_label = _backup_storage_panel.provider_label
+    # Jobs' template branches on the automatic-row and backup-row markers.
+    _automatic_row_marker = AutomaticRow("", "", "", "", "").is_automatic
+    _backup_row_marker = BackupRunRow("", "", "", "", "", "", None, (), (), "").is_backup

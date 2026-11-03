@@ -14,6 +14,7 @@ from automation.observation import ObservedSchedule
 from automation.worker_observation import ObservedWorker
 from automation.workers import WorkerDefinition
 from bootstrap.standing import HostJudgment, Standing
+from jobs.observation import PROVIDER, JobReading, ObservedChange, ProviderCoverage
 from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
@@ -21,8 +22,9 @@ from servers.models import Server
 from sites.bodies.pool import SitePool
 
 if TYPE_CHECKING:
-    from backups.observation import ObservedBackup, OffsiteStorage
+    from backups.observation import BackupRun, BackupTimer, ObservedBackup, OffsiteStorage
     from cache.models import CacheObservation
+    from jobs.models import JobCoverage, JobObservation
     from security.observation import SecurityState
 
 from .models import (
@@ -250,6 +252,10 @@ class CollectedSnapshot:
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
     certificate_email: str = ""
     certificate_email_state: str = ""
+    # The server's own Barectl change runs and their coverage (Phase E #285).
+    jobs: Observation[JobReading] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", JobReading())
+    )
 
     @property
     def capacity(self) -> tuple[Observation[object], ...]:
@@ -327,6 +333,9 @@ def save_snapshot(
         offsite_status=collected.offsite.outcome,
         offsite_source=_joined(collected.offsite.source),
         offsite_warning=collected.offsite.warning,
+        jobs_status=collected.jobs.outcome,
+        jobs_source=_joined(collected.jobs.source),
+        jobs_warning=collected.jobs.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -417,6 +426,7 @@ def save_snapshot(
     _save_workers(snapshot, collected.workers.value)
     _save_backups(snapshot, collected.backups.value)
     _save_security(snapshot, collected.security.value, collected.security.source)
+    _save_jobs(snapshot, collected.jobs.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -757,9 +767,9 @@ def _read_offsite(value: dict[str, object]) -> "OffsiteStorage | None":  # noqa:
 
 def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ...]) -> None:
     from backups.integrity import record as record_integrity
-    from backups.models import BackupObservation
+    from backups.models import BackupObservation, BackupRunObservation, BackupTimerObservation
 
-    BackupObservation.objects.bulk_create(
+    created = BackupObservation.objects.bulk_create(
         BackupObservation(
             snapshot=snapshot,
             identifier=backup.identifier,
@@ -790,9 +800,54 @@ def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ..
                 if backup.copy is not None
                 else {}
             ),
+            runs_truncated=backup.runs_truncated,
+            timers_truncated=backup.timers_truncated,
         )
         for backup in backups
     )
+    run_rows: list[BackupRunObservation] = []
+    timer_rows: list[BackupTimerObservation] = []
+    for observation, backup in zip(created, backups, strict=True):
+        run_rows.extend(
+            BackupRunObservation(
+                observation=observation,
+                kind=run.kind,
+                result_class=run.result_class,
+                reason=run.reason,
+                at=run.at,
+                point=run.point,
+                scope=run.scope,
+                origin=run.origin,
+                snapshots=run.snapshots,
+                size=run.size,
+                offsite=run.offsite,
+                location=run.location,
+                checked=run.checked,
+                subset=run.subset,
+                onsite_deleted=run.onsite.deleted if run.onsite else 0,
+                onsite_kept=run.onsite.kept if run.onsite else 0,
+                onsite_skipped=run.onsite.skipped if run.onsite else 0,
+                onsite_failed=run.onsite.failed if run.onsite else 0,
+                offsite_deleted=run.offsite_counts.deleted if run.offsite_counts else 0,
+                offsite_kept=run.offsite_counts.kept if run.offsite_counts else 0,
+                offsite_skipped=run.offsite_counts.skipped if run.offsite_counts else 0,
+                offsite_failed=run.offsite_counts.failed if run.offsite_counts else 0,
+            )
+            for run in backup.runs
+        )
+        timer_rows.extend(
+            BackupTimerObservation(
+                observation=observation,
+                work=timer.work,
+                location=timer.location,
+                on=timer.on,
+                next_elapse_us=timer.next_elapse_us,
+                last_trigger_us=timer.last_trigger_us,
+            )
+            for timer in backup.timers
+        )
+    BackupRunObservation.objects.bulk_create(run_rows)
+    BackupTimerObservation.objects.bulk_create(timer_rows)
     for backup in backups:
         record_integrity(snapshot.server, backup.identifier, backup.integrity)
 
@@ -800,6 +855,40 @@ def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ..
 class AttemptSnapshot(NamedTuple):
     attempt: DiscoveryAttempt
     snapshot: Snapshot | None
+
+
+def _save_jobs(snapshot: DiscoverySnapshot, reading: JobReading) -> None:
+    from jobs.models import JobCoverage, JobObservation
+
+    JobObservation.objects.bulk_create(
+        JobObservation(
+            snapshot=snapshot,
+            provider=PROVIDER,
+            unit=row.unit,
+            invocation_id=row.invocation_id,
+            kind_slug=row.kind_slug,
+            sites=list(row.sites),
+            result_class=row.result_class,
+            reason=row.reason,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            running=row.running,
+            active_state=row.active_state,
+            sub_state=row.sub_state,
+            exec_main_status=row.exec_main_status,
+        )
+        for row in reading.changes
+    )
+    JobCoverage.objects.bulk_create(
+        JobCoverage(
+            snapshot=snapshot,
+            provider=item.provider,
+            state=item.state,
+            warning=item.warning,
+            oldest_at=item.oldest_at,
+        )
+        for item in reading.coverage
+    )
 
 
 _OBSERVATION_ROWS = (
@@ -813,9 +902,13 @@ _OBSERVATION_ROWS = (
     "automation",
     "workers",
     "backups",
+    "backups__runs",
+    "backups__timers",
     "security__rules",
     "security__listeners",
     "security__pending_updates",
+    "jobs",
+    "job_coverage",
 )
 
 
@@ -960,6 +1053,15 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             _read_offsite(row.offsite),
         ),
         security=_read_security(row),
+        jobs=Observation(
+            ObservationOutcome(row.jobs_status),
+            _reads(row.jobs_source),
+            row.jobs_warning,
+            JobReading(
+                tuple(_read_job(item) for item in row.jobs.all()),
+                tuple(_read_job_coverage(item) for item in row.job_coverage.all()),
+            ),
+        ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
             {
@@ -1024,6 +1126,27 @@ def _read_cache(row: CacheObservation) -> ObservedCache:
         row.client,
         row.unit_state,
     )
+
+
+def _read_job(row: JobObservation) -> ObservedChange:
+    return ObservedChange(
+        unit=row.unit,
+        invocation_id=row.invocation_id,
+        kind_slug=row.kind_slug,
+        sites=tuple(site for site in row.sites if isinstance(site, str)),
+        result_class=row.result_class,
+        reason=row.reason,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        running=row.running,
+        active_state=row.active_state,
+        sub_state=row.sub_state,
+        exec_main_status=row.exec_main_status,
+    )
+
+
+def _read_job_coverage(row: JobCoverage) -> ProviderCoverage:
+    return ProviderCoverage(row.provider, row.state, row.warning, row.oldest_at)
 
 
 def _read_site(row: SiteObservation) -> ObservedSite:
@@ -1301,6 +1424,70 @@ def _read_backup(row: object) -> ObservedBackup:
         last,
         _read_offsite(row.offsite),
         copy,
+        (),
+        tuple(_read_run(value) for value in row.runs.all()),
+        tuple(_read_timer(value) for value in row.timers.all()),
+        row.runs_truncated,
+        row.timers_truncated,
+    )
+
+
+def _read_run(value: object) -> BackupRun:
+    from backups.models import BackupRunObservation
+    from backups.observation import BackupRun, CleanupCounts
+
+    if not isinstance(value, BackupRunObservation):
+        raise TypeError("Not a backup run observation.")
+
+    def counts(prefix: str) -> CleanupCounts | None:
+        if value.kind != "cleanup":
+            return None
+        if prefix == "onsite":
+            return CleanupCounts(
+                value.onsite_deleted,
+                value.onsite_kept,
+                value.onsite_skipped,
+                value.onsite_failed,
+            )
+        return CleanupCounts(
+            value.offsite_deleted,
+            value.offsite_kept,
+            value.offsite_skipped,
+            value.offsite_failed,
+        )
+
+    return BackupRun(
+        value.kind,
+        value.result_class,
+        value.reason,
+        value.at,
+        value.point,
+        value.scope,
+        value.origin,
+        value.snapshots,
+        value.size,
+        value.offsite,
+        value.location,
+        value.checked,
+        value.subset,
+        counts("onsite"),
+        counts("offsite"),
+    )
+
+
+def _read_timer(value: object) -> BackupTimer:
+    from backups.models import BackupTimerObservation
+    from backups.observation import BackupTimer
+
+    if not isinstance(value, BackupTimerObservation):
+        raise TypeError("Not a backup timer observation.")
+
+    return BackupTimer(
+        value.work,
+        value.location,
+        value.on,
+        value.next_elapse_us,
+        value.last_trigger_us,
     )
 
 

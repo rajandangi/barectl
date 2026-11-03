@@ -1,0 +1,563 @@
+"""The Jobs page's permissions, check action, retention and query cost (#285)."""
+
+from datetime import timedelta
+from typing import override
+from unittest import mock
+
+from django.db import connection
+from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
+from django.utils import timezone
+
+from discovery.fakes import STALE, FakeServer, claim_task, record_attempt, run_worker
+from discovery.models import DiscoveryAttempt
+from discovery.services import request_discovery
+from servers.models import ConnectionDefinition, Server
+from servers.testing import ControllerConfigTestCase
+
+from . import observation as observation_module
+from .models import JobObservation
+from .observation import ObservedChange
+from .testing import (
+    BOOT,
+    SECRET,
+    backup,
+    cache,
+    change,
+    journal_shell,
+    line,
+    record_jobs,
+    record_reading,
+    result_line,
+    run,
+    scheduled,
+    timer,
+    worker,
+)
+
+
+class JobsPageTests(ControllerConfigTestCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        ConnectionDefinition.objects.create(
+            server=self.server,
+            revision=1,
+            mode="alias",
+            alias="web.example.com",
+            address="203.0.113.10",
+            username="deploy",
+            port=22,
+        )
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.server.refresh_from_db()
+        self.url = reverse("server_jobs", args=(self.server.pk,))
+
+    def a_finished_change(self, **values: object) -> ObservedChange:
+        fields = {
+            "unit": "barectl-apply-" + "a" * 32 + ".service",
+            "kind_slug": "create_http_site",
+            "sites": ("alpha",),
+            "finished_at": timezone.now(),
+        }
+        fields.update(values)
+        return change(**fields)  # type: ignore[arg-type]
+
+    def test_view_server_is_needed_for_the_page(self) -> None:
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+
+    def test_change_rows_counts_and_details_need_view_changes(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "may view this server but not its changes")
+        self.assertNotContains(response, "Create PHP site")
+        self.assertNotContains(response, "Needs attention")
+        self.assertNotContains(response, "Show details")
+        self.assertNotContains(response, "barectl-apply-")
+
+    def test_a_row_and_its_details_are_plain_until_details_are_opened(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Last checked")
+        self.assertContains(response, "Needs attention")
+        self.assertContains(response, "Running")
+        self.assertContains(response, "Automatic work")
+        self.assertContains(response, "Recent results")
+        self.assertContains(response, "Create PHP site")
+        self.assertContains(response, "alpha")
+        self.assertContains(response, "Finished")
+        self.assertContains(response, "Show details")
+        self.assertContains(response, "barectl-apply-")
+        self.assertContains(response, "Result class")
+        self.assertContains(response, "Started on another computer")
+        self.assertNotContains(response, "No available Barectl change results.")
+
+    def test_without_jobs_evidence_the_page_explains_how_to_begin(self) -> None:
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Run a check to read it for the first time")
+        self.assertContains(response, "Check now")
+
+    def test_a_server_off_the_target_stack_gets_one_sentence(self) -> None:
+        from dataclasses import replace
+
+        from bootstrap.standing import HostJudgment, Standing
+        from discovery.fakes import COLLECTED, record_attempt
+        from discovery.models import DiscoveryAttempt
+        from discovery.snapshot import save_snapshot
+
+        attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
+        from sites.ui_testing import attach_current_connection
+
+        attach_current_connection(self.server, attempt)
+        save_snapshot(
+            attempt,
+            replace(
+                COLLECTED,
+                standing=HostJudgment(Standing.NOT_MANAGEABLE, ("Other stack.",), (), ()),
+            ),
+            timezone.now(),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Jobs reads only servers")
+        self.assertNotContains(response, "Needs attention")
+        self.assertNotContains(response, "Check now")
+
+    def test_check_now_is_a_csrf_protected_discovery_request_that_returns_to_jobs(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        page = client.get(self.url)
+        self.assertContains(page, 'name="next" value="jobs"')
+        csrf = page.cookies["csrftoken"].value
+        refused = client.post(reverse("server_verify", args=(self.server.pk,)), {"next": "jobs"})
+        self.assertEqual(refused.status_code, 403)
+        accepted = client.post(
+            reverse("server_verify", args=(self.server.pk,)),
+            {"next": "jobs", "csrfmiddlewaretoken": csrf},
+        )
+        self.assertRedirects(accepted, self.url, fetch_redirect_response=False)
+        self.assertTrue(
+            DiscoveryAttempt.objects.filter(
+                server=self.server, status=DiscoveryAttempt.Status.QUEUED
+            ).exists()
+        )
+
+    def test_check_now_needs_the_discovery_request_permission(self) -> None:
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("server_verify", args=(self.server.pk,)), {"next": "jobs"}
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(DiscoveryAttempt.objects.exists())
+
+    def test_check_now_shows_queued_and_checking_and_keeps_the_previous_results(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        self.client.post(reverse("server_verify", args=(self.server.pk,)), {"next": "jobs"})
+        queued = self.client.get(self.url)
+        self.assertContains(queued, "Barectl queued a check")
+        self.assertContains(queued, "Create PHP site")
+        self.assertContains(queued, "may be out of date")
+        attempt = (
+            DiscoveryAttempt.objects.filter(server=self.server)
+            .exclude(status=DiscoveryAttempt.Status.SUCCEEDED)
+            .latest("pk")
+        )
+        record_attempt(attempt, DiscoveryAttempt.Status.RUNNING)
+        checking = self.client.get(self.url)
+        self.assertContains(checking, "checking the server now")
+        self.assertContains(checking, "Create PHP site")
+        self.assertContains(checking, "Last checked")
+
+    def test_no_get_opens_an_ssh_connection(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        with (
+            mock.patch("discovery.ssh.connect") as connect,
+            mock.patch("discovery.ssh.connect_alias") as alias,
+        ):
+            self.client.get(self.url)
+        connect.assert_not_called()
+        alias.assert_not_called()
+
+    def test_range_and_filter_gets_change_nothing_on_the_server(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        before = DiscoveryAttempt.objects.count()
+        with (
+            mock.patch("discovery.ssh.connect") as connect,
+            mock.patch("discovery.ssh.connect_alias") as alias,
+        ):
+            response = self.client.get(
+                self.url,
+                {
+                    "range": "today",
+                    "site": "alpha",
+                    "work": "create_http_site",
+                    "result": "finished",
+                    "tz": "Europe/London",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Times are shown in Europe/London")
+        self.assertEqual(DiscoveryAttempt.objects.count(), before)
+        connect.assert_not_called()
+        alias.assert_not_called()
+
+    def test_an_unknown_or_missing_zone_is_labelled_utc(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        for query in ({}, {"tz": "Not/AZone"}):
+            with self.subTest(query=query):
+                response = self.client.get(self.url, query)
+                self.assertContains(response, "Times are shown in UTC")
+
+    def test_the_zone_exchange_returns_only_the_jobs_panel(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(
+            self.url,
+            {"tz": "Europe/London"},
+            headers={"HX-Request": "true", "HX-Request-Type": "partial"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="jobs-panel"')
+        self.assertContains(response, "Times are shown in Europe/London")
+        self.assertNotContains(response, "<html")
+        self.assertIn("HX-Request-Type", response.headers["Vary"])
+
+    def test_without_change_permission_no_filter_controls_or_counts_are_rendered(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertNotContains(response, "Type of work")
+        self.assertNotContains(response, "Past 7 days")
+        self.assertNotContains(response, "Show results")
+
+    def test_a_failed_check_keeps_the_previous_rows_and_says_they_may_be_stale(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        remote = FakeServer()
+        remote.failure = "Barectl could not reach the SSH service configured for web."
+        with remote.substituted():
+            request_discovery(self.server, user=self.user)
+            run_worker()
+        response = self.client.get(self.url)
+        self.assertContains(response, "Create PHP site")
+        self.assertContains(response, "The latest connection check failed")
+        self.assertContains(response, "may be out of date")
+
+    def test_revoked_authority_before_publication_publishes_nothing(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        remote = FakeServer()
+        permission = self.user.user_permissions.get(codename="add_discoveryattempt")
+
+        def collected_then_revoked(*args: object, **kwargs: object) -> object:
+            from discovery.observations import collect
+
+            collected = collect(*args, **kwargs)  # type: ignore[arg-type]
+            self.user.user_permissions.remove(permission)
+            return collected
+
+        with (
+            remote.substituted(),
+            mock.patch("discovery.services.collect", side_effect=collected_then_revoked),
+        ):
+            queued = request_discovery(self.server, user=self.user)
+            run_worker()
+        from discovery.fakes import current
+
+        queued = DiscoveryAttempt.objects.get(pk=queued.pk)
+        self.assertEqual(queued.status, DiscoveryAttempt.Status.FAILED)
+        self.assertFalse(self.server.snapshots.filter(attempt=queued).exists())
+        self.assertEqual(
+            current(self.server).collected.jobs.value.changes[0].kind_slug, "create_http_site"
+        )
+
+    def test_an_interrupted_check_cannot_overwrite_newer_rows(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        attempt = request_discovery(self.server)
+        record_attempt(attempt, DiscoveryAttempt.Status.QUEUED, age=STALE)
+        claim_task(attempt, age=STALE)
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        self.client.get(self.url)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+        from discovery.fakes import current
+
+        self.assertEqual(
+            current(self.server).collected.jobs.value.changes[0].unit,
+            self.a_finished_change().unit,
+        )
+
+    def test_jobs_rows_are_scoped_to_their_server_registration(self) -> None:
+        other = Server.objects.create(name="Other", ssh_alias="db-1")
+        record_jobs(
+            self.server,
+            changes=(self.a_finished_change(unit="barectl-apply-" + "c" * 32 + ".service"),),
+        )
+        record_jobs(
+            other,
+            changes=(
+                self.a_finished_change(
+                    unit="barectl-apply-" + "d" * 32 + ".service",
+                    kind_slug="set_default_php",
+                ),
+            ),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "barectl-apply-" + "c" * 32)
+        self.assertNotContains(response, "barectl-apply-" + "d" * 32)
+
+    def test_a_seeded_secret_never_reaches_rows_details_or_responses(self) -> None:
+        reading = observation_module.read(
+            journal_shell(
+                units=BOOT + "\n",
+                history="\n".join(
+                    (
+                        line(f"barectl-stage {SECRET}", usec=1_762_000_000_000_000),
+                        line(
+                            result_line(kind="create_http_site", sites=("alpha",)),
+                            usec=1_762_000_000_100_000,
+                        ),
+                    )
+                ),
+            )
+        )
+        record_reading(self.server, reading)
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertNotIn(SECRET, response.content.decode())
+        for row in JobObservation.objects.all():
+            self.assertNotIn(SECRET, " ".join(str(value) for value in row.__dict__.values()))
+
+    def test_automatic_work_lists_tasks_workers_and_cache_with_settings_links(self) -> None:
+        record_jobs(
+            self.server,
+            schedules=(scheduled(),),
+            workers=(worker(identifier="beta"),),
+            cache=(cache(),),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Automatic work")
+        self.assertContains(response, "Scheduled tasks")
+        self.assertContains(response, "On, the last run succeeded")
+        self.assertContains(response, "Queue workers")
+        self.assertContains(response, "On, running")
+        self.assertContains(response, "Object cache")
+        self.assertContains(response, "Next run")
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/settings/#scheduled-tasks",
+        )
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/beta/settings/#queue-workers",
+        )
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/settings/#site-object-cache-heading",
+        )
+        self.assertNotContains(response, "Run now")
+
+    def test_automatic_work_is_visible_without_change_permission(self) -> None:
+        record_jobs(
+            self.server,
+            changes=(self.a_finished_change(),),
+            schedules=(scheduled(),),
+        )
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "may view this server but not its changes")
+        self.assertContains(response, "On, the last run succeeded")
+        self.assertNotContains(response, "Create PHP site")
+        self.assertNotContains(response, "Recent results")
+        self.assertNotContains(response, "barectl-apply-")
+
+    def test_a_crash_looping_worker_is_in_needs_attention(self) -> None:
+        from automation.worker_status import WorkerStatus
+
+        record_jobs(
+            self.server,
+            workers=(worker(status=WorkerStatus.STOPPED_AFTER_CRASHES),),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Needs attention")
+        self.assertContains(response, "Queue workers for alpha stopped after repeated crashes.")
+
+    def test_a_deliberately_off_timer_is_shown_as_off_and_not_flagged(self) -> None:
+        from automation.status import ScheduleStatus
+
+        record_jobs(self.server, schedules=(scheduled(status=ScheduleStatus.OFF),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Off")
+        self.assertNotContains(response, "Scheduled tasks for alpha")
+        self.assertNotContains(response, "No cron")
+
+    def test_a_missing_next_elapse_is_shown_as_unknown(self) -> None:
+        record_jobs(self.server, schedules=(scheduled(next_elapse_us=0),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Next run unknown")
+
+    def test_an_unreadable_automatic_provider_keeps_its_warning(self) -> None:
+        record_jobs(
+            self.server,
+            automation_warning="The scheduled tasks could not be read.",
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "The scheduled tasks could not be read.")
+        self.assertNotContains(
+            response,
+            "No scheduled tasks, queue workers or object cache were found",
+        )
+
+    def test_the_read_query_count_does_not_grow_with_rows(self) -> None:
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        with CaptureQueriesContext(connection) as one:
+            self.client.get(self.url)
+        record_jobs(
+            self.server,
+            changes=tuple(
+                self.a_finished_change(unit=f"barectl-apply-{index:032x}.service")
+                for index in range(5)
+            ),
+        )
+        with CaptureQueriesContext(connection) as many:
+            self.client.get(self.url)
+        self.assertEqual(len(one), len(many))
+
+    def test_runs_dropped_at_the_per_site_cap_are_a_coverage_notice(self) -> None:
+        record_jobs(
+            self.server,
+            backups=(backup(runs=(run(at=timezone.now()),), runs_truncated=True),),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Some older backup runs are not shown")
+
+    def test_a_queued_check_names_the_stopped_worker_after_the_help_delay(self) -> None:
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        self.client.post(reverse("server_verify", args=(self.server.pk,)), {"next": "jobs"})
+        attempt = (
+            DiscoveryAttempt.objects.filter(server=self.server)
+            .exclude(status=DiscoveryAttempt.Status.SUCCEEDED)
+            .latest("pk")
+        )
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
+            queued_at=timezone.now() - timedelta(minutes=11)
+        )
+        response = self.client.get(self.url)
+        self.assertContains(response, "worker has not started it")
+        self.assertContains(response, "python manage.py db_worker")
+
+    def test_backup_runs_and_schedules_are_plain_rows_with_a_backups_link(self) -> None:
+        record_jobs(
+            self.server,
+            backups=(
+                backup(
+                    runs=(
+                        run(at=timezone.now(), offsite="failed"),
+                        run(
+                            kind="cleanup",
+                            location="onsite",
+                            at=timezone.now(),
+                            onsite=(2, 1, 0, 0),
+                        ),
+                    ),
+                    timers=(timer(),),
+                ),
+            ),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Backup")
+        self.assertContains(response, "Finished")
+        self.assertContains(response, "On this server")
+        self.assertContains(response, "Offsite storage")
+        self.assertContains(response, "Copy failed")
+        self.assertContains(response, "Deleted 2, kept 1, skipped 0, failed 0")
+        self.assertContains(response, "Backup schedule")
+        self.assertContains(response, "On")
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/backups/#backups-heading",
+        )
+        self.assertContains(response, "Saved here, offsite copy failed.")
+        self.assertNotContains(response, "Run now")
+        self.assertNotContains(response, "Back up now")
+        self.assertNotContains(response, "Restore")
+
+    def test_backup_rows_are_visible_without_change_permission(self) -> None:
+        record_jobs(self.server, backups=(backup(runs=(run(at=timezone.now()),)),))
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "may view this server but not its changes")
+        self.assertContains(response, "Finished")
+        self.assertNotContains(response, "Narrow recent results")
+        self.assertNotContains(response, "Past 7 days")
+
+    def test_an_unreadable_backup_observation_keeps_its_warning(self) -> None:
+        record_jobs(
+            self.server,
+            backups_warning="Barectl could not read this server's backups.",
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "could not read this server")
+        self.assertNotContains(
+            response,
+            "No scheduled tasks, queue workers, object cache or backup schedules were found",
+        )
+
+    def test_a_backup_secret_canary_never_reaches_the_response_or_rows(self) -> None:
+        record_jobs(
+            self.server,
+            backups=(backup(runs=(run(at=timezone.now(), reason=SECRET),)),),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertNotIn(SECRET, response.content.decode())

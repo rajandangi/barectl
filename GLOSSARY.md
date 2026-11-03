@@ -408,8 +408,8 @@ _Avoid_: Logs, event feed
 Past activity evidenced by logs and records that the server's operating system and services retain. It may be incomplete or unavailable and does not include private Barectl operation records.
 _Avoid_: Discovery history, complete audit trail
 
-**Jobs view** (planned):
-A managed server's dashboard section for supported running work, schedules, background services and retained native server history. It is distinct from Activity's private Barectl records and does not list individual application queue items.
+**Jobs view**:
+A managed server's dashboard section for supported running work, schedules, background services and retained native server history. It is distinct from Activity's private Barectl records and does not list individual application queue items. Its Barectl changes provider, its Automatic work provider, which lists each site's scheduled tasks, queue workers and object cache from Phase C's projection, and its Backups provider, which lists recent capture, copy, check and cleanup runs and the backup, check and cleanup timers from Phase D's passive observation, are implemented ([#284](https://github.com/rajandangi/barectl/issues/284)).
 _Avoid_: Activity, complete audit trail, application job history
 
 **Automation slice**:

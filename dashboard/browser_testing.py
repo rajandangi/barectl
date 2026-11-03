@@ -29,6 +29,7 @@ from playwright.sync_api import (
     expect,
     sync_playwright,
 )
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from servers.discovery_state import DiscoveryState
 from servers.models import Server
@@ -130,11 +131,23 @@ class BrowserTestCase(LiveServerTestCase):
 
     @override
     def tearDown(self) -> None:
+        # The Jobs page sends the viewer's zone in a small background request after it
+        # loads (docs/server-jobs.md). A test that navigates away immediately can leave
+        # that read running into the server thread while the next test flushes SQLite,
+        # which reports a locked table. Let it finish first.
+        if any(urlsplit(request.url).path.endswith("/jobs/") for request in self.requests):
+            with contextlib.suppress(PlaywrightTimeoutError):
+                self.page.wait_for_load_state("networkidle", timeout=3000)
         self.context.close()
         self.assertEqual(self.console_errors, [])
 
-    def open_context(self, *, width: int, height: int) -> None:
-        self.context = self.browser.new_context(viewport={"width": width, "height": height})
+    def open_context(self, *, width: int, height: int, timezone_id: str | None = None) -> None:
+        if timezone_id is None:
+            self.context = self.browser.new_context(viewport={"width": width, "height": height})
+        else:
+            self.context = self.browser.new_context(
+                viewport={"width": width, "height": height}, timezone_id=timezone_id
+            )
         self.page = self.context.new_page()
         self.requests = []
         self.console_errors = []
@@ -205,6 +218,11 @@ class BrowserTestCase(LiveServerTestCase):
         accordion or Logs section does not count. ``allowed`` names the terms this
         screen may legitimately show (the fingerprint step and Journey 7 sentences).
         """
+        if urlsplit(self.page.url).path.endswith("/jobs/"):
+            # The Jobs page sends the viewer's zone in a background request; let it finish
+            # before the test navigates, or it can race the next request's session write.
+            with contextlib.suppress(PlaywrightTimeoutError):
+                self.page.wait_for_load_state("networkidle", timeout=3000)
         visible = self.page.locator("body").inner_text().lower()
         found = [
             term

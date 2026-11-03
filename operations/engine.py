@@ -1000,6 +1000,7 @@ def current_units() -> frozenset[str]:
 # The structured result line -----------------------------------------------------------------
 
 RESULT_PREFIX: Final = "barectl-result "
+SITE_IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}")
 RESULT_CLASSES: Final = frozenset(
     {"succeeded", "refused", "partial", "failed", "lock_busy", "timed_out"}
 )
@@ -1195,10 +1196,17 @@ RESULT_REASONS: Final = frozenset(
 
 @dataclass(frozen=True)
 class ResultLine:
-    """The one structured line a payload prints to the journal before it exits."""
+    """The one structured line a payload prints to the journal before it exits.
+
+    ``change_kind`` is the registered slug of the kind whose body ran, and ``sites`` are
+    the site identifiers the stored review declared; both are empty on a run that predates
+    the fields (docs/adr/0035-one-change-engine-with-effect-derived-consent.md).
+    """
 
     result_class: str
     reason: str
+    change_kind: str = ""
+    sites: tuple[str, ...] = ()
 
 
 def parse_result_line(text: str) -> ResultLine | None:
@@ -1222,11 +1230,19 @@ def parse_result_line(text: str) -> ResultLine | None:
         reason = value.get("reason", "")
         if not isinstance(reason, str) or reason not in RESULT_REASONS:
             raise native.Unreadable("The result line is not in the engine's form.")
+        change_kind = value.get("change_kind", "")
+        if not isinstance(change_kind, str) or (change_kind and kind_of(change_kind) is None):
+            raise native.Unreadable("The result line is not in the engine's form.")
+        sites = value.get("sites", [])
+        if not isinstance(sites, list) or any(
+            not isinstance(site, str) or SITE_IDENTIFIER.fullmatch(site) is None for site in sites
+        ):
+            raise native.Unreadable("The result line is not in the engine's form.")
         # A full capture or restore records the pause before it starts copying so discovery
         # can name an interrupted run. It is not the run's outcome: the final result follows.
         if reason in ("backup_paused", "restore_paused"):
             continue
-        return ResultLine(result_class, reason)
+        return ResultLine(result_class, reason, change_kind, tuple(sites))
     return None
 
 
@@ -1318,7 +1334,50 @@ def _unit_result(evidence: native.UnitEvidence) -> tuple[Result, str]:
 
 # The payload -------------------------------------------------------------------------------
 
-_RESULT_FUNCTION: Final = "r() { printf 'barectl-result %s\\n' \"$1\"; }"
+
+# The engine writes the change's registered slug and its reviewed site identifiers into
+# every result line, including one the kind's body prints, so another controller can name
+# the work without the starting controller's database
+# (docs/adr/0035-one-change-engine-with-effect-derived-consent.md).
+def _review_sites(review: ChangeReview) -> str:
+    sites = review.affected_sites
+    if not isinstance(sites, list) or any(
+        not isinstance(site, str) or SITE_IDENTIFIER.fullmatch(site) is None for site in sites
+    ):
+        raise ValueError("The review's affected sites are not site identifiers.")
+    return json.dumps(sites, separators=(",", ":"))
+
+
+def _result_fields(kind: ChangeKind, review: ChangeReview) -> tuple[str, str]:
+    return kind.slug, _review_sites(review)
+
+
+def _result_function(kind: ChangeKind, review: ChangeReview) -> str:
+    slug, sites = _result_fields(kind, review)
+    return (
+        f'r() {{ printf \'barectl-result {{"change_kind":"{slug}","sites":{sites},%s\\n\' '
+        '"${1#\\{}"; }'
+    )
+
+
+def _body_step(
+    kind: ChangeKind, review: ChangeReview, path: str, arguments: tuple[str, ...]
+) -> str:
+    """Run the kind's body with the engine's fields on every result line it prints.
+
+    ``sed -u`` streams each line to the journal without waiting, and ``bash -o pipefail``
+    keeps the body's exit status as the unit's even though sed is the last pipeline stage.
+    """
+    slug, sites = _result_fields(kind, review)
+    substitution = (
+        's/^barectl-result [{]/barectl-result {"change_kind":"' + slug + '","sites":' + sites + ",/"
+    )
+    command = (
+        shlex.join(["/usr/bin/sh", path, *arguments])
+        + " | /usr/bin/sed -u "
+        + shlex.quote(substitution)
+    )
+    return "exec " + shlex.join(["/bin/bash", "-o", "pipefail", "-c", command])
 
 
 def _refused(reason: str) -> str:
@@ -1471,7 +1530,7 @@ def payload(
         raise ValueError("The staged secret path does not belong to this run.")
     removals = f"rm -f -- {shlex.quote(path)}" + (f" {shlex.quote(secret)}" if secret else "")
     steps = [
-        _RESULT_FUNCTION,
+        _result_function(kind, review),
         f"trap '{removals}' EXIT",
         *native.lock_steps(_refused("unsafe_lock"), _lock_busy()),
         (
@@ -1501,7 +1560,7 @@ def payload(
             f'[ "$(sha256sum -- {shlex.quote(path)} | cut -d" " -f1)" = {digest} ] '
             f"|| {_refused('evidence')}"
         ),
-        ("exec " + shlex.join(["/usr/bin/sh", path, *body.arguments])),
+        _body_step(kind, review, path, body.arguments),
     ]
     script = "; ".join(steps)
     if len(script.encode()) > native.MAX_PAYLOAD:
@@ -2068,6 +2127,15 @@ def _failure(outcome: Result, reason: str) -> str:
     if reason in _REFUSED_REASONS and outcome in (Result.REFUSED, Result.PARTIAL):
         return _REFUSED_REASONS[reason]
     return _FAILURES.get(outcome, "")
+
+
+def reason_text(result_class: str, reason: str) -> str:
+    """The plain sentence the run screens use for a result class and reason."""
+    try:
+        outcome = Result(result_class)
+    except ValueError:
+        return ""
+    return _failure(outcome, reason)
 
 
 def _fixed_privileged(shell: RemoteShell, argv: list[str]) -> str | None:

@@ -8,6 +8,7 @@ The sign-in page, the Servers and server pages, the server forms and the access-
 | --- | --- |
 | `frontend/main.ts` | Application entry: styles, HTMX 4 configuration and USWDS lifecycle |
 | `frontend/uswds-init.ts` | USWDS initializer, loaded before first paint |
+| `frontend/jobs-time.ts` | Jobs viewer zone: sends the browser's IANA zone and keeps filter focus under the HTMX lifecycle |
 | `frontend/uswds.ts` | USWDS component setup for the page shell and HTMX fragments |
 | `frontend/styles/` | USWDS theme settings, palette, fonts and Barectl styles |
 | `vite.config.ts` | Vite development server and production build |
@@ -83,6 +84,8 @@ USWDS behaviors expose `on(root)` and `off(root)`. `on` runs component setup wit
 - Fragment components (the sortable table) are bound to each element marked `data-uswds-fragment`. `htmx.onLoad`, which listens for HTMX 4's `htmx:after:process`, binds roots found in the initial page and in swapped content. After `htmx:after:swap`, detached roots are released with `off`.
 
 Fragment roots must be replaced whole with `outerHTML`. Replacing only a root's children is not supported. Browser tests repeat searches and check that one sort action toggles the order once.
+
+`frontend/jobs-time.ts` is the Jobs page's own entry and uses the same lifecycle. On the first visit without a `tz` parameter it sends the browser's IANA zone to the same URL as an HTMX request targeting `#jobs-panel`, so the page adopts the viewer's zone without a full reload. It keeps the viewer zone in the filter form, restores focus after a filter change, and updates the `role="status"` result count. The entry is production-asset based and adds no HTMX extension.
 
 ## HTMX 4
 

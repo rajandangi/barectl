@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -14,7 +15,7 @@ from bootstrap.standing import Standing
 from discovery.models import SiteState
 from operations.inputs import PreparationInputs
 
-from .change_testing import apply_change
+from .change_testing import apply_change, submit_change, wait_result
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 PREFIX = "s5"
@@ -146,6 +147,8 @@ for slug, inputs in json.loads(os.environ["S5_REVIEWS"]):
         "effects": review.effects,
     })
 sites = collected["sites"]["value"]
+from jobs.presentation import present as present_jobs
+jobs = present_jobs(snapshot, server, may_view_changes=True)
 print(json.dumps({
     "summary": {
         "standing": collected["standing"]["standing"],
@@ -160,6 +163,11 @@ print(json.dumps({
     "challenge": [challenge.challenge_key_type, challenge.challenge_fingerprint],
     "observed": collected,
     "reviews": reviews,
+    "jobs": [
+        {"title": row.title, "sites": list(row.sites), "summary": row.summary,
+         "result_class": row.result_class}
+        for group in jobs.groups for row in group.rows
+    ],
 }, default=str))
 """
 
@@ -177,11 +185,19 @@ class _Summary(TypedDict):
     default_node: str
 
 
+class _Job(TypedDict):
+    title: str
+    sites: list[str]
+    summary: str
+    result_class: str
+
+
 class _Report(TypedDict):
     challenge: list[str]
     summary: _Summary
     observed: dict[str, object]
     reviews: list[_Review]
+    jobs: list[_Job]
 
 
 @tag(SCENARIO_TAG)
@@ -191,7 +207,7 @@ class FreshControllerReconstruction(ScenarioTestCase):
     layer = "L1"
     exclusive = True
     prefix = PREFIX
-    records: tuple[str, ...] = ("reconstruction-26.04",)
+    records: tuple[str, ...] = ("reconstruction-26.04", "jobs-changes-26.04")
 
     def test_two_fresh_controllers_reconstruct_the_same_server_and_propose_nothing(self) -> None:
         self.build()
@@ -199,6 +215,9 @@ class FreshControllerReconstruction(ScenarioTestCase):
             # Recording replays every review over one connection, which leaves no time
             # within the scenario limit for the two controllers.
             self.checkpoint_reviews()
+            return
+        if self.record_state == "jobs-changes-26.04":
+            self.checkpoint_jobs()
             return
         fingerprint = self.native(
             "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f2"
@@ -221,6 +240,17 @@ class FreshControllerReconstruction(ScenarioTestCase):
                     self.assertTrue(review["no_changes"], review)
         self.maxDiff = None
         self.assertEqual(results["a"]["observed"], results["b"]["observed"])
+        for name, result in results.items():
+            with self.subTest(controller=name):
+                self.assertIn(
+                    {
+                        "title": "Create PHP site",
+                        "sites": ["s5alpha"],
+                        "summary": "Finished",
+                        "result_class": "succeeded",
+                    },
+                    result["jobs"],
+                )
         summary = results["a"]["summary"]
         self.assertEqual(summary["standing"], Standing.TARGET_STACK)
         self.assertEqual(
@@ -247,9 +277,20 @@ class FreshControllerReconstruction(ScenarioTestCase):
         from sites.node_change import SET_SITE_NODE
 
         (alpha, runtime), *others = SITES
-        apply_change(
+        created = submit_change(
             self, CREATE_SITE, PreparationInputs(runtime, alpha, (alpha + ".example.com",))
         )
+        line = wait_result(self, created)
+        # A fresh controller names the work from the run's own journal, not this one's
+        # database: the result line carries the kind and the site its review declared.
+        self.assertEqual(line.change_kind, CREATE_SITE.slug)
+        self.assertEqual(line.sites, (alpha,))
+        with self.shell() as shell:
+            verified = CREATE_SITE.verify(shell, created.review)
+            if verified is None:
+                time.sleep(0.5)
+                verified = CREATE_SITE.verify(shell, created.review)
+            self.assertTrue(verified)
         source = observation.COMMON_SOURCE + "\nidentities = []\n"
         for identifier, runtime in others:
             source += (
@@ -286,6 +327,14 @@ class FreshControllerReconstruction(ScenarioTestCase):
                 review = kind.review(kind.inspect(shell, decoded), decoded)
                 self.assertTrue(review.no_changes, (slug, inputs, review.refusals, review.effects))
             self.checkpoint("reconstruction-26.04", shell)
+
+    def checkpoint_jobs(self) -> None:
+        """Record a full discovery holding the finished change's journal lines."""
+        from discovery.observations import collect
+
+        with self.shell() as shell:
+            collect(shell, releases=True)
+            self.checkpoint("jobs-changes-26.04", shell)
 
     def start(
         self, root: Path, fingerprint: str, reviews: tuple[tuple[str, dict[str, object]], ...]

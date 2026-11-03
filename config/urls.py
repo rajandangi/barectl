@@ -152,6 +152,7 @@ urlpatterns = [
     path(
         "servers/<int:pk>/activity/", server_detail, {"section": "activity"}, name="server_activity"
     ),
+    path("servers/<int:pk>/jobs/", server_detail, {"section": "jobs"}, name="server_jobs"),
     path(
         "servers/<int:pk>/security/", server_detail, {"section": "security"}, name="server_security"
     ),

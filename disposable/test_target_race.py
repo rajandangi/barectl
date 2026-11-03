@@ -174,10 +174,12 @@ class TwoControllerNativeLock(ScenarioTestCase):
                 finally:
                     self.native("systemctl thaw " + frozen[0])
                 self.assertEqual(second["class"], "lock_busy", second)
-                self.record_refused_run(str(second["unit"]))
                 winner = self.finish(first)
                 self.assertEqual(winner["class"], "succeeded", winner)
                 self.native("test -d /var/www/s10alpha; ! test -e /var/www/s10beta")
+                # The refused run's evidence is read once the winner has settled, so the
+                # recorded state is a complete target stack rather than a machine mid-change.
+                self.record_refused_run(str(second["unit"]))
                 fresh = self.controller(
                     common
                     | {
@@ -203,7 +205,9 @@ class TwoControllerNativeLock(ScenarioTestCase):
             collect(shell)
             self.assertFalse(native.inspect(shell, unit).found)
             line = engine.read_result(shell, unit)
-            self.assertEqual(line, engine.ResultLine("lock_busy", ""))
+            from sites.change import SLUG
+
+            self.assertEqual(line, engine.ResultLine("lock_busy", "", SLUG, ("s10beta",)))
             self.checkpoint("race-lock-busy-26.04", shell)
 
     def await_native_lock(self, timeout: float = 70) -> None:

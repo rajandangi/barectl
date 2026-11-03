@@ -71,6 +71,7 @@ class SecretChannelTests(ChangeTestCase):
             "\n".join(self.remote.commands),
             "\n".join(self.systemd.submissions),
             "\n".join(self.systemd.journals),
+            "\n".join(unit.journal() for unit in self.systemd.journal_units.values()),
             "\n".join(self.systemd.systemctl_outputs),
             "\n".join(getattr(page, "content", b"").decode() for page in pages),
         ]
@@ -99,6 +100,10 @@ class SecretChannelTests(ChangeTestCase):
         # Cleared once sent.
         self.assertEqual(run.secret_sealed, "")
         self.assertIsNone(run.secret_expires_at)
+        # The result line the server keeps names the kind and the review's sites, never the
+        # value (docs/adr/0035, docs/adr/0032).
+        line = engine.parse_result_line(self.systemd.journal_units[run.unit_name].journal())
+        self.assertEqual(line, engine.ResultLine("succeeded", "", SLUG, ()))
         self.assert_canary_absent(
             response,
             self.client.get(f"/changes/{run.review.preparation_id}/"),

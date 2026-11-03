@@ -13,7 +13,10 @@ from backups import observation as backup_observation
 from backups.observation import ObservedBackup, OffsiteStorage
 from bootstrap.standing import HostJudgment, Standing
 from cache import instance as cache_instance
+from jobs import observation as jobs_observation
+from jobs.observation import JobReading
 from laravel import observation as laravel_observation
+from operations import native
 from runtimes import defaults as runtime_defaults
 from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
@@ -53,6 +56,7 @@ ARCH_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,100}")
 DIGITS = re.compile(r"[0-9]+")
 MAX_CPU_COUNT = 1_000_000
 SITES_NOT_READ = "Barectl reads sites only on a host whose standing is Target stack."
+JOBS_NOT_READ = "Barectl reads Jobs only on a server set up on its supported stack."
 
 
 def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -> CollectedSnapshot:
@@ -132,6 +136,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         if sites
         else Observation(ObservationOutcome.OBSERVED, (), "", None)
     )
+    jobs = _hosting_jobs(shell, standing, sites=sites, releases=releases)
     collected = CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -152,9 +157,24 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
         security=security,
+        jobs=jobs,
     )
     backups, offsite = _hosting_backups(shell, collected, sites=sites)
     return replace(collected, backups=backups, offsite=offsite)
+
+
+def _hosting_jobs(
+    shell: RemoteShell, standing: HostJudgment, *, sites: bool, releases: bool
+) -> Observation[JobReading]:
+    if not sites or not releases or standing.standing != Standing.TARGET_STACK:
+        return Observation(ObservationOutcome.ABSENT, (), JOBS_NOT_READ, JobReading())
+    reading = jobs_observation.read(shell)
+    return Observation(
+        ObservationOutcome.OBSERVED,
+        (native.RETAINED_STATES, jobs_observation.HISTORY_COMMAND, jobs_observation.OLDEST_COMMAND),
+        "",
+        reading,
+    )
 
 
 def _hosting_sites(

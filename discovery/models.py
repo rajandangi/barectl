@@ -122,6 +122,12 @@ class DiscoverySnapshot(models.Model):
     )
     offsite_source = models.TextField(blank=True, default="")
     offsite_warning = models.TextField(blank=True, default="")
+    # The server's own Barectl change runs (Phase E #285).
+    jobs_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    jobs_source = models.TextField(blank=True, default="")
+    jobs_warning = models.TextField(blank=True, default="")
     host_standing = models.CharField(max_length=32, blank=True)
     host_standing_reasons = models.TextField(blank=True)
     host_standing_warnings = models.TextField(blank=True)

@@ -256,7 +256,9 @@ class BackupCase(ScenarioTestCase):
             self.native(f"find {root} \\( -type f -o -type d \\) -perm -0004 -print"), ""
         )
 
-    def set_schedule(self, at: str, *, scope: str = "database") -> ChangeReview:
+    def set_schedule(
+        self, at: str, *, scope: str = "database", offsite: bool = False
+    ) -> ChangeReview:
         from backups import schedule
 
         return apply_change(
@@ -270,6 +272,7 @@ class BackupCase(ScenarioTestCase):
                 frequency="daily",
                 at=at,
                 scope=scope,
+                offsite=offsite,
             ),
             timeout=120,
         )
@@ -647,10 +650,14 @@ class ScheduledCapture(BackupCase):
     def test_a_scheduled_capture_runs_and_is_reconstructed(self) -> None:
         self.prepare_site()
         self.enable()
+        # The schedule copies offsite too, so Jobs shows the onsite capture and its offsite
+        # copy as separate findings after a run no controller watched.
+        self.start_s3()
+        self.offsite_setup()
         # One reviewed schedule installs a fixed UTC timer. It fires a live capture with no
         # controller connected, and a fresh controller reads the same schedule back.
         at = self.next_schedule_time()
-        self.set_schedule(at)
+        self.set_schedule(at, offsite=True)
         installed = self.schedule_row()
         self.assertTrue(installed.installed)
         self.assertTrue(installed.timer_active)
@@ -694,6 +701,54 @@ class ScheduledCapture(BackupCase):
             self.fail("No scheduled result was reconstructed.")
         self.assertEqual(backup.last.origin, "scheduled")
         self.assertIn(backup.last.result_class, ("succeeded", "partial"))
+        # The same passive read keeps this run's separate findings and the timer that fired
+        # it, so Jobs can show the work a fresh controller never watched run (#286).
+        scheduled_run = next(
+            run for run in backup.runs if run.kind == "capture" and run.origin == "scheduled"
+        )
+        self.assertIn(scheduled_run.result_class, ("succeeded", "partial"))
+        self.assertEqual(scheduled_run.offsite, "copied")
+        self.assertTrue(
+            any(timer.work == "backup" and timer.on for timer in backup.timers),
+            backup.timers,
+        )
+        from datetime import UTC, datetime
+
+        from discovery.snapshot import Snapshot
+        from jobs import presentation as jobs_presentation
+        from jobs.backups import CAPTURE, BackupRunRow, BackupTimerRow
+        from servers.models import Server
+
+        view = jobs_presentation.present(
+            Snapshot(collected, datetime.now(UTC), self.target().alias),
+            Server(pk=1),
+            may_view_changes=True,
+        )
+        recent = next(group for group in view.groups if group.key == "recent")
+        (job_run,) = [
+            row
+            for row in recent.rows
+            if isinstance(row, BackupRunRow)
+            and row.identifier == self.identifier
+            and row.work_type == CAPTURE
+        ]
+        self.assertEqual(job_run.summary, "Finished")
+        self.assertEqual(
+            [label for label, _ in job_run.findings],
+            ["On this server", "Offsite storage"],
+        )
+        self.assertIn("Saved", job_run.findings[0][1])
+        self.assertIn("Copy finished", job_run.findings[1][1])
+        automatic = next(group for group in view.groups if group.key == "automatic")
+        (job_timer,) = [
+            row
+            for row in automatic.rows
+            if isinstance(row, BackupTimerRow)
+            and row.identifier == self.identifier
+            and row.work_type == "backup_schedule"
+        ]
+        self.assertEqual(job_timer.state, "On")
+        self.assertIsNotNone(job_timer.next_run_at)
         from operations.models import ChangeReview as Review
         from operations.models import ChangeRun
 

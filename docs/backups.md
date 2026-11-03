@@ -441,9 +441,16 @@ SSH connection. A listing older than 15 minutes is labelled as possibly out of d
 ## Discovery
 
 Passive discovery reads the restic profile, each site's root-only repository and server key,
-whether the site database exists, and the newest safe `barectl-result` line in the journal.
-It runs no restic command, lists no snapshots and contacts no storage. A fresh controller
-reconstructs that backups are enabled and the last result from this native evidence alone.
+whether the site database exists, the newest safe `barectl-result` line in the journal, and a
+bounded set of recent capture, copy, check and cleanup result lines for Jobs. It also reads
+each site's backup, check and cleanup timers from systemd: on or off, and the next elapse
+systemd reports. A missing timer is unknown, never an invented schedule, and the offsite copy
+runs inside the scheduled capture when that schedule includes it. The read keeps at most six
+runs per site and ninety-six runs in one answer, with at most five timers per site, so it stays
+inside the one bounded SSH answer. A timer that systemd says fired but whose result line is
+missing becomes **Could not confirm**, never a success or a failure. It runs no restic command,
+lists no snapshots and contacts no storage. A fresh controller reconstructs that backups are
+enabled, the last result, the recent runs and the schedules from this native evidence alone.
 A removed site's kept repository is a fact only an explicit read names: **Check backups**
 lists it, and passive discovery never invents one.
 

@@ -199,6 +199,7 @@ build must not pay for:
 | `RebootAutomation` | The container's init restarts with no Barectl controller: the queue workers return enabled, the timer is armed for the next calendar minute, a missed minute is not replayed as a burst, and the site serves |
 | `RebootGateFence` | A Deploy whose `/up` fails leaves the gate up with boot activation off for the timer and every worker; a boot cannot start them; Roll back closes the gate and restores exactly that work |
 | `LongSchedulerTick` | A tick that runs longer than a calendar minute is followed by the next calendar elapse, not an immediate second start (`DeferReactivation=yes`) |
+| `JobsSurvivingEvidence` | A real journald rotation and vacuum remove an older finished change, a newer change survives a boot, and Jobs shows the survivor and the start of the retained history without claiming nothing ran |
 | `MemoryOneGiB`, `MemoryTwoGiB`, `MemoryFourGiB` | The cache instance and each queue worker are measured inside a 1, 2 and 4 GiB memory cgroup, and the site still serves |
 
 The container shares the Docker VM's kernel, so the reboot is a userspace reboot and each
@@ -367,7 +368,7 @@ Vulture 2.16 scans the repository, including tests, settings and migrations. It 
 
 Vulture compares names across scopes. A reference can hide an unrelated unused symbol with the same name, and dynamic calls can produce false positives. Passing the gate does not prove every Python file is reachable. Check URLs, templates, registrations and tests before deleting reported code.
 
-Knip 6.38.0 checks unused files, exports and dependencies beyond TypeScript's unused-local checks. Its Stylelint and Vite plugins discover the tooling entry files. `knip.json` registers the two Vite entries that templates load, `frontend/main.ts` and `frontend/uswds-init.ts`. The project glob includes first-party JS/TS and Sass throughout the repository, so adding an orphan file fails. Knip follows Sass `@use` and `@forward`, which is how it sees the Inter package. Vendor files and generated bundles are excluded. Register new template entry points in both `vite.config.ts` and `knip.json`. Do not mark every source file as an entry point. These checks do not establish whether CSS selectors or Django templates are unused.
+Knip 6.38.0 checks unused files, exports and dependencies beyond TypeScript's unused-local checks. Its Stylelint and Vite plugins discover the tooling entry files. `knip.json` registers the three Vite entries that templates load, `frontend/main.ts`, `frontend/uswds-init.ts` and `frontend/jobs-time.ts`. The project glob includes first-party JS/TS and Sass throughout the repository, so adding an orphan file fails. Knip follows Sass `@use` and `@forward`, which is how it sees the Inter package. Vendor files and generated bundles are excluded. Register new template entry points in both `vite.config.ts` and `knip.json`. Do not mark every source file as an entry point. These checks do not establish whether CSS selectors or Django templates are unused.
 
 These tools and the 60% threshold are Barectl choices based on their maintainers' documentation, not Django recommendations.
 

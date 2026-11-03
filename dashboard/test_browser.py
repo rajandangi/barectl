@@ -20,6 +20,7 @@ from discovery.fakes import (
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from servers.models import Server
+from servers.views import SECTIONS
 
 from .browser_testing import DESTRUCTIVE, PRIMARY_BLUE, serve_development_assets
 from .browser_testing import BrowserTestCase as BrowserTestCase
@@ -173,7 +174,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         nav = page.get_by_role("navigation", name="Server sections")
-        for section in ("Sites", "Activity", "Settings", "Advanced"):
+        for section in SECTIONS.values():
             link = nav.get_by_role("link", name=section, exact=True)
             link.focus()
             page.keyboard.press("Enter")
