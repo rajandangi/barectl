@@ -22,6 +22,7 @@ from discovery.snapshot import (
     WebStackComponentObservation,
     save_snapshot,
 )
+from operations import recovery
 from operations.consent import Scope
 from operations.engine import BodyContext, ReviewDraft
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
@@ -313,7 +314,7 @@ class EngineReviewTests(ControllerConfigTestCase):
         self.assertIn(observation.digest_command("mariadb"), text)
         self.assertIn("skip-networking", text)
 
-    def test_the_install_restarts_the_units_a_package_transaction_unbinds(self) -> None:
+    def test_the_install_review_and_body_contract_names_the_unit_recovery(self) -> None:
         draft = self.review(evidence(simulation=mariadb_simulation()))
         self.assertIn("recover", draft.stages)
         self.assertLess(draft.stages.index("harden"), draft.stages.index("recover"))
@@ -322,7 +323,7 @@ class EngineReviewTests(ControllerConfigTestCase):
         restarted = next(
             item["value"] for item in details if item["label"] == "Restarted after install"
         )
-        for unit in ("php-fpm@*.service", "php-fpm-site-*@*.service", "haproxy-site@*.service"):
+        for unit in recovery.UNIT_PATTERNS:
             self.assertIn(unit, restarted)
         self.assertIn("restart every running PHP master and site proxy", draft.effects[0].text)
         self.assertTrue(
@@ -368,6 +369,37 @@ class RemovalReviewTests(ControllerConfigTestCase):
         self.assertTrue(draft.eligible, draft.refusals)
         self.assertFalse(draft.effects)
         self.assertIn("not installed", str(draft.document["note"]))
+
+    def test_the_removal_review_and_body_contract_names_the_unit_recovery(self) -> None:
+        draft = self.removal(usage=())
+        self.assertIn("recover", draft.stages)
+        self.assertLess(draft.stages.index("remove"), draft.stages.index("recover"))
+        self.assertLess(draft.stages.index("recover"), draft.stages.index("verify"))
+        details = cast(list[dict[str, str]], draft.document["details"])
+        restarted = next(
+            item["value"] for item in details if item["label"] == "Restarted after removal"
+        )
+        for unit in recovery.UNIT_PATTERNS:
+            self.assertIn(unit, restarted)
+        self.assertIn("restart every running PHP master and site proxy", draft.effects[0].text)
+        self.assertTrue(
+            any(
+                "restarted after the package database changed" in text
+                for text in draft.postconditions
+            )
+        )
+        self.assertIn(b"restart_affected_units", engine.REMOVE_BYTES)
+        self.assertIn(b"systemctl list-units --type=service --state=running", engine.REMOVE_BYTES)
+        self.assertIn(b"barectl-restarted", engine.REMOVE_BYTES)
+        self.assertIn(b"stage recover", engine.REMOVE_BYTES)
+        self.assertIn(b'"reason":"database_reload"', engine.REMOVE_BYTES)
+
+    def test_the_removal_message_reads_for_install_and_removal(self) -> None:
+        from operations import engine as operations_engine
+
+        message = operations_engine.reason_text("partial", "database_reload")
+        self.assertIn("The database engine change was applied", message)
+        self.assertIn("could not restart every running PHP master and site proxy", message)
 
 
 class EngineInputTests(ControllerConfigTestCase):

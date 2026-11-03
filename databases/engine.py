@@ -3,9 +3,10 @@
 docs/target-architecture.md#stack, the phase specification's database engine bullet, and
 ADRs 0007, 0010 and 0013. One engine per server: the review resolves APT's own transaction
 and names every package and version, the native body installs exactly those under the
-inline apt-daily guard and refuses when the resolved set differs, the engine is hardened to
-the socket and account shape the phase specification sets, and the running units the
-transaction's ``daemon-reload`` unbinds are restarted (#428).
+inline apt-daily guard and refuses when the resolved set differs, and the engine is hardened
+to the socket and account shape the phase specification sets. Both bodies restart the units
+the transaction unbinds (#428,
+docs/databases.md#restarting-units-after-the-package-transaction-428).
 """
 
 import hashlib
@@ -41,7 +42,7 @@ REMOVE_SLUG: Final = "remove_database_engine"
 REMOVE_LABEL: Final = "Remove database engine"
 ENGINE_CHOICES: Final = observation.ENGINES
 STAGES: Final = ("preflight", "install", "start", "harden", "recover", "verify")
-REMOVE_STAGES: Final = ("preflight", "remove", "verify")
+REMOVE_STAGES: Final = ("preflight", "remove", "recover", "verify")
 
 _DEB_ARCH: Final = {"x86_64": "amd64", "aarch64": "arm64"}
 # The phase specification's headroom, matching the foundation's provisional admission.
@@ -63,7 +64,10 @@ BODY_SHA256: Final = hashlib.sha256(BODY_BYTES).hexdigest()
 REMOVE_BYTES: Final = (
     _RESOURCES.joinpath("remove.sh")
     .read_text()
-    .replace("# ENGINE_DIGESTS\n# ENGINE_VERIFY", observation.body_functions())
+    .replace(
+        "# ENGINE_DIGESTS\n# ENGINE_VERIFY",
+        recovery.shell() + observation.body_functions(),
+    )
     .rstrip("\n")
     .encode()
 )
@@ -594,12 +598,14 @@ def review_removal(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                         "administration."
                     ),
                 },
+                {"label": "Restarted after removal", "value": recovery.DETAIL},
             ],
         )
         effects = (
             DeclaredEffect(
                 Scope.SERVER,
-                f"Remove {spec.label} and stop its service. Its databases and data are kept.",
+                f"Remove {spec.label} and stop its service, then restart every running PHP "
+                "master and site proxy. Its databases and data are kept.",
             ),
         )
     return ReviewDraft(
@@ -607,7 +613,7 @@ def review_removal(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         intent=f"Remove {spec.label}.",
         effects=effects,
         stages=REMOVE_STAGES,
-        postconditions=(f"{spec.label} is no longer installed.",),
+        postconditions=(f"{spec.label} is no longer installed.", recovery.POSTCONDITION),
         refusals=tuple(refusals),
         boot_id=evidence.boot_id,
         uptime_centiseconds=evidence.uptime_centiseconds,

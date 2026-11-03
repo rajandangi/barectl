@@ -214,17 +214,30 @@ class KvmProbeTests(SimpleTestCase):
             self.assertFalse(vm._kvm_usable())
         self.assertEqual([item.args for item in close.call_args_list], [(7,)])
 
-    def test_a_device_that_answers_every_probe_is_usable_and_closes_each_descriptor(
-        self,
-    ) -> None:
+    def test_a_device_with_another_api_version_is_not_usable(self) -> None:
         with (
             patch("os.open", return_value=7),
             patch("os.close") as close,
             patch("fcntl.ioctl", return_value=9) as ioctl,
         ):
+            self.assertFalse(vm._kvm_usable())
+        ioctl.assert_called_once_with(7, vm.KVM_GET_API_VERSION, 0)
+        self.assertEqual([item.args for item in close.call_args_list], [(7,)])
+
+    def test_a_device_that_answers_every_probe_is_usable_and_closes_each_descriptor(
+        self,
+    ) -> None:
+        def ioctl(descriptor: int, request: int, argument: int = 0) -> int:
+            return vm.KVM_API_VERSION if request == vm.KVM_GET_API_VERSION else 9
+
+        with (
+            patch("os.open", return_value=7),
+            patch("os.close") as close,
+            patch("fcntl.ioctl", side_effect=ioctl) as probe,
+        ):
             self.assertTrue(vm._kvm_usable())
         self.assertEqual(
-            [item.args for item in ioctl.call_args_list],
+            [item.args for item in probe.call_args_list],
             [(7, vm.KVM_GET_API_VERSION, 0), (7, vm.KVM_CREATE_VM, 0)],
         )
         self.assertEqual([item.args for item in close.call_args_list], [(9,), (7,)])

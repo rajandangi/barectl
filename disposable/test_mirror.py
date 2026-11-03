@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import ssl
 import subprocess
 import tempfile
@@ -69,6 +70,47 @@ class DownloadTests(SimpleTestCase):
             self.assertIn("404", str(raised.exception))
             self.assertEqual(urlopen.call_count, 1)
             sleep.assert_not_called()
+
+    def test_an_unresolvable_host_is_a_real_error_not_an_outage(self) -> None:
+        with (
+            patch("disposable.mirror.time.sleep") as sleep,
+            patch("disposable.mirror.urllib.request.urlopen") as urlopen,
+        ):
+            urlopen.side_effect = urllib.error.URLError(
+                socket.gaierror(-2, "Name or service not known")
+            )
+            with self.assertRaises(mirror.MirrorError) as raised:
+                mirror.download("https://no-such-host.invalid/x")
+            self.assertNotIsInstance(raised.exception, mirror.MirrorUnavailable)
+            self.assertEqual(urlopen.call_count, 1)
+            sleep.assert_not_called()
+
+
+class TransientTests(SimpleTestCase):
+    def http_error(self, code: int) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError("https://example.test/x", code, "error", Message(), None)
+
+    def test_408_429_and_5xx_are_transient(self) -> None:
+        for code in (408, 429, 500, 503):
+            with self.subTest(code=code):
+                self.assertTrue(mirror._transient(self.http_error(code)))
+
+    def test_other_responses_are_permanent(self) -> None:
+        for code in (407, 430, 499, 404, 410):
+            with self.subTest(code=code):
+                self.assertFalse(mirror._transient(self.http_error(code)))
+
+    def test_a_connection_failure_is_transient(self) -> None:
+        self.assertTrue(
+            mirror._transient(urllib.error.URLError(ConnectionRefusedError(111, "refused")))
+        )
+
+    def test_a_dns_failure_is_not_transient(self) -> None:
+        self.assertFalse(
+            mirror._transient(
+                urllib.error.URLError(socket.gaierror(-2, "Name or service not known"))
+            )
+        )
 
 
 class ManifestTests(SimpleTestCase):

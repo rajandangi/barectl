@@ -244,8 +244,9 @@ QEMU, mirror and test logs, and uploads them as an artifact. A failure opens or 
 adds nothing to the merge build or the [test time budget](#test-time-budget).
 
 Run it locally on macOS arm64 with HVF or on a Linux host with a usable `/dev/kvm`. The lane
-probes the KVM API (`KVM_GET_API_VERSION` and `KVM_CREATE_VM`) before selecting KVM, so a
-hosted runner that exposes a device it cannot actually use falls back to TCG:
+probes the KVM API (`KVM_GET_API_VERSION` must report 12 and `KVM_CREATE_VM` must succeed)
+before selecting KVM, so a hosted runner that exposes a device it cannot actually use falls
+back to TCG:
 
 ```bash
 docker/disposable-server/mirror.sh --env-file .env -- fetch
@@ -277,7 +278,7 @@ The full build reports controller-fast and fast-validators separately and their 
 
 ### The local mirror
 
-`docker/disposable-server/mirror-manifest.json` lists every upstream file a build needs with its SHA-256: the Nix installer tarball, the Nix binary-cache closure of the runtime catalog lock (byte copies of each `narinfo` and NAR, as cache.nixos.org serves them) and the Ubuntu archive's frozen release pocket, the only pocket whose bytes are stable. `docker/disposable-server/mirror.sh -- fetch` downloads and verifies them into `~/.cache/barectl/native/mirror`; it needs the internet and runs only when asked. Nothing at scenario time reaches the internet: each lane serves the mirror under the real host names over HTTPS with the fixture CA, which L0 trusts, so every signature stays the upstream's own. `mirror.sh -- drift` reports any file whose upstream bytes changed, and the [drift job](#drift-and-the-weekly-jobs) opens an issue; an upstream that stays unavailable after retries is reported as unavailable instead, does not count as drift and opens no issue. A scenario proves the mirror end to end: L0's Nix client installs from the mirrored tarball, realises a catalog path with `max-jobs = 0` and reads the official `cache.nixos.org-1` signature back, with only ADR 0028's `nix.conf` in place.
+`docker/disposable-server/mirror-manifest.json` lists every upstream file a build needs with its SHA-256: the Nix installer tarball, the Nix binary-cache closure of the runtime catalog lock (byte copies of each `narinfo` and NAR, as cache.nixos.org serves them) and the Ubuntu archive's frozen release pocket, the only pocket whose bytes are stable. `docker/disposable-server/mirror.sh -- fetch` downloads and verifies them into `~/.cache/barectl/native/mirror`; it needs the internet and runs only when asked. Nothing at scenario time reaches the internet: each lane serves the mirror under the real host names over HTTPS with the fixture CA, which L0 trusts, so every signature stays the upstream's own. `mirror.sh -- drift` reports any file whose upstream bytes changed, and the [drift job](#drift-and-the-weekly-jobs) opens an issue; an upstream that stays unavailable after retries is reported as unavailable instead, does not count as drift and opens no issue. Transient means HTTP 408, 429 or any 5xx, a timeout, or a connection failure. Any other response, including a removed file's 404 or 410, and a name that does not resolve are permanent errors, so they fail the drift job instead of hiding drift. A scenario proves the mirror end to end: L0's Nix client installs from the mirrored tarball, realises a catalog path with `max-jobs = 0` and reads the official `cache.nixos.org-1` signature back, with only ADR 0028's `nix.conf` in place.
 
 ### Lanes and scenarios
 
