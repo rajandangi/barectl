@@ -203,7 +203,9 @@ class TwoControllerNativeLock(ScenarioTestCase):
             collect(shell)
             self.assertFalse(native.inspect(shell, unit).found)
             line = engine.read_result(shell, unit)
-            self.assertEqual(line, engine.ResultLine("lock_busy", ""))
+            from sites.change import SLUG
+
+            self.assertEqual(line, engine.ResultLine("lock_busy", "", SLUG, ("s10beta",)))
             self.checkpoint("race-lock-busy-26.04", shell)
 
     def await_native_lock(self, timeout: float = 70) -> None:

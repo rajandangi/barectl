@@ -558,6 +558,18 @@ class RetainedNamespaceTests(SiteKindTestCase):
         self.assertFalse(self.systemd.submissions)
 
 
+class ResultLineInJournalTests(SiteKindTestCase):
+    def test_a_finished_run_records_its_kind_and_sites_in_the_journal(self) -> None:
+        review = self.change("fixture_sites")
+        run = self.apply(review)
+        self.assertEqual(run.status, Status.SUCCEEDED)
+        journal = self.systemd.journal_units[run.unit_name].journal()
+        self.assertEqual(
+            engine.parse_result_line(journal),
+            engine.ResultLine("succeeded", "", "fixture_sites", ("alpha", "beta")),
+        )
+
+
 class EngineReconciliationTests(ChangeTestCase):
     def lost(self) -> ChangeRun:
         self.systemd.units[EXITED] = finished_unit(1)
@@ -957,6 +969,20 @@ class ResultLineTests(SimpleTestCase):
                 engine.ResultLine("succeeded", ""),
             ),
             ('barectl-result {"class": "partial", "reason": "backup_paused"}\n', None),
+            (
+                (
+                    'barectl-result {"class": "succeeded", "change_kind": "create_http_site", '
+                    '"sites": ["alpha", "beta"]}\n'
+                ),
+                engine.ResultLine("succeeded", "", "create_http_site", ("alpha", "beta")),
+            ),
+            (
+                (
+                    'barectl-result {"class": "refused", "reason": "evidence", '
+                    '"change_kind": "host_foundation", "sites": []}\n'
+                ),
+                engine.ResultLine("refused", "evidence", "host_foundation", ()),
+            ),
         ):
             with self.subTest(text=text):
                 self.assertEqual(engine.parse_result_line(text), expected)
@@ -969,6 +995,20 @@ class ResultLineTests(SimpleTestCase):
             'barectl-result {"class": "refused", "reason": "invented"}\n',
             'barectl-result {"class": "refused", "reason": []}\n',
             "barectl-result []\n",
+            'barectl-result {"class": "succeeded", "change_kind": "invented", "sites": []}\n',
+            'barectl-result {"class": "succeeded", "change_kind": [], "sites": []}\n',
+            (
+                'barectl-result {"class": "succeeded", "change_kind": "create_http_site", '
+                '"sites": "alpha"}\n'
+            ),
+            (
+                'barectl-result {"class": "succeeded", "change_kind": "create_http_site", '
+                '"sites": [1]}\n'
+            ),
+            (
+                'barectl-result {"class": "succeeded", "change_kind": "create_http_site", '
+                '"sites": ["Not A Site"]}\n'
+            ),
         ):
             with self.subTest(bad=bad), self.assertRaises(native.Unreadable):
                 engine.parse_result_line(bad)
@@ -1044,7 +1084,7 @@ class EnginePayloadTests(SimpleTestCase):
         boot = payload.index("/proc/sys/kernel/random/boot_id")
         capacity = payload.index("n=$(systemctl list-units")
         sites = payload.index("printf x | sha256sum")
-        body = payload.index("exec /usr/bin/sh")
+        body = payload.index("/usr/bin/sh ")
         apt = payload.index("apt-daily.service")
         self.assertLess(lock, boot)
         self.assertLess(boot, capacity)

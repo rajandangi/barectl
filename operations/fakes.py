@@ -34,6 +34,19 @@ _UNIT = re.compile(r"barectl-apply-[0-9a-f]{32}\.service")
 _SUBMITTED_UNIT = re.compile(r"--unit=(barectl-apply-[0-9a-f]{32}\.service)")
 # The reviewed target's unit and invocation are plain validated arguments to its script.
 _TARGETS = re.compile(r"(barectl-apply-[0-9a-f]{32}\.service)\|[0-9a-f]{32}\|")
+# The engine writes the change kind and its sites into the payload's result function and
+# body filter, and every result line carries them (docs/adr/0035).
+_RESULT_FIELDS = re.compile(r'"change_kind":"([a-z0-9_]+)","sites":(\[[^]]*\])')
+
+
+def _result_fields(command: str) -> tuple[str, tuple[str, ...]]:
+    match = _RESULT_FIELDS.search(command)
+    if match is None:
+        return "", ()
+    sites = json.loads(match[2])
+    if not isinstance(sites, list):
+        return "", ()
+    return match[1], tuple(str(site) for site in sites)
 
 
 @dataclass
@@ -46,6 +59,9 @@ class EngineUnit:
     # The structured result line's class; ``None`` when the payload reported nothing.
     result_class: str | None = None
     reason: str = ""
+    # The kind and reviewed sites the engine writes into every result line.
+    change_kind: str = ""
+    sites: tuple[str, ...] = ()
     # The ``barectl-stage`` lines the payload printed before its result line, if any.
     stages: tuple[str, ...] = ()
     invocation_id: str = "0f" * 16
@@ -58,9 +74,12 @@ class EngineUnit:
         stages = "".join(f"barectl-stage {stage}\n" for stage in reversed(self.stages))
         if self.result_class is None:
             return stages
-        line = {"class": self.result_class}
+        line: dict[str, object] = {"class": self.result_class}
         if self.reason:
             line["reason"] = self.reason
+        if self.change_kind:
+            line["change_kind"] = self.change_kind
+            line["sites"] = list(self.sites)
         return f"{engine.RESULT_PREFIX}{json.dumps(line)}\n{stages}"
 
     def terminal_report(self) -> str:
@@ -289,6 +308,7 @@ class EngineSystemd:
         found = _SUBMITTED_UNIT.search(command)
         if found is None or self.reject:
             return CommandResult(1, "")
+        change_kind, sites = _result_fields(command)
         unit = EngineUnit(
             exit_status=_EXIT_STATUSES.get(self.result_class or "", 0),
             result_class=self.result_class,
@@ -296,6 +316,8 @@ class EngineSystemd:
             body_path=next(
                 iter(re.findall(r"/run/lock/barectl/body-[0-9a-f]{32}\.sh", command)), ""
             ),
+            change_kind=change_kind,
+            sites=sites,
         )
         self.units[found[1]] = unit
         self.journal_units[found[1]] = unit
