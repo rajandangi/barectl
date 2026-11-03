@@ -21,6 +21,7 @@ from .observation import ObservedChange
 from .testing import (
     BOOT,
     SECRET,
+    backup,
     cache,
     change,
     journal_shell,
@@ -28,7 +29,9 @@ from .testing import (
     record_jobs,
     record_reading,
     result_line,
+    run,
     scheduled,
+    timer,
     worker,
 )
 
@@ -459,3 +462,75 @@ class JobsPageTests(ControllerConfigTestCase):
         with CaptureQueriesContext(connection) as many:
             self.client.get(self.url)
         self.assertEqual(len(one), len(many))
+
+    def test_backup_runs_and_schedules_are_plain_rows_with_a_backups_link(self) -> None:
+        record_jobs(
+            self.server,
+            backups=(
+                backup(
+                    runs=(
+                        run(at=timezone.now(), offsite="failed"),
+                        run(
+                            kind="cleanup",
+                            location="onsite",
+                            at=timezone.now(),
+                            onsite=(2, 1, 0, 0),
+                        ),
+                    ),
+                    timers=(timer(),),
+                ),
+            ),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Backup")
+        self.assertContains(response, "Finished")
+        self.assertContains(response, "On this server")
+        self.assertContains(response, "Offsite storage")
+        self.assertContains(response, "Copy failed")
+        self.assertContains(response, "Deleted 2, kept 1, skipped 0, failed 0")
+        self.assertContains(response, "Backup schedule")
+        self.assertContains(response, "On")
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/backups/#backups-heading",
+        )
+        self.assertContains(response, "Saved here, offsite copy failed.")
+        self.assertNotContains(response, "Run now")
+        self.assertNotContains(response, "Back up now")
+        self.assertNotContains(response, "Restore")
+
+    def test_backup_rows_are_visible_without_change_permission(self) -> None:
+        record_jobs(self.server, backups=(backup(runs=(run(at=timezone.now()),)),))
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "may view this server but not its changes")
+        self.assertContains(response, "Finished")
+        self.assertNotContains(response, "Narrow recent results")
+        self.assertNotContains(response, "Past 7 days")
+
+    def test_an_unreadable_backup_observation_keeps_its_warning(self) -> None:
+        record_jobs(
+            self.server,
+            backups_warning="Barectl could not read this server's backups.",
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "could not read this server")
+        self.assertNotContains(
+            response,
+            "No scheduled tasks, queue workers, object cache or backup schedules were found",
+        )
+
+    def test_a_backup_secret_canary_never_reaches_the_response_or_rows(self) -> None:
+        record_jobs(
+            self.server,
+            backups=(backup(runs=(run(at=timezone.now(), reason=SECRET),)),),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertNotIn(SECRET, response.content.decode())

@@ -517,6 +517,7 @@ def _backup(value: dict[str, object], identifier: str) -> observation.ObservedBa
         )
         if isinstance(last, dict)
         else None,
+        observation.offsite_of(value),
     )
 
 

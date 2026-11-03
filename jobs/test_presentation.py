@@ -239,7 +239,7 @@ class JobsPresentationTests(TestCase):
             )
         )
         self.assertEqual(view.groups[-1].rows, ())
-        self.assertIn("No available Barectl change results.", view.groups[-1].empty)
+        self.assertIn("No available Barectl change or backup results.", view.groups[-1].empty)
         self.assertIn("no available", view.notices[0].text)
 
     def test_coverage_notices_name_denial_truncation_and_the_oldest_time(self) -> None:
@@ -463,7 +463,7 @@ class JobsPresentationTests(TestCase):
         )
         recent = view.groups[-1]
         self.assertEqual(recent.rows, ())
-        self.assertIn("No available Barectl change results match", recent.empty)
+        self.assertIn("No available Barectl change or backup results match", recent.empty)
         self.assertNotIn("nothing ran", recent.empty.lower())
 
     def test_the_view_names_the_selected_zone_and_its_filter_choices(self) -> None:

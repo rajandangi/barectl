@@ -88,6 +88,46 @@
                       {% endfor %}
                     </dl>
                   </details>
+                {% elif row.is_backup %}
+                  <p>
+                    <strong>{{ row.title }}</strong> · {{ row.identifier }}
+                  </p>
+                  <p>
+                    {% if group.key == "attention" %}
+                      {{ row.attention_sentence }}
+                    {% else %}
+                      {{ row.summary }}
+                    {% endif %}
+                    {% if row.when %}
+                      · <time datetime="{{ row.when|date:'c' }}">{{ row.when|date:'M j, Y, H:i T' }}</time>
+                    {% endif %}
+                  </p>
+                  <dl class="barectl-facts">
+                    {% for label, value in row.findings %}
+                      <div>
+                        <dt>{{ label }}</dt>
+                        <dd>
+                          {{ value }}
+                        </dd>
+                      </div>
+                    {% endfor %}
+                  </dl>
+                  <p>
+                    <a href="{{ row.link_url }}">Open Backups</a>
+                  </p>
+                  <details>
+                    <summary>Show details</summary>
+                    <dl class="barectl-facts">
+                      {% for label, value in row.detail_lines %}
+                        <div>
+                          <dt>{{ label }}</dt>
+                          <dd>
+                            <code>{{ value }}</code>
+                          </dd>
+                        </div>
+                      {% endfor %}
+                    </dl>
+                  </details>
                 {% else %}
                   <p>
                     <strong>{{ row.title }}</strong>

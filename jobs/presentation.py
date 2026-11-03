@@ -20,6 +20,7 @@ from operations.models import ChangeRun
 from servers.models import Server
 
 from .automatic import AutomaticRow, automatic_work
+from .backups import BackupRunRow, BackupTimerRow, BackupWork, backup_work
 from .filters import Filtered, Filters, Selection, filter_recent
 from .models import Coverage
 from .observation import ObservedChange, ProviderCoverage
@@ -34,12 +35,14 @@ EMPTY = (
     "it for the first time."
 )
 NO_OBSERVATION = "No Barectl change observations have been read yet. Run a check to read them."
-ATTENTION_EMPTY = "No Barectl changes or automatic work need attention."
-AUTOMATIC_ATTENTION_EMPTY = "No automatic work needs attention."
-AUTOMATIC_EMPTY = "No scheduled tasks, queue workers or object cache were found on this server."
+ATTENTION_EMPTY = "No Barectl changes, automatic work or backups need attention."
+AUTOMATIC_ATTENTION_EMPTY = "No automatic work or backups need attention."
+AUTOMATIC_EMPTY = (
+    "No scheduled tasks, queue workers, object cache or backup schedules were found on this server."
+)
 NOT_READ = "Automatic work is read by a full check of this server. Run a check to read it."
-RECENT_EMPTY = "No available Barectl change results."
-FILTERED_EMPTY = "No available Barectl change results match these filters."
+RECENT_EMPTY = "No available Barectl change or backup results."
+FILTERED_EMPTY = "No available Barectl change or backup results match these filters."
 
 _RESULT_LABELS: Final[dict[str, str]] = {
     "succeeded": "Finished",
@@ -96,7 +99,7 @@ class JobRow:
 class JobGroup:
     key: Group
     title: str
-    rows: tuple[JobRow | AutomaticRow, ...]
+    rows: tuple[JobRow | AutomaticRow | BackupRunRow | BackupTimerRow, ...]
     empty: str = ""
 
 
@@ -138,25 +141,40 @@ def present(
     observation = snapshot.collected.jobs
     full_read = observation.outcome == ObservationOutcome.OBSERVED
     work = automatic_work(snapshot, server)
-    automatic_empty = work.empty if full_read or work.warnings else NOT_READ
-    automatic = JobGroup("automatic", "Automatic work", work.rows, automatic_empty)
-    attention = tuple(row for row in work.rows if row.needs_attention)
-    automatic_notices = tuple(CoverageNotice(text=text) for text in work.warnings)
-    automatic_groups: tuple[JobGroup, ...] = (
+    backups = backup_work(snapshot, server)
+    automatic_rows: tuple[AutomaticRow | BackupTimerRow, ...] = (*work.rows, *backups.timers)
+    automatic_empty = _automatic_empty(full_read, work.warnings, automatic_rows, backups)
+    automatic = JobGroup("automatic", "Automatic work", automatic_rows, automatic_empty)
+    attention: tuple[JobRow | AutomaticRow | BackupRunRow, ...] = (
+        *(row for row in work.rows if row.needs_attention),
+        *(row for row in backups.runs if row.needs_attention),
+    )
+    provider_notices = tuple(
+        CoverageNotice(text=text) for text in (*work.warnings, *backups.warnings)
+    )
+    attention_groups: tuple[JobGroup, ...] = (
         *(
             (JobGroup("attention", "Needs attention", attention, AUTOMATIC_ATTENTION_EMPTY),)
             if attention
             else ()
         ),
-        automatic,
     )
+    recent_backups = _recent_backups(backups.runs)
     if not may_view_changes:
         return JobsView(
             last_checked=snapshot.collected_at,
             may_view_changes=False,
             target_stack=True,
-            groups=automatic_groups,
-            notices=automatic_notices,
+            groups=(
+                *attention_groups,
+                automatic,
+                *(
+                    (JobGroup("recent", "Recent results", recent_backups, RECENT_EMPTY),)
+                    if recent_backups
+                    else ()
+                ),
+            ),
+            notices=provider_notices,
             automatic_empty=automatic_empty,
             zone=displayed,
         )
@@ -165,16 +183,28 @@ def present(
             last_checked=snapshot.collected_at,
             may_view_changes=True,
             target_stack=True,
-            groups=automatic_groups,
-            notices=automatic_notices,
+            groups=(
+                *attention_groups,
+                automatic,
+                *(
+                    (JobGroup("recent", "Recent results", recent_backups, RECENT_EMPTY),)
+                    if recent_backups
+                    else ()
+                ),
+            ),
+            notices=provider_notices,
             empty=NO_OBSERVATION,
             automatic_empty=automatic_empty,
             zone=displayed,
         )
     reading = observation.value
     rows = _rows(reading.changes, server)
-    filtered: Filtered[JobRow] = filter_recent(
-        tuple(row for row in rows if not row.running),
+    attention_rows = (
+        *attention,
+        *(row for row in rows if row.needs_attention),
+    )
+    filtered: Filtered[JobRow | BackupRunRow] = filter_recent(
+        (*tuple(row for row in rows if not row.running), *recent_backups),
         selected,
         now=now if now is not None else timezone.now(),
         zone=displayed.info,
@@ -187,12 +217,7 @@ def present(
         may_view_changes=True,
         target_stack=True,
         groups=(
-            JobGroup(
-                "attention",
-                "Needs attention",
-                attention + tuple(row for row in rows if row.needs_attention),
-                ATTENTION_EMPTY,
-            ),
+            JobGroup("attention", "Needs attention", attention_rows, ATTENTION_EMPTY),
             JobGroup(
                 "running",
                 "Running",
@@ -207,11 +232,28 @@ def present(
                 FILTERED_EMPTY if selected.active else RECENT_EMPTY,
             ),
         ),
-        notices=automatic_notices + notices,
+        notices=provider_notices + notices,
         automatic_empty=automatic_empty,
         zone=displayed,
         filters=filtered.filters,
     )
+
+
+def _automatic_empty(
+    full_read: bool,
+    warnings: tuple[str, ...],
+    rows: tuple[JobRow | AutomaticRow | BackupTimerRow, ...],
+    backups: BackupWork,
+) -> str:
+    if warnings or backups.warnings:
+        return ""
+    if not full_read:
+        return NOT_READ
+    return "" if rows else AUTOMATIC_EMPTY
+
+
+def _recent_backups(rows: tuple[BackupRunRow, ...]) -> tuple[BackupRunRow, ...]:
+    return tuple(row for row in rows if not row.running)
 
 
 def _rows(changes: tuple[ObservedChange, ...], server: Server) -> tuple[JobRow, ...]:
