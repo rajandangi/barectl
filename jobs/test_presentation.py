@@ -262,6 +262,42 @@ class JobsPresentationTests(TestCase):
             self.fail("The notice kept the oldest held time.")
         self.assertEqual(oldest.date(), (self.now - timedelta(days=10)).date())
 
+    def test_a_complete_read_names_the_oldest_history_inside_the_chosen_range(self) -> None:
+        view = self.view(
+            change(
+                unit="barectl-apply-" + "a" * 32 + ".service",
+                finished_at=self.now,
+            ),
+            coverage=(
+                ProviderCoverage(
+                    "barectl_changes",
+                    Coverage.COMPLETE,
+                    "",
+                    self.now - timedelta(days=1),
+                ),
+            ),
+        )
+        (notice,) = view.notices
+        self.assertEqual(notice.text, "The server's retained change history starts")
+        self.assertEqual(notice.oldest_at, self.now - timedelta(days=1))
+
+    def test_a_complete_read_that_covers_the_range_has_no_oldest_notice(self) -> None:
+        view = self.view(
+            change(
+                unit="barectl-apply-" + "a" * 32 + ".service",
+                finished_at=self.now,
+            ),
+            coverage=(
+                ProviderCoverage(
+                    "barectl_changes",
+                    Coverage.COMPLETE,
+                    "",
+                    self.now - timedelta(days=10),
+                ),
+            ),
+        )
+        self.assertEqual(view.notices, ())
+
     def test_without_change_permission_no_change_rows_or_counts_are_exposed(self) -> None:
         view = self.view(
             change(

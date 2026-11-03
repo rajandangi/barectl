@@ -21,7 +21,7 @@ from servers.models import Server
 
 from .automatic import AutomaticRow, automatic_work
 from .backups import BackupRunRow, BackupTimerRow, BackupWork, backup_work
-from .filters import Filtered, Filters, Selection, filter_recent
+from .filters import Filtered, Filters, Selection, filter_recent, start_of_range
 from .models import Coverage
 from .observation import ObservedChange, ProviderCoverage
 from .timezones import DisplayZone, resolve_zone
@@ -203,13 +203,17 @@ def present(
         *attention,
         *(row for row in rows if row.needs_attention),
     )
+    checked_at = now if now is not None else timezone.now()
     filtered: Filtered[JobRow | BackupRunRow] = filter_recent(
         (*tuple(row for row in rows if not row.running), *recent_backups),
         selected,
-        now=now if now is not None else timezone.now(),
+        now=checked_at,
         zone=displayed.info,
     )
-    notices = _notices(reading.coverage)
+    notices = _notices(
+        reading.coverage,
+        range_start=start_of_range(selected, now=checked_at, zone=displayed.info),
+    )
     if filtered.untimed:
         notices += (CoverageNotice(_untimed_notice(filtered.untimed)),)
     return JobsView(
@@ -318,14 +322,17 @@ def _untimed_notice(count: int) -> str:
     return f"{count} results have no usable time and are not shown in this range."
 
 
-def _notices(coverage: tuple[ProviderCoverage, ...]) -> tuple[CoverageNotice, ...]:
+def _notices(
+    coverage: tuple[ProviderCoverage, ...], *, range_start: datetime
+) -> tuple[CoverageNotice, ...]:
+    """Warnings and the start of the host's retained history when it misses the range."""
     notices: list[CoverageNotice] = []
     for item in coverage:
-        if item.state == Coverage.COMPLETE:
-            continue
         if item.warning:
             notices.append(CoverageNotice(item.warning, item.oldest_at))
-        if item.oldest_at is not None:
+        if item.oldest_at is not None and (
+            item.state != Coverage.COMPLETE or item.oldest_at > range_start
+        ):
             notices.append(
                 CoverageNotice(
                     "The server's retained change history starts",

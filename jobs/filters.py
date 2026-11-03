@@ -138,6 +138,11 @@ class Filtered[RowT]:
     filters: Filters
 
 
+def start_of_range(selection: Selection, *, now: datetime, zone: ZoneInfo) -> datetime:
+    """The first instant of the selection's range in the viewer's zone."""
+    return start_of_local_day(now, zone, days_back=_RANGE_DAYS[selection.range])
+
+
 def filter_recent[RowT: Filterable](
     rows: Sequence[RowT],
     selection: Selection,
@@ -146,7 +151,7 @@ def filter_recent[RowT: Filterable](
     zone: ZoneInfo,
 ) -> Filtered[RowT]:
     """The newest-first rows of Recent results that the selection keeps."""
-    start = start_of_local_day(now, zone, days_back=_RANGE_DAYS[selection.range])
+    start = start_of_range(selection, now=now, zone=zone)
     timed = [row for row in rows if not row.running and row.when is not None]
     untimed = sum(1 for row in rows if not row.running and row.when is None)
     in_range = [row for row in timed if _when(row) >= start]
