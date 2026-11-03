@@ -218,6 +218,11 @@ class BrowserTestCase(LiveServerTestCase):
         accordion or Logs section does not count. ``allowed`` names the terms this
         screen may legitimately show (the fingerprint step and Journey 7 sentences).
         """
+        if urlsplit(self.page.url).path.endswith("/jobs/"):
+            # The Jobs page sends the viewer's zone in a background request; let it finish
+            # before the test navigates, or it can race the next request's session write.
+            with contextlib.suppress(PlaywrightTimeoutError):
+                self.page.wait_for_load_state("networkidle", timeout=3000)
         visible = self.page.locator("body").inner_text().lower()
         found = [
             term
