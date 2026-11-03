@@ -85,6 +85,7 @@ class BaselineTests(SimpleTestCase):
             recorded,
             current,
             current_inputs={"new.py": "input"},
+            command_inputs={"a.py": "1"},
             capture_pins={"ubuntu": "pin"},
             capture_states={"state": "hash"},
             audit_digest="a" * 64,
@@ -94,6 +95,7 @@ class BaselineTests(SimpleTestCase):
         document = self.baseline({"a.py": "1"}, {"a.py": "1", "b.py": "2"})
         self.assertEqual(document["sources"], {"a.py": "1", "b.py": "2"})
         self.assertEqual(document["capture_inputs"], {"new.py": "input"})
+        self.assertEqual(document["capture_command_inputs"], {"a.py": "1"})
         self.assertEqual(document["audit_digest"], "a" * 64)
 
     def test_a_changed_or_removed_shared_source_still_needs_the_recording_pass(self) -> None:

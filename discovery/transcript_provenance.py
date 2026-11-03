@@ -42,6 +42,16 @@ def _python_files(root: Path) -> Iterator[Path]:
                 yield directory / name
 
 
+def command_inputs() -> dict[str, str]:
+    """The shared sources whose text can change a recorded native command.
+
+    Only these require a new capture pass; the wider ``inputs()`` set feeds the audit
+    digest, so editing a test or harness file cannot invalidate verified transcripts.
+    """
+    root = source_manifest.REPOSITORY
+    return {name: digest(root / name) for name in sorted(source_manifest.SOURCES)}
+
+
 def inputs() -> dict[str, str]:
     root = source_manifest.REPOSITORY
     paths = set(source_manifest.SOURCES)
@@ -176,12 +186,22 @@ def _state_hashes(states: tuple[str, ...]) -> dict[str, str]:
 
 def plan(states: tuple[str, ...]) -> tuple[str, ...]:
     manifest = _object(source_manifest.MANIFEST)
-    previous = manifest.get("capture_inputs")
+    previous = manifest.get("capture_command_inputs")
+    if previous is None:
+        # A legacy manifest recorded every input; keep only the ones that can name a command.
+        recorded_inputs = manifest.get("capture_inputs")
+        previous = {
+            name: value
+            for name, value in (_strings(recorded_inputs).items() if recorded_inputs else ())
+            if name in source_manifest.SOURCES
+        }
     pins = manifest.get("capture_pins")
     hashes = manifest.get("capture_states")
     if previous is None or pins != recorded.current_pins() or not isinstance(hashes, dict):
         return states
-    selected = set(affected(states, _strings(previous), inputs(), proof=audited_exclusion()))
+    selected = set(
+        affected(states, _strings(previous), command_inputs(), proof=audited_exclusion())
+    )
     for state in states:
         path = _state_path(state)
         if not path.is_file() or hashes.get(state) != digest(path):
@@ -194,11 +214,11 @@ def begin(states: tuple[str, ...], *, resume: bool, incremental: bool) -> tuple[
         raise ValueError("A capture pass needs distinct states")
     for state in states:
         _state_path(state)
-    current, pins = inputs(), recorded.current_pins()
+    current, commands, pins = inputs(), command_inputs(), recorded.current_pins()
     if resume:
         document = _object(PASS)
         if (
-            document.get("inputs") != current
+            document.get("command_inputs", document.get("inputs")) != commands
             or document.get("pins") != pins
             or document.get("states") != list(states)
         ):
@@ -214,6 +234,7 @@ def begin(states: tuple[str, ...], *, resume: bool, incremental: bool) -> tuple[
         PASS,
         {
             "inputs": current,
+            "command_inputs": commands,
             "pins": pins,
             "states": list(states),
             "selected": list(selected),
@@ -225,7 +246,10 @@ def begin(states: tuple[str, ...], *, resume: bool, incremental: bool) -> tuple[
 
 def start(state: str) -> None:
     document = _object(PASS)
-    if document.get("inputs") != inputs() or document.get("pins") != recorded.current_pins():
+    if (
+        document.get("command_inputs", document.get("inputs")) != command_inputs()
+        or document.get("pins") != recorded.current_pins()
+    ):
         raise ValueError("Capture inputs changed")
     path = _state_path(state)
     document["started"] = {
@@ -237,7 +261,10 @@ def start(state: str) -> None:
 
 def complete(state: str) -> None:
     document = _object(PASS)
-    if document.get("inputs") != inputs() or document.get("pins") != recorded.current_pins():
+    if (
+        document.get("command_inputs", document.get("inputs")) != command_inputs()
+        or document.get("pins") != recorded.current_pins()
+    ):
         raise ValueError("Capture inputs changed during recording")
     started = document.get("started")
     path = _state_path(state)
@@ -264,14 +291,15 @@ def finish() -> None:
         raise ValueError("Invalid capture states")
     completed = _strings(document.get("completed"))
     if (
-        document.get("inputs") != inputs()
+        document.get("command_inputs", document.get("inputs")) != command_inputs()
         or document.get("pins") != recorded.current_pins()
         or completed != _state_hashes(tuple(states))
     ):
         raise ValueError("Incomplete or stale capture pass; resume it before finalizing")
     source_manifest.write(
         capture={
-            "capture_inputs": document["inputs"],
+            "capture_inputs": inputs(),
+            "capture_command_inputs": command_inputs(),
             "capture_pins": document["pins"],
             "capture_states": completed,
         }

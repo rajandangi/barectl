@@ -48,8 +48,10 @@ class CaptureSelectionTests(SimpleTestCase):
         states = recorded.stored()
         current = provenance.inputs()
         capture_inputs = {**current, provenance.OMITTED: "0" * 64}
+        command_inputs = provenance.command_inputs()
         metadata = {
             "capture_inputs": capture_inputs,
+            "capture_command_inputs": command_inputs,
             "capture_pins": recorded.current_pins(),
             "audit_digest": provenance.audit_digest(current),
             "capture_states": {
@@ -60,11 +62,13 @@ class CaptureSelectionTests(SimpleTestCase):
             manifest = Path(directory) / "manifest.json"
             manifest.write_text(json.dumps(metadata))
             with mock.patch.object(source_manifest, "MANIFEST", manifest):
-                self.assertEqual(
-                    provenance.plan(states),
-                    tuple(state for state in states if state != "ubuntu-24.04"),
-                )
+                self.assertEqual(provenance.plan(states), ())
+                # A harness-only edit neither needs a capture nor changes the audit.
                 capture_inputs["disposable/images.py"] = "0" * 64
+                manifest.write_text(json.dumps(metadata))
+                self.assertEqual(provenance.plan(states), ())
+                # A shared command source still requires every state.
+                command_inputs["discovery/observations/__init__.py"] = "0" * 64
                 manifest.write_text(json.dumps(metadata))
                 self.assertEqual(provenance.plan(states), states)
 
@@ -127,6 +131,9 @@ class CaptureReceiptTests(SimpleTestCase):
             mock.patch.object(provenance, "inputs", side_effect=lambda: dict(self.sources))
         )
         self.enterContext(
+            mock.patch.object(provenance, "command_inputs", side_effect=lambda: dict(self.sources))
+        )
+        self.enterContext(
             mock.patch.object(recorded, "current_pins", return_value={"ubuntu": "pin"})
         )
 
@@ -162,6 +169,7 @@ class CaptureReceiptTests(SimpleTestCase):
         path.write_text("recorded bytes")
         metadata = {
             "capture_inputs": dict(self.sources),
+            "capture_command_inputs": dict(self.sources),
             "capture_pins": {"ubuntu": "pin"},
             "capture_states": {"ubuntu-24.04": provenance.digest(path)},
         }
