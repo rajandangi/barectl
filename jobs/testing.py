@@ -341,7 +341,7 @@ def journal_shell(
     authorized: bool = True,
 ) -> ReplayShell:
     commands: list[tuple[str, Recorded]] = [
-        (native.RETAINED_STATES, Recorded(ssh.CommandResult(0, units))),
+        (native.RUNNING_STATES, Recorded(ssh.CommandResult(0, units))),
         ("id -u", Recorded(ssh.CommandResult(0, f"{root}\n"))),
         (observation.HISTORY_COMMAND, Recorded(ssh.CommandResult(0, history))),
         (observation.OLDEST_COMMAND, Recorded(ssh.CommandResult(0, oldest))),

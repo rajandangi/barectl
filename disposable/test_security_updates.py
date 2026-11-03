@@ -8,6 +8,7 @@ refuse before dpkg changes anything.
 """
 
 import shlex
+import time
 from typing import cast, override
 
 from django.test import tag
@@ -160,11 +161,17 @@ class SecurityUpdates(ScenarioTestCase):
             submitted = submit_draft(self, shell, INSTALL_UPDATES, draft, acknowledge=False)
         wait_result(self, submitted, timeout=120)
         self.assertEqual(self._version("openssl"), SECURITY_OPENSSL)
-        self.assertIn(
+        expected = (
             'barectl-result {"change_kind":"install_ubuntu_updates",'
-            '"sites":[],"class":"succeeded"}',
-            self.native(f"journalctl -u {submitted.unit} --no-pager -o cat"),
+            '"sites":[],"class":"succeeded"}'
         )
+        # journald publishes a unit's last lines a moment after the run's reader saw them.
+        end = time.monotonic() + 5
+        output = self.native(f"journalctl -u {submitted.unit} --no-pager -o cat")
+        while expected not in output and time.monotonic() < end:
+            time.sleep(0.1)
+            output = self.native(f"journalctl -u {submitted.unit} --no-pager -o cat")
+        self.assertIn(expected, output)
 
     def _router(self, shell: RemoteShell) -> None:
         write(self, shell, "/etc/apt/sources.list.d/barectl-fixture.sources", mirror.apt_sources())

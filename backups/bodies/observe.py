@@ -44,7 +44,6 @@ TIMER_ROLES = (
     ("cleanup", "cleanup", "onsite"),
     ("cleanup", "cleanupoffsite", "offsite"),
 )
-ENABLED_STATES = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
 PROVIDERS = ("s3", "r2")
 # The controller prepends databases/binding.py to this body; its names are our globals.
 binding = sys.modules[__name__]
@@ -384,22 +383,8 @@ def schedules(identifiers: list[str]) -> dict[str, list[dict[str, object]]]:
             "--output=json",
         ]
     )
-    files = _systemctl(
-        [
-            "systemctl",
-            "list-unit-files",
-            "--type=timer",
-            "--no-pager",
-            "--output=json",
-        ]
-    )
-    if listed is None or files is None:
+    if listed is None:
         return {}
-    states = {
-        str(row.get("unit_file")): str(row.get("state"))
-        for row in files or []
-        if isinstance(row, dict) and isinstance(row.get("unit_file"), str)
-    }
     timers = {
         str(row.get("unit")): row
         for row in listed or []
@@ -411,7 +396,7 @@ def schedules(identifiers: list[str]) -> dict[str, list[dict[str, object]]]:
         found: list[dict[str, object]] = []
         for work, role, location in TIMER_ROLES:
             name = f"barectl-site-{identifier}-{role}.timer"
-            if name not in states and name not in timers:
+            if name not in timers:
                 continue
             row = timers.get(name, {})
             next_elapse = row.get("next")
@@ -424,7 +409,8 @@ def schedules(identifiers: list[str]) -> dict[str, list[dict[str, object]]]:
                 {
                     "work": work,
                     "location": location,
-                    "on": states.get(name, "") in ENABLED_STATES and next_us > 0,
+                    # A disabled timer reports no next elapse; that is Off, not a problem.
+                    "on": next_us > 0,
                     "next": next_us,
                     "last": last_us,
                 }

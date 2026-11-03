@@ -262,6 +262,7 @@ READ_ONLY = re.compile(
     rf"|\A{re.escape(_AUTOMATION_READ_COMMAND)}\Z"
     rf"|\Asudo -n (-l )?/usr/bin/sh -c {_AUTOMATION_READ}\Z"
     rf"|\A{re.escape(native.RETAINED_STATES)}\Z"
+    rf"|\A{re.escape(native.RUNNING_STATES)}\Z"
     rf"|\A{re.escape(jobs_observation.HISTORY_COMMAND)}\Z"
     rf"|\A{re.escape(jobs_observation.OLDEST_COMMAND)}\Z"
     rf"|\Asudo -n (-l )?/usr/bin/sh -c "
@@ -347,7 +348,7 @@ class FakeServer:
                 0, unit_report("certbot.timer", active="active", sub="waiting")
             ),
             # A server with no Barectl change runs to show (Phase E #285).
-            native.RETAINED_STATES: ssh.CommandResult(0, "00000000-0000-0000-0000-000000000000\n"),
+            native.RUNNING_STATES: ssh.CommandResult(0, "00000000-0000-0000-0000-000000000000\n"),
             jobs_observation.HISTORY_COMMAND: ssh.CommandResult(0, ""),
             jobs_observation.OLDEST_COMMAND: ssh.CommandResult(0, ""),
         }
