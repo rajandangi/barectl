@@ -166,10 +166,11 @@ class SecurityUpdates(ScenarioTestCase):
         )
         # journald publishes a unit's last lines a moment after the run's reader saw them.
         end = time.monotonic() + 5
-        output = self.native(f"journalctl -u {submitted.unit} --no-pager -o cat")
+        read = f"journalctl -u {submitted.unit} --no-pager -o cat --grep '^barectl-result '"
+        output = self.native(read)
         while expected not in output and time.monotonic() < end:
             time.sleep(0.1)
-            output = self.native(f"journalctl -u {submitted.unit} --no-pager -o cat")
+            output = self.native(read)
         self.assertIn(expected, output)
 
     def _router(self, shell: RemoteShell) -> None:

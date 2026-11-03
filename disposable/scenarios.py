@@ -1259,7 +1259,10 @@ def _prepare_all_stage(options: argparse.Namespace, lanes: int, output: Output) 
     """Build every missing snapshot once, then stop; a fully archived run loads nothing."""
     started = time.monotonic()
     required = ("L0", "fixture", *SPECIAL_LAYERS, *PREPARATION_LAYERS)
-    if all(images.archived(layer) for layer in required):
+    # An archive name carries no key, so a file left by an older cache proves nothing:
+    # load it and let the image tag decide, or a changed product key would be saved back
+    # under the new name without being rebuilt.
+    if all(images.load(layer) for layer in required):
         print(f"Prepared snapshots: 0 of 0 passed in {time.monotonic() - started:.0f} s")  # noqa: T201
         return 0
     # The special images are plain Docker targets, independent of the product flows; one

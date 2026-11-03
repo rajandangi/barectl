@@ -872,7 +872,7 @@ class PrepareAllTests(SimpleTestCase):
             return []
 
         with (
-            patch("disposable.images.archived", return_value=False),
+            patch("disposable.images.load", return_value=False),
             patch("disposable.images.ensure", side_effect=ensure),
             patch("disposable.images.store", side_effect=store),
             patch("disposable.scenarios.mirror.fixture_ca"),
@@ -908,7 +908,7 @@ class PrepareAllTests(SimpleTestCase):
                 with (
                     self.subTest(content=content),
                     patch.dict(os.environ, {"BARECTL_MIRROR_MARKER": str(marker)}),
-                    patch("disposable.images.archived", return_value=False),
+                    patch("disposable.images.load", return_value=False),
                     patch("disposable.images.ensure", return_value="image"),
                     patch("disposable.images.store"),
                     patch.object(scenarios, "controller_key", return_value=Path("key")),
@@ -931,9 +931,9 @@ class PrepareAllTests(SimpleTestCase):
                                 scenarios.Output(io.StringIO()),
                             )
 
-    def test_a_fully_archived_run_loads_nothing(self) -> None:
+    def test_fully_verified_archives_prepare_nothing(self) -> None:
         with (
-            patch("disposable.images.archived", return_value=True),
+            patch("disposable.images.load", return_value=True),
             patch("disposable.images.ensure") as ensure,
             patch.object(scenarios, "prepare_layers") as prepare,
         ):
