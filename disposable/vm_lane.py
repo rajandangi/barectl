@@ -42,6 +42,11 @@ def arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--work-dir", type=Path, help="work directory (default: temporary)")
     parser.add_argument("--timeout", type=float, default=vm.BOOT_TIMEOUT, metavar="SECONDS")
     parser.add_argument("--tag", default=VM_TAG, help="test tag to run")
+    parser.add_argument(
+        "--boot-only",
+        action="store_true",
+        help="boot once and print diagnostics without running the vm tests",
+    )
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if options.timeout <= 0:
         parser.error("--timeout must be positive")
@@ -97,6 +102,10 @@ def main(argv: Sequence[str] | None = None, output: TextIO | None = None) -> int
             + "\n",
             encoding="utf-8",
         )
+        if options.boot_only:
+            _diagnostics(machine, stream)
+            status = 0
+            return status
         command = [
             sys.executable,
             "manage.py",
@@ -137,11 +146,28 @@ def main(argv: Sequence[str] | None = None, output: TextIO | None = None) -> int
             vm.keep_logs(work, stream)
         except OSError as error:
             stream.write(f"vm: could not keep logs: {error}\n")
-        if status == 0 and not options.keep:
+        if status == 0 and not (options.keep or options.boot_only):
             shutil.rmtree(work, ignore_errors=True)
         else:
             stream.write(f"vm: kept the work directory at {work}\n")
         stream.flush()
+
+
+_DIAGNOSTICS = (
+    ("cloud-init", "cloud-init status --long 2>&1 || true"),
+    ("listeners", "ss -Hlnptu"),
+    ("failed units", "systemctl --failed --no-pager 2>&1 || true"),
+    ("addresses", "ip -br addr"),
+    ("hosts", "cat /etc/hosts"),
+    ("journal", "journalctl --no-pager -n 100 2>&1 || true"),
+)
+
+
+def _diagnostics(machine: vm.Vm, output: TextIO) -> None:
+    for label, command in _DIAGNOSTICS:
+        code, stdout, stderr = machine.run(command, timeout=120)
+        output.write(f"### {label} (exit {code})\n{stdout}{stderr}\n")
+    output.flush()
 
 
 def _tail(path: Path, lines: int = 80) -> str:

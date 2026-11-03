@@ -163,6 +163,8 @@ uv run --env-file .env python -m discovery.transcript_provenance affected ubuntu
 
 `discovery/source_manifest.py` lists command-building modules and fixed bodies. Add every new command-building module to `COMMAND_SOURCES` and fixed native sources to `SOURCES`; a missing dependency must not be inferred as independence. The manifest records capture inputs, pins and state receipts alongside source digests. Use the affected-state explanation before deciding what can be reused, then run `scripts/record-all-transcripts.sh --check` after the pass. Handoffs name the frozen revision, receipts and literal capture/check results.
 
+Adding a harness-only file that no recorded command embeds does not need a full recording pass. Run `scripts/refresh-transcript-baseline.sh`; it updates the source digests, capture inputs and audit digest, and refuses a changed or removed shared source, changed pins or changed transcript bytes. Any command-source or transcript change still needs `scripts/record-all-transcripts.sh`.
+
 A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
 
 ```bash
@@ -246,7 +248,16 @@ the fallback when KVM is absent or its device is not accessible, as on some host
 ```bash
 docker/disposable-server/mirror.sh --env-file .env -- fetch
 uv run --env-file .env python -m disposable.vm_lane
+uv run --env-file .env python -m disposable.vm_lane --boot-only
 ```
+
+`--boot-only` boots once and prints cloud-init status, listeners, failed units, addresses,
+`/etc/hosts` and the last journal lines, then stops the guest and keeps the work directory.
+Use it before changing the lane; it avoids a full test run for a diagnosis.
+
+A new `workflow_dispatch` workflow is only dispatchable once it is on the default branch.
+Merge the lane first, dispatch it on `main`, and record the post-merge head in the
+qualification record.
 
 The first run downloads the pinned image; `--keep` keeps the work directory, `--image`
 uses a local base image, `--arch` chooses the pinned architecture, and `--ssh-port`,

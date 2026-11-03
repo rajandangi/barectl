@@ -79,6 +79,30 @@ def embedded_sources() -> set[str]:
     return found
 
 
+class BaselineTests(SimpleTestCase):
+    def baseline(self, recorded: dict[str, str], current: dict[str, str]) -> dict[str, object]:
+        return source_manifest.baseline_document(
+            recorded,
+            current,
+            current_inputs={"new.py": "input"},
+            capture_pins={"ubuntu": "pin"},
+            capture_states={"state": "hash"},
+            audit_digest="a" * 64,
+        )
+
+    def test_an_added_harness_source_refreshes_inputs_and_sources(self) -> None:
+        document = self.baseline({"a.py": "1"}, {"a.py": "1", "b.py": "2"})
+        self.assertEqual(document["sources"], {"a.py": "1", "b.py": "2"})
+        self.assertEqual(document["capture_inputs"], {"new.py": "input"})
+        self.assertEqual(document["audit_digest"], "a" * 64)
+
+    def test_a_changed_or_removed_shared_source_still_needs_the_recording_pass(self) -> None:
+        with self.assertRaisesMessage(source_manifest.BaselineRefused, "text changed"):
+            self.baseline({"a.py": "1"}, {"a.py": "2"})
+        with self.assertRaisesMessage(source_manifest.BaselineRefused, "were removed"):
+            self.baseline({"a.py": "1"}, {})
+
+
 class SourceManifestTests(SimpleTestCase):
     def test_every_embedded_resource_is_a_shared_source(self) -> None:
         missing = sorted(embedded_sources() - set(source_manifest.SOURCES))

@@ -13,7 +13,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import override
+from typing import cast, override
 from unittest.mock import patch
 
 import yaml
@@ -159,6 +159,20 @@ class VmRestart(_VmCase):
                 self.fail("The restart run reported no native result line.")
             self.assertEqual(line.result_class, "succeeded", line.reason)
             self.assertTrue(restart.verify(shell, submitted.review))
+
+
+class AcceleratorTests(SimpleTestCase):
+    def test_an_unusable_kvm_device_falls_back_to_tcg(self) -> None:
+        with (
+            patch.object(vm, "_kvm_usable", return_value=False),
+            patch("platform.system", return_value="Linux"),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            self.assertEqual(vm.accelerator(), "tcg")
+
+    def test_an_explicit_accelerator_wins(self) -> None:
+        with patch.dict("os.environ", {"BARECTL_VM_ACCEL": "tcg"}, clear=True):
+            self.assertEqual(vm.accelerator(), "tcg")
 
 
 class CloudImagePinTests(SimpleTestCase):
@@ -316,6 +330,22 @@ class LaneCliTests(SimpleTestCase):
         self.assertEqual(options.image, Path("build/image.img"))
         self.assertEqual(options.arch, "arm64")
         self.assertEqual(options.ssh_port, 2222)
+
+    def test_boot_only_prints_diagnostics_without_tests(self) -> None:
+        options = vm_lane.arguments(["--boot-only"])
+        self.assertTrue(options.boot_only)
+        self.assertEqual(options.labels, [vm_lane.TEST_MODULE])
+
+    def test_boot_only_diagnostics_cover_cloud_init_listeners_and_journal(self) -> None:
+        class Machine:
+            def run(self, command: str, *, timeout: float = 60) -> tuple[int, str, str]:
+                return 0, f"output for {command}\n", ""
+
+        output = io.StringIO()
+        vm_lane._diagnostics(cast(vm.Vm, Machine()), output)
+        text = output.getvalue()
+        for label in ("cloud-init", "listeners", "failed units", "journal"):
+            self.assertIn(f"### {label}", text)
 
     def test_a_nonpositive_timeout_is_refused(self) -> None:
         with patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
