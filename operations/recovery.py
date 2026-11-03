@@ -1,26 +1,19 @@
-"""Restart the running units a package transaction's ``daemon-reload`` unbinds (#428).
+"""Restart the units a package transaction's daemon-reload unbinds (#428).
 
-A package transaction clears the loaded-execution metadata of every running unit, so the
-foundation's diagnostic PHP masters and each site's PHP master and proxy read as
-unverifiable on the next discovery even though they serve traffic. Both package-install
-bodies embed the one fixed shell below; it discovers the running units from systemd itself,
-restarts exactly the affected ones, and prints each restarted unit to the run's journal.
-The server's running units stay authoritative: Barectl writes no marker.
+docs/databases.md#restarting-units-after-the-package-transaction-428.
 """
 
 from typing import Final
 
-# The templates a package transaction's daemon-reload affects: the foundation's diagnostic
-# PHP masters, each site's PHP master and each site's proxy.
 UNIT_PATTERNS: Final = (
     "php-fpm@*.service",
     "php-fpm-site-*@*.service",
     "haproxy-site@*.service",
 )
 DETAIL: Final = (
-    "The running PHP masters (php-fpm@*.service), each site's PHP master "
-    "(php-fpm-site-*@*.service) and each site's proxy (haproxy-site@*.service), so discovery "
-    "still verifies their loaded state."
+    "The running units a package transaction's daemon-reload unbinds ("
+    + ", ".join(UNIT_PATTERNS)
+    + "), so discovery still verifies their loaded state."
 )
 POSTCONDITION: Final = (
     "Every running PHP master and site proxy was restarted after the package database "
@@ -29,7 +22,7 @@ POSTCONDITION: Final = (
 
 
 def shell() -> str:
-    """The fixed shell both package-install bodies run before they verify their state."""
+    """The fixed shell the package bodies run before they verify their state."""
     patterns = " | ".join(UNIT_PATTERNS)
     return f"""restart_affected_units() {{
   units=$(systemctl list-units --type=service --state=running --no-legend --plain) || return 1

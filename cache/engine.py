@@ -2,9 +2,9 @@
 
 One reviewed APT transaction installs Ubuntu's ``valkey-server`` at the version and size
 the review names (docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md).
-The body then stops and masks the distribution's shared unit, and the shared recovery shell
-restarts the running PHP masters and site proxies whose loaded execution evidence a package
-transaction's ``daemon-reload`` clears (#428). Per-site instances belong to #392/#393.
+The body then stops and masks the distribution's shared unit and restarts the units the
+transaction unbinds (#428, docs/object-cache.md#restarting-units-after-the-package-transaction-428).
+Per-site instances belong to #392/#393.
 """
 
 import hashlib

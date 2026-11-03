@@ -1,7 +1,8 @@
 #!/bin/sh
 # shellcheck shell=sh
 # docs/adr/0010-use-local-site-identities-for-database-access.md
-# Remove exactly the reviewed engine packages, keeping every database and data directory.
+# Remove exactly the reviewed engine packages, keeping every database and data directory,
+# then restart the running units the transaction's daemon-reload unbinds (#428).
 set -eu
 reported=0
 result() { reported=1; printf 'barectl-result %s\n' "$1"; }
@@ -39,6 +40,9 @@ status=0
 output=$(DEBIAN_FRONTEND=noninteractive apt-get -q -y remove $packages 2>&1 </dev/null) || status=$?
 printf '%s\n' "$output" | tail -c 120000
 [ "$status" -eq 0 ] || exit 2
+
+stage recover
+restart_affected_units || { result '{"class":"partial","reason":"database_reload"}'; exit 2; }
 
 stage verify
 absent=1

@@ -55,6 +55,8 @@ DOWNLOAD_CHUNK = 4 * 1024 * 1024
 BOOT_TIMEOUT = 600.0
 KVM_GET_API_VERSION = 0xAE00
 KVM_CREATE_VM = 0xAE01
+# The API version QEMU's KVM accelerator requires.
+KVM_API_VERSION = 12
 _MACHINES = {
     "x86_64": "amd64",
     "amd64": "amd64",
@@ -371,7 +373,7 @@ def _kvm_usable() -> bool:
     """Probe the KVM API: a readable device is not necessarily a usable one.
 
     Hosted runners expose ``/dev/kvm`` that opens yet refuses the ioctls QEMU issues,
-    so KVM is selected only when the API reports its version and can create a virtual
+    so KVM is selected only when the API reports version 12 and can create a virtual
     machine. Every descriptor the probe obtains is closed on every path.
     """
     try:
@@ -380,7 +382,8 @@ def _kvm_usable() -> bool:
         return False
     machine: int | None = None
     try:
-        fcntl.ioctl(device, KVM_GET_API_VERSION, 0)
+        if fcntl.ioctl(device, KVM_GET_API_VERSION, 0) != KVM_API_VERSION:
+            return False
         machine = fcntl.ioctl(device, KVM_CREATE_VM, 0)
         return True
     except OSError:

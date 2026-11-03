@@ -286,7 +286,11 @@ def host_architecture() -> str:
 
 
 def download(url: str, *, attempts: int = 8) -> bytes:
-    """Fetch a manifest entry, riding out a transient upstream 5xx or timeout."""
+    """Fetch a manifest entry, riding out a transient upstream outage.
+
+    docs/quality.md#the-local-mirror: HTTP 408, 429 and 5xx, a timeout and a connection
+    failure are outages and are retried; anything else raises ``MirrorError`` at once.
+    """
     last: Exception | None = None
     for attempt in range(attempts):
         try:
@@ -305,12 +309,16 @@ def download(url: str, *, attempts: int = 8) -> bytes:
 def _transient(error: BaseException) -> bool:
     """Whether an upstream failure may pass, rather than a file gone from the manifest.
 
-    docs/quality.md#the-local-mirror: a 5xx, 408 or 429 and any connection-level failure are
-    outages. Other HTTP responses, such as a removed file's 404 or 410, are real drift.
+    docs/quality.md#the-local-mirror names the rule. A DNS failure and any other permanent
+    error stay permanent, so drift can fail the job.
     """
     if isinstance(error, urllib.error.HTTPError):
         return error.code in {408, 429} or error.code >= 500
-    return True
+    if isinstance(error, (TimeoutError, ConnectionError)):
+        return True
+    if isinstance(error, urllib.error.URLError):
+        return isinstance(error.reason, (TimeoutError, ConnectionError))
+    return False
 
 
 def sha256(data: bytes) -> str:

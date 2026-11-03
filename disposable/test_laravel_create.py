@@ -94,10 +94,6 @@ class LaravelCreateCase(ScenarioTestCase):
             self.router(shell)
             apply_change(self, kinds.INSTALL, PreparationInputs("mariadb", git=True), timeout=180)
         self.assertIn("active", self.native("systemctl is-active mariadb.service"))
-        # A package transaction reloads systemd and clears the running foundation masters'
-        # loaded-execution metadata; restart them, as ordinary administration, so the site
-        # review's live protections are current again.
-        self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
 
     def repository(self) -> str:
         return f"git@{os.environ['BARECTL_FIXTURE_GIT_HOST']}:fixture.git"

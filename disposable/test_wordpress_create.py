@@ -92,7 +92,6 @@ class WordPressCreateCase(ScenarioTestCase):
             self.router(shell)
             apply_change(self, kinds.INSTALL, PreparationInputs("mariadb"), timeout=180)
         self.assertIn("active", self.native("systemctl is-active mariadb.service"))
-        self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
 
     def inputs(self) -> PreparationInputs:
         return PreparationInputs(

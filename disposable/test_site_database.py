@@ -30,6 +30,9 @@ RUNNING_UNITS = (
     f"haproxy-site@{IDENTIFIER}.service",
     f"php-fpm-site-php84@{IDENTIFIER}.service",
 )
+# The site proxy, the site's PHP master and the foundation's PHP 8.4 master must be running
+# when the install's recovery restarts them; the PHP 8.5 master may be absent.
+REQUIRED_UNITS = tuple(unit for unit in RUNNING_UNITS if unit != "php-fpm@php85.service")
 
 
 def write(test: ScenarioTestCase, shell: RemoteShell, path: str, content: str) -> None:
@@ -70,6 +73,10 @@ class SiteDatabaseCase(ScenarioTestCase):
                     f"systemctl show -p InvocationID --value {unit}"
                 ).strip()
         return running
+
+    def assert_recovery_subjects(self, before: dict[str, str]) -> None:
+        self.assertLessEqual(set(REQUIRED_UNITS), set(before), before)
+        self.assertLessEqual(set(before), set(RUNNING_UNITS), before)
 
     def bind(self, *, timeout: float = 120) -> ChangeReview:
         from databases import site
@@ -140,7 +147,7 @@ class SiteDatabaseMariaDB(SiteDatabaseCase):
         # before the site review's live protections are read again.
         self.create_site()
         before = self.invocations()
-        self.assertGreaterEqual(len(before), 3, before)
+        self.assert_recovery_subjects(before)
         with self.shell() as shell:
             apply_change(self, kinds.INSTALL, PreparationInputs("mariadb"), timeout=150)
         self.assertIn("active", self.native("systemctl is-active mariadb.service"))
@@ -309,7 +316,7 @@ class SiteDatabasePostgreSQL(SiteDatabaseCase):
         # before the site review's live protections are read again.
         self.create_site()
         before = self.invocations()
-        self.assertGreaterEqual(len(before), 3, before)
+        self.assert_recovery_subjects(before)
         with self.shell() as shell:
             apply_change(self, kinds.INSTALL, PreparationInputs("postgresql"), timeout=180)
         self.assertIn("active", self.native("systemctl is-active postgresql.service"))

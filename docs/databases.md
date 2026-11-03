@@ -35,8 +35,8 @@ Installing is one reviewed change:
 A package transaction runs `systemctl daemon-reload`, which clears the loaded execution
 metadata of running units. Without recovery, the foundation's diagnostic PHP masters and
 each site's PHP master and proxy read as unverifiable on the next discovery even though they
-serve traffic. The reviewed change therefore restarts exactly the running units it affects —
-`php-fpm@php84.service`, `php-fpm@php85.service`, and each site's
+serve traffic. The database-engine kind body therefore restarts exactly the running units it
+affects — `php-fpm@php84.service`, `php-fpm@php85.service`, and each site's
 `php-fpm-site-<runtime>@<id>.service` and `haproxy-site@<id>.service` — through the same
 fixed recovery shell the Valkey install uses ([object cache](object-cache.md#restarting-units-after-the-package-transaction-428)),
 and prints each restarted unit to the run's journal as `barectl-restarted <unit>`. Discovery
@@ -57,7 +57,8 @@ principal, database or password exists until a site has one.
 
 ## Remove a database engine (implemented, #378)
 
-**Remove** is a reviewed change that removes the engine's packages and stops its service.
+**Remove** is a reviewed change that removes the engine's packages, stops its service and
+has its kind body restart the units the package transaction unbinds.
 It is refused while the engine holds any database, so a site's data can never be stranded,
 and it never drops a database or deletes data itself. Removing an engine so the other one
 can be installed is ordinary administration; Barectl refuses to install the second engine

@@ -180,7 +180,7 @@ class InstallReviewTests(ControllerConfigTestCase):
         restarted = next(
             item["value"] for item in details if item["label"] == "Restarted after install"
         )
-        for unit in ("php-fpm@*.service", "php-fpm-site-*@*.service", "haproxy-site@*.service"):
+        for unit in recovery.UNIT_PATTERNS:
             self.assertIn(unit, restarted)
         self.assertEqual(draft.stages, engine.STAGES)
         self.assertIn("6379", " ".join(draft.postconditions))
