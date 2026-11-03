@@ -62,6 +62,14 @@ OLDEST_COMMAND: Final = (
     )
     + " | /usr/bin/head -n 1"
 )
+# One authorized command returns the oldest retained time and the bounded history, so a
+# discovery pays one exact-sudo authorization and one SSH execution instead of two.
+OLDEST_MARK: Final = "--barectl-jobs-oldest--"
+HISTORY_MARK: Final = "--barectl-jobs-history--"
+JOURNAL_COMMAND: Final = (
+    f"printf '%s\\n' '{OLDEST_MARK}'; {OLDEST_COMMAND}; "
+    f"printf '%s\\n' '{HISTORY_MARK}'; {HISTORY_COMMAND}"
+)
 
 RUNNING_NOT_READ = "Barectl could not read the change runs the server still holds."
 JOURNAL_NOT_READ = "Barectl could not read the server's record of finished changes."
@@ -194,14 +202,18 @@ def _running(shell: RemoteShell) -> tuple[tuple[ObservedChange, ...], str, str]:
 def _finished(
     shell: RemoteShell,
 ) -> tuple[tuple[ObservedChange, ...], str, str, datetime | None]:
-    result, denied = _journal(shell, HISTORY_COMMAND)
+    result, denied = _journal(shell, JOURNAL_COMMAND)
     if denied:
         return (), "access_denied", JOURNAL_DENIED, None
     if result.exit_status != 0:
         return (), "read_failed", JOURNAL_NOT_READ, None
-    rows, unreadable, counted = _parse(result.stdout)
+    split = _split(result.stdout)
+    if split is None:
+        return (), "unreadable", JOURNAL_UNREADABLE, None
+    oldest_text, history_text = split
+    rows, unreadable, counted = _parse(history_text)
     truncated = result.truncated or counted > HISTORY_LINES
-    oldest = _oldest(shell)
+    oldest = _oldest(oldest_text)
     if truncated:
         return tuple(rows), "truncated", JOURNAL_TRUNCATED, oldest
     if unreadable:
@@ -222,16 +234,30 @@ def _journal(shell: RemoteShell, command: str) -> tuple[CommandResult, bool]:
     return shell.run(native.privileged(argv, root=False)), False
 
 
-def _oldest(shell: RemoteShell) -> datetime | None:
-    """The oldest journal time the server still holds for Barectl's units."""
-    result, _ = _journal(shell, OLDEST_COMMAND)
-    if result.exit_status != 0 or not result.stdout.strip():
-        return None
+def _split(text: str) -> tuple[str, str] | None:
+    """The oldest line and the history lines from the one combined read."""
+    lines = text.splitlines()
     try:
-        value = json.loads(result.stdout.splitlines()[0])
+        oldest = lines.index(OLDEST_MARK)
+        history = lines.index(HISTORY_MARK)
     except ValueError:
         return None
-    return _timestamp(value.get("__REALTIME_TIMESTAMP")) if isinstance(value, dict) else None
+    if not oldest < history:
+        return None
+    return "\n".join(lines[oldest + 1 : history]), "\n".join(lines[history + 1 :])
+
+
+def _oldest(text: str) -> datetime | None:
+    """The oldest journal time the server still holds, from the combined read."""
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except ValueError:
+            return None
+        return _timestamp(value.get("__REALTIME_TIMESTAMP")) if isinstance(value, dict) else None
+    return None
 
 
 @dataclass

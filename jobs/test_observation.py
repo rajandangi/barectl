@@ -170,9 +170,7 @@ class RecordedChangeJobsTests(SimpleTestCase):
             [
                 native.RUNNING_STATES,
                 "id -u",
-                observation.HISTORY_COMMAND,
-                "id -u",
-                observation.OLDEST_COMMAND,
+                observation.JOURNAL_COMMAND,
             ],
         )
 
@@ -187,6 +185,6 @@ class PrivilegedReadTests(SimpleTestCase):
         )
         reading = observation.read(replay)
         self.assertEqual(reading.coverage[0].state, "complete")
-        history = ["/usr/bin/sh", "-c", observation.HISTORY_COMMAND]
-        self.assertIn(native.authorization(history), replay.commands)
-        self.assertIn(native.privileged(history, root=False), replay.commands)
+        read = ["/usr/bin/sh", "-c", observation.JOURNAL_COMMAND]
+        self.assertIn(native.authorization(read), replay.commands)
+        self.assertIn(native.privileged(read, root=False), replay.commands)
