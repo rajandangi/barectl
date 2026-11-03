@@ -116,7 +116,7 @@ One pure projection (`automation/status.py`) turns native evidence into the stat
 
 Queue workers use the same projection with their own states: Off, On and running, On and restarting after a crash, Stopped after repeated crashes (systemd's start limit), Paused by a change, Off during maintenance and Could not confirm.
 
-A deliberate Off is not an alarm. Paused, off-during-maintenance, failed, timed out, skipped, no-cron and unconfirmed states appear in the site's Overview line and in the server's Needs attention list with one next action: turning the work back on is the ordinary Scheduled tasks or Queue workers change, which asks for the state it should have and preselects nothing. Both roles share this projection; the WordPress-only **No cron is running** state appears only for the WordPress role.
+A deliberate Off is not an alarm. Paused, off-during-maintenance, failed, timed out, skipped, no-cron and unconfirmed states appear in the site's Overview line and in the server's Needs attention list with one next action: turning the work back on is the ordinary Scheduled tasks or Queue workers change, which asks for the state it should have and preselects nothing. Both roles share this projection; the WordPress-only **No cron is running** state appears only for the WordPress role. Jobs shows these same states as Automatic work beside the next run, marks the attention states in Needs attention, and links each row to the site's Settings entry without adding any control.
 
 ## Discovery and reconstruction
 

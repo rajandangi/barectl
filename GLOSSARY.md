@@ -409,7 +409,7 @@ Past activity evidenced by logs and records that the server's operating system a
 _Avoid_: Discovery history, complete audit trail
 
 **Jobs view**:
-A managed server's dashboard section for supported running work, schedules, background services and retained native server history. It is distinct from Activity's private Barectl records and does not list individual application queue items. The Barectl changes provider is implemented; later providers land with their owning phases ([#284](https://github.com/rajandangi/barectl/issues/284)).
+A managed server's dashboard section for supported running work, schedules, background services and retained native server history. It is distinct from Activity's private Barectl records and does not list individual application queue items. Its Barectl changes provider and its Automatic work provider, which lists each site's scheduled tasks, queue workers and object cache from Phase C's projection, are implemented; backups land with Phase D ([#284](https://github.com/rajandangi/barectl/issues/284)).
 _Avoid_: Activity, complete audit trail, application job history
 
 **Automation slice**:

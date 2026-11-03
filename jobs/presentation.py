@@ -19,6 +19,7 @@ from operations import engine
 from operations.models import ChangeRun
 from servers.models import Server
 
+from .automatic import AutomaticRow, automatic_work
 from .filters import Filtered, Filters, Selection, filter_recent
 from .models import Coverage
 from .observation import ObservedChange, ProviderCoverage
@@ -32,8 +33,11 @@ EMPTY = (
     "Jobs shows what the server itself says about Barectl's changes. Run a check to read "
     "it for the first time."
 )
-NO_OBSERVATION = "No Jobs observations have been read yet. Run a check to read them."
-AUTOMATIC_EMPTY = "Automatic work will appear here when a later phase reads it."
+NO_OBSERVATION = "No Barectl change observations have been read yet. Run a check to read them."
+ATTENTION_EMPTY = "No Barectl changes or automatic work need attention."
+AUTOMATIC_ATTENTION_EMPTY = "No automatic work needs attention."
+AUTOMATIC_EMPTY = "No scheduled tasks, queue workers or object cache were found on this server."
+NOT_READ = "Automatic work is read by a full check of this server. Run a check to read it."
 RECENT_EMPTY = "No available Barectl change results."
 FILTERED_EMPTY = "No available Barectl change results match these filters."
 
@@ -92,7 +96,7 @@ class JobRow:
 class JobGroup:
     key: Group
     title: str
-    rows: tuple[JobRow, ...]
+    rows: tuple[JobRow | AutomaticRow, ...]
     empty: str = ""
 
 
@@ -129,13 +133,44 @@ def present(
         return JobsView(None, may_view_changes, True, empty=EMPTY, zone=displayed)
     standing = snapshot.collected.standing
     target = standing is not None and standing.standing == Standing.TARGET_STACK
-    if not may_view_changes:
-        return JobsView(snapshot.collected_at, False, target, zone=displayed)
     if not target:
-        return JobsView(snapshot.collected_at, True, False, zone=displayed)
+        return JobsView(snapshot.collected_at, may_view_changes, False, zone=displayed)
     observation = snapshot.collected.jobs
-    if observation.outcome != ObservationOutcome.OBSERVED:
-        return JobsView(snapshot.collected_at, True, True, empty=NO_OBSERVATION, zone=displayed)
+    full_read = observation.outcome == ObservationOutcome.OBSERVED
+    work = automatic_work(snapshot, server)
+    automatic_empty = work.empty if full_read or work.warnings else NOT_READ
+    automatic = JobGroup("automatic", "Automatic work", work.rows, automatic_empty)
+    attention = tuple(row for row in work.rows if row.needs_attention)
+    automatic_notices = tuple(CoverageNotice(text=text) for text in work.warnings)
+    automatic_groups: tuple[JobGroup, ...] = (
+        *(
+            (JobGroup("attention", "Needs attention", attention, AUTOMATIC_ATTENTION_EMPTY),)
+            if attention
+            else ()
+        ),
+        automatic,
+    )
+    if not may_view_changes:
+        return JobsView(
+            last_checked=snapshot.collected_at,
+            may_view_changes=False,
+            target_stack=True,
+            groups=automatic_groups,
+            notices=automatic_notices,
+            automatic_empty=automatic_empty,
+            zone=displayed,
+        )
+    if not full_read:
+        return JobsView(
+            last_checked=snapshot.collected_at,
+            may_view_changes=True,
+            target_stack=True,
+            groups=automatic_groups,
+            notices=automatic_notices,
+            empty=NO_OBSERVATION,
+            automatic_empty=automatic_empty,
+            zone=displayed,
+        )
     reading = observation.value
     rows = _rows(reading.changes, server)
     filtered: Filtered[JobRow] = filter_recent(
@@ -155,8 +190,8 @@ def present(
             JobGroup(
                 "attention",
                 "Needs attention",
-                tuple(row for row in rows if row.needs_attention),
-                "No Barectl changes need attention.",
+                attention + tuple(row for row in rows if row.needs_attention),
+                ATTENTION_EMPTY,
             ),
             JobGroup(
                 "running",
@@ -164,7 +199,7 @@ def present(
                 tuple(row for row in rows if row.running),
                 "No Barectl change was running when the server was last checked.",
             ),
-            JobGroup("automatic", "Automatic work", ()),
+            automatic,
             JobGroup(
                 "recent",
                 "Recent results",
@@ -172,7 +207,8 @@ def present(
                 FILTERED_EMPTY if selected.active else RECENT_EMPTY,
             ),
         ),
-        notices=notices,
+        notices=automatic_notices + notices,
+        automatic_empty=automatic_empty,
         zone=displayed,
         filters=filtered.filters,
     )

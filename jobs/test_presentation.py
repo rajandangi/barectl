@@ -6,10 +6,16 @@ from typing import override
 from django.test import TestCase
 from django.utils import timezone
 
+from automation.observation import ObservedSchedule
+from automation.status import ScheduleStatus
+from automation.worker_observation import ObservedWorker
+from automation.worker_status import WorkerStatus
+from discovery.snapshot import ObservedCache
 from operations.activity_testing import record_change, record_run
 from servers.models import Server
 
 from . import presentation
+from .automatic import AutomaticRow
 from .filters import Selection
 from .models import Coverage
 from .observation import ObservedChange, ProviderCoverage
@@ -27,6 +33,14 @@ class JobsPresentationTests(TestCase):
         self,
         *changes: ObservedChange,
         coverage: tuple[ProviderCoverage, ...] = (),
+        schedules: tuple[ObservedSchedule, ...] = (),
+        workers: tuple[ObservedWorker, ...] = (),
+        cache: tuple[ObservedCache, ...] = (),
+        automation_warning: str = "",
+        workers_warning: str = "",
+        cache_warning: str = "",
+        may_view_changes: bool = True,
+        full_read: bool = True,
         selection: Selection | None = None,
         zone: str | None = None,
     ) -> presentation.JobsView:
@@ -39,12 +53,20 @@ class JobsPresentationTests(TestCase):
 
         from .observation import JobReading
 
+        def observed[T](value: T, warning: str) -> Observation[T]:
+            if warning:
+                return Observation(ObservationOutcome.INACCESSIBLE, (), warning, value)
+            return Observation(ObservationOutcome.OBSERVED, (), "", value)
+
         collected = replace(
             COLLECTED,
             components=(),
             standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
+            automation=observed(schedules, automation_warning),
+            workers=observed(workers, workers_warning),
+            cache=observed(cache, cache_warning),
             jobs=Observation(
-                ObservationOutcome.OBSERVED,
+                ObservationOutcome.OBSERVED if full_read else ObservationOutcome.ABSENT,
                 ("journalctl",),
                 "",
                 JobReading(
@@ -57,10 +79,22 @@ class JobsPresentationTests(TestCase):
         return presentation.present(
             snapshot,
             self.server,
-            may_view_changes=True,
+            may_view_changes=may_view_changes,
             selection=selection,
             zone=resolve_zone(zone),
         )
+
+    def change_row(self, group: presentation.JobGroup, index: int = 0) -> presentation.JobRow:
+        row = group.rows[index]
+        if not isinstance(row, presentation.JobRow):
+            self.fail("Expected a change row.")
+        return row
+
+    def automatic_row(self, group: presentation.JobGroup, index: int = 0) -> AutomaticRow:
+        row = group.rows[index]
+        if not isinstance(row, AutomaticRow):
+            self.fail("Expected an automatic work row.")
+        return row
 
     def test_a_finished_change_is_named_by_its_kind_and_sites(self) -> None:
         view = self.view(
@@ -153,7 +187,7 @@ class JobsPresentationTests(TestCase):
         invocation = "1" * 32
         run = record_run(record_change(self.server, kind_slug="create_http_site"))
         type(run).objects.filter(pk=run.pk).update(unit_name=units, invocation_id=invocation)
-        linked = (
+        linked = self.change_row(
             self.view(
                 change(
                     unit=units,
@@ -162,14 +196,12 @@ class JobsPresentationTests(TestCase):
                     sites=("alpha",),
                     finished_at=self.now,
                 )
-            )
-            .groups[-1]
-            .rows[0]
+            ).groups[-1]
         )
         self.assertEqual(linked.run_url, f"/runs/{run.pk}/")
         self.assertFalse(linked.other_controller)
 
-        other = (
+        other = self.change_row(
             self.view(
                 change(
                     unit=units,
@@ -177,9 +209,7 @@ class JobsPresentationTests(TestCase):
                     kind_slug="create_http_site",
                     finished_at=self.now,
                 )
-            )
-            .groups[-1]
-            .rows[0]
+            ).groups[-1]
         )
         self.assertEqual(other.run_url, "")
         self.assertTrue(other.other_controller)
@@ -232,42 +262,103 @@ class JobsPresentationTests(TestCase):
             self.fail("The notice kept the oldest held time.")
         self.assertEqual(oldest.date(), (self.now - timedelta(days=10)).date())
 
-    def test_without_change_permission_no_rows_or_counts_are_exposed(self) -> None:
-        from dataclasses import replace
-
-        from bootstrap.standing import HostJudgment, Standing
-        from discovery.fakes import COLLECTED
-        from discovery.models import ObservationOutcome
-        from discovery.snapshot import Observation, Snapshot
-
-        from .observation import JobReading
-
-        collected = replace(
-            COLLECTED,
-            standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
-            jobs=Observation(
-                ObservationOutcome.OBSERVED,
-                (),
-                "",
-                JobReading(
-                    (
-                        change(
-                            unit="barectl-apply-" + "a" * 32 + ".service",
-                            finished_at=self.now,
-                        ),
-                    ),
-                    (ProviderCoverage("barectl_changes", Coverage.COMPLETE),),
-                ),
+    def test_without_change_permission_no_change_rows_or_counts_are_exposed(self) -> None:
+        view = self.view(
+            change(
+                unit="barectl-apply-" + "a" * 32 + ".service",
+                finished_at=self.now,
             ),
-        )
-        view = presentation.present(
-            Snapshot(collected, self.now, "web.example.com"),
-            self.server,
             may_view_changes=False,
         )
         self.assertFalse(view.may_view_changes)
-        self.assertEqual(view.groups, ())
+        self.assertEqual([group.key for group in view.groups], ["automatic"])
+        self.assertEqual(view.groups[0].rows, ())
         self.assertEqual(view.notices, ())
+        self.assertIsNone(view.filters)
+
+    def test_without_change_permission_automatic_work_is_still_shown(self) -> None:
+        from .testing import scheduled
+
+        view = self.view(
+            change(
+                unit="barectl-apply-" + "a" * 32 + ".service",
+                finished_at=self.now,
+            ),
+            schedules=(scheduled(),),
+            may_view_changes=False,
+        )
+        self.assertEqual([group.key for group in view.groups], ["automatic"])
+        row = self.automatic_row(view.groups[0])
+        self.assertEqual(row.state, "On, the last run succeeded")
+        self.assertEqual(row.identifier, "alpha")
+        self.assertEqual([group for group in view.groups if group.key == "recent"], [])
+
+    def test_automatic_work_is_the_third_group_and_keeps_phase_c_wording(self) -> None:
+        from .testing import scheduled
+
+        view = self.view(schedules=(scheduled(),))
+        self.assertEqual(
+            [group.key for group in view.groups],
+            ["attention", "running", "automatic", "recent"],
+        )
+        automatic = view.groups[2]
+        self.assertEqual(automatic.title, "Automatic work")
+        row = self.automatic_row(automatic)
+        self.assertEqual(row.identifier, "alpha")
+        self.assertEqual(row.work_type, "scheduled_task")
+        self.assertEqual(row.state, "On, the last run succeeded")
+        self.assertEqual(
+            row.link_url, f"/servers/{self.server.pk}/sites/alpha/settings/#scheduled-tasks"
+        )
+
+    def test_a_crash_looping_worker_is_in_needs_attention_with_the_overview_sentence(
+        self,
+    ) -> None:
+        from .testing import worker
+
+        view = self.view(workers=(worker(status=WorkerStatus.STOPPED_AFTER_CRASHES),))
+        attention = view.groups[0]
+        row = self.automatic_row(attention)
+        self.assertTrue(row.needs_attention)
+        self.assertEqual(row.summary, "Queue workers for alpha stopped after repeated crashes.")
+        automatic = next(group for group in view.groups if group.key == "automatic")
+        self.assertEqual(self.automatic_row(automatic).state, "Stopped after repeated crashes")
+
+    def test_a_deliberately_off_timer_is_not_flagged(self) -> None:
+        from .testing import scheduled
+
+        view = self.view(schedules=(scheduled(status=ScheduleStatus.OFF),))
+        self.assertEqual(view.groups[0].rows, ())
+        row = self.automatic_row(view.groups[2])
+        self.assertEqual(row.state, "Off")
+        self.assertFalse(row.needs_attention)
+
+    def test_a_missing_next_elapse_is_unknown(self) -> None:
+        from .testing import scheduled
+
+        view = self.view(schedules=(scheduled(next_elapse_us=0),))
+        row = self.automatic_row(view.groups[2])
+        self.assertIsNone(row.next_run_at)
+        self.assertTrue(row.next_run_unknown)
+
+    def test_an_unreadable_provider_warns_and_never_claims_there_is_no_work(self) -> None:
+        view = self.view(automation_warning="The scheduled tasks could not be read.")
+        self.assertEqual(view.groups[0].rows, ())
+        self.assertEqual(view.groups[2].rows, ())
+        self.assertEqual(
+            [notice.text for notice in view.notices],
+            ["The scheduled tasks could not be read."],
+        )
+        self.assertEqual(view.automatic_empty, "")
+
+    def test_a_partial_check_does_not_claim_there_is_no_automatic_work(self) -> None:
+        view = self.view(full_read=False)
+        self.assertEqual([group.key for group in view.groups], ["automatic"])
+        automatic = view.groups[0]
+        self.assertEqual(automatic.rows, ())
+        self.assertEqual(automatic.empty, presentation.NOT_READ)
+        self.assertNotIn("were found", automatic.empty)
+        self.assertIn("No Barectl change observations", view.empty)
 
     def test_a_server_off_the_target_stack_gets_one_sentence_instead_of_rows(self) -> None:
         from dataclasses import replace
@@ -342,8 +433,9 @@ class JobsPresentationTests(TestCase):
             ),
         )
         recent = view.groups[-1]
+        rows = [self.change_row(recent, index) for index in range(len(recent.rows))]
         self.assertEqual(
-            [row.finished_at for row in recent.rows],
+            [row.finished_at for row in rows],
             [self.now, self.now - timedelta(hours=1), self.now - timedelta(hours=2)],
         )
 
@@ -391,40 +483,3 @@ class JobsPresentationTests(TestCase):
             else [],
             ["30d"],
         )
-
-    def test_without_change_permission_there_are_no_filter_options_or_counts(self) -> None:
-        from dataclasses import replace
-
-        from bootstrap.standing import HostJudgment, Standing
-        from discovery.fakes import COLLECTED
-        from discovery.models import ObservationOutcome
-        from discovery.snapshot import Observation, Snapshot
-
-        from .observation import JobReading
-
-        collected = replace(
-            COLLECTED,
-            standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
-            jobs=Observation(
-                ObservationOutcome.OBSERVED,
-                (),
-                "",
-                JobReading(
-                    (
-                        change(
-                            unit="barectl-apply-" + "a" * 32 + ".service",
-                            finished_at=self.now,
-                        ),
-                    ),
-                    (ProviderCoverage("barectl_changes", Coverage.COMPLETE),),
-                ),
-            ),
-        )
-        view = presentation.present(
-            Snapshot(collected, self.now, "web.example.com"),
-            self.server,
-            may_view_changes=False,
-        )
-        self.assertIsNone(view.filters)
-        self.assertEqual(view.groups, ())
-        self.assertEqual(view.notices, ())

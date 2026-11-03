@@ -7,12 +7,17 @@ from typing import Final
 
 from django.utils import timezone
 
+from automation.observation import ObservedSchedule
+from automation.status import ScheduleStatus
+from automation.worker_observation import ObservedWorker
+from automation.worker_status import WorkerStatus
+from automation.workers import WorkerDefinition
 from bootstrap.standing import HostJudgment, Standing
 from discovery import ssh
 from discovery.fakes import COLLECTED, HOST_KEY, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.recorded import Recorded, ReplayShell, Transcript
-from discovery.snapshot import Observation, save_snapshot
+from discovery.snapshot import Observation, ObservedCache, save_snapshot
 from operations import native
 from servers.models import Server
 
@@ -63,22 +68,47 @@ def record_jobs(
     changes: tuple[ObservedChange, ...] = (),
     coverage: tuple[ProviderCoverage, ...] | None = None,
     collected_at: datetime | None = None,
+    schedules: tuple[ObservedSchedule, ...] = (),
+    workers: tuple[ObservedWorker, ...] = (),
+    cache: tuple[ObservedCache, ...] = (),
+    automation_warning: str = "",
+    workers_warning: str = "",
+    cache_warning: str = "",
 ) -> None:
     """A target-stack snapshot whose Jobs observation is ``changes``."""
     record_reading(
         server,
         JobReading(changes, coverage if coverage is not None else evidence()),
         collected_at=collected_at,
+        schedules=schedules,
+        workers=workers,
+        cache=cache,
+        automation_warning=automation_warning,
+        workers_warning=workers_warning,
+        cache_warning=cache_warning,
     )
 
 
 def record_reading(
-    server: Server, reading: JobReading, *, collected_at: datetime | None = None
+    server: Server,
+    reading: JobReading,
+    *,
+    collected_at: datetime | None = None,
+    schedules: tuple[ObservedSchedule, ...] = (),
+    workers: tuple[ObservedWorker, ...] = (),
+    cache: tuple[ObservedCache, ...] = (),
+    automation_warning: str = "",
+    workers_warning: str = "",
+    cache_warning: str = "",
 ) -> None:
+    source = ("/etc/systemd/system",)
     collected = replace(
         COLLECTED,
         components=(),
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
+        automation=_observed(schedules, automation_warning, source),
+        workers=_observed(workers, workers_warning, source),
+        cache=_observed(cache, cache_warning, ("/etc/valkey", "/var/www")),
         jobs=Observation(ObservationOutcome.OBSERVED, ("journalctl",), "", reading),
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
@@ -86,6 +116,61 @@ def record_reading(
 
     attach_current_connection(server, attempt)
     save_snapshot(attempt, collected, collected_at or timezone.now())
+
+
+def _observed[T](
+    value: tuple[T, ...], warning: str, source: tuple[str, ...]
+) -> Observation[tuple[T, ...]]:
+    if warning:
+        return Observation(ObservationOutcome.INACCESSIBLE, source, warning, ())
+    return Observation(ObservationOutcome.OBSERVED, source, "", value)
+
+
+def scheduled(
+    *,
+    identifier: str = "alpha",
+    role: str = "wpcron",
+    status: ScheduleStatus = ScheduleStatus.SUCCEEDED,
+    next_elapse_us: int = 1_762_000_000_000_000,
+) -> ObservedSchedule:
+    return ObservedSchedule(
+        identifier=identifier,
+        role=role,
+        status=status,
+        next_elapse_us=next_elapse_us,
+        installed=status != ScheduleStatus.OFF,
+    )
+
+
+def worker(
+    *,
+    identifier: str = "alpha",
+    status: WorkerStatus = WorkerStatus.RUNNING,
+    definition: WorkerDefinition | None = None,
+) -> ObservedWorker:
+    return ObservedWorker(
+        identifier=identifier,
+        status=status,
+        definition=definition or WorkerDefinition(("default",), 2, 60),
+        processes=2,
+        active_processes=2 if status == WorkerStatus.RUNNING else 0,
+        installed=True,
+        enabled=status != WorkerStatus.OFF,
+    )
+
+
+def cache(
+    *,
+    identifier: str = "alpha",
+    state: str = "on",
+    problem: str = "",
+) -> ObservedCache:
+    return ObservedCache(
+        identifier,
+        state,
+        64 if state != "off" else None,
+        problem,
+    )
 
 
 BOOT: Final = "0f7a3c1e-6f4a-4a09-9f9f-3a0a9a9a9a9a"

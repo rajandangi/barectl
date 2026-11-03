@@ -139,6 +139,7 @@ if TYPE_CHECKING:
     from disposable.test_vm_lane import VmReboot, VmRestart
     from disposable.test_wordpress_create import WordPressCreateMariaDB
     from jobs.apps import JobsConfig
+    from jobs.automatic import AutomaticRow
     from jobs.models import Coverage
     from jobs.presentation import JobRow, JobsView
     from laravel import configuration as laravel_configuration
@@ -657,3 +658,5 @@ if TYPE_CHECKING:
     # Server Settings > Backup storage renders the panel's provider label in its template.
     _backup_storage_panel = BackupStoragePanel(False, False, "", "", "", "", "", "", False, (), "")
     _backup_storage_label = _backup_storage_panel.provider_label
+    # Jobs' template branches on the automatic-row marker to render work rows differently.
+    _automatic_row_marker = AutomaticRow("", "", "", "", "").is_automatic
