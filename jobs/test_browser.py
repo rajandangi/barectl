@@ -19,7 +19,18 @@ from operations.activity_testing import record_change, record_run
 from operations.models import ChangeRun
 from servers.models import Server
 
-from .testing import cache, change, record_jobs, scheduled, worker
+from .testing import (
+    backup,
+    cache,
+    change,
+    record_jobs,
+    scheduled,
+    timer,
+    worker,
+)
+from .testing import (
+    run as backup_run,
+)
 
 
 @tag("browser")
@@ -83,6 +94,20 @@ class JobsBrowserTests(BrowserTestCase):
             schedules=(scheduled(),),
             workers=(worker(identifier="beta", status=WorkerStatus.STOPPED_AFTER_CRASHES),),
             cache=(cache(),),
+            backups=(
+                backup(
+                    runs=(
+                        backup_run(at=now, offsite="failed"),
+                        backup_run(
+                            kind="cleanup",
+                            location="onsite",
+                            at=now - timedelta(minutes=5),
+                            onsite=(1, 2, 0, 0),
+                        ),
+                    ),
+                    timers=(timer(),),
+                ),
+            ),
         )
         run = record_run(record_change(self.server, kind_slug="create_http_site"))
         ChangeRun.objects.filter(pk=run.pk).update(
@@ -118,6 +143,17 @@ class JobsBrowserTests(BrowserTestCase):
             "href",
             f"/servers/{self.server.pk}/sites/alpha/settings/#scheduled-tasks",
         )
+        expect(page.get_by_text("Backup schedule").first).to_be_visible()
+        expect(page.get_by_text("On", exact=True).first).to_be_visible()
+        backup_row = page.locator("li.barectl-job-row", has_text="Offsite storage").first
+        expect(backup_row).to_be_visible()
+        expect(backup_row).to_contain_text("On this server")
+        expect(backup_row).to_contain_text("Copy failed")
+        expect(page.get_by_role("link", name="Open Backups").first).to_have_attribute(
+            "href",
+            f"/servers/{self.server.pk}/sites/alpha/backups/#backups-heading",
+        )
+        expect(page.get_by_text("Saved here, offsite copy failed.").first).to_be_visible()
         self.assert_no_native_terms()
         page.set_viewport_size({"width": 320, "height": 740})
         self.assertEqual(

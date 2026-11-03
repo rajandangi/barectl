@@ -12,6 +12,7 @@ from automation.status import ScheduleStatus
 from automation.worker_observation import ObservedWorker
 from automation.worker_status import WorkerStatus
 from automation.workers import WorkerDefinition
+from backups.observation import BackupRun, BackupTimer, ObservedBackup, OffsiteStorage
 from bootstrap.standing import HostJudgment, Standing
 from discovery import ssh
 from discovery.fakes import COLLECTED, HOST_KEY, record_attempt
@@ -74,6 +75,8 @@ def record_jobs(
     automation_warning: str = "",
     workers_warning: str = "",
     cache_warning: str = "",
+    backups: tuple[ObservedBackup, ...] = (),
+    backups_warning: str = "",
 ) -> None:
     """A target-stack snapshot whose Jobs observation is ``changes``."""
     record_reading(
@@ -86,6 +89,8 @@ def record_jobs(
         automation_warning=automation_warning,
         workers_warning=workers_warning,
         cache_warning=cache_warning,
+        backups=backups,
+        backups_warning=backups_warning,
     )
 
 
@@ -100,6 +105,8 @@ def record_reading(
     automation_warning: str = "",
     workers_warning: str = "",
     cache_warning: str = "",
+    backups: tuple[ObservedBackup, ...] = (),
+    backups_warning: str = "",
 ) -> None:
     source = ("/etc/systemd/system",)
     collected = replace(
@@ -110,6 +117,9 @@ def record_reading(
         workers=_observed(workers, workers_warning, source),
         cache=_observed(cache, cache_warning, ("/etc/valkey", "/var/www")),
         jobs=Observation(ObservationOutcome.OBSERVED, ("journalctl",), "", reading),
+        backups=_observed(
+            backups, backups_warning, ("/var/lib/barectl-backups", "/etc/barectl/backups")
+        ),
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
     from sites.ui_testing import attach_current_connection
@@ -170,6 +180,86 @@ def cache(
         state,
         64 if state != "off" else None,
         problem,
+    )
+
+
+def run(
+    *,
+    kind: str = "capture",
+    result_class: str = "succeeded",
+    reason: str = "",
+    at: datetime | None = None,
+    point: str = "0123456789abcdef",
+    scope: str = "database",
+    origin: str = "scheduled",
+    snapshots: int = 1,
+    size: int = 4096,
+    offsite: str = "",
+    location: str = "",
+    checked: int = 0,
+    subset: str = "",
+    onsite: tuple[int, int, int, int] | None = None,
+    offsite_counts: tuple[int, int, int, int] | None = None,
+) -> BackupRun:
+    from backups.observation import CleanupCounts
+
+    def counts(values: tuple[int, int, int, int] | None) -> CleanupCounts | None:
+        return CleanupCounts(*values) if values is not None else None
+
+    return BackupRun(
+        kind,
+        result_class,
+        reason,
+        (at or timezone.now()).isoformat(),
+        point,
+        scope,
+        origin,
+        snapshots,
+        size,
+        offsite,
+        location,
+        checked,
+        subset,
+        counts(onsite),
+        counts(offsite_counts),
+    )
+
+
+def timer(
+    *,
+    work: str = "backup",
+    location: str = "",
+    on: bool = True,
+    next_elapse_us: int = 1_762_000_000_000_000,
+    last_trigger_us: int = 0,
+) -> BackupTimer:
+    from backups.observation import BackupTimer
+
+    return BackupTimer(work, location, on, next_elapse_us, last_trigger_us)
+
+
+def backup(
+    *,
+    identifier: str = "alpha",
+    enabled: bool = True,
+    runs: tuple[BackupRun, ...] = (),
+    timers: tuple[BackupTimer, ...] = (),
+    offsite: OffsiteStorage | None = None,
+) -> ObservedBackup:
+    return ObservedBackup(
+        identifier,
+        "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1" if enabled else "",
+        enabled,
+        enabled,
+        (),
+        True,
+        "",
+        None,
+        offsite,
+        None,
+        (),
+        runs,
+        timers,
     )
 
 

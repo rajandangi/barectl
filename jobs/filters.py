@@ -40,6 +40,18 @@ RESULT_CHOICES: Final = (
     ("unconfirmed", "Could not confirm", ""),
 )
 _RESULT_KEYS: Final = {result_class: key for key, _, result_class in RESULT_CHOICES}
+# Backup runs are Recent results too, so Type of work can narrow them (#286).
+BACKUP_WORK_LABELS: Final = {
+    "backup": "Backup",
+    "backup_copy": "Offsite copy",
+    "backup_check": "Backup check",
+    "backup_cleanup": "Backup cleanup",
+}
+
+
+def _work_label(slug: str) -> str:
+    kind = engine.kind_of(slug)
+    return kind.label if kind is not None else BACKUP_WORK_LABELS.get(slug, slug)
 
 
 class Filterable(Protocol):
@@ -79,7 +91,7 @@ class Selection:
         if site and not site_names.valid_identifier(site):
             site = ""
         work = query.get("work", "").strip()
-        if work and engine.kind_of(work) is None:
+        if work and engine.kind_of(work) is None and work not in BACKUP_WORK_LABELS:
             work = ""
         result = query.get("result", "").strip()
         if result and result not in {key for key, _, _ in RESULT_CHOICES}:
@@ -184,13 +196,14 @@ def _site_options(rows: Sequence[Filterable], selection: Selection) -> tuple[Opt
 def _work_options(rows: Sequence[Filterable], selection: Selection) -> tuple[Option, ...]:
     counts: dict[str, int] = {}
     for row in rows:
-        if row.kind_slug and engine.kind_of(row.kind_slug) is not None:
+        if row.kind_slug and (
+            engine.kind_of(row.kind_slug) is not None or row.kind_slug in BACKUP_WORK_LABELS
+        ):
             counts[row.kind_slug] = counts.get(row.kind_slug, 0) + 1
-    options: list[Option] = []
-    for slug, count in counts.items():
-        kind = engine.kind_of(slug)
-        if kind is not None:
-            options.append(Option(slug, kind.label, count, slug == selection.work))
+    options = [
+        Option(slug, _work_label(slug), count, slug == selection.work)
+        for slug, count in counts.items()
+    ]
     options.sort(key=lambda option: option.label)
     return tuple(options)
 

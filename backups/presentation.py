@@ -10,7 +10,13 @@ from discovery.snapshot import CollectedSnapshot, ObservedSite
 
 from . import check, convention, kit
 from .models import BackupCheck, BackupSchedule
-from .observation import IntegrityFinding, ObservedBackup
+from .observation import (
+    BackupResult,
+    CleanupCounts,
+    IntegrityFinding,
+    ObservedBackup,
+    OffsiteCopy,
+)
 
 SCOPE_LABELS = {
     "database": "Database only",
@@ -159,10 +165,16 @@ def _label(value: datetime | None) -> str:
     return timezone.localtime(value).strftime("%-d %b %Y, %H:%M")
 
 
-def last_view(backup: ObservedBackup | None) -> LastBackupView | None:  # noqa: C901 - one result
+def last_view(backup: ObservedBackup | None) -> LastBackupView | None:
     if backup is None or backup.last is None:
         return None
-    result = backup.last
+    return result_view(backup.last, backup.copy)
+
+
+def result_view(  # noqa: C901 - one result
+    result: BackupResult, copy: OffsiteCopy | None = None
+) -> LastBackupView:
+    """One safe result's plain sentence, shared by the section and Jobs (#286)."""
     at = _when(result.at)
     scope = SCOPE_LABELS.get(result.scope, "Database only")
     if result.reason.startswith("restore_"):
@@ -194,7 +206,7 @@ def last_view(backup: ObservedBackup | None) -> LastBackupView | None:  # noqa: 
             else "The database dump finished and its recovery point is kept here."
         )
         if result.offsite == "failed" or (
-            backup.copy is not None and backup.copy.point == result.point and not backup.copy.copied
+            copy is not None and copy.point == result.point and not copy.copied
         ):
             return LastBackupView(
                 "Saved here, offsite copy failed.",
@@ -263,6 +275,8 @@ def _result_reason(reason: str) -> str:
         "backup_offsite": (
             "The onsite recovery point is saved, but the offsite copy did not finish."
         ),
+        "cleanup_clock": "The server's clock was not synchronized, so cleanup did not run.",
+        "evidence": "The server's backup setup could not be read, so nothing ran.",
         "schedule_timer": "Systemd did not report the new backup timer as active.",
         "schedule_units": "The backup schedule's units are not in the reviewed state.",
         "schedule_install": "The backup schedule could not be installed on the server.",
@@ -306,6 +320,56 @@ def integrity_views(
     return tuple(
         _integrity_view(location, by_location.get(location)) for location in ("onsite", "offsite")
     )
+
+
+def integrity_view(location: str, finding: IntegrityFinding | None) -> IntegrityFindingView:
+    """One location's finding, shared with Jobs (#286)."""
+    return _integrity_view(location, finding)
+
+
+@dataclass(frozen=True)
+class CleanupView:
+    headline: str
+    detail: str
+    time_label: str
+    result_class: str
+
+
+def cleanup_view(
+    onsite: CleanupCounts | None,
+    offsite: CleanupCounts | None,
+    *,
+    result_class: str = "succeeded",
+    reason: str = "",
+    at: str = "",
+) -> CleanupView:
+    """One cleanup run's two locations' counts in plain words, shared with Jobs (#286)."""
+    here = onsite or CleanupCounts()
+    there = offsite or CleanupCounts()
+    detail = (
+        "On this server: deleted "
+        f"{here.deleted}, kept {here.kept}, skipped {here.skipped}, failed {here.failed}. "
+        "Offsite storage: deleted "
+        f"{there.deleted}, kept {there.kept}, skipped {there.skipped}, failed {there.failed}."
+    )
+    when = _label(_when(at))
+    if result_class == "lock_busy":
+        return CleanupView(
+            "The cleanup was skipped.",
+            "Another backup task was using this backup store, so nothing was deleted.",
+            when,
+            result_class,
+        )
+    if result_class in ("failed", "refused", ""):
+        return CleanupView(
+            "The cleanup did not finish.",
+            _result_reason(reason),
+            when,
+            result_class or "failed",
+        )
+    if here.failed or there.failed or result_class == "partial":
+        return CleanupView("Cleanup finished with some failures.", detail, when, "partial")
+    return CleanupView("Cleanup finished.", detail, when, "succeeded")
 
 
 def _integrity_view(location: str, finding: IntegrityFinding | None) -> IntegrityFindingView:

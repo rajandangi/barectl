@@ -12,7 +12,7 @@ import re
 import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
 
 from discovery.root_read import run_root
@@ -34,6 +34,13 @@ READ_SOURCE: Final = (
 MAX_SITES: Final = 64
 MAX_PROBLEMS: Final = 8
 MAX_POINTS: Final = 500
+# Jobs reads a bounded number of runs and schedules from the one passive read (#286).
+MAX_RUNS: Final = 6
+MAX_TIMERS_PER_SITE: Final = 5
+RUN_KINDS: Final = frozenset({"capture", "copy", "check", "cleanup"})
+TIMER_WORKS: Final = frozenset({"backup", "check", "cleanup"})
+TIMER_LOCATIONS: Final = frozenset({"", "onsite", "offsite"})
+CLEANUP_KEYS: Final = frozenset({"deleted", "kept", "skipped", "failed"})
 CLASSES: Final = frozenset({"succeeded", "partial", "failed", "refused", "lock_busy"})
 POINT: Final = re.compile(r"[0-9a-f]{16}")
 DIGEST: Final = re.compile(r"[0-9a-f]{64}")
@@ -159,6 +166,84 @@ class IntegrityFinding:
 
 
 @dataclass(frozen=True)
+class CleanupCounts:
+    """One cleanup run's deleted, kept, skipped and failed point counts."""
+
+    deleted: int = 0
+    kept: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+
+@dataclass(frozen=True)
+class BackupRun:
+    """One safe result line for one run, as Jobs reads it (#286).
+
+    ``result_class`` is empty when the server kept no result line for a run systemd says
+    fired: Jobs words that as Could not confirm and never as success or failure.
+    """
+
+    kind: str
+    result_class: str = ""
+    reason: str = ""
+    at: str = ""
+    point: str = ""
+    scope: str = ""
+    origin: str = ""
+    snapshots: int = 0
+    size: int = 0
+    offsite: str = ""
+    location: str = ""
+    checked: int = 0
+    subset: str = ""
+    onsite: CleanupCounts | None = None
+    offsite_counts: CleanupCounts | None = None
+
+    @property
+    def time(self) -> datetime | None:
+        try:
+            return datetime.fromisoformat(self.at)
+        except ValueError:
+            return None
+
+    @property
+    def short_point(self) -> str:
+        return self.point[:8]
+
+
+@dataclass(frozen=True)
+class BackupTimer:
+    """One site's backup, check or cleanup timer, from systemd only (#286).
+
+    A missing timer is not in the tuple at all: Jobs shows it as unknown and never
+    invents a schedule. ``on`` is the timer being enabled and reporting a next elapse.
+    """
+
+    work: str
+    location: str = ""
+    on: bool = False
+    next_elapse_us: int = 0
+    last_trigger_us: int = 0
+
+    @property
+    def next_at(self) -> datetime | None:
+        return _moment(self.next_elapse_us)
+
+    @property
+    def last_at(self) -> datetime | None:
+        return _moment(self.last_trigger_us)
+
+
+def _moment(microseconds: int) -> datetime | None:
+    if microseconds <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(microseconds / 1_000_000, tz=UTC)
+    except OverflowError, OSError, ValueError:
+        return None
+
+
+@dataclass(frozen=True)
 class ObservedBackup:
     """One site's backup setup, from one snapshot's native evidence."""
 
@@ -173,6 +258,9 @@ class ObservedBackup:
     offsite: OffsiteStorage | None = None
     copy: OffsiteCopy | None = None
     integrity: tuple[IntegrityFinding, ...] = ()
+    # Additive Phase D evidence for Jobs (#286): recent runs and the site's timers.
+    runs: tuple[BackupRun, ...] = ()
+    timers: tuple[BackupTimer, ...] = ()
 
     @property
     def enabled(self) -> bool:
@@ -325,13 +413,22 @@ INTEGRITY_SUBSET: Final = re.compile(r"[0-9]{1,3}/[0-9]{1,3}\Z")
 
 
 def _valid_site(value: object) -> bool:
-    if not isinstance(value, dict) or not set(value) <= _SITE_KEYS | {"copy", "integrity"}:
+    if not isinstance(value, dict) or not set(value) <= _SITE_KEYS | {
+        "copy",
+        "integrity",
+        "runs",
+        "timers",
+    }:
         return False
     if not set(value) >= _SITE_KEYS:
         return False
     if "copy" in value and not (value["copy"] is None or _valid_copy(value["copy"])):
         return False
     if "integrity" in value and not _valid_integrity(value["integrity"]):
+        return False
+    if "runs" in value and not _valid_runs(value["runs"]):
+        return False
+    if "timers" in value and not _valid_timers(value["timers"]):
         return False
     return (
         isinstance(value["identifier"], str)
@@ -509,6 +606,99 @@ def _valid_result(value: object) -> bool:
     )
 
 
+_RUN_COMMON = {"kind", "class", "reason", "at"}
+_RUN_KEYS: Final = {
+    "capture": _RUN_COMMON | {"point", "scope", "origin", "snapshots", "bytes", "offsite"},
+    "copy": _RUN_COMMON | {"point"},
+    "check": _RUN_COMMON | {"point", "location", "checked", "snapshots", "bytes", "subset"},
+    "cleanup": _RUN_COMMON | {"onsite", "offsite"},
+}
+
+
+def _valid_runs(value: object) -> bool:
+    return bool(
+        isinstance(value, list)
+        and len(value) <= MAX_RUNS
+        and all(_valid_run(item) for item in value)
+    )
+
+
+def _valid_run(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    kind = value.get("kind")
+    if not isinstance(kind, str) or kind not in RUN_KINDS or set(value) != _RUN_KEYS[kind]:
+        return False
+    if value["class"] not in (*CLASSES, ""):
+        return False
+    if not isinstance(value["reason"], str) or len(value["reason"]) > 500:
+        return False
+    if not isinstance(value["at"], str) or (value["at"] and ISO.fullmatch(value["at"]) is None):
+        return False
+    if kind == "capture":
+        return bool(
+            isinstance(value["point"], str)
+            and (value["point"] == "" or POINT.fullmatch(value["point"]))
+            and (value["scope"] == "" or value["scope"] in convention.SCOPES)
+            and (value["origin"] == "" or value["origin"] in convention.ORIGINS)
+            and type(value["snapshots"]) is int
+            and 0 <= value["snapshots"] <= 16
+            and type(value["bytes"]) is int
+            and value["bytes"] >= 0
+            and value["offsite"] in ("", "copied", "failed")
+        )
+    if kind == "copy":
+        return bool(
+            isinstance(value["point"], str)
+            and (value["point"] == "" or POINT.fullmatch(value["point"]))
+        )
+    if kind == "check":
+        return bool(
+            value["location"] in ("onsite", "offsite")
+            and isinstance(value["point"], str)
+            and (value["point"] == "" or POINT.fullmatch(value["point"]))
+            and type(value["checked"]) is int
+            and 0 <= value["checked"] <= 10_000
+            and type(value["snapshots"]) is int
+            and 0 <= value["snapshots"] <= 16
+            and type(value["bytes"]) is int
+            and value["bytes"] >= 0
+            and isinstance(value["subset"], str)
+            and (value["subset"] == "" or INTEGRITY_SUBSET.fullmatch(value["subset"]) is not None)
+        )
+    return bool(_valid_counts(value["onsite"]) and _valid_counts(value["offsite"]))
+
+
+def _valid_counts(value: object) -> bool:
+    return bool(
+        isinstance(value, dict)
+        and set(value) == CLEANUP_KEYS
+        and all(type(item) is int and 0 <= item <= 10_000 for item in value.values())
+    )
+
+
+def _valid_timers(value: object) -> bool:
+    return bool(
+        isinstance(value, list)
+        and len(value) <= MAX_TIMERS_PER_SITE
+        and all(_valid_timer(item) for item in value)
+    )
+
+
+def _valid_timer(value: object) -> bool:
+    return bool(
+        isinstance(value, dict)
+        and set(value) == {"work", "location", "on", "next", "last"}
+        and value["work"] in TIMER_WORKS
+        and value["location"] in TIMER_LOCATIONS
+        and type(value["on"]) is bool
+        and type(value["next"]) is int
+        and 0 <= value["next"] <= 10**17
+        and type(value["last"]) is int
+        and 0 <= value["last"] <= 10**17
+    )
+
+
 def observations(
     value: dict[str, object] | None, sites: Sequence[ObservedSite]
 ) -> tuple[ObservedBackup, ...] | None:
@@ -548,6 +738,8 @@ def _observation(row: dict[str, object], offsite: OffsiteStorage | None) -> Obse
     last = row.get("last")
     copy = row.get("copy")
     problems = row.get("problems")
+    timers = timers_of(row)
+    runs = with_missing_runs(runs_of(row), timers)
     return ObservedBackup(
         str(row["identifier"]),
         str(row["profile"]),
@@ -560,7 +752,102 @@ def _observation(row: dict[str, object], offsite: OffsiteStorage | None) -> Obse
         offsite,
         _copy(copy) if isinstance(copy, dict) else None,
         integrity_of(row),
+        runs,
+        timers,
     )
+
+
+def runs_of(row: dict[str, object]) -> tuple[BackupRun, ...]:
+    """The site's recent safe result lines, newest first."""
+    value = row.get("runs")
+    if not isinstance(value, list):
+        return ()
+    return tuple(run for item in value if (run := run_of(item)) is not None)
+
+
+def run_of(value: object) -> BackupRun | None:
+    if not isinstance(value, dict) or not _valid_run(value):
+        return None
+    kind = str(value["kind"])
+    return BackupRun(
+        kind,
+        str(value["class"]),
+        str(value["reason"]),
+        str(value["at"]),
+        str(value.get("point", "")),
+        str(value.get("scope", "")),
+        str(value.get("origin", "")),
+        int(str(value.get("snapshots", 0))),
+        int(str(value.get("bytes", 0))),
+        str(value.get("offsite", "")),
+        str(value.get("location", "")),
+        int(str(value.get("checked", 0))),
+        str(value.get("subset", "")),
+        _counts(value.get("onsite")) if kind == "cleanup" else None,
+        _counts(value.get("offsite")) if kind == "cleanup" else None,
+    )
+
+
+def _counts(value: object) -> CleanupCounts | None:
+    if not isinstance(value, dict) or not _valid_counts(value):
+        return None
+    return CleanupCounts(
+        int(str(value["deleted"])),
+        int(str(value["kept"])),
+        int(str(value["skipped"])),
+        int(str(value["failed"])),
+    )
+
+
+def timers_of(row: dict[str, object]) -> tuple[BackupTimer, ...]:
+    """The site's timer evidence, with no entry for a timer systemd does not report."""
+    value = row.get("timers")
+    if not isinstance(value, list):
+        return ()
+    return tuple(timer for item in value if (timer := timer_of(item)) is not None)
+
+
+def timer_of(value: object) -> BackupTimer | None:
+    if not isinstance(value, dict) or not _valid_timer(value):
+        return None
+    return BackupTimer(
+        str(value["work"]),
+        str(value["location"]),
+        value["on"] is True,
+        int(str(value["next"])),
+        int(str(value["last"])),
+    )
+
+
+def with_missing_runs(
+    runs: Sequence[BackupRun], timers: Sequence[BackupTimer]
+) -> tuple[BackupRun, ...]:
+    """Add one Could not confirm run when a timer fired without a matching result line.
+
+    systemd's last trigger is the only evidence that such a run happened. It is never
+    turned into a success or a failure.
+    """
+    found = list(runs)
+    for timer in timers:
+        last = timer.last_at
+        if last is None:
+            continue
+        kind = "capture" if timer.work == "backup" else timer.work
+        matched = any(
+            run.kind == kind
+            and (timer.work == "cleanup" or not timer.location or run.location == timer.location)
+            and run.time is not None
+            and abs((run.time - last).total_seconds()) <= 15 * 60
+            for run in found
+        )
+        if matched:
+            continue
+        found.append(BackupRun(kind, at=last.isoformat(), location=timer.location))
+    found.sort(
+        key=lambda run: (run.time is not None, run.time or datetime.min.replace(tzinfo=UTC)),
+        reverse=True,
+    )
+    return tuple(found)
 
 
 def integrity_of(row: dict[str, object]) -> tuple[IntegrityFinding, ...]:

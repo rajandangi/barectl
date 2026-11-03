@@ -5,6 +5,7 @@ site's root-only repository and server key, whether the site database exists, an
 safe result line in the journal; it never reads key contents or snapshot data.
 """
 
+import datetime
 import json
 import os
 import pathlib
@@ -12,6 +13,7 @@ import pwd
 import stat
 import subprocess
 import sys
+from typing import NamedTuple
 
 REPOSITORY_ROOT = "/var/lib/barectl-backups"
 KEY_ROOT = "/etc/barectl/backups"
@@ -25,6 +27,21 @@ PROFILE_ROOT = "/nix/var/nix/profiles/barectl"
 RESTIC_PROFILE = PROFILE_ROOT + "/restic"
 MAX_SITES = 64
 MAX_TEXT = 500
+# Jobs reads only this many recent runs and this many timers per site from the one read.
+MAX_RUNS = 6
+MAX_RUN_ROWS = 96
+MAX_TIMERS = 5
+# A timer's last trigger is used only as missing-result evidence inside Jobs' 30-day range.
+RUN_EVIDENCE_US = 30 * 24 * 60 * 60 * 1_000_000
+JOURNAL_LINES = 400
+TIMER_ROLES = (
+    ("backup", "backup", ""),
+    ("check", "check", "onsite"),
+    ("check", "checkoffsite", "offsite"),
+    ("cleanup", "cleanup", "onsite"),
+    ("cleanup", "cleanupoffsite", "offsite"),
+)
+ENABLED_STATES = frozenset({"enabled", "enabled-runtime", "static", "indirect"})
 PROVIDERS = ("s3", "r2")
 # The controller prepends databases/binding.py to this body; its names are our globals.
 binding = sys.modules[__name__]
@@ -111,85 +128,306 @@ def bounded(argv: list[str], *, limit: int = 32768) -> tuple[int, bytes]:
     return process.returncode, output
 
 
-def journal() -> tuple[  # noqa: C901 - one journal read
-    dict[str, dict[str, object]],
-    dict[str, dict[str, object]],
-    dict[str, dict[str, dict[str, object]]],
-    dict[str, dict[str, object]],
-]:
+class Journal(NamedTuple):
+    """The one bounded journal read, reduced to the safe fields Jobs needs."""
+
+    newest: dict[str, dict[str, object]]
+    copies: dict[str, dict[str, object]]
+    integrity: dict[str, dict[str, dict[str, object]]]
+    connections: dict[str, dict[str, object]]
+    runs: dict[str, list[dict[str, object]]]
+
+
+def journal() -> Journal:  # noqa: C901 - one journal read
     status, output = bounded(
         [
             "/usr/bin/journalctl",
             "--no-pager",
             "--reverse",
             "-o",
-            "cat",
+            "json",
+            "--output-fields=MESSAGE,__REALTIME_TIMESTAMP",
             "-n",
-            "500",
+            str(JOURNAL_LINES),
             "--grep",
             "^barectl-result ",
         ],
-        limit=512 * 1024,
+        limit=768 * 1024,
     )
     if status:
-        return {}, {}, {}, {}
+        return Journal({}, {}, {}, {}, {})
     newest: dict[str, dict[str, object]] = {}
     copies: dict[str, dict[str, object]] = {}
     integrity: dict[str, dict[str, dict[str, object]]] = {}
     connections: dict[str, dict[str, object]] = {}
-    for line in output.decode("utf-8", "replace").splitlines():
-        if not line.startswith("barectl-result "):
-            continue
-        try:
-            value = json.loads(line[len("barectl-result ") :])
-        except ValueError:
-            continue
-        if not isinstance(value, dict) or value.get("kind") not in (
-            "backup",
-            "copy",
-            "restore",
-            "integrity",
-            "connect",
-        ):
-            continue
-        if value.get("kind") == "connect":
+    runs: dict[str, list[dict[str, object]]] = {}
+    final_capture: set[str] = set()
+    total_runs = 0
+    for entry in _entries(output):
+        value = entry.value
+        kind = value.get("kind")
+        if kind == "connect":
             _connection(value, connections)
             continue
         identifier = value.get("site")
         if not isinstance(identifier, str) or not identifier:
             continue
-        if value.get("kind") == "integrity":
+        if kind == "integrity":
             finding_row = _integrity(value)
             location = value.get("location")
             if finding_row is None or location not in ("onsite", "offsite"):
                 continue
             integrity.setdefault(identifier, {}).setdefault(str(location), finding_row)
+            if total_runs < MAX_RUN_ROWS:
+                run = _run(value, "check", entry.at)
+                if run is not None:
+                    runs.setdefault(identifier, []).append(run)
+                    total_runs += 1
             continue
-        if value.get("kind") == "copy":
-            if identifier in copies:
+        if kind == "copy":
+            if identifier not in copies:
+                copies[identifier] = _copy_row(value, entry.at)
+            if total_runs < MAX_RUN_ROWS:
+                run = _run(value, "copy", entry.at)
+                if run is not None:
+                    runs.setdefault(identifier, []).append(run)
+                    total_runs += 1
+            continue
+        if kind == "cleanup":
+            if total_runs < MAX_RUN_ROWS:
+                run = _run(value, "cleanup", entry.at)
+                if run is not None:
+                    runs.setdefault(identifier, []).append(run)
+                    total_runs += 1
+            continue
+        if kind != "backup":
+            continue
+        # A full capture writes one interim backup_paused line before its final line. The
+        # newest final line describes the run; an interrupted run keeps its interim line.
+        interim = value.get("reason") == "backup_paused"
+        if identifier not in newest:
+            newest[identifier] = _capture_row(value, entry.at)
+        if total_runs < MAX_RUN_ROWS and not (interim and identifier in final_capture):
+            run = _run(value, "capture", entry.at)
+            if run is not None:
+                runs.setdefault(identifier, []).append(run)
+                total_runs += 1
+                if not interim:
+                    final_capture.add(identifier)
+    for identifier, rows in list(runs.items()):
+        del rows[MAX_RUNS:]
+        if not rows:
+            del runs[identifier]
+    return Journal(newest, copies, integrity, connections, runs)
+
+
+class Entry(NamedTuple):
+    value: dict[str, object]
+    at: str
+
+
+def _entries(output: bytes) -> list[Entry]:
+    entries: list[Entry] = []
+    for line in output.decode("utf-8", "replace").splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        message = record.get("MESSAGE")
+        if not isinstance(message, str) or not message.startswith("barectl-result "):
+            continue
+        try:
+            value = json.loads(message[len("barectl-result ") :])
+        except ValueError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        entries.append(Entry(value, _timestamp(record.get("__REALTIME_TIMESTAMP"))))
+    return entries
+
+
+def _timestamp(value: object) -> str:
+    try:
+        microseconds = int(str(value))
+        moment = datetime.datetime.fromtimestamp(microseconds / 1_000_000, datetime.UTC)
+    except OverflowError, OSError, ValueError:
+        return ""
+    return moment.replace(microsecond=0).isoformat()
+
+
+def _capture_row(value: dict[str, object], at: str) -> dict[str, object]:
+    row: dict[str, object] = {}
+    for key in ("class", "reason", "scope", "origin", "at", "point", "offsite"):
+        item = value.get(key)
+        row[key] = item if isinstance(item, str) and len(item) <= MAX_TEXT else ""
+    for key in ("snapshots", "bytes"):
+        item = value.get(key)
+        row[key] = item if type(item) is int and item >= 0 else 0
+    if not row["at"]:
+        row["at"] = at
+    if row["class"] not in ("succeeded", "partial", "failed", "refused", "lock_busy"):
+        row["class"] = "failed"
+    if row["offsite"] not in ("", "copied", "failed"):
+        row["offsite"] = ""
+    return row
+
+
+def _copy_row(value: dict[str, object], at: str) -> dict[str, object]:
+    copy: dict[str, object] = {}
+    for key in ("class", "reason", "at", "point"):
+        item = value.get(key)
+        copy[key] = item if isinstance(item, str) and len(item) <= MAX_TEXT else ""
+    if not copy["at"]:
+        copy["at"] = at
+    if copy["class"] not in ("succeeded", "partial", "failed", "refused", "lock_busy"):
+        copy["class"] = "failed"
+    return copy
+
+
+def _run(value: dict[str, object], kind: str, at: str) -> dict[str, object] | None:
+    result_class = value.get("class")
+    if not isinstance(result_class, str) or result_class not in (
+        "succeeded",
+        "partial",
+        "failed",
+        "refused",
+        "lock_busy",
+    ):
+        return None
+    run: dict[str, object] = {
+        "kind": kind,
+        "class": result_class,
+        "reason": _text(value.get("reason")),
+        "at": _text(value.get("at")) or at,
+    }
+    if not run["at"]:
+        return None
+    if kind == "capture":
+        run.update(
+            point=_point(value.get("point")),
+            scope=_text(value.get("scope")),
+            origin=_text(value.get("origin")),
+            snapshots=_count(value.get("snapshots")),
+            bytes=_count(value.get("bytes")),
+            offsite=(value.get("offsite") if value.get("offsite") in ("copied", "failed") else ""),
+        )
+    elif kind == "copy":
+        run["point"] = _point(value.get("point"))
+    elif kind == "check":
+        location = value.get("location")
+        if location not in ("onsite", "offsite"):
+            return None
+        run.update(
+            location=location,
+            point=_point(value.get("point")),
+            checked=_count(value.get("checked")),
+            snapshots=_count(value.get("snapshots")),
+            bytes=_count(value.get("bytes")),
+            subset=_text(value.get("subset")),
+        )
+    else:
+        run.update(
+            onsite=_counts(value.get("onsite")),
+            offsite=_counts(value.get("offsite")),
+        )
+    return run
+
+
+def _text(value: object) -> str:
+    return value if isinstance(value, str) and len(value) <= MAX_TEXT else ""
+
+
+def _point(value: object) -> str:
+    return value if isinstance(value, str) and len(value) == 16 else ""
+
+
+def _count(value: object) -> int:
+    return value if type(value) is int and 0 <= value <= 10_000 else 0
+
+
+def _counts(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {"deleted": 0, "kept": 0, "skipped": 0, "failed": 0}
+    return {key: _count(value.get(key)) for key in ("deleted", "kept", "skipped", "failed")}
+
+
+def schedules(identifiers: list[str]) -> dict[str, list[dict[str, object]]]:
+    """Each site's backup, check and cleanup timers, on or off, from systemd only.
+
+    A timer systemd does not report is absent from the answer: the controller shows it as
+    unknown and never invents a schedule.
+    """
+    listed = _systemctl(
+        [
+            "systemctl",
+            "list-timers",
+            "--all",
+            "--no-pager",
+            "--full",
+            "--output=json",
+        ]
+    )
+    files = _systemctl(
+        [
+            "systemctl",
+            "list-unit-files",
+            "--type=timer",
+            "--no-pager",
+            "--output=json",
+        ]
+    )
+    if listed is None or files is None:
+        return {}
+    states = {
+        str(row.get("unit_file")): str(row.get("state"))
+        for row in files or []
+        if isinstance(row, dict) and isinstance(row.get("unit_file"), str)
+    }
+    timers = {
+        str(row.get("unit")): row
+        for row in listed or []
+        if isinstance(row, dict) and isinstance(row.get("unit"), str)
+    }
+    now = datetime.datetime.now(datetime.UTC).timestamp() * 1_000_000
+    rows: dict[str, list[dict[str, object]]] = {}
+    for identifier in identifiers:
+        found: list[dict[str, object]] = []
+        for work, role, location in TIMER_ROLES:
+            name = f"barectl-site-{identifier}-{role}.timer"
+            if name not in states and name not in timers:
                 continue
-            copy: dict[str, object] = {}
-            for key in ("class", "reason", "at", "point"):
-                item = value.get(key)
-                copy[key] = item if isinstance(item, str) and len(item) <= MAX_TEXT else ""
-            if copy["class"] in ("succeeded", "partial", "failed", "refused", "lock_busy"):
-                copies[identifier] = copy
-            continue
-        if identifier in newest:
-            continue
-        row: dict[str, object] = {}
-        for key in ("class", "reason", "scope", "origin", "at", "point", "offsite"):
-            item = value.get(key)
-            row[key] = item if isinstance(item, str) and len(item) <= MAX_TEXT else ""
-        for key in ("snapshots", "bytes"):
-            item = value.get(key)
-            row[key] = item if type(item) is int and item >= 0 else 0
-        if row["class"] not in ("succeeded", "partial", "failed", "refused", "lock_busy"):
-            continue
-        if row["offsite"] not in ("", "copied", "failed"):
-            row["offsite"] = ""
-        newest[identifier] = row
-    return newest, copies, integrity, connections
+            row = timers.get(name, {})
+            next_elapse = row.get("next")
+            last_trigger = row.get("last")
+            next_us = next_elapse if type(next_elapse) is int and next_elapse > 0 else 0
+            last_us = last_trigger if type(last_trigger) is int and last_trigger > 0 else 0
+            if last_us and now - last_us > RUN_EVIDENCE_US:
+                last_us = 0
+            found.append(
+                {
+                    "work": work,
+                    "location": location,
+                    "on": states.get(name, "") in ENABLED_STATES and next_us > 0,
+                    "next": next_us,
+                    "last": last_us,
+                }
+            )
+        if found:
+            rows[identifier] = found[:MAX_TIMERS]
+    return rows
+
+
+def _systemctl(argv: list[str]) -> list[object] | None:
+    status, output = bounded(argv, limit=256 * 1024)
+    if status:
+        return None
+    try:
+        value = json.loads(output.decode("utf-8", "replace") or "[]")
+    except ValueError:
+        return None
+    return value if isinstance(value, list) else None
 
 
 def _connection(value: dict[str, object], found: dict[str, dict[str, object]]) -> None:
@@ -401,8 +639,12 @@ def main() -> None:
     root_safe = (not os.path.lexists(REPOSITORY_ROOT) or controlled(REPOSITORY_ROOT)) and (
         not os.path.lexists(KEY_ROOT) or controlled(KEY_ROOT)
     )
-    latest, copies, integrities, connections = journal()
-    storage = offsite(connections)
+    read = journal()
+    latest = read.newest
+    copies = read.copies
+    integrities = read.integrity
+    storage = offsite(read.connections)
+    timers = schedules(sites)
     rows = []
     for identifier in sites:
         problems = []
@@ -466,6 +708,8 @@ def main() -> None:
                     if found_integrity
                     else None
                 ),
+                "runs": read.runs.get(identifier, [])[:MAX_RUNS],
+                "timers": timers.get(identifier, []),
             }
         )
     sys.stdout.write(

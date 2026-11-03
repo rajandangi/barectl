@@ -226,6 +226,9 @@ class BackupObservation(models.Model):
     # The non-secret offsite location and the newest copy result (#403).
     offsite = models.JSONField(default=dict, blank=True)
     copy = models.JSONField(default=dict, blank=True)
+    # Jobs' bounded recent runs and each site's timers, additive to the fields above (#286).
+    runs = models.JSONField(default=list, blank=True)
+    timers = models.JSONField(default=list, blank=True)
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()
