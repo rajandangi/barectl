@@ -227,11 +227,42 @@ class VerificationRunnerTests(SimpleTestCase):
             self.assertEqual(browser["command"][-2:], ["--tag", "browser"])
 
     def test_source_identity_survives_commit_and_detects_working_edits(self) -> None:
+        staged, committed = self._source_identity_fixture()
+        self.assertEqual(staged["index_sha256"], committed["index_sha256"])
+        self.assertEqual(staged["working_diff_sha256"], committed["working_diff_sha256"])
+
+    def test_the_fixture_leaves_the_enclosing_repository_unchanged(self) -> None:
+        """A pre-push hook runs this file; its temporary repository must not leak here."""
+        repository = Path(__file__).resolve().parents[1]
+
+        def setting() -> str:
+            result = subprocess.run(
+                ["/usr/bin/git", "config", "--get", "core.bare"],
+                cwd=repository,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.stdout.strip()
+
+        before = setting()
+        self._source_identity_fixture()
+        self.assertEqual(setting(), before)
+
+    def _source_identity_fixture(self) -> tuple[dict[str, str], dict[str, str]]:
         from contextlib import chdir
 
-        from .verification import input_revision
-
-        with tempfile.TemporaryDirectory() as directory, chdir(directory):
+        # The hook that runs this suite exports GIT_DIR, GIT_WORK_TREE and friends. Without
+        # stripping them, the "temporary" git commands target the enclosing repository and
+        # can set core.bare there. docs/quality.md#before-every-push.
+        isolated = {
+            name: value for name, value in os.environ.items() if not name.startswith("GIT_")
+        }
+        with (
+            mock.patch.dict(os.environ, isolated, clear=True),
+            tempfile.TemporaryDirectory() as directory,
+            chdir(directory),
+        ):
             for arguments in (
                 ["init", "-q"],
                 ["config", "user.name", "Verification Test"],
@@ -244,13 +275,12 @@ class VerificationRunnerTests(SimpleTestCase):
             staged = input_revision()
             subprocess.run(["/usr/bin/git", "commit", "-qm", "fixture"], check=True)
             committed = input_revision()
-            self.assertEqual(staged["index_sha256"], committed["index_sha256"])
-            self.assertEqual(staged["working_diff_sha256"], committed["working_diff_sha256"])
             source.write_text("changed\n")
             changed = input_revision()
             self.assertNotEqual(changed["working_diff_sha256"], committed["working_diff_sha256"])
             subprocess.run(["/usr/bin/git", "add", "source.txt"], check=True)
             self.assertNotEqual(input_revision()["index_sha256"], committed["index_sha256"])
+        return staged, committed
 
     def test_each_failed_git_probe_refuses_unchanged_evidence(self) -> None:
         from unittest.mock import patch

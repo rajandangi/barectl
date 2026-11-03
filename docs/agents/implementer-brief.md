@@ -10,6 +10,7 @@ Use this shape for a subagent that owns one ticket phase. Keep it short: the tic
 - **Ownership:** the files or seams this ticket owns. Name overlaps with parallel tickets and the shared file to change in one place.
 - **Acceptance evidence:** every criterion and the exact command, test or native scenario that proves it. State which evidence is required and which may be deferred.
 - **Source freeze:** after focused controller and affected native proof, obtain preliminary independent Standards and Spec review. Resolve findings before freezing command sources and running expensive transcript capture. The final pushed-head review remains required.
+- **Long commands:** run transcript passes, native items and CI watches in the foreground of one shell call with no timeout. Ending the turn while one runs leaves an unowned process and an incomplete handoff.
 - **Completion bar:** focused tests, the local command set in `docs/quality.md#local-commands`, native scenarios when the ticket changes a native path, a merged integration tip, and a handoff note at `<path>`. Run your own scenario item through `docker/disposable-server/run-scenarios.sh` before pushing: the runner takes the host-wide native lock, so a parallel agent waits instead of sharing lanes. Deferring the native run to the orchestrator is how cross-ticket seams — a version parser, an S3 flag, a unit payload — reach the integration tip untested.
 
 ## Handoff

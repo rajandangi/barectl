@@ -60,6 +60,8 @@ docker/disposable-server/quiet-run.sh run "$NOTES/native.log" -- docker/disposab
 
 The parent process stays alive until the command completes. A detached `start` call is only suitable for a host that guarantees detached child survival; returning from an execution tool can terminate its process group. An absent status file is not evidence that a job is running. Read the runner's liveness result before resuming or restarting it.
 
+A subagent runs a long command in the foreground of one shell call with no timeout, and does not end its turn while that call is live. Backgrounding the command and returning ("waiting for the pass") hands the orchestrator a running process with no owner and forces a manual resume; a handoff note written while a command runs is incomplete. If the client itself detached the process, resume the same session and wait for the recorded pid or runner handle before reporting.
+
 The runner takes the host-wide native lock itself (`disposable/locking.py`), so every caller — the orchestrator, an implementer proving one item, `build.sh` — waits for the lane owner instead of sharing lanes. `build.sh` holds the same lock once for its side-by-side validator and native stages.
 
 `run` and `follow` wait until completion. The legacy bounded `wait` is an observation deadline, not a command deadline; its exit 124 must never be treated as a completed test. Keep the owning tool session alive when a command outlasts a bounded observation. The native harness owns test deadlines. Full recording passes can legitimately exceed nine minutes.

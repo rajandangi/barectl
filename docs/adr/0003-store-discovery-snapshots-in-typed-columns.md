@@ -6,7 +6,7 @@ Typed columns let the database enforce the domain: it refuses an absent operatin
 
 ## Consequences
 
-- Each new kind of observation needs a migration, and its database constraints are written with it.
+- Each new kind of observation needs a migration, and its database constraints are written with it. A fast test (`discovery/test_observation_shape.py`) fails when a snapshot-attached model hides observation rows in a `JSONField`; only the named bounded values may use one.
 - Several values are stored as newline-joined text, which only the snapshot module encodes and decodes.
 - Revisit this decision when any of these holds:
   - Barectl keeps past snapshots to show what changed between discoveries, where uniform rows make comparisons generic.
