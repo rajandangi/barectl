@@ -1,5 +1,6 @@
 """The Restart server change kind (Phase E #305): review, body, verification and wording."""
 
+import re
 import shutil
 import subprocess
 from dataclasses import replace
@@ -21,6 +22,7 @@ from security import restart
 from security.observation import RestartState, SecurityState
 from security.presentation import present
 from security.testing import check, ok_state
+from sites.bodies.remove import BACKUP_ROLES
 
 BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
 OTHER_BOOT = "7a2d5f2b-4b9f-4c60-8e3f-8d1c9b0e2f34"
@@ -199,6 +201,13 @@ class RestartVerifyTests(SimpleTestCase):
 
 @skipUnless(shutil.which("shellcheck") is not None, "shellcheck is not installed")
 class RestartBodyTests(SimpleTestCase):
+    def test_the_body_refuses_the_canonical_backup_roles(self) -> None:
+        path = Path(__file__).resolve().parents[1] / "bodies" / "restart.sh"
+        found = re.search(r"for role in ([a-z ]+); do", path.read_text(encoding="utf-8"))
+        if found is None:
+            self.fail("The restart body has no role loop.")
+        self.assertEqual(set(found.group(1).split()), set(BACKUP_ROLES))
+
     def test_the_checked_in_body_passes_shellcheck(self) -> None:
         path = Path(__file__).resolve().parents[1] / "bodies" / "restart.sh"
         subprocess.run(["shellcheck", "-s", "sh", str(path)], check=True)  # noqa: S603, S607

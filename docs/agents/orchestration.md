@@ -8,6 +8,8 @@ Fetch the parent issue, every sub-issue and their comments to the notes director
 
 Follow the agreed phase order and the tracker's blocking edges, not issue-number order. Record consequential decisions, the alternatives checked and source links in the owning issue. Resolve routine product, architecture and implementation decisions yourself; do not interview the user or request repeated confirmation.
 
+Before running tests in a new worktree, run `scripts/worktree-setup.sh` from inside it. It copies the controller-local `.env`, installs the locked dependencies and builds the production assets. A missing `static/dist` makes browser tests fail as HTTP 500s, not as a useful test failure.
+
 ## Authority and boundaries
 
 - Claim tickets, branch, commit, push, open pull requests and merge them once required checks and reviews pass. Preserve branch protection.

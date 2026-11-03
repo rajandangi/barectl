@@ -639,6 +639,11 @@ class Vm:
     _seed_stream: TextIO | None = None
     _mirror_stream: TextIO | None = None
 
+    def run(self, command: str, *, timeout: float = 60) -> tuple[int, str, str]:
+        """Run one fixed diagnostic command over SSH as the lane's root user."""
+        with _client(port=self.ssh_port, key=self.key, known_hosts=self.known_hosts) as client:
+            return _run(client, command, timeout=timeout)
+
     def stop(self) -> None:
         while self._cleanups:
             action = self._cleanups.pop()
@@ -670,7 +675,8 @@ class Vm:
         logs.mkdir(parents=True, exist_ok=True)
         chosen = architecture or host_architecture()
         pin = load_pins()[chosen]
-        stream.write(f"vm: using {pin.name} for {chosen}\n")
+        accel = accelerator()
+        stream.write(f"vm: using {pin.name} for {chosen} with {accel}\n")
         stream.flush()
         base = image or ensure(pin, output=stream)
         disk = overlay(base, work / "disk.qcow2")
@@ -715,7 +721,7 @@ class Vm:
         try:
             instance._start_seed(seed_directory)
             instance._start_mirror(mirror_root, certificate, certificate_key, hosts)
-            instance._start_qemu(chosen, disk, work)
+            instance._start_qemu(chosen, disk, work, accel=accel)
             stream.write(f"vm: guest booted, SSH on 127.0.0.1:{ssh_port}\n")
             stream.flush()
             wait_for_ssh(
@@ -795,7 +801,7 @@ class Vm:
         stream.write(f"mirror: 127.0.0.1:{self.mirror_port}\n")
         stream.flush()
 
-    def _start_qemu(self, architecture: str, disk: Path, work: Path) -> None:
+    def _start_qemu(self, architecture: str, disk: Path, work: Path, *, accel: str) -> None:
         seed_wrapper = _wrapper(
             work,
             "guestfwd-seed.sh",
@@ -812,7 +818,7 @@ class Vm:
         )
         command = qemu_command(
             architecture=architecture,
-            accel=accelerator(),
+            accel=accel,
             disk=disk,
             ssh_port=self.ssh_port,
             seed_port=self.seed_port,

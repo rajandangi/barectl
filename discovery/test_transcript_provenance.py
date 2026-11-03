@@ -47,9 +47,11 @@ class CaptureSelectionTests(SimpleTestCase):
     def test_real_recorded_states_select_only_affected_captures(self) -> None:
         states = recorded.stored()
         current = provenance.inputs()
+        capture_inputs = {**current, provenance.OMITTED: "0" * 64}
         metadata = {
-            "capture_inputs": {**current, provenance.OMITTED: "0" * 64},
+            "capture_inputs": capture_inputs,
             "capture_pins": recorded.current_pins(),
+            "audit_digest": provenance.audit_digest(current),
             "capture_states": {
                 state: provenance.digest(recorded.TRANSCRIPTS / f"{state}.json") for state in states
             },
@@ -62,14 +64,14 @@ class CaptureSelectionTests(SimpleTestCase):
                     provenance.plan(states),
                     tuple(state for state in states if state != "ubuntu-24.04"),
                 )
-                metadata["capture_inputs"]["disposable/images.py"] = "0" * 64
+                capture_inputs["disposable/images.py"] = "0" * 64
                 manifest.write_text(json.dumps(metadata))
                 self.assertEqual(provenance.plan(states), states)
 
     def test_changed_consumer_or_provision_inputs_require_explicit_reaudit(self) -> None:
         current = provenance.inputs()
         self.assertIn("scripts/record-all-transcripts.sh", current)
-        self.assertEqual(provenance.audit_digest(current), provenance.AUDITED_INPUT_DIGEST)
+        self.assertEqual(provenance.audit_digest(current), provenance.recorded_audit_digest())
         for name in (
             "security/sign_in.py",
             "discovery/observations/__init__.py",
@@ -92,7 +94,9 @@ class CaptureSelectionTests(SimpleTestCase):
             with (
                 mock.patch.object(source_manifest, "REPOSITORY", root),
                 mock.patch.object(provenance, "inputs", return_value={}),
-                mock.patch.object(provenance, "AUDITED_INPUT_DIGEST", provenance.audit_digest({})),
+                mock.patch.object(
+                    provenance, "recorded_audit_digest", return_value=provenance.audit_digest({})
+                ),
             ):
                 self.assertTrue(provenance.audited_exclusion())
                 (root / "other.py").write_text('RESOURCE = "sign_in.sh"\n')

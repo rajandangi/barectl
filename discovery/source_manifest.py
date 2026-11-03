@@ -9,6 +9,7 @@ re-records it, before a replay fails with an unrecorded command
 import hashlib
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parent.parent
@@ -145,6 +146,81 @@ def read() -> dict[str, str]:
     return sources
 
 
+class BaselineRefused(ValueError):
+    """A harness-only baseline cannot absorb this change."""
+
+
+def baseline_document(
+    recorded: Mapping[str, str],
+    current: Mapping[str, str],
+    *,
+    current_inputs: Mapping[str, str],
+    capture_pins: Mapping[str, str],
+    capture_states: Mapping[str, str],
+    audit_digest: str,
+) -> dict[str, object]:
+    """The manifest for additions that no recorded command embeds.
+
+    A changed or removed source can change command text a transcript replays, so it still
+    needs the recording pass. A new harness-only file does not.
+    """
+    removed = sorted(set(recorded) - set(current))
+    changed = sorted(
+        path for path in set(recorded) & set(current) if recorded[path] != current[path]
+    )
+    if removed:
+        raise BaselineRefused(
+            "Shared sources were removed; run scripts/record-all-transcripts.sh: "
+            + ", ".join(removed)
+        )
+    if changed:
+        raise BaselineRefused(
+            "Shared source text changed; run scripts/record-all-transcripts.sh: "
+            + ", ".join(changed)
+        )
+    return {
+        "version": FORMAT,
+        "sources": dict(sorted(current.items())),
+        "capture_inputs": dict(sorted(current_inputs.items())),
+        "capture_pins": dict(capture_pins),
+        "capture_states": dict(capture_states),
+        "audit_digest": audit_digest,
+    }
+
+
+def refresh_baseline() -> tuple[str, ...]:
+    """Update the manifest for added harness-only sources, refusing anything else."""
+    document = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    recorded = read()
+    current = digests()
+    from . import recorded as transcripts
+    from . import transcript_provenance as provenance
+
+    states = {
+        state: provenance.digest(transcripts.TRANSCRIPTS / f"{state}.json")
+        for state in transcripts.stored()
+    }
+    if document.get("capture_pins") != transcripts.current_pins():
+        raise BaselineRefused("Capture pins changed; run scripts/record-all-transcripts.sh.")
+    if document.get("capture_states") != states:
+        raise BaselineRefused(
+            "Recorded transcript bytes changed; run scripts/record-all-transcripts.sh."
+        )
+    inputs = provenance.inputs()
+    updated = baseline_document(
+        recorded,
+        current,
+        current_inputs=inputs,
+        capture_pins=transcripts.current_pins(),
+        capture_states=states,
+        audit_digest=provenance.audit_digest(inputs),
+    )
+    temporary = MANIFEST.with_suffix(".tmp")
+    temporary.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(MANIFEST)
+    return tuple(sorted(set(current) - set(recorded)))
+
+
 def write(*, capture: dict[str, object] | None = None) -> Path:
     """Write the current digest map; run after `scripts/record-all-transcripts.sh`."""
     if capture is None:
@@ -181,8 +257,19 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if arguments == ["refresh-baseline"]:
+        try:
+            added = refresh_baseline()
+        except BaselineRefused as error:
+            print(str(error), file=sys.stderr)  # noqa: T201
+            return 1
+        print("Added harness-only sources: " + (", ".join(added) or "none"))  # noqa: T201
+        return 0
     if arguments:
-        print("usage: python -m discovery.source_manifest [write]", file=sys.stderr)  # noqa: T201
+        print(  # noqa: T201
+            "usage: python -m discovery.source_manifest [write|refresh-baseline]",
+            file=sys.stderr,
+        )
         return 2
     changes = stale()
     for path in changes:

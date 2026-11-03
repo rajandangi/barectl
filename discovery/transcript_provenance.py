@@ -100,7 +100,12 @@ def _resource_consumers_proven() -> bool:
     return consumers == {"security/sign_in.py"}
 
 
-AUDITED_INPUT_DIGEST = "c918222cd4c06be5a56d0ca8b0956fd7472c4ae23724f3678333357820a87fa7"
+def recorded_audit_digest() -> str:
+    document = json.loads(source_manifest.MANIFEST.read_text(encoding="utf-8"))
+    value = document.get("audit_digest")
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError("The manifest has no audit digest.")
+    return value
 
 
 def audit_digest(values: dict[str, str]) -> str:
@@ -117,7 +122,11 @@ def audit_digest(values: dict[str, str]) -> str:
 
 
 def audited_exclusion() -> bool:
-    return audit_digest(inputs()) == AUDITED_INPUT_DIGEST and _resource_consumers_proven()
+    try:
+        recorded_digest = recorded_audit_digest()
+    except OSError, ValueError, json.JSONDecodeError:
+        return False
+    return audit_digest(inputs()) == recorded_digest and _resource_consumers_proven()
 
 
 def affected(

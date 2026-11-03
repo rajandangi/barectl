@@ -23,6 +23,10 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 
 - A count, order or set that names a product surface (check names, journey steps, section rows) lives in one exported value that tests and presentation read. Prose points at it; do not restate the count in a docstring, glossary entry or help text.
 
+## Behaviour prose names the layer
+
+- When a document or review describes a refusal, verification or ordering, name where it runs: engine admission, kind body, worker or discovery. Do not attribute shared engine behavior to a kind's body. This is a judgement call; quote the owning layer in the finding.
+
 ## Required evidence
 
 - A required native test is never removed, skipped or weakened to fit an item limit or a time budget. Split the setup into a preparation scenario, or record the gap in the handoff and the qualification record; a missing test is not a pass.

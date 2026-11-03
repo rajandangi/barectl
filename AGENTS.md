@@ -4,6 +4,10 @@ Before changing behavior, read the specification that owns the area and the modu
 
 Each phase's specification is a GitHub issue and the single source of truth for that phase: Phase A [#325](https://github.com/rajandangi/barectl/issues/325), Phase B PHP sites [#356](https://github.com/rajandangi/barectl/issues/356), Phase C automation [#357](https://github.com/rajandangi/barectl/issues/357) and Phase D protection [#358](https://github.com/rajandangi/barectl/issues/358); dashboard journeys follow [#179](https://github.com/rajandangi/barectl/issues/179). The topic documents describe implemented behavior: `docs/saved-server-connections.md`, `docs/ssh-connections.md`, `docs/bootstrap.md`, `docs/runtimes.md`, `docs/runtime-defaults.md`, `docs/php-versions.md`, `docs/sites.md`, `docs/site-conventions.md`, `docs/tls.md`, `docs/databases.md`, `docs/wordpress.md`, `docs/settings.md`, `docs/dashboard-workflows.md`, `docs/backups.md`, `docs/security.md` and `docs/recovery.md`. `docs/v0.9.md` and `docs/server-jobs.md` are requirement inputs for Phase E. A specification records accepted design; it does not mean its features are implemented. A phase's qualification record, such as `docs/phase-a-qualification.md` and `docs/phase-b-qualification.md`, names the revision it is tested on and what is not qualified.
 
+## Long-running work
+
+Native builds, the cloud-image VM lane and transcript passes run for minutes. Start them with `docker/disposable-server/quiet-run.sh run LOG -- CMD`, the foreground runner, or a background tool session, and keep that session alive. Do not kill and rerun a lane to check progress; read its log or resume the same run. See [long-running commands](docs/agents/orchestration.md#long-running-commands).
+
 ## Official guidance first
 
 Before selecting a package or recommending an approach, follow `docs/quality.md#official-guidance-first` and record sources for consequential choices. Use version-matched official documentation: Django 6.1 via `docs/documentation-sources.md`, and the official HTMX 4 agent skills linked in `docs/frontend-assets.md#official-htmx-4-agent-skills`.
@@ -44,7 +48,7 @@ Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push 
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-Keep new tests inside the [test time budget](docs/quality.md#test-time-budget). Run commands longer than a minute with `docker/disposable-server/quiet-run.sh run LOG -- CMD` in one persistent tool session, and watch a pull request with `scripts/watch-checks.sh <n> "$NOTES/pr-checks.log"` ([long-running commands](docs/agents/orchestration.md#long-running-commands)). A full local build is `docker/disposable-server/build.sh`; it holds the same lock for its stages. Browser tests need Chromium: `uv run playwright install chromium`, or `BARECTL_BROWSER_EXECUTABLE` ([native layer](docs/quality.md#native-layer)).
+Keep new tests inside the [test time budget](docs/quality.md#test-time-budget). Long commands follow [Long-running work](#long-running-work), and a pull request is watched with `scripts/watch-checks.sh <n> "$NOTES/pr-checks.log"`. A full local build is `docker/disposable-server/build.sh`; it holds the same lock for its stages. Browser tests need Chromium: `uv run playwright install chromium`, or `BARECTL_BROWSER_EXECUTABLE` ([native layer](docs/quality.md#native-layer)).
 
 ## Project boundaries
 
