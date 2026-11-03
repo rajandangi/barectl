@@ -133,8 +133,13 @@ class BrowserTestCase(LiveServerTestCase):
         self.context.close()
         self.assertEqual(self.console_errors, [])
 
-    def open_context(self, *, width: int, height: int) -> None:
-        self.context = self.browser.new_context(viewport={"width": width, "height": height})
+    def open_context(self, *, width: int, height: int, timezone_id: str | None = None) -> None:
+        if timezone_id is None:
+            self.context = self.browser.new_context(viewport={"width": width, "height": height})
+        else:
+            self.context = self.browser.new_context(
+                viewport={"width": width, "height": height}, timezone_id=timezone_id
+            )
         self.page = self.context.new_page()
         self.requests = []
         self.console_errors = []

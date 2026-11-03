@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from "vite-plus";
 const frontendRoot = fileURLToPath(new URL("frontend", import.meta.url));
 const mainEntry = fileURLToPath(new URL("frontend/main.ts", import.meta.url));
 const uswdsInitEntry = fileURLToPath(new URL("frontend/uswds-init.ts", import.meta.url));
+const jobsTimeEntry = fileURLToPath(new URL("frontend/jobs-time.ts", import.meta.url));
 const nodeModules = fileURLToPath(new URL("node_modules", import.meta.url));
 const outDir = fileURLToPath(new URL("static/dist", import.meta.url));
 const uswdsPackages = fileURLToPath(new URL("node_modules/@uswds/uswds/packages", import.meta.url));
@@ -194,7 +195,7 @@ export default defineConfig(({ command }) => ({
     license: { fileName: "licenses/dependencies.md" },
     modulePreload: { polyfill: false },
     rolldownOptions: {
-      input: [uswdsInitEntry, mainEntry],
+      input: [uswdsInitEntry, mainEntry, jobsTimeEntry],
     },
   },
 }));

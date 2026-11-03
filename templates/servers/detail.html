@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load vite %}
 {% block title %}{{ server.name }} · Barectl{% endblock %}
 {% block content %}
   <div class="barectl-page-heading">
@@ -92,6 +93,7 @@
         </p>
         {% include "servers/_activity_rows.html" %}
       {% elif section == "jobs" %}
+        {% vite_entry "jobs-time.ts" %}
         {% include "servers/_jobs.html" %}
       {% endif %}
     </div>
