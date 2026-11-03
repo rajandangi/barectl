@@ -8,6 +8,7 @@ from django.test import override_settings, tag
 from django.utils import timezone
 from playwright.sync_api import expect
 
+from automation.worker_status import WorkerStatus
 from dashboard.browser_testing import BrowserTestCase
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt
@@ -15,7 +16,7 @@ from operations.activity_testing import record_change, record_run
 from operations.models import ChangeRun
 from servers.models import Server
 
-from .testing import change, record_jobs
+from .testing import cache, change, record_jobs, scheduled, worker
 
 
 @tag("browser")
@@ -55,7 +56,13 @@ class JobsBrowserTests(BrowserTestCase):
             started_at=now,
             finished_at=now,
         )
-        record_jobs(self.server, changes=(finished, failed))
+        record_jobs(
+            self.server,
+            changes=(finished, failed),
+            schedules=(scheduled(),),
+            workers=(worker(identifier="beta", status=WorkerStatus.STOPPED_AFTER_CRASHES),),
+            cache=(cache(),),
+        )
         run = record_run(record_change(self.server, kind_slug="create_http_site"))
         ChangeRun.objects.filter(pk=run.pk).update(
             unit_name=finished.unit, invocation_id=finished.invocation_id
@@ -77,6 +84,16 @@ class JobsBrowserTests(BrowserTestCase):
         expect(page.get_by_text("Set default PHP").first).to_be_visible()
         expect(page.get_by_text("Started on another computer").first).to_be_visible()
         expect(page.get_by_role("link", name="Open this run")).to_be_visible()
+        expect(page.get_by_text("On, the last run succeeded").first).to_be_visible()
+        expect(page.get_by_text("Next run").first).to_be_visible()
+        expect(page.get_by_text("Object cache").first).to_be_visible()
+        expect(
+            page.get_by_text("Queue workers for beta stopped after repeated crashes.").first
+        ).to_be_visible()
+        expect(page.get_by_role("link", name="Open scheduled tasks")).to_have_attribute(
+            "href",
+            f"/servers/{self.server.pk}/sites/alpha/settings/#scheduled-tasks",
+        )
         self.assert_no_native_terms()
         page.set_viewport_size({"width": 320, "height": 740})
         self.assertEqual(

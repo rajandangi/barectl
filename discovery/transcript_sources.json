@@ -276,7 +276,7 @@
     "disposable/scenario_testing.py": "63079131ce2568febf03dc3ba72886c4f5fa67414248a0c40ab42f64510a4562",
     "disposable/scenarios.py": "b9c85e2300ce4b56409eeaa269edc3a966f83d7c35407df7918de26b155ae51f",
     "disposable/shard_times.py": "8a96b50f6fff8c724363c3fb177a6e5ccb6027b4397b8378c5997678e297f6fb",
-    "disposable/test_automation.py": "094426edd2076e18651d7de9609aac15667331258c3c9a5e74acec188c364f02",
+    "disposable/test_automation.py": "f623e1afd82ab285effeb35c80d483643e8177b4a5385e964d3452be13585206",
     "disposable/test_automation_validators.py": "0e66acac1d6d7fa078c79689b59a1ee8cf72ed2633e36ace16093294e0aae6c8",
     "disposable/test_backups.py": "d75fb8594e91eb713113ac23000361a031cccdca62a4f33704bebb1f5ba2a8b1",
     "disposable/test_breadth.py": "ee905872c99495e45768db6b75a31360d158cc55939619a4935408db58d40a91",
@@ -375,10 +375,11 @@
     "docker/disposable-server/run-scenarios.sh": "198016520d4df2c2c4ac402af087bd10fa8d75e2a3f6604fac724d5fb369787a",
     "jobs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "jobs/apps.py": "77c0484267262d0a7ebb74d64f859fe46531f772c1c7aa8669d5073fa6328ffd",
+    "jobs/automatic.py": "2ccadb62ec6cf64f25ae6a833eaeb1a5c28741aa9d8aa5d9b4ad5bfdc340c971",
     "jobs/models.py": "c12fa027c8ca5c2360cdcfa234df991f7bdd6cd4750405af8eca4f2a5c8019b0",
     "jobs/observation.py": "de60ad8f0ccf1812cda0b034fa8f0cd05a5c9a2e33a448f13d712fe19c0cda58",
-    "jobs/presentation.py": "db5065e7ca0c1e60ace298c7832eaaef2251c94d313bac6645e37ec68b14fa2c",
-    "jobs/testing.py": "335c87463eeb76abd552bec8b3cf6fbafbfdc482bb7615c4bf468f3f5350245d",
+    "jobs/presentation.py": "718dff002ce8a59f6c05ddacaf0147e4ea7d9d865be5e07ee60c410bf7b990df",
+    "jobs/testing.py": "710f2c253067b0dda38d72830bbcecc677b7228da881bbe35e3edc8b7e9668b9",
     "laravel/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "laravel/apps.py": "69a590e622bd0c2417d3ec717408ca69a91716463a5a3c7a999ccb8d5e4f3cd5",
     "laravel/bodies/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -549,7 +550,7 @@
     "sites/ui_testing.py": "8dfb18cac6c703593a50a7dfa4ee08919e02a262c14c8ca13b991d14a7cb2007",
     "sites/views.py": "de9bf8a2a5dfcccf2e3c561e3a112ca8180710cb65f533418c77c518fd6718f3",
     "uv.lock": "7f890989066924198b8c251ebddcfb6e6636ba4b9e7dafb26143f552144f7e48",
-    "vulture_allowlist.py": "7a5246d5f5f1edeb89581f9ecda27d62b011de7bbcd2a30f90d0aab65368ebea",
+    "vulture_allowlist.py": "2fb661dc7acc5aac638c9988044b2b89739e8f924877f712f241eff1cb3b89f6",
     "wordpress/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "wordpress/actions.py": "e17c18aca20f3df0476aaa0778d85646e2f374f5cd6f494a53f4ac13b42230cd",
     "wordpress/apps.py": "9e18a4526c86967fcd68986a0e99a9f5b961c8dd5e3b0597adc7be3d58c6ad8d",
@@ -606,5 +607,5 @@
     "unknown-runtime-26.04": "63740e251688ee91f184cec21260b32cfd1bb06bc45dae8d736abc44539462a1",
     "valkey-installed-26.04": "42daaecdd2d5d2a9795177f86ffebbbdf12fec09a153f67255707df12b87c655"
   },
-  "audit_digest": "ac7348a68f673633c457d6a5a0b74fce2812c8aebc0f9a32815a2de0d9934f7a"
+  "audit_digest": "8a28d6c94841b07cca50d403203aaefc206f6263834d366b60c2b67dcdcf8a12"
 }

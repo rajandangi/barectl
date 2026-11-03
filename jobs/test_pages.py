@@ -21,12 +21,15 @@ from .observation import ObservedChange
 from .testing import (
     BOOT,
     SECRET,
+    cache,
     change,
     journal_shell,
     line,
     record_jobs,
     record_reading,
     result_line,
+    scheduled,
+    worker,
 )
 
 
@@ -290,6 +293,97 @@ class JobsPageTests(ControllerConfigTestCase):
         self.assertNotIn(SECRET, response.content.decode())
         for row in JobObservation.objects.all():
             self.assertNotIn(SECRET, " ".join(str(value) for value in row.__dict__.values()))
+
+    def test_automatic_work_lists_tasks_workers_and_cache_with_settings_links(self) -> None:
+        record_jobs(
+            self.server,
+            schedules=(scheduled(),),
+            workers=(worker(identifier="beta"),),
+            cache=(cache(),),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Automatic work")
+        self.assertContains(response, "Scheduled tasks")
+        self.assertContains(response, "On, the last run succeeded")
+        self.assertContains(response, "Queue workers")
+        self.assertContains(response, "On, running")
+        self.assertContains(response, "Object cache")
+        self.assertContains(response, "Next run")
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/settings/#scheduled-tasks",
+        )
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/beta/settings/#queue-workers",
+        )
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/settings/#site-object-cache-heading",
+        )
+        self.assertNotContains(response, "Run now")
+
+    def test_automatic_work_is_visible_without_change_permission(self) -> None:
+        record_jobs(
+            self.server,
+            changes=(self.a_finished_change(),),
+            schedules=(scheduled(),),
+        )
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "may view this server but not its changes")
+        self.assertContains(response, "On, the last run succeeded")
+        self.assertNotContains(response, "Create PHP site")
+        self.assertNotContains(response, "Recent results")
+        self.assertNotContains(response, "barectl-apply-")
+
+    def test_a_crash_looping_worker_is_in_needs_attention(self) -> None:
+        from automation.worker_status import WorkerStatus
+
+        record_jobs(
+            self.server,
+            workers=(worker(status=WorkerStatus.STOPPED_AFTER_CRASHES),),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Needs attention")
+        self.assertContains(response, "Queue workers for alpha stopped after repeated crashes.")
+
+    def test_a_deliberately_off_timer_is_shown_as_off_and_not_flagged(self) -> None:
+        from automation.status import ScheduleStatus
+
+        record_jobs(self.server, schedules=(scheduled(status=ScheduleStatus.OFF),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Off")
+        self.assertNotContains(response, "Scheduled tasks for alpha")
+        self.assertNotContains(response, "No cron")
+
+    def test_a_missing_next_elapse_is_shown_as_unknown(self) -> None:
+        record_jobs(self.server, schedules=(scheduled(next_elapse_us=0),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Next run unknown")
+
+    def test_an_unreadable_automatic_provider_keeps_its_warning(self) -> None:
+        record_jobs(
+            self.server,
+            automation_warning="The scheduled tasks could not be read.",
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "The scheduled tasks could not be read.")
+        self.assertNotContains(
+            response,
+            "No scheduled tasks, queue workers or object cache were found",
+        )
 
     def test_the_read_query_count_does_not_grow_with_rows(self) -> None:
         self.grant("view_server", "view_changes")

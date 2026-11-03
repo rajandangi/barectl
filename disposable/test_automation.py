@@ -177,7 +177,12 @@ class WordPressServerCron(WordPressCreateCase):
                 self._checkpoint(shell, inputs)
 
     def _checkpoint(self, shell: ssh.RemoteShell, inputs: PreparationInputs) -> None:
+        from datetime import UTC, datetime
+
         from discovery.observations import collect
+        from discovery.snapshot import Snapshot
+        from jobs.automatic import SCHEDULED_TASK, automatic_work
+        from servers.models import Server
 
         observed = collect(shell, releases=True)
         draft = change.review(change.inspect(shell, inputs), inputs)
@@ -188,6 +193,16 @@ class WordPressServerCron(WordPressCreateCase):
         self.assertEqual(schedule.disable_wp_cron, "true")
         self.assertTrue(draft.no_changes, draft.refusals)
         self.assertEqual(draft.effects, ())
+        # Jobs reads the same stored projection as the site's Overview. The tick ran with
+        # every controller stopped; this fresh read names it without opening a connection.
+        rows = automatic_work(
+            Snapshot(observed, datetime.now(UTC), self.target().alias), Server(pk=1)
+        ).rows
+        (job,) = [
+            row for row in rows if row.identifier == IDENTIFIER and row.work_type == SCHEDULED_TASK
+        ]
+        self.assertEqual(job.state, "On, the last run succeeded")
+        self.assertIsNotNone(job.next_run_at)
 
     def test_4_turning_off_gives_page_load_cron_back_before_the_task_stops(self) -> None:
         self.wait_manageable()
@@ -523,8 +538,13 @@ class LaravelQueueWorkers(LaravelDeployCase):
                 self._checkpoint(shell)
 
     def _checkpoint(self, shell: ssh.RemoteShell) -> None:
+        from datetime import UTC, datetime
+
         from automation import worker_change
         from discovery.observations import collect
+        from discovery.snapshot import Snapshot
+        from jobs.automatic import QUEUE_WORKER, automatic_work
+        from servers.models import Server
 
         observed = collect(shell, releases=True)
         inputs = self.start_inputs()
@@ -535,6 +555,17 @@ class LaravelQueueWorkers(LaravelDeployCase):
         self.assertEqual(row.definition, WorkerDefinition(("default",), 2, 60))
         self.assertTrue(draft.no_changes, draft.refusals)
         self.assertEqual(draft.effects, ())
+        # Jobs names the same running work a fresh controller reads, after the workers
+        # processed dispatched jobs with no controller involved.
+        rows = automatic_work(
+            Snapshot(observed, datetime.now(UTC), self.target().alias), Server(pk=1)
+        ).rows
+        (job,) = [
+            item
+            for item in rows
+            if item.identifier == self.identity and item.work_type == QUEUE_WORKER
+        ]
+        self.assertEqual(job.state, "On, running")
 
     def test_4_an_explicit_stop_survives_a_restart(self) -> None:
         from automation import worker_change

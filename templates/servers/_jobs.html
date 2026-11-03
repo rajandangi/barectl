@@ -48,36 +48,70 @@
         {% for row in group.rows %}
           <li class="barectl-job-row"
               id="job-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
-            <p>
-              <strong>{{ row.title }}</strong>
-              {% if row.sites %}· {{ row.sites|join:", " }}{% endif %}
-            </p>
-            <p>
-              {{ row.summary }}
-              {% if row.when %}
-                · <time datetime="{{ row.when|date:'c' }}">{{ row.when|date:'M j, Y, H:i T' }}</time>
-              {% endif %}
-            </p>
-            <p>
-              {% if row.run_url %}
-                <a href="{{ row.run_url }}">Open this run</a>
-              {% else %}
-                <span class="barectl-note">Started on another computer, so this installation has no run to open.</span>
-              {% endif %}
-            </p>
-            <details>
-              <summary>Show details</summary>
-              <dl class="barectl-facts">
-                {% for label, value in row.detail_lines %}
-                  <div>
-                    <dt>{{ label }}</dt>
-                    <dd>
-                      <code>{{ value }}</code>
-                    </dd>
-                  </div>
-                {% endfor %}
-              </dl>
-            </details>
+            {% if row.is_automatic %}
+              <p>
+                <strong>{{ row.title }}</strong> · {{ row.identifier }}
+              </p>
+              <p>
+                {% if group.key == "attention" %}
+                  {{ row.attention_sentence }}
+                {% else %}
+                  {{ row.state }}
+                {% endif %}
+                {% if row.next_run_at %}
+                  · Next run <time datetime="{{ row.next_run_at|date:'c' }}">{{ row.next_run_at|date:'M j, Y, H:i' }}</time> UTC
+                {% elif row.next_run_unknown %}
+                  · Next run unknown
+                {% endif %}
+              </p>
+              <p>
+                <a href="{{ row.link_url }}">{{ row.link_label }}</a>
+              </p>
+              <details>
+                <summary>Show details</summary>
+                <dl class="barectl-facts">
+                  {% for label, value in row.detail_lines %}
+                    <div>
+                      <dt>{{ label }}</dt>
+                      <dd>
+                        <code>{{ value }}</code>
+                      </dd>
+                    </div>
+                  {% endfor %}
+                </dl>
+              </details>
+            {% else %}
+              <p>
+                <strong>{{ row.title }}</strong>
+                {% if row.sites %}· {{ row.sites|join:", " }}{% endif %}
+              </p>
+              <p>
+                {{ row.summary }}
+                {% if row.when %}
+                  · <time datetime="{{ row.when|date:'c' }}">{{ row.when|date:'M j, Y, H:i T' }}</time>
+                {% endif %}
+              </p>
+              <p>
+                {% if row.run_url %}
+                  <a href="{{ row.run_url }}">Open this run</a>
+                {% else %}
+                  <span class="barectl-note">Started on another computer, so this installation has no run to open.</span>
+                {% endif %}
+              </p>
+              <details>
+                <summary>Show details</summary>
+                <dl class="barectl-facts">
+                  {% for label, value in row.detail_lines %}
+                    <div>
+                      <dt>{{ label }}</dt>
+                      <dd>
+                        <code>{{ value }}</code>
+                      </dd>
+                    </div>
+                  {% endfor %}
+                </dl>
+              </details>
+            {% endif %}
           </li>
         {% endfor %}
       </ul>
