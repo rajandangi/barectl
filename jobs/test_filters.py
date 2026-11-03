@@ -8,17 +8,17 @@ from django.test import SimpleTestCase
 
 from .filters import (
     DEFAULT_RANGE,
-    RESULT_CHOICES,
     Selection,
     filter_recent,
 )
+from .results import RESULT_CHOICES
 
 
 @dataclass(frozen=True)
 class Row:
     when: datetime | None = None
     sites: tuple[str, ...] = ("alpha",)
-    kind_slug: str = "create_http_site"
+    work_type: str = "create_http_site"
     result_class: str = "succeeded"
     running: bool = False
 
@@ -107,15 +107,15 @@ class FilterTests(SimpleTestCase):
 
     def test_work_type_matches_the_established_kind_slug_only(self) -> None:
         rows = (
-            Row(when=NOW, kind_slug="create_http_site"),
-            Row(when=NOW, kind_slug="set_default_php"),
-            Row(when=NOW, kind_slug=""),
+            Row(when=NOW, work_type="create_http_site"),
+            Row(when=NOW, work_type="set_default_php"),
+            Row(when=NOW, work_type=""),
         )
         filtered = filter_recent(
             rows, Selection.parse({"work": "set_default_php"}), now=NOW, zone=LONDON
         )
         self.assertEqual(len(filtered.rows), 1)
-        self.assertEqual(filtered.rows[0].kind_slug, "set_default_php")
+        self.assertEqual(filtered.rows[0].work_type, "set_default_php")
 
     def test_each_result_choice_matches_its_result_class(self) -> None:
         rows = tuple(
@@ -137,9 +137,9 @@ class FilterTests(SimpleTestCase):
 
     def test_filters_combine(self) -> None:
         rows = (
-            Row(when=NOW, sites=("alpha",), kind_slug="create_http_site", result_class="failed"),
-            Row(when=NOW, sites=("alpha",), kind_slug="create_http_site", result_class="succeeded"),
-            Row(when=NOW, sites=("beta",), kind_slug="create_http_site", result_class="failed"),
+            Row(when=NOW, sites=("alpha",), work_type="create_http_site", result_class="failed"),
+            Row(when=NOW, sites=("alpha",), work_type="create_http_site", result_class="succeeded"),
+            Row(when=NOW, sites=("beta",), work_type="create_http_site", result_class="failed"),
         )
         filtered = filter_recent(
             rows,
@@ -178,9 +178,9 @@ class UntimedAndOrderTests(SimpleTestCase):
 class OptionTests(SimpleTestCase):
     def test_site_and_work_options_come_only_from_visible_established_rows(self) -> None:
         rows = (
-            Row(when=NOW, sites=("alpha", "beta"), kind_slug="create_http_site"),
-            Row(when=NOW, sites=("beta",), kind_slug="set_default_php"),
-            Row(when=NOW, sites=(), kind_slug=""),
+            Row(when=NOW, sites=("alpha", "beta"), work_type="create_http_site"),
+            Row(when=NOW, sites=("beta",), work_type="set_default_php"),
+            Row(when=NOW, sites=(), work_type=""),
         )
         options = filter_recent(rows, Selection.parse({}), now=NOW, zone=LONDON).filters
         self.assertEqual(

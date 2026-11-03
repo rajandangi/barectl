@@ -245,6 +245,8 @@ def backup(
     runs: tuple[BackupRun, ...] = (),
     timers: tuple[BackupTimer, ...] = (),
     offsite: OffsiteStorage | None = None,
+    runs_truncated: bool = False,
+    timers_truncated: bool = False,
 ) -> ObservedBackup:
     return ObservedBackup(
         identifier,
@@ -260,6 +262,8 @@ def backup(
         (),
         runs,
         timers,
+        runs_truncated,
+        timers_truncated,
     )
 
 

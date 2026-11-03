@@ -31,6 +31,9 @@ MAX_TEXT = 500
 MAX_RUNS = 6
 MAX_RUN_ROWS = 96
 MAX_TIMERS = 5
+# The controller discards an answer above MAX_OUTPUT (64 KiB). Keep a margin so a read
+# always returns a parseable answer, trimming the oldest runs first and timers last.
+MAX_OUTPUT_BYTES = 56 * 1024
 # A timer's last trigger is used only as missing-result evidence inside Jobs' 30-day range.
 RUN_EVIDENCE_US = 30 * 24 * 60 * 60 * 1_000_000
 JOURNAL_LINES = 400
@@ -136,6 +139,7 @@ class Journal(NamedTuple):
     integrity: dict[str, dict[str, dict[str, object]]]
     connections: dict[str, dict[str, object]]
     runs: dict[str, list[dict[str, object]]]
+    truncated: set[str]
 
 
 def journal() -> Journal:  # noqa: C901 - one journal read
@@ -155,12 +159,13 @@ def journal() -> Journal:  # noqa: C901 - one journal read
         limit=768 * 1024,
     )
     if status:
-        return Journal({}, {}, {}, {}, {})
+        return Journal({}, {}, {}, {}, {}, set())
     newest: dict[str, dict[str, object]] = {}
     copies: dict[str, dict[str, object]] = {}
     integrity: dict[str, dict[str, dict[str, object]]] = {}
     connections: dict[str, dict[str, object]] = {}
     runs: dict[str, list[dict[str, object]]] = {}
+    truncated: set[str] = set()
     final_capture: set[str] = set()
     total_runs = 0
     for entry in _entries(output):
@@ -183,6 +188,8 @@ def journal() -> Journal:  # noqa: C901 - one journal read
                 if run is not None:
                     runs.setdefault(identifier, []).append(run)
                     total_runs += 1
+            else:
+                truncated.add(identifier)
             continue
         if kind == "copy":
             if identifier not in copies:
@@ -192,6 +199,8 @@ def journal() -> Journal:  # noqa: C901 - one journal read
                 if run is not None:
                     runs.setdefault(identifier, []).append(run)
                     total_runs += 1
+            else:
+                truncated.add(identifier)
             continue
         if kind == "cleanup":
             if total_runs < MAX_RUN_ROWS:
@@ -199,6 +208,8 @@ def journal() -> Journal:  # noqa: C901 - one journal read
                 if run is not None:
                     runs.setdefault(identifier, []).append(run)
                     total_runs += 1
+            else:
+                truncated.add(identifier)
             continue
         if kind != "backup":
             continue
@@ -214,11 +225,15 @@ def journal() -> Journal:  # noqa: C901 - one journal read
                 total_runs += 1
                 if not interim:
                     final_capture.add(identifier)
+        elif not (interim and identifier in final_capture):
+            truncated.add(identifier)
     for identifier, rows in list(runs.items()):
-        del rows[MAX_RUNS:]
+        if len(rows) > MAX_RUNS:
+            del rows[MAX_RUNS:]
+            truncated.add(identifier)
         if not rows:
             del runs[identifier]
-    return Journal(newest, copies, integrity, connections, runs)
+    return Journal(newest, copies, integrity, connections, runs, truncated)
 
 
 class Entry(NamedTuple):
@@ -710,11 +725,50 @@ def main() -> None:
                 ),
                 "runs": read.runs.get(identifier, [])[:MAX_RUNS],
                 "timers": timers.get(identifier, []),
+                "runs_truncated": identifier in read.truncated,
+                "timers_truncated": False,
             }
         )
-    sys.stdout.write(
-        json.dumps({"version": 1, "sites": rows, "offsite": storage}, separators=(",", ":"))
-    )
+    sys.stdout.write(_bounded_answer(rows, storage))
+
+
+def _bounded_answer(rows: list[dict[str, object]], storage: dict[str, object] | None) -> str:
+    """The answer under the controller's byte ceiling, trimming oldest evidence first."""
+    answer: dict[str, object] = {"version": 1, "sites": rows, "offsite": storage}
+
+    def encode() -> str:
+        return json.dumps(answer, separators=(",", ":"))
+
+    text = encode()
+    while len(text.encode("utf-8")) > MAX_OUTPUT_BYTES:
+        runs: list[tuple[str, int]] = []
+        for index, row in enumerate(rows):
+            found = row.get("runs")
+            if isinstance(found, list) and found:
+                last = found[-1]
+                at = last.get("at") if isinstance(last, dict) else ""
+                runs.append((at if isinstance(at, str) else "", index))
+        if runs:
+            _, index = min(runs)
+            found = rows[index]["runs"]
+            if isinstance(found, list):
+                found.pop()
+                rows[index]["runs_truncated"] = True
+        else:
+            timers = [
+                (len(found), index)
+                for index, row in enumerate(rows)
+                if isinstance((found := row.get("timers")), list) and found
+            ]
+            if not timers:
+                break
+            _, index = max(timers)
+            found = rows[index]["timers"]
+            if isinstance(found, list):
+                found.pop()
+                rows[index]["timers_truncated"] = True
+        text = encode()
+    return text
 
 
 if __name__ == "__main__":

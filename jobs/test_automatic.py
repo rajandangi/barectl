@@ -81,11 +81,13 @@ def schedule(
     identifier: str = "alpha",
     role: str = "wpcron",
     next_elapse_us: int = NEXT_ELAPSE,
+    last_exit_us: int = 0,
 ) -> ObservedSchedule:
     return ObservedSchedule(
         identifier=identifier,
         role=role,
         status=status,
+        last_exit_us=last_exit_us,
         next_elapse_us=next_elapse_us,
         installed=status not in (ScheduleStatus.OFF, ScheduleStatus.NO_CRON),
         timer_active=status
@@ -111,6 +113,8 @@ def worker(
     status: WorkerStatus,
     *,
     identifier: str = "beta",
+    last_start_us: int = 0,
+    last_exit_us: int = 0,
 ) -> ObservedWorker:
     return ObservedWorker(
         identifier=identifier,
@@ -120,6 +124,8 @@ def worker(
         active_processes=2 if status == WorkerStatus.RUNNING else 0,
         installed=True,
         enabled=status != WorkerStatus.OFF,
+        last_start_us=last_start_us,
+        last_exit_us=last_exit_us,
     )
 
 
@@ -165,6 +171,17 @@ class ScheduleRowTests(SimpleTestCase):
                 (row,) = work.rows
                 self.assertEqual(row.state, sentence)
                 self.assertEqual(row.needs_attention, status in SCHEDULE_ATTENTION)
+
+    def test_a_schedule_row_details_its_last_run(self) -> None:
+        usec = 1_761_000_000_000_000
+        work = automatic_work(
+            snapshot(schedules=(schedule(ScheduleStatus.SUCCEEDED, last_exit_us=usec),)), SERVER
+        )
+        (row,) = work.rows
+        self.assertIn(
+            ("Last run", datetime.fromtimestamp(usec / 1_000_000, tz=UTC).isoformat()),
+            row.detail_lines,
+        )
 
     def test_a_failed_run_needs_attention_with_the_overview_sentence(self) -> None:
         work = automatic_work(snapshot(schedules=(schedule(ScheduleStatus.FAILED),)), SERVER)
@@ -245,6 +262,24 @@ class WorkerRowTests(SimpleTestCase):
                 (row,) = work.rows
                 self.assertEqual(row.state, sentence)
                 self.assertEqual(row.needs_attention, status in WORKER_ATTENTION)
+
+    def test_a_worker_row_details_its_last_start_and_finish(self) -> None:
+        start, exit_us = 1_760_000_000_000_000, 1_761_000_000_000_000
+        work = automatic_work(
+            snapshot(
+                workers=(worker(WorkerStatus.RUNNING, last_start_us=start, last_exit_us=exit_us),)
+            ),
+            SERVER,
+        )
+        (row,) = work.rows
+        self.assertIn(
+            ("Last started", datetime.fromtimestamp(start / 1_000_000, tz=UTC).isoformat()),
+            row.detail_lines,
+        )
+        self.assertIn(
+            ("Last finished", datetime.fromtimestamp(exit_us / 1_000_000, tz=UTC).isoformat()),
+            row.detail_lines,
+        )
 
     def test_a_crash_looping_worker_needs_attention_with_the_overview_sentence(self) -> None:
         work = automatic_work(

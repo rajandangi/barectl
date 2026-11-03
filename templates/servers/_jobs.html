@@ -75,19 +75,6 @@
                   <p>
                     <a href="{{ row.link_url }}">{{ row.link_label }}</a>
                   </p>
-                  <details>
-                    <summary>Show details</summary>
-                    <dl class="barectl-facts">
-                      {% for label, value in row.detail_lines %}
-                        <div>
-                          <dt>{{ label }}</dt>
-                          <dd>
-                            <code>{{ value }}</code>
-                          </dd>
-                        </div>
-                      {% endfor %}
-                    </dl>
-                  </details>
                 {% elif row.is_backup %}
                   <p>
                     <strong>{{ row.title }}</strong> · {{ row.identifier }}
@@ -115,19 +102,6 @@
                   <p>
                     <a href="{{ row.link_url }}">Open Backups</a>
                   </p>
-                  <details>
-                    <summary>Show details</summary>
-                    <dl class="barectl-facts">
-                      {% for label, value in row.detail_lines %}
-                        <div>
-                          <dt>{{ label }}</dt>
-                          <dd>
-                            <code>{{ value }}</code>
-                          </dd>
-                        </div>
-                      {% endfor %}
-                    </dl>
-                  </details>
                 {% else %}
                   <p>
                     <strong>{{ row.title }}</strong>
@@ -146,20 +120,20 @@
                       <span class="barectl-note">Started on another computer, so this installation has no run to open.</span>
                     {% endif %}
                   </p>
-                  <details>
-                    <summary>Show details</summary>
-                    <dl class="barectl-facts">
-                      {% for label, value in row.detail_lines %}
-                        <div>
-                          <dt>{{ label }}</dt>
-                          <dd>
-                            <code>{{ value }}</code>
-                          </dd>
-                        </div>
-                      {% endfor %}
-                    </dl>
-                  </details>
                 {% endif %}
+                <details>
+                  <summary>Show details</summary>
+                  <dl class="barectl-facts">
+                    {% for label, value in row.detail_lines %}
+                      <div>
+                        <dt>{{ label }}</dt>
+                        <dd>
+                          <code>{{ value }}</code>
+                        </dd>
+                      </div>
+                    {% endfor %}
+                  </dl>
+                </details>
               </li>
             {% endfor %}
           </ul>

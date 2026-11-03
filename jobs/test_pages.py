@@ -1,5 +1,6 @@
 """The Jobs page's permissions, check action, retention and query cost (#285)."""
 
+from datetime import timedelta
 from typing import override
 from unittest import mock
 
@@ -462,6 +463,32 @@ class JobsPageTests(ControllerConfigTestCase):
         with CaptureQueriesContext(connection) as many:
             self.client.get(self.url)
         self.assertEqual(len(one), len(many))
+
+    def test_runs_dropped_at_the_per_site_cap_are_a_coverage_notice(self) -> None:
+        record_jobs(
+            self.server,
+            backups=(backup(runs=(run(at=timezone.now()),), runs_truncated=True),),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Some older backup runs are not shown")
+
+    def test_a_queued_check_names_the_stopped_worker_after_the_help_delay(self) -> None:
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        self.client.post(reverse("server_verify", args=(self.server.pk,)), {"next": "jobs"})
+        attempt = (
+            DiscoveryAttempt.objects.filter(server=self.server)
+            .exclude(status=DiscoveryAttempt.Status.SUCCEEDED)
+            .latest("pk")
+        )
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
+            queued_at=timezone.now() - timedelta(minutes=11)
+        )
+        response = self.client.get(self.url)
+        self.assertContains(response, "worker has not started it")
+        self.assertContains(response, "python manage.py db_worker")
 
     def test_backup_runs_and_schedules_are_plain_rows_with_a_backups_link(self) -> None:
         record_jobs(

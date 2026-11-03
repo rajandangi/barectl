@@ -11,6 +11,7 @@ from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
@@ -44,7 +45,7 @@ from .discovery_state import (
 )
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
-from .page import banner, status_line
+from .page import QUEUE_HELP_AFTER, banner, status_line
 from .registration import (
     RemovalBlocked,
     SaveOutcome,
@@ -145,14 +146,15 @@ def _more_options_open(form: ServerForm) -> bool:
     return (port not in (None, "", 22, "22")) or bool(alias)
 
 
-Section = Literal["sites", "security", "activity", "jobs", "advanced", "settings"]
-_SECTIONS: dict[Section, str] = {
+Section = Literal["sites", "security", "activity", "jobs", "settings", "advanced"]
+# The server sections in navigation order; the page title, navigation and tests read this.
+SECTIONS: dict[Section, str] = {
     "sites": "Sites",
     "security": "Security",
     "activity": "Activity",
     "jobs": "Jobs",
-    "advanced": "Advanced",
     "settings": "Settings",
+    "advanced": "Advanced",
 }
 
 SiteSection = Literal[
@@ -392,6 +394,16 @@ def _jobs_context(request: HttpRequest, state: DiscoveryState, context: dict[str
 
 def _check_progress(state: DiscoveryState) -> str:
     if state.attempt is not None and state.attempt.status == Status.QUEUED:
+        if state.attempt.worker_unavailable:
+            return (
+                "Barectl queued a check, but the worker has not started it. Start the worker "
+                "on the controller host with python manage.py db_worker."
+            )
+        if timezone.now() - state.attempt.queued_at > QUEUE_HELP_AFTER:
+            return (
+                "Barectl queued a check. If it stays queued, start the worker on the controller "
+                "host with python manage.py db_worker."
+            )
         return "Barectl queued a check. It starts in a moment."
     if state.attempt is not None and state.attempt.status == Status.RUNNING:
         return "Barectl is checking the server now. The results below are from an earlier check."
@@ -420,7 +432,15 @@ def server_page(
         history=state.history,
         snapshot=state.snapshot,
         section=section,
-        section_title=_SECTIONS[section],
+        section_title=SECTIONS[section],
+        server_sections=tuple(
+            {
+                "key": key,
+                "title": title,
+                "url": reverse(f"server_{key}", args=(server.pk,)),
+            }
+            for key, title in SECTIONS.items()
+        ),
     )
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
         context["sites_forbidden"] = True

@@ -170,7 +170,8 @@ def _cache_applications(
 
 def _schedule_row(row: ObservedSchedule, server: Server) -> AutomaticRow:
     view = schedule_presentation.schedule_view(row.identifier, row, None)
-    next_run = _moment(row.next_elapse_us)
+    next_run = _from_microseconds(row.next_elapse_us)
+    last_run = _from_microseconds(row.last_exit_us)
     return AutomaticRow(
         key=f"{row.identifier}:{row.role}:scheduled",
         identifier=row.identifier,
@@ -187,12 +188,25 @@ def _schedule_row(row: ObservedSchedule, server: Server) -> AutomaticRow:
             f"barectl-site-{row.identifier}-{row.role}.timer",
             f"barectl-site-{row.identifier}-{row.role}.service",
         ),
+        facts=(("Last run", last_run.isoformat()),) if last_run is not None else (),
     )
 
 
 def _worker_row(row: ObservedWorker, server: Server) -> AutomaticRow:
     view = worker_view(row.identifier, row, None)
     definition = row.definition
+    last_start = _from_microseconds(row.last_start_us)
+    last_exit = _from_microseconds(row.last_exit_us)
+    facts: tuple[tuple[str, str], ...] = (
+        (
+            ("Queues", ", ".join(definition.queues)),
+            ("Processes", str(definition.processes)),
+        )
+        if definition is not None
+        else ()
+    )
+    facts += (("Last started", last_start.isoformat()),) if last_start is not None else ()
+    facts += (("Last finished", last_exit.isoformat()),) if last_exit is not None else ()
     return AutomaticRow(
         key=f"{row.identifier}:queue",
         identifier=row.identifier,
@@ -208,14 +222,7 @@ def _worker_row(row: ObservedWorker, server: Server) -> AutomaticRow:
             if definition is not None
             else ()
         ),
-        facts=(
-            (
-                ("Queues", ", ".join(definition.queues)),
-                ("Processes", str(definition.processes)),
-            )
-            if definition is not None
-            else ()
-        ),
+        facts=facts,
     )
 
 
@@ -248,7 +255,7 @@ def _settings_url(server: Server, identifier: str, work_type: str) -> str:
     return reverse("site_settings", args=(server.pk, identifier)) + "#" + ANCHOR[work_type]
 
 
-def _moment(microseconds: int) -> datetime | None:
+def _from_microseconds(microseconds: int) -> datetime | None:
     """The server's next elapse as UTC, or ``None`` when it reported none."""
     if not microseconds:
         return None

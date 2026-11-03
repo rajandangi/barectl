@@ -257,6 +257,59 @@ class JournalTests(SimpleTestCase):
         self.assertEqual(reading.runs["alpha"][0]["reason"], "backup_paused")
         self.assertEqual(reading.newest["alpha"]["reason"], "backup_paused")
 
+    def test_runs_past_the_per_site_cap_are_marked_truncated(self) -> None:
+        lines = [
+            _line(_result(at=f"2026-10-2{day}T11:00:00+00:00"), usec=1_762_000_000_000_000 - day)
+            for day in range(1, 8)
+        ]
+        reading = self.run_journal(*lines)
+        self.assertEqual(len(reading.runs["alpha"]), body.MAX_RUNS)
+        self.assertIn("alpha", reading.truncated)
+
+    def test_the_answer_is_trimmed_under_the_controller_byte_bound(self) -> None:
+        identifiers = [f"s{index:02d}" for index in range(body.MAX_SITES)]
+        rows = [
+            row(
+                identifier=identifier,
+                runs=[
+                    {
+                        "kind": "capture",
+                        "class": "succeeded",
+                        "reason": "r" * 220,
+                        "at": f"2026-10-{day:02d}T11:00:00+00:00",
+                        "point": "0123456789abcdef",
+                        "scope": "database",
+                        "origin": "scheduled",
+                        "snapshots": 1,
+                        "bytes": 4096,
+                        "offsite": "",
+                    }
+                    for day in range(1, 7)
+                ],
+                timers=[
+                    {
+                        "work": "backup",
+                        "location": "",
+                        "on": True,
+                        "next": 1_793_329_200_000_000,
+                        "last": 1_793_000_000_000_000,
+                    }
+                ],
+                runs_truncated=False,
+                timers_truncated=False,
+            )
+            for identifier in identifiers
+        ]
+        text = body._bounded_answer(rows, None)
+        self.assertLessEqual(len(text.encode()), body.MAX_OUTPUT_BYTES)
+        value = json.loads(text)
+        self.assertTrue(any(site["runs_truncated"] for site in value["sites"]))
+        self.assertTrue(all(len(site["runs"]) <= body.MAX_RUNS for site in value["sites"]))
+        parsed = observation.observations(value, tuple(site(name) for name in identifiers))
+        if parsed is None:
+            self.fail("The trimmed answer was not accepted.")
+        self.assertTrue(any(item.runs_truncated for item in parsed))
+
 
 class ScheduleTests(SimpleTestCase):
     def run_schedules(
