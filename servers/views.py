@@ -362,12 +362,21 @@ def _advanced_section(
 
 
 def _jobs_context(request: HttpRequest, state: DiscoveryState, context: dict[str, object]) -> None:
+    from jobs.filters import Selection
     from jobs.presentation import FORBIDDEN, NOT_TARGET_STACK, present
+    from jobs.timezones import resolve_zone
 
     may_view_changes = request.user.has_perm(VIEW_CHANGES)
-    view = present(state.snapshot, state.server, may_view_changes=may_view_changes)
+    view = present(
+        state.snapshot,
+        state.server,
+        may_view_changes=may_view_changes,
+        selection=Selection.parse(request.GET),
+        zone=resolve_zone(request.GET.get("tz")),
+    )
     context.update(
         jobs_view=view,
+        jobs_url=reverse("server_jobs", args=(state.server.pk,)),
         jobs_forbidden="" if may_view_changes else FORBIDDEN,
         jobs_not_target_stack="" if view.target_stack else NOT_TARGET_STACK,
         jobs_check_url=reverse("server_verify", args=(state.server.pk,)),
@@ -457,6 +466,10 @@ def server_page(
         )
     if section == "jobs":
         _jobs_context(request, state, context)
+        if _is_fragment_request(request):
+            response = render(request, "servers/_jobs.html", context)
+            patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+            return response
     if section == "advanced":
         context["presented"] = state.presentation
     if section == "security":

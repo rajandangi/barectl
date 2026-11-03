@@ -1,0 +1,64 @@
+{% comment %}
+  Recent results filters (#291). This form is an ordinary GET: it reads the saved view,
+  keeps the URL bookmarkable and never opens an SSH connection or queues a check.
+{% endcomment %}
+<form class="usa-form barectl-jobs-filter"
+      method="get"
+      action="{{ jobs_url }}"
+      data-jobs-filters>
+  <fieldset class="usa-fieldset">
+    <legend class="usa-legend">Narrow recent results</legend>
+    <p class="usa-hint">These read the saved view; they never contact the server.</p>
+    <div class="usa-form-group">
+      <label class="usa-label" for="jobs-range">Range</label>
+      <select class="usa-select"
+              id="jobs-range"
+              name="range"
+              data-jobs-default="7d">
+        {% for option in jobs_view.filters.ranges %}
+          <option value="{{ option.value }}"
+                  {% if option.selected %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if jobs_view.filters.sites %}
+      <div class="usa-form-group">
+        <label class="usa-label" for="jobs-site">Site</label>
+        <select class="usa-select" id="jobs-site" name="site">
+          <option value="">All sites</option>
+          {% for option in jobs_view.filters.sites %}
+            <option value="{{ option.value }}"
+                    {% if option.selected %}selected{% endif %}>{{ option.label }} ({{ option.count }})</option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
+    {% if jobs_view.filters.works %}
+      <div class="usa-form-group">
+        <label class="usa-label" for="jobs-work">Type of work</label>
+        <select class="usa-select" id="jobs-work" name="work">
+          <option value="">All types of work</option>
+          {% for option in jobs_view.filters.works %}
+            <option value="{{ option.value }}"
+                    {% if option.selected %}selected{% endif %}>{{ option.label }} ({{ option.count }})</option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
+    <div class="usa-form-group">
+      <label class="usa-label" for="jobs-result">Result</label>
+      <select class="usa-select" id="jobs-result" name="result">
+        <option value="">All results</option>
+        {% for option in jobs_view.filters.results %}
+          <option value="{{ option.value }}"
+                  {% if option.selected %}selected{% endif %}>{{ option.label }} ({{ option.count }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" name="tz" value="{{ jobs_view.zone.label }}">
+    <button class="usa-button" type="submit">Show results</button>
+  </fieldset>
+</form>
+<p id="jobs-results-status" class="usa-sr-only" role="status">
+  {{ jobs_view.filters.shown }} result{{ jobs_view.filters.shown|pluralize }} in Recent results.
+</p>

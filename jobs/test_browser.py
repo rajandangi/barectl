@@ -1,7 +1,10 @@
-"""The operator's Jobs journey against production-built assets (#285)."""
+"""The operator's Jobs journey against production-built assets (#285, #291)."""
 
+import re
 import tempfile
+from datetime import timedelta
 from typing import override
+from urllib.parse import urlsplit
 
 from django.core.management import call_command
 from django.test import override_settings, tag
@@ -55,11 +58,32 @@ class JobsBrowserTests(BrowserTestCase):
             started_at=now,
             finished_at=now,
         )
-        record_jobs(self.server, changes=(finished, failed))
+        beta = change(
+            unit="barectl-apply-" + "c" * 32 + ".service",
+            invocation="3" * 32,
+            kind_slug="create_http_site",
+            sites=("beta",),
+            result_class="succeeded",
+            started_at=now - timedelta(hours=1),
+            finished_at=now - timedelta(hours=1),
+        )
+        older = change(
+            unit="barectl-apply-" + "d" * 32 + ".service",
+            invocation="4" * 32,
+            kind_slug="create_http_site",
+            sites=("omega",),
+            result_class="succeeded",
+            started_at=now - timedelta(days=20),
+            finished_at=now - timedelta(days=20),
+        )
+        record_jobs(self.server, changes=(finished, failed, beta, older))
         run = record_run(record_change(self.server, kind_slug="create_http_site"))
         ChangeRun.objects.filter(pk=run.pk).update(
             unit_name=finished.unit, invocation_id=finished.invocation_id
         )
+        # A real browser zone, so the page can name it and place Today at local midnight.
+        self.context.close()
+        self.open_context(width=1280, height=900, timezone_id="Europe/London")
         self.sign_in()
         self.page.goto(f"{self.live_server_url}/servers/{self.server.pk}/jobs/")
 
@@ -73,8 +97,8 @@ class JobsBrowserTests(BrowserTestCase):
         expect(page.get_by_role("heading", name="Running", level=2)).to_be_visible()
         expect(page.get_by_role("heading", name="Automatic work", level=2)).to_be_visible()
         expect(page.get_by_role("heading", name="Recent results", level=2)).to_be_visible()
-        expect(page.get_by_text("Create PHP site").first).to_be_visible()
-        expect(page.get_by_text("Set default PHP").first).to_be_visible()
+        expect(page.locator("li.barectl-job-row", has_text="Create PHP site").first).to_be_visible()
+        expect(page.locator("li.barectl-job-row", has_text="Set default PHP").first).to_be_visible()
         expect(page.get_by_text("Started on another computer").first).to_be_visible()
         expect(page.get_by_role("link", name="Open this run")).to_be_visible()
         self.assert_no_native_terms()
@@ -86,12 +110,59 @@ class JobsBrowserTests(BrowserTestCase):
             0,
         )
         page.set_viewport_size({"width": 1280, "height": 900})
-        last_checked = page.locator("#jobs-last-checked time").inner_text()
+
+        # #291: the small entry sends the browser's IANA zone under the HTMX lifecycle.
+        recent_rows = page.locator("section[aria-labelledby='jobs-recent-heading'] ul")
+        expect(page.locator("#jobs-zone")).to_contain_text("Europe/London")
+        expect(page).to_have_url(re.compile(r"[?&]tz=Europe"))
+        self.assertNotIn("range=", page.url)
+        expect(page.locator("#jobs-results-status")).to_have_attribute("role", "status")
+        expect(recent_rows).to_contain_text("Create PHP site")
+        expect(recent_rows).not_to_contain_text("omega")
+        attempts = DiscoveryAttempt.objects.count()
+
+        page.get_by_label("Range").select_option("30d")
+        page.get_by_role("button", name="Show results").click()
+        expect(page).to_have_url(re.compile(r"[?&]range=30d"))
+        expect(page.locator("#jobs-zone")).to_contain_text("Europe/London")
+        expect(recent_rows).to_contain_text("omega")
+        expect(page.get_by_label("Range")).to_be_focused()
+
+        page.get_by_label("Site").select_option("alpha")
+        page.get_by_label("Result", exact=True).select_option("failed")
+        page.get_by_role("button", name="Show results").click()
+        expect(page).to_have_url(re.compile(r"[?&]site=alpha.*[?&]result=failed"))
+        expect(recent_rows).not_to_contain_text("beta")
+        expect(recent_rows).to_contain_text("alpha")
+        expect(recent_rows).to_contain_text("Failed")
+        expect(recent_rows).not_to_contain_text("Finished")
+        expect(page.get_by_label("Result", exact=True)).to_be_focused()
+
+        # Back and forward restore the same bookmarkable selection.
+        page.go_back()
+        expect(page.get_by_label("Site")).to_have_value("")
+        expect(page.get_by_label("Result", exact=True)).to_have_value("")
+        self.assertNotIn("work=", page.url)
+        expect(page).to_have_url(re.compile(r"range=30d&tz="))
+        page.go_forward()
+        expect(page.get_by_label("Site")).to_have_value("alpha")
+        expect(page.get_by_label("Result", exact=True)).to_have_value("failed")
+
+        self.assertEqual(DiscoveryAttempt.objects.count(), attempts)
+        paths = [urlsplit(request.url).path for request in self.requests]
+        self.assertFalse(
+            any(path == f"/servers/{self.server.pk}/verify/" for path in paths),
+            paths,
+        )
+
+        last_checked = page.locator("#jobs-last-checked time").get_attribute("datetime")
 
         page.get_by_role("button", name="Check now").click()
         expect(page.get_by_text("Barectl queued a check")).to_be_visible()
-        expect(page.get_by_text("Create PHP site").first).to_be_visible()
-        expect(page.locator("#jobs-last-checked time")).to_have_text(last_checked)
+        expect(page.locator("li.barectl-job-row", has_text="Create PHP site").first).to_be_visible()
+        expect(page.locator("#jobs-last-checked time")).to_have_attribute(
+            "datetime", last_checked or ""
+        )
 
         attempt = (
             DiscoveryAttempt.objects.filter(server=self.server)
@@ -101,7 +172,7 @@ class JobsBrowserTests(BrowserTestCase):
         record_attempt(attempt, DiscoveryAttempt.Status.RUNNING)
         page.reload()
         expect(page.get_by_text("checking the server now")).to_be_visible()
-        expect(page.get_by_text("Create PHP site").first).to_be_visible()
+        expect(page.locator("li.barectl-job-row", has_text="Create PHP site").first).to_be_visible()
 
         row = page.locator("li.barectl-job-row", has_text="Create PHP site").first
         row.get_by_text("Show details").click()

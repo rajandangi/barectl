@@ -5,11 +5,12 @@ their details and their links need ``operations.view_changes``; without it the v
 the page, the last-checked time and a plain notice, and exposes no row text or count.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Final, Literal
 
 from django.urls import reverse
+from django.utils import timezone
 
 from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome
@@ -18,8 +19,10 @@ from operations import engine
 from operations.models import ChangeRun
 from servers.models import Server
 
+from .filters import Filtered, Filters, Selection, filter_recent
 from .models import Coverage
 from .observation import ObservedChange, ProviderCoverage
+from .timezones import DisplayZone, resolve_zone
 
 Group = Literal["attention", "running", "automatic", "recent"]
 
@@ -31,6 +34,8 @@ EMPTY = (
 )
 NO_OBSERVATION = "No Jobs observations have been read yet. Run a check to read them."
 AUTOMATIC_EMPTY = "Automatic work will appear here when a later phase reads it."
+RECENT_EMPTY = "No available Barectl change results."
+FILTERED_EMPTY = "No available Barectl change results match these filters."
 
 _RESULT_LABELS: Final[dict[str, str]] = {
     "succeeded": "Finished",
@@ -67,6 +72,7 @@ class JobRow:
     other_controller: bool = False
     needs_attention: bool = False
     running: bool = False
+    kind_slug: str = ""
 
     @property
     def when(self) -> datetime | None:
@@ -99,23 +105,48 @@ class JobsView:
     notices: tuple[CoverageNotice, ...] = ()
     empty: str = ""
     automatic_empty: str = AUTOMATIC_EMPTY
+    zone: DisplayZone = field(default_factory=lambda: resolve_zone(None))
+    filters: Filters | None = None
 
 
-def present(snapshot: Snapshot | None, server: Server, *, may_view_changes: bool) -> JobsView:
-    """The section's groups, notices and details from one stored snapshot."""
+def present(
+    snapshot: Snapshot | None,
+    server: Server,
+    *,
+    may_view_changes: bool,
+    selection: Selection | None = None,
+    zone: DisplayZone | None = None,
+    now: datetime | None = None,
+) -> JobsView:
+    """The section's groups, notices and details from one stored snapshot.
+
+    ``selection`` and ``zone`` narrow only Recent results and the displayed times. They
+    never change Needs attention, Running, what the server keeps or what it runs.
+    """
+    selected = selection if selection is not None else Selection()
+    displayed = zone if zone is not None else resolve_zone(None)
     if snapshot is None:
-        return JobsView(None, may_view_changes, True, empty=EMPTY)
+        return JobsView(None, may_view_changes, True, empty=EMPTY, zone=displayed)
     standing = snapshot.collected.standing
     target = standing is not None and standing.standing == Standing.TARGET_STACK
     if not may_view_changes:
-        return JobsView(snapshot.collected_at, False, target)
+        return JobsView(snapshot.collected_at, False, target, zone=displayed)
     if not target:
-        return JobsView(snapshot.collected_at, True, False)
+        return JobsView(snapshot.collected_at, True, False, zone=displayed)
     observation = snapshot.collected.jobs
     if observation.outcome != ObservationOutcome.OBSERVED:
-        return JobsView(snapshot.collected_at, True, True, empty=NO_OBSERVATION)
+        return JobsView(snapshot.collected_at, True, True, empty=NO_OBSERVATION, zone=displayed)
     reading = observation.value
     rows = _rows(reading.changes, server)
+    filtered: Filtered[JobRow] = filter_recent(
+        tuple(row for row in rows if not row.running),
+        selected,
+        now=now if now is not None else timezone.now(),
+        zone=displayed.info,
+    )
+    notices = _notices(reading.coverage)
+    if filtered.untimed:
+        notices += (CoverageNotice(_untimed_notice(filtered.untimed)),)
     return JobsView(
         last_checked=snapshot.collected_at,
         may_view_changes=True,
@@ -137,11 +168,13 @@ def present(snapshot: Snapshot | None, server: Server, *, may_view_changes: bool
             JobGroup(
                 "recent",
                 "Recent results",
-                tuple(row for row in rows if not row.running),
-                "No available Barectl change results.",
+                filtered.rows,
+                FILTERED_EMPTY if selected.active else RECENT_EMPTY,
             ),
         ),
-        notices=_notices(reading.coverage),
+        notices=notices,
+        zone=displayed,
+        filters=filtered.filters,
     )
 
 
@@ -185,6 +218,7 @@ def _row(change: ObservedChange, run_id: int | None) -> JobRow:
         other_controller=run_id is None,
         needs_attention=not change.running and change.result_class in _FAILED,
         running=change.running,
+        kind_slug=change.kind_slug,
     )
 
 
@@ -198,6 +232,12 @@ def _summary(change: ObservedChange) -> str:
         reason = engine.reason_text(change.result_class, change.reason)
         return f"{label}: {reason}" if reason else label
     return label
+
+
+def _untimed_notice(count: int) -> str:
+    if count == 1:
+        return "1 result has no usable time and is not shown in this range."
+    return f"{count} results have no usable time and are not shown in this range."
 
 
 def _notices(coverage: tuple[ProviderCoverage, ...]) -> tuple[CoverageNotice, ...]:
