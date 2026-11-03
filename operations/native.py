@@ -398,6 +398,21 @@ RETAINED_STATES: Final = (
     f"do {_unit_report('"$u"')}; done; fi"
 )
 
+# The running half of the same read, for screens that need work in flight rather than the
+# whole retained inventory (jobs/observation.py). systemd filters the units, so a host that
+# keeps many finished units does not pay one ``systemctl show`` per unit on every discovery.
+ACTIVE_UNITS: Final = (
+    "systemctl list-units --type=service --state=running,activating "
+    "--plain --no-legend 'barectl-apply-*'"
+)
+RUNNING_STATES: Final = (
+    "cat /proc/sys/kernel/random/boot_id; "
+    f"units=$({ACTIVE_UNITS}) || exit $?; "
+    f'if [ -n "$units" ]; then '
+    f"for u in $(printf '%s\\n' \"$units\" | cut -d' ' -f1); "
+    f"do {_unit_report('"$u"')}; done; fi"
+)
+
 
 def parse_retained_states(text: str) -> tuple[str, list[UnitEvidence]]:
     lines = text.splitlines()

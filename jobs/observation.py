@@ -165,7 +165,7 @@ def _state(changes: tuple[ObservedChange, ...], running_state: str, finished_sta
 
 
 def _running(shell: RemoteShell) -> tuple[tuple[ObservedChange, ...], str, str]:
-    result = shell.run(native.RETAINED_STATES)
+    result = shell.run(native.RUNNING_STATES)
     if result.exit_status != 0:
         return (), "read_failed", RUNNING_NOT_READ
     if result.truncated:
@@ -186,19 +186,9 @@ def _running(shell: RemoteShell) -> tuple[tuple[ObservedChange, ...], str, str]:
         for unit in units
         if unit.found and not unit.terminal
     )
-    terminal = tuple(
-        ObservedChange(
-            unit=unit.unit,
-            invocation_id=unit.invocation_id,
-            result_class="",
-            active_state=unit.active_state,
-            sub_state=unit.sub_state,
-            exec_main_status=unit.exec_main_status,
-        )
-        for unit in units
-        if unit.found and unit.terminal
-    )
-    return (*rows, *terminal), "complete", ""
+    # A finished run's evidence is its journal line; the retained-unit read is filtered to
+    # active units so a host that keeps many finished units pays nothing for them.
+    return rows, "complete", ""
 
 
 def _finished(

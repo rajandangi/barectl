@@ -168,7 +168,7 @@ class RecordedChangeJobsTests(SimpleTestCase):
         self.assertEqual(
             replay.commands,
             [
-                native.RETAINED_STATES,
+                native.RUNNING_STATES,
                 "id -u",
                 observation.HISTORY_COMMAND,
                 "id -u",

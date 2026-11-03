@@ -30,6 +30,9 @@ class ConfidentialChannelLifecycle(ScenarioTestCase):
     def stage_and_submit(self, secret: str, *, before_submit: str = "") -> str:
         """Stage the body and the value, submit the reviewed run, return its result class."""
         kind = SECRET_PROBE
+        # The probe kind is registered only by test support; a result line names its slug,
+        # and the engine's reader recognises only registered slugs (#412).
+        engine.register_kind(kind)
         with self.shell() as shell:
             draft = kind.review(kind.inspect(shell, EMPTY_INPUTS), EMPTY_INPUTS)
             self.assertTrue(draft.eligible, draft.refusals)

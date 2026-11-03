@@ -312,13 +312,9 @@ class JournalTests(SimpleTestCase):
 
 
 class ScheduleTests(SimpleTestCase):
-    def run_schedules(
-        self, timers: list[dict[str, object]], files: list[dict[str, object]]
-    ) -> dict[str, list[dict[str, object]]]:
+    def run_schedules(self, timers: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
         def bounded(argv: list[str], *, limit: int = 0) -> tuple[int, bytes]:
-            if "list-timers" in argv:
-                return 0, json.dumps(timers).encode()
-            return 0, json.dumps(files).encode()
+            return 0, json.dumps(timers).encode()
 
         with mock.patch.object(body, "bounded", side_effect=bounded):
             return body.schedules(["alpha"])
@@ -338,19 +334,14 @@ class ScheduleTests(SimpleTestCase):
                     "last": 0,
                 },
             ],
-            [
-                {"unit_file": "barectl-site-alpha-backup.timer", "state": "enabled"},
-                {"unit_file": "barectl-site-alpha-check.timer", "state": "disabled"},
-                {"unit_file": "barectl-site-alpha-cleanup.timer", "state": "enabled"},
-            ],
         )
         rows = {row["work"]: row for row in found["alpha"]}
         self.assertTrue(rows["backup"]["on"])
         self.assertEqual(rows["backup"]["next"], now + 3_600_000_000)
         self.assertFalse(rows["check"]["on"])
         self.assertEqual(rows["check"]["next"], 0)
-        # A timer in the unit files but not in list-timers is off, not missing.
-        self.assertFalse(rows["cleanup"]["on"])
+        # A timer systemd does not list is unknown, never invented.
+        self.assertNotIn("cleanup", rows)
         self.assertNotIn("copy", rows)
 
 
