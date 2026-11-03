@@ -25,10 +25,10 @@ jobs:
       - name: Allow the runner to use KVM when the device exists
         run: |
           sudo chmod 666 /dev/kvm || true
-          if [ -r /dev/kvm ]; then
-            echo "vm: KVM is readable"
+          if [ -e /dev/kvm ]; then
+            echo "vm: /dev/kvm is present; the lane probes the KVM API before selecting it"
           else
-            echo "vm: KVM is unavailable; the lane falls back to TCG"
+            echo "vm: no /dev/kvm; the lane falls back to TCG"
           fi
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0
