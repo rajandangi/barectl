@@ -118,6 +118,9 @@ class JobsBrowserTests(BrowserTestCase):
         self.open_context(width=1280, height=900, timezone_id="Europe/London")
         self.sign_in()
         self.page.goto(f"{self.live_server_url}/servers/{self.server.pk}/jobs/")
+        # The page sends the viewer's zone in a background request; let it finish before
+        # a test writes to the database, or SQLite reports a locked table.
+        self.page.wait_for_load_state("networkidle")
 
     def test_jobs_groups_details_check_and_narrow_layout(self) -> None:
         page = self.page

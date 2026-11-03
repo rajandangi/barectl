@@ -29,6 +29,7 @@ from playwright.sync_api import (
     expect,
     sync_playwright,
 )
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from servers.discovery_state import DiscoveryState
 from servers.models import Server
@@ -130,6 +131,13 @@ class BrowserTestCase(LiveServerTestCase):
 
     @override
     def tearDown(self) -> None:
+        # The Jobs page sends the viewer's zone in a small background request after it
+        # loads (docs/server-jobs.md). A test that navigates away immediately can leave
+        # that read running into the server thread while the next test flushes SQLite,
+        # which reports a locked table. Let it finish first.
+        if any(urlsplit(request.url).path.endswith("/jobs/") for request in self.requests):
+            with contextlib.suppress(PlaywrightTimeoutError):
+                self.page.wait_for_load_state("networkidle", timeout=3000)
         self.context.close()
         self.assertEqual(self.console_errors, [])
 
