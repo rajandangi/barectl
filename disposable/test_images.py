@@ -174,6 +174,18 @@ class PreparedWordPressLayerTests(SimpleTestCase):
         with mock.patch.object(images, "key", return_value="abcd1234"):
             self.assertEqual(images.cache_key("L3"), "l3-abcd1234")
 
+    def test_a_prepared_format_bump_retires_the_prepared_layer_keys(self) -> None:
+        builders = (
+            images.prepared_wordpress_inputs,
+            images.prepared_cache_inputs,
+            images.prepared_laravel_cache_inputs,
+        )
+        for builder in builders:
+            with self.subTest(builder=builder.__name__):
+                before = builder("aaaa")
+                with mock.patch.object(images, "PREPARED_FORMAT", "3"):
+                    self.assertNotEqual(builder("aaaa"), before)
+
     def test_an_unbuilt_l3_is_not_built_from_the_dockerfile(self) -> None:
         with (
             mock.patch.object(images, "key", return_value="abcd1234"),
