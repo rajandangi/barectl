@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from discovery.ssh import RemoteShell
 from operations import engine, native, revert
+from operations.consent import affected_sites_of
 from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 
@@ -46,7 +47,9 @@ def submit_draft(
     """Stage and submit an already reviewed draft, without refreshing its evidence."""
     test.assertTrue(draft.eligible, draft.refusals)
     stored = ChangeReview(
+        kind_slug=draft.kind,
         document=draft.document,
+        affected_sites=list(affected_sites_of(draft.effects)),
         sites_read=draft.sites_read,
         sites_digest=engine._sites_digest(shell, draft),
     )
@@ -98,7 +101,7 @@ def wait_result(
     timeout: float = 30,
     expected: str = "succeeded",
     reason: str = "",
-) -> None:
+) -> engine.ResultLine:
     with test.shell() as shell:
         end = time.monotonic() + timeout
         result = engine.read_result(shell, submitted.unit)
@@ -117,6 +120,7 @@ def wait_result(
         # same end; a read taken while the unit still holds the lock reports "could not read"
         # instead of the postcondition.
         wait_inactive(shell, submitted.unit)
+    return result
 
 
 def confirm_window(test: ScenarioTestCase, submitted: Submitted) -> revert.Window:

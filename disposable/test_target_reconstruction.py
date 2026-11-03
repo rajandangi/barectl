@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -14,7 +15,7 @@ from bootstrap.standing import Standing
 from discovery.models import SiteState
 from operations.inputs import PreparationInputs
 
-from .change_testing import apply_change
+from .change_testing import apply_change, submit_change, wait_result
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 PREFIX = "s5"
@@ -247,9 +248,20 @@ class FreshControllerReconstruction(ScenarioTestCase):
         from sites.node_change import SET_SITE_NODE
 
         (alpha, runtime), *others = SITES
-        apply_change(
+        created = submit_change(
             self, CREATE_SITE, PreparationInputs(runtime, alpha, (alpha + ".example.com",))
         )
+        line = wait_result(self, created)
+        # A fresh controller names the work from the run's own journal, not this one's
+        # database: the result line carries the kind and the site its review declared.
+        self.assertEqual(line.change_kind, CREATE_SITE.slug)
+        self.assertEqual(line.sites, (alpha,))
+        with self.shell() as shell:
+            verified = CREATE_SITE.verify(shell, created.review)
+            if verified is None:
+                time.sleep(0.5)
+                verified = CREATE_SITE.verify(shell, created.review)
+            self.assertTrue(verified)
         source = observation.COMMON_SOURCE + "\nidentities = []\n"
         for identifier, runtime in others:
             source += (

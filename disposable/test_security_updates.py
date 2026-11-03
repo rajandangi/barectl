@@ -161,7 +161,8 @@ class SecurityUpdates(ScenarioTestCase):
         wait_result(self, submitted, timeout=120)
         self.assertEqual(self._version("openssl"), SECURITY_OPENSSL)
         self.assertIn(
-            'barectl-result {"class":"succeeded"}',
+            'barectl-result {"change_kind":"install_ubuntu_updates",'
+            '"sites":[],"class":"succeeded"}',
             self.native(f"journalctl -u {submitted.unit} --no-pager -o cat"),
         )
 
