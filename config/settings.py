@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "logs",
     "backups",
     "security",
+    "jobs",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

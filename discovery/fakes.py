@@ -24,6 +24,7 @@ from django.utils import timezone
 from django_tasks_db.models import DBTaskResultQuerySet
 
 from automation import observation as automation_observation
+from jobs import observation as jobs_observation
 from operations import lifecycle, native
 from operations.apt import PROCESS_COMMAND
 from operations.models import RemoteOperation
@@ -260,6 +261,13 @@ READ_ONLY = re.compile(
     rf"|\A{re.escape(_MEMBERSHIP_READ)}\Z"
     rf"|\A{re.escape(_AUTOMATION_READ_COMMAND)}\Z"
     rf"|\Asudo -n (-l )?/usr/bin/sh -c {_AUTOMATION_READ}\Z"
+    rf"|\A{re.escape(native.RETAINED_STATES)}\Z"
+    rf"|\A{re.escape(jobs_observation.HISTORY_COMMAND)}\Z"
+    rf"|\A{re.escape(jobs_observation.OLDEST_COMMAND)}\Z"
+    rf"|\Asudo -n (-l )?/usr/bin/sh -c "
+    rf"{re.escape(shlex.quote(jobs_observation.HISTORY_COMMAND))}\Z"
+    rf"|\Asudo -n (-l )?/usr/bin/sh -c "
+    rf"{re.escape(shlex.quote(jobs_observation.OLDEST_COMMAND))}\Z"
     rf"|\Asudo -n (-l )?/usr/bin/sh -c {re.escape(shlex.quote(PROXY_INVENTORY_COMMAND))}\Z"
     r"|\Aapt --version\Z"
     r"|\Adpkg --version\Z"
@@ -338,6 +346,10 @@ class FakeServer:
             UNIT_QUERY.format("certbot.timer"): ssh.CommandResult(
                 0, unit_report("certbot.timer", active="active", sub="waiting")
             ),
+            # A server with no Barectl change runs to show (Phase E #285).
+            native.RETAINED_STATES: ssh.CommandResult(0, "00000000-0000-0000-0000-000000000000\n"),
+            jobs_observation.HISTORY_COMMAND: ssh.CommandResult(0, ""),
+            jobs_observation.OLDEST_COMMAND: ssh.CommandResult(0, ""),
         }
     )
     failure: str = ""

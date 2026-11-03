@@ -1,0 +1,94 @@
+{% if jobs_view.last_checked %}
+  <p class="barectl-note" id="jobs-last-checked">
+    <strong>Last checked</strong>
+    <time datetime="{{ jobs_view.last_checked|date:'c' }}">{{ jobs_view.last_checked|date:'M j, Y, H:i T' }}</time>
+    ({{ jobs_view.last_checked|timesince }} ago). Opening Jobs and its rows reads this saved
+    view; it does not contact the server.
+  </p>
+{% else %}
+  <p class="barectl-note" id="jobs-last-checked">
+    <strong>Last checked</strong> not yet. Jobs reads a saved view and never contacts the
+    server when the page opens.
+  </p>
+{% endif %}
+{% include "servers/_snapshot_notice.html" with notice=state.snapshot_notice %}
+{% if jobs_forbidden %}
+  <p class="barectl-note">{{ jobs_forbidden }}</p>
+{% elif jobs_not_target_stack %}
+  <p class="barectl-note">{{ jobs_not_target_stack }}</p>
+{% endif %}
+{% if jobs_check_progress %}
+  <p class="barectl-note" id="jobs-check-progress" role="status">{{ jobs_check_progress }}</p>
+{% endif %}
+{% if jobs_can_check %}
+  <form method="post" action="{{ jobs_check_url }}">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="jobs">
+    <button class="usa-button" type="submit">Check now</button>
+  </form>
+{% elif jobs_view.may_view_changes and jobs_view.target_stack and not jobs_check_progress %}
+  <p class="barectl-note">An operator with permission to check this server can read Jobs.</p>
+{% endif %}
+{% if jobs_view.empty %}
+  <p class="barectl-note" id="jobs-empty">{{ jobs_view.empty }}</p>
+{% endif %}
+{% for notice in jobs_view.notices %}
+  <p class="barectl-note" id="jobs-coverage-{{ forloop.counter }}">
+    {{ notice.text }}
+    {% if notice.oldest_at %}
+      <time datetime="{{ notice.oldest_at|date:'c' }}">{{ notice.oldest_at|date:'M j, Y' }}</time> (UTC).
+    {% endif %}
+  </p>
+{% endfor %}
+{% for group in jobs_view.groups %}
+  <section class="margin-top-4" aria-labelledby="jobs-{{ group.key }}-heading">
+    <h2 id="jobs-{{ group.key }}-heading">{{ group.title }}</h2>
+    {% if group.rows %}
+      <ul class="usa-list usa-list--unstyled">
+        {% for row in group.rows %}
+          <li class="barectl-job-row"
+              id="job-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
+            <p>
+              <strong>{{ row.title }}</strong>
+              {% if row.sites %}· {{ row.sites|join:", " }}{% endif %}
+            </p>
+            <p>
+              {{ row.summary }}
+              {% if row.when %}
+                · <time datetime="{{ row.when|date:'c' }}">{{ row.when|date:'M j, Y, H:i T' }}</time>
+              {% endif %}
+            </p>
+            <p>
+              {% if row.run_url %}
+                <a href="{{ row.run_url }}">Open this run</a>
+              {% else %}
+                <span class="barectl-note">Started on another computer, so this installation has no run to open.</span>
+              {% endif %}
+            </p>
+            <details>
+              <summary>Show details</summary>
+              <dl class="barectl-facts">
+                {% for label, value in row.detail_lines %}
+                  <div>
+                    <dt>{{ label }}</dt>
+                    <dd>
+                      <code>{{ value }}</code>
+                    </dd>
+                  </div>
+                {% endfor %}
+              </dl>
+            </details>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="barectl-note">
+        {% if group.key == "automatic" %}
+          {{ jobs_view.automatic_empty }}
+        {% else %}
+          {{ group.empty }}
+        {% endif %}
+      </p>
+    {% endif %}
+  </section>
+{% endfor %}

@@ -21,6 +21,7 @@ class RecordedHostStandingTests(TestCase):
         "site-node-interrupted-26.04": (Standing.TARGET_STACK, ()),
         "http-site-unsafe-master-26.04": (Standing.TARGET_STACK, ()),
         "reconstruction-26.04": (Standing.TARGET_STACK, ()),
+        "jobs-changes-26.04": (Standing.TARGET_STACK, ()),
         "judge-by-shape-26.04": (Standing.TARGET_STACK, ()),
         "race-lock-busy-26.04": (Standing.TARGET_STACK, ()),
         "unknown-runtime-26.04": (Standing.TARGET_STACK, ()),

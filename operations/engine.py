@@ -2129,6 +2129,15 @@ def _failure(outcome: Result, reason: str) -> str:
     return _FAILURES.get(outcome, "")
 
 
+def reason_text(result_class: str, reason: str) -> str:
+    """The plain sentence the run screens use for a result class and reason."""
+    try:
+        outcome = Result(result_class)
+    except ValueError:
+        return ""
+    return _failure(outcome, reason)
+
+
 def _fixed_privileged(shell: RemoteShell, argv: list[str]) -> str | None:
     """Run one fixed command with root or the authorized sudo; ``None`` when unreadable."""
     root = _root(shell)

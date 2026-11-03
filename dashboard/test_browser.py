@@ -173,7 +173,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         nav = page.get_by_role("navigation", name="Server sections")
-        for section in ("Sites", "Activity", "Settings", "Advanced"):
+        for section in ("Sites", "Activity", "Jobs", "Settings", "Advanced"):
             link = nav.get_by_role("link", name=section, exact=True)
             link.focus()
             page.keyboard.press("Enter")

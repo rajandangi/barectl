@@ -28,6 +28,7 @@ COMMAND_SOURCES = (
     "discovery/observations/components.py",
     "discovery/observations/probes.py",
     "discovery/observations/standing.py",
+    "jobs/observation.py",
     "operations/revert.py",
     "security/change.py",
     "security/firewall.py",

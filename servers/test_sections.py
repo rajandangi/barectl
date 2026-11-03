@@ -19,6 +19,7 @@ class ServerSectionTests(ControllerConfigTestCase):
                 ("sites/", "Sites"),
                 ("security/", "Security"),
                 ("activity/", "Activity"),
+                ("jobs/", "Jobs"),
                 ("settings/", "Settings"),
                 ("advanced/", "Advanced"),
             ):
