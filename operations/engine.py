@@ -292,6 +292,12 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The server's resolved package set differs from the reviewed one, so Barectl stopped "
         "before changing packages. Prepare a new review."
     ),
+    "database_reload": (
+        "The database engine was installed, but Barectl could not restart every running PHP "
+        "master and site proxy, so discovery may report them outside supported settings until "
+        "the server is restarted. Read the run's journal on the server, then prepare a new "
+        "review."
+    ),
     "valkey_server": (
         "The server's resolved package set differs from the reviewed one, so Barectl stopped "
         "before changing packages. Prepare a new review."
@@ -1059,6 +1065,7 @@ RESULT_REASONS: Final = frozenset(
         "site_remove_accounts",
         "site_remove_verify",
         "database_engine",
+        "database_reload",
         "valkey_server",
         "valkey_mask",
         "valkey_reload",

@@ -2,9 +2,9 @@
 
 One reviewed APT transaction installs Ubuntu's ``valkey-server`` at the version and size
 the review names (docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md).
-The body then stops and masks the distribution's shared unit, and restarts the running
-PHP masters and site proxies whose loaded execution evidence a package transaction's
-``daemon-reload`` clears (#428). Per-site instances belong to #392/#393.
+The body then stops and masks the distribution's shared unit, and the shared recovery shell
+restarts the running PHP masters and site proxies whose loaded execution evidence a package
+transaction's ``daemon-reload`` clears (#428). Per-site instances belong to #392/#393.
 """
 
 import hashlib
@@ -29,6 +29,7 @@ from databases.packages import (
 from discovery.root_read import run_root
 from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
+from operations import recovery
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import PreparationInputs
@@ -50,7 +51,10 @@ _RESOURCES: Final = importlib.resources.files("cache.bodies")
 BODY_BYTES: Final = (
     _RESOURCES.joinpath("install.sh")
     .read_text()
-    .replace("# VALKEY_FUNCTIONS", observation.body_functions())
+    .replace(
+        "# VALKEY_FUNCTIONS",
+        recovery.shell() + observation.body_functions(),
+    )
     .rstrip("\n")
     .encode()
 )
@@ -298,13 +302,7 @@ def _install_document(
                     "runs and nothing listens on port 6379."
                 ),
             },
-            {
-                "label": "Restarted after install",
-                "value": (
-                    "The running PHP masters and site proxies, so discovery still verifies "
-                    "their loaded state (#428)."
-                ),
-            },
+            {"label": "Restarted after install", "value": recovery.DETAIL},
         ],
     }
     effects = (
@@ -313,7 +311,7 @@ def _install_document(
             (
                 f"Install {observation.LABEL} ({observation.PACKAGE} {version}, {download} "
                 "download) from the Ubuntu archive, stop and mask the distribution's shared "
-                "service, and restart the running PHP masters and site proxies."
+                "service, and restart every running PHP master and site proxy."
             ),
         ),
     )
@@ -369,10 +367,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 "service is stopped and masked."
             ),
             "Nothing listens on TCP port 6379.",
-            (
-                "Every running PHP master and site proxy was restarted after the package "
-                "database changed, so discovery still verifies them."
-            ),
+            recovery.POSTCONDITION,
             "Discovery reconstructs Valkey and its version from the server alone.",
         ),
         refusals=tuple(refusals),

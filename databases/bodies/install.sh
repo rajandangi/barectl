@@ -2,7 +2,9 @@
 # shellcheck shell=sh
 # docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md
 # One reviewed database engine, installed by exactly one APT transaction whose resolved
-# actions the inline guard admits, then hardened to the phase specification's shape.
+# actions the inline guard admits, then hardened to the phase specification's shape and
+# the running units its daemon-reload unbinds are restarted by the shared recovery shell
+# (#428).
 set -eu
 reported=0
 result() { reported=1; printf 'barectl-result %s\n' "$1"; }
@@ -69,6 +71,9 @@ engine_start "$engine" || exit 2
 
 stage harden
 engine_harden "$engine"
+
+stage recover
+restart_affected_units || { result '{"class":"partial","reason":"database_reload"}'; exit 2; }
 
 stage verify
 systemctl is-active --quiet "$(engine_main_unit "$engine")"

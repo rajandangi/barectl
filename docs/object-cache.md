@@ -46,13 +46,17 @@ empty `ss` answer for port 6379. A later per-site instance uses the packaged
 A package transaction runs `systemctl daemon-reload`, and masking the unit needs another.
 That clears the loaded execution metadata of running units, so the foundation's diagnostic
 PHP masters, each site's PHP master and each site's proxy read as unverifiable on the next
-discovery even though they serve traffic. The reviewed change restarts exactly the running
-units it affects — `php-fpm@php84.service`, `php-fpm@php85.service`, and each site's
-`php-fpm-site-<runtime>@<id>.service` and `haproxy-site@<id>.service` — and prints each
-restarted unit to the run's journal. A restarted proxy loads its persisted server state, so
-discovery reads the runtime selection and the server's check-health counter from it rather
-than requiring a fixed counter value. If a restart fails the run is partly applied with
-`valkey_reload`, never a silent success.
+discovery even though they serve traffic. Both package installs embed the one fixed recovery
+shell in `operations/recovery.py`: it reads the running services from `systemctl list-units`
+and restarts exactly the affected units — `php-fpm@php84.service`, `php-fpm@php85.service`,
+and each site's `php-fpm-site-<runtime>@<id>.service` and `haproxy-site@<id>.service` — and
+prints each restarted unit to the run's journal as `barectl-restarted <unit>`. The server's
+running units stay authoritative; Barectl writes no marker. A restarted proxy loads its
+persisted server state, so discovery reads the runtime selection and the server's
+check-health counter from it rather than requiring a fixed counter value. If a restart fails
+the Valkey run is partly applied with `valkey_reload`; the database engine install uses the
+same shell and reports `database_reload` instead ([databases](databases.md#restarting-units-after-the-package-transaction-428)).
+Neither is a silent success.
 
 ## Fresh-controller reconstruction
 
