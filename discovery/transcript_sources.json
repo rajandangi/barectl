@@ -260,7 +260,7 @@
     "disposable/change_testing.py": "7ef0708d25943de0a3376c82c034a4e8710d12a59f2f6319e4ff7a1e1c0afad7",
     "disposable/docker.py": "4484c1c4a9c5d9f7254b00892a48be29b15c0e066d2e6e31b3732ea7fcda3250",
     "disposable/foundation_testing.py": "c1ab22bcc72aa3333f07a047b7f4728cfb5f655521783e9d1a41719bcf97561e",
-    "disposable/images.py": "0402b93fac83cc86d6e58ef50f2d43bd8db99d6f5527e55debc89c3d730fb214",
+    "disposable/images.py": "d67696c9ca8262c0f4afcb00cf8543f5ef13936b1d9a2d1c729ecdcca3ed8b75",
     "disposable/lock.py": "f7a21b9b758a8835b432dbc517d7b1eeac9ed3ad4e1de662d1a7dfad9a403a9a",
     "disposable/locking.py": "b5dab02a215ffc03e81c8884b44d4b6e0c9db35a1c6b796b295ae33fdb6bcfa5",
     "disposable/machine.py": "585e4b36ea5de8e2d301ae01d03a09c8d477fe3baa9f5b30f7225907470c988b",
@@ -301,7 +301,7 @@
     "disposable/test_http_site_validators.py": "19097609912f2fa537234a416d992a8947bb9c81f231c006e3b263c11edc00c2",
     "disposable/test_http_sites.py": "f8e46f8986c501fedeee8873d98e64d06fd79910344b968383fd0ced3e57c017",
     "disposable/test_https.py": "6c53e6b210911e4a6bca7ce5a688853fb46123dc5265b717daf54fe384c2e67e",
-    "disposable/test_images.py": "7e93cfe75f6bb2ef63c0e69245303cb8728aabdef92e06ccde79c584833e4749",
+    "disposable/test_images.py": "717a184f3bb9c8f1e0205477cfc2c961a52a69888cad5d451070b21dc02f3b7a",
     "disposable/test_l0_discovery.py": "d43b7461252072458cda143795a2176656a61fea9951c36b0f3d595e343d2413",
     "disposable/test_laravel_create.py": "7b21bdd2c90bacb5d4e95a349acd2ddb1e5c92659c66f426bd05acdb013a79c4",
     "disposable/test_laravel_deploy.py": "77e9fc68a1ea5f54c4a6fe2c52004c1b1997d15a682d01f81170be3100e4e66d",
@@ -717,5 +717,5 @@
     "unknown-runtime-26.04": "10755de18623ac81ff48796f263b65606d50f275367a55d9ef2fc2f99959a101",
     "valkey-installed-26.04": "3d58984fc4472cfa09ff300d718ddf6e4e43309060508a50daf823df9c79b69c"
   },
-  "audit_digest": "c6a53718947181050db879c45e40e3dd535cdd33c5c604c27ccec484b9801fe0"
+  "audit_digest": "41c6c90e2a352d251762c058b8507f6178327504510cd0899c583710948bbe4f"
 }

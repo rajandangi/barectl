@@ -1,6 +1,7 @@
 import io
 import os
 import tempfile
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -42,6 +43,19 @@ class SnapshotArchiveTests(SimpleTestCase):
             self.assertTrue((Path(directory) / "l1.tar").exists())
             loaded.clear()
             self.assertTrue(images.load("L1"))
+
+    def test_an_archive_without_the_keyed_tag_reports_and_rebuilds(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"BARECTL_NATIVE_L0_CACHE": directory}),
+            mock.patch.object(images, "tag", return_value="barectl-disposable-l0:26.04-key"),
+            mock.patch.object(images, "docker"),
+            mock.patch.object(images, "exists", return_value=False),
+            redirect_stderr(io.StringIO()) as error,
+        ):
+            (Path(directory) / "l1.tar").write_bytes(b"image")
+            self.assertFalse(images.load("L1"))
+        self.assertIn("does not hold", error.getvalue())
 
     def test_replace_overwrites_an_archive_left_by_an_older_key(self) -> None:
         saved: list[str] = []
