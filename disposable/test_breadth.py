@@ -21,14 +21,14 @@ import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from typing import override
+from typing import TYPE_CHECKING, override
 
 from django.test import tag
 
 from discovery import ssh
 from operations.inputs import PreparationInputs
 
-from .change_testing import apply_change
+from .change_testing import apply_change, submit_change, wait_result
 from .scenario_testing import SCENARIO_TAG
 from .test_laravel_deploy import (
     _GOOD_BOOTSTRAP,
@@ -37,6 +37,11 @@ from .test_laravel_deploy import (
     _HEALTH_RENAMED,
     LaravelDeployCase,
 )
+
+if TYPE_CHECKING:
+    from jobs.automatic import AutomaticRow
+    from jobs.backups import BackupRunRow, BackupTimerRow
+    from jobs.presentation import JobRow, JobsView
 
 SITE = "sqwalpha"
 DOMAIN = "site.fixture.test"
@@ -222,6 +227,103 @@ class RebootAutomation(BreadthCase):
         if after_started != before_started:
             self.assertEqual(after_started % 60, 0, "a tick started off the boundary")
         self.assertTrue(self.served(), "the site did not serve after the boot")
+
+
+@tag(SCENARIO_TAG)
+class JobsSurvivingEvidence(BreadthCase):
+    """A journal rotation and a boot keep the newer run and name the retained start."""
+
+    def jobs_view(self) -> JobsView:
+        from datetime import UTC, datetime
+
+        from discovery.observations import collect
+        from discovery.snapshot import Snapshot
+        from jobs.presentation import present
+        from servers.models import Server
+
+        with self.shell() as shell:
+            collected = collect(shell, releases=True)
+        return present(
+            Snapshot(collected, datetime.now(UTC), self.target().alias),
+            Server(pk=1),
+            may_view_changes=True,
+        )
+
+    def results_in_journal(self) -> int:
+        return int(
+            self.native(
+                "journalctl -u 'barectl-apply-*' --grep '^barectl-result ' "
+                "--no-pager -o cat | wc -l"
+            ).strip()
+            or 0
+        )
+
+    def test_a_rotation_and_boot_keep_the_newer_run_and_name_the_retained_start(self) -> None:
+        from datetime import UTC, datetime
+
+        from automation import scheduler
+        from automation.worker_change import SET_LARAVEL_QUEUE_WORKERS
+
+        older = submit_change(
+            self,
+            scheduler.SET_LARAVEL_SCHEDULER,
+            PreparationInputs("", self.identity, schedule_state="on"),
+        )
+        self.assertFalse(older.no_changes)
+        wait_result(self, older)
+        before = self.jobs_view()
+        self.assertTrue(
+            any(row.title == scheduler.SET_LARAVEL_SCHEDULER.label for row in self.rows(before)),
+            "The finished change was not visible before the rotation.",
+        )
+        # Seal the journal that holds the finished change, age it past a one-second cutoff
+        # and vacuum it: the old change evidence is now gone from the server.
+        self.native("journalctl --rotate")
+        time.sleep(2)
+        self.native("journalctl --vacuum-time=1s")
+        self.assertEqual(self.results_in_journal(), 0, "The older change evidence survived.")
+        changed_at = int(self.native("date +%s").strip())
+        submitted = submit_change(
+            self,
+            SET_LARAVEL_QUEUE_WORKERS,
+            PreparationInputs("", self.identity, worker_action="stop"),
+        )
+        self.assertFalse(submitted.no_changes)
+        wait_result(self, submitted)
+        # A container stop and start is the userspace reboot the breadth classes use.
+        self.stop_for(20)
+        after = self.jobs_view()
+        rows = self.rows(after)
+        self.assertIn(
+            "Change queue workers",
+            [row.title for row in rows],
+            "The surviving change was not shown after the boot.",
+        )
+        self.assertNotIn(
+            scheduler.SET_LARAVEL_SCHEDULER.label,
+            [row.title for row in rows],
+            "The removed change was still shown after the boot.",
+        )
+        notices = [notice for notice in after.notices if notice.oldest_at is not None]
+        self.assertTrue(notices, "The retained history start was not named.")
+        self.assertEqual(notices[0].text, "The server's retained change history starts")
+        oldest = notices[0].oldest_at
+        if oldest is None:
+            self.fail("The retained history start had no time.")
+        self.assertGreaterEqual(oldest.astimezone(UTC), datetime.fromtimestamp(changed_at, UTC))
+        # A rotation or a missing line never becomes "nothing ran": the surviving row is
+        # shown, the page is not empty and no notice claims there is no evidence.
+        self.assertTrue(rows, "Jobs claimed no work after the rotation.")
+        self.assertFalse(after.empty)
+        self.assertNotIn(
+            "does not mean no change ran",
+            "\n".join(notice.text for notice in after.notices),
+        )
+
+    def rows(
+        self, view: JobsView
+    ) -> tuple[JobRow | AutomaticRow | BackupRunRow | BackupTimerRow, ...]:
+        return tuple(row for group in view.groups if group.key == "recent" for row in group.rows)
 
 
 @tag(SCENARIO_TAG)
@@ -496,6 +598,7 @@ class MemoryFourGiB(MemoryCase):
 
 __all__ = [
     "GateFence",
+    "JobsSurvivingEvidence",
     "LongSchedulerTick",
     "MemoryFourGiB",
     "MemoryOneGiB",

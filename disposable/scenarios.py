@@ -7,8 +7,9 @@ forwarder. Non-exclusive scenarios share one server in sequence, each with its o
 prefix and a residue check; a failed scenario or residue check discards the server. Items
 are killed at 180 s, the build stops at 900 s naming what did not finish, and the summary
 reports the total against the 5-minute target. The scheduled breadth scenarios
-(``--breadth``) are separate: a reboot, a long scheduler run and the 1/2/4 GiB memory classes
-never add to the merge build (docs/quality.md#the-scheduled-breadth-job).
+(``--breadth``) are separate: a reboot, a long scheduler run, a journald rotation and the
+1/2/4 GiB memory classes never add to the merge build
+(docs/quality.md#the-scheduled-breadth-job).
 """
 
 import argparse

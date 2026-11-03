@@ -1,7 +1,8 @@
 name: Native breadth
 # docs/quality.md#the-scheduled-breadth-job: the measurements the merge build must not pay
-# for. A real boot with the controller closed, a scheduler tick longer than a minute, and
-# the memory of a site's cache instance and its queue workers inside 1, 2 and 4 GiB memory
+# for. A real boot with the controller closed, a scheduler tick longer than a minute, a
+# journald rotation that leaves the surviving Jobs evidence and its retained start, and the
+# memory of a site's cache instance and its queue workers inside 1, 2 and 4 GiB memory
 # cgroups. Weekly and by dispatch; never a required check, so it never blocks a merge.
 on:
   schedule:

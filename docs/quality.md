@@ -199,6 +199,7 @@ build must not pay for:
 | `RebootAutomation` | The container's init restarts with no Barectl controller: the queue workers return enabled, the timer is armed for the next calendar minute, a missed minute is not replayed as a burst, and the site serves |
 | `RebootGateFence` | A Deploy whose `/up` fails leaves the gate up with boot activation off for the timer and every worker; a boot cannot start them; Roll back closes the gate and restores exactly that work |
 | `LongSchedulerTick` | A tick that runs longer than a calendar minute is followed by the next calendar elapse, not an immediate second start (`DeferReactivation=yes`) |
+| `JobsSurvivingEvidence` | A real journald rotation and vacuum remove an older finished change, a newer change survives a boot, and Jobs shows the survivor and the start of the retained history without claiming nothing ran |
 | `MemoryOneGiB`, `MemoryTwoGiB`, `MemoryFourGiB` | The cache instance and each queue worker are measured inside a 1, 2 and 4 GiB memory cgroup, and the site still serves |
 
 The container shares the Docker VM's kernel, so the reboot is a userspace reboot and each

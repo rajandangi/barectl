@@ -74,6 +74,14 @@ from every ordinary native selection and from the merge build; its lane is outsi
 own startup and measured 46 s. The wall target miss is 12 s with native at 256 s and browser
 at 126 s on a loaded host, not a raised target.
 
+The Server Jobs slices measured the same stages on the integration branch after #286: the
+fast gate ran 2293 tests in 25.6 s (wall 27.4 s), the browser stage 104 tests in 20.2 s (wall
+22.0 s), and the Phase D scheduled-capture native item 97.8 s (107 s lane) against the 180 s
+item limit. On the #413 head the fast gate ran 2295 tests in 23.5 s (wall 25.3 s) and the
+browser stage 104 tests in 20.8 s, inside the #286 figures and the targets. The full-build table above remains
+the #415 build; no new full build was run for #413. The new `JobsSurvivingEvidence` breadth
+item is outside this budget and measured 38.6 s (44 s lane).
+
 ## Security lifecycle
 
 The section's lifecycle is proven by the target-stack scenarios below, each on a set-up
@@ -147,6 +155,81 @@ that a different, longer qualification (see [Not qualified](#not-qualified)).
   passes the #179 banned-terms check, and the restart and updates controls work by keyboard at
   320 px.
 
+## Server Jobs
+
+Server Jobs is specified by [#284](https://github.com/rajandangi/barectl/issues/284) and
+delivered by [#412](https://github.com/rajandangi/barectl/issues/412),
+[#285](https://github.com/rajandangi/barectl/issues/285),
+[#291](https://github.com/rajandangi/barectl/issues/291),
+[#289](https://github.com/rajandangi/barectl/issues/289) and
+[#286](https://github.com/rajandangi/barectl/issues/286); this record is
+[#413](https://github.com/rajandangi/barectl/issues/413).
+
+| Evidence | Revision |
+| --- | --- |
+| Change result line carries its kind and sites (#412) | `7d536b3f` |
+| Jobs reads Barectl changes from any controller (#285) | `7e0bac4a` |
+| Recent-result ranges, filters and viewer time zones (#291) | `b361305d` |
+| Automatic work from Phase C's projection (#289) | `3c356baf` |
+| Backup runs and schedules from Phase D's observation (#286) | `50df7d5c` |
+| Qualification code and documents (#413) | The `jobs/413-qualification` head that follows `50df7d5c` |
+
+**Environments.** The measurements below are local arm64: an Apple M4 Pro with 14 CPUs and
+64 GiB host memory; the Docker VM exposes 14 CPUs and 15.7 GiB. The server image is the
+current L5 snapshot from `docker/disposable-server/pins.json`, Ubuntu 26.04.1 LTS, systemd
+259.9-0ubuntu0.1 (`barectl-disposable-l0:26.04-329707f95c4f`). The controller runs Python
+3.14 and Django 6.1.1. No hosted amd64 run was made for this section; see
+[Not qualified](#not-qualified).
+
+**Journal-read cap and Check now.** The literal cap remains `HISTORY_LINES = 90`. Each
+measurement rotated and vacuumed the image's journal, then wrote 60 real transient
+`barectl-apply-*` units with one stage and one result line each (120 lines), so the read
+returns 91 lines and reports truncation. `Check now` was measured from
+`request_discovery` through the batch worker returning and publishing a newer snapshot,
+three times on each freshly booted L5 container capped with `--memory=N --memory-swap=N`.
+The fixed journal command and the full `jobs.observation.read` were timed over the same SSH
+connection.
+
+| Measurement | 1 GiB | 2 GiB | 4 GiB |
+| --- | --- | --- | --- |
+| Check now, median of three | 1.994 s | 1.993 s | 2.008 s |
+| Check now runs | 2.028, 1.994, 1.951 s | 1.993, 1.974, 1.993 s | 2.008, 2.054, 2.000 s |
+| Journal read, fixed command | 0.013 s | 0.011 s | 0.011 s |
+| Lines returned / bytes | 91 / 49,954 | 91 / 49,951 | 91 / 49,953 |
+| Full Jobs read | 0.048 s | 0.044 s | 0.046 s |
+| Rows from 90 retained lines | 45 | 45 | 45 |
+
+The L5 fixture enabled all three provider families in the same read: one scheduled task,
+one queue worker, one cache observation and one backup observation, plus the change rows.
+The journal read is line-capped, not byte-capped; the 91-line answer stayed at about 50 KiB,
+well inside the 64 KiB SSH answer bound.
+
+**Breadth: rotation and boot.** `JobsSurvivingEvidence` is a new `breadth`-tagged scenario,
+never in the merge build. It starts from L5, performs a real scheduled-tasks change and
+confirms Jobs shows it, seals the journal with `journalctl --rotate`, waits two seconds,
+vacuums with `journalctl --vacuum-time=1s` and confirms no `barectl-result` line remains, then
+performs a real queue-workers change and boots the container with `stop_for(20)`. After
+rediscovery it asserts the surviving queue-workers change is shown, the removed
+scheduled-tasks change is absent, the **The server's retained change history starts** notice
+is present with a time after the surviving run, and no notice says the server has no evidence.
+The local arm64 item passed in **38.6 s** (44 s lane), against the 180 s item limit and the
+300 s lane target, with `docker/disposable-server/run-scenarios.sh --env-file .env --
+--breadth disposable.test_breadth.JobsSurvivingEvidence`.
+
+**Second-controller reconstruction.** Every provider is read from server evidence, never from
+another controller's database. The change provider is proved by two scenarios that start
+controllers with their own database, account, saved connection and host trust: S3
+`HttpSiteControllerRecovery` (a second SQLite database and host trust after the first worker is
+killed) and S5 `FreshControllerReconstruction` (two controllers, each with its own database,
+key and known-hosts file). Both assert the second controller's Jobs shows the first
+controller's **Create PHP site** run as Finished, with its kind and site. Phase C's
+`WordPressServerCron` and `LaravelQueueWorkers` each rebuild a `Snapshot` from a fresh
+discovery and assert the Jobs automatic row (a succeeded scheduled task with a next run; a
+running queue worker). Phase D's `ScheduledCapture` rebuilds the stored snapshot and asserts
+the Jobs backup row with its onsite and offsite findings and the backup timer On. No provider
+row reads the first controller's local run record; the optional run link is the only join. On
+this head the two second-controller scenarios passed together in 41 s (S3 13.4 s, S5 31.3 s).
+
 ## Acceptance criteria
 
 - **#411.** The update guard watches only `apt-daily.service` and
@@ -179,6 +262,11 @@ that a different, longer qualification (see [Not qualified](#not-qualified)).
 - **#415.** This record, the rewritten current-behavior documents, the amended ADRs and the
   updated glossary are the qualification artifacts. The full local build and the four
   security scenarios are recorded above; the hosted runs and any gap are below.
+- **#413.** The Server Jobs section above names the revisions, environment, systemd version,
+  enabled providers, the 90-line cap and the Check now times on 1, 2 and 4 GiB containers,
+  the rotation-and-boot breadth item and the second-controller reconstruction claim.
+  `docs/server-jobs.md` now covers the saved-read path, permissions, legacy result lines,
+  retained-history wording and the certificate non-provider; the remaining gaps are below.
 
 ## Not qualified
 
@@ -199,6 +287,30 @@ that a different, longer qualification (see [Not qualified](#not-qualified)).
 - **Cloud and provider firewalls, Docker hosts, fail2ban/CrowdSec, CIS/Lynis scores, Ubuntu
   Pro, release upgrades, scheduled restarts and fleet-wide patching** are outside Phase E and
   are not qualified here.
+- **Evidence the server no longer retains.** The rotation-and-boot breadth item proves that a
+  real journald vacuum removes an older change and that Jobs shows the survivor and the start
+  of the retained history without claiming nothing ran. It does not prove recovery of rows the
+  server removed, a journal on separate storage lost with a host, or a power loss.
+- **A real kernel reboot.** The breadth item restarts the container's init, a userspace reboot.
+  The kernel and boot ID are shared with the Docker VM; unit enablement, timers and journal
+  files are re-exercised, but a kernel panic, a power loss or a full host reboot is not.
+- **A real 1, 2 or 4 GiB host.** The Check now figures are containers capped with
+  `--memory`; the kernel, page cache and Docker VM are shared, so they are not whole-host
+  measurements. The 60-unit journal used for the cap is synthetic evidence, not 30 days of
+  real changes; the cap is a line bound and journal retention remains native policy.
+- **Runs written before the result line carried kind and sites** stay **A Barectl change** with
+  no site. The fast layer covers those lines; the native scenarios do not manufacture one.
+- **No copy timer.** Phase D's scheduled capture performs the offsite copy, so Jobs shows copy
+  **runs** when their result lines exist but has no invented copy timer. A copy scheduled
+  independently of a capture is not a supported convention.
+- **A separate second-controller database and host trust for Automatic work and Backups.** S3
+  and S5 provide that for the change rows. Phase C's and Phase D's provider assertions rebuild
+  the Jobs rows from a fresh discovery in their lifecycle scenarios, as #284's Testing
+  Decisions chose; they do not start a second controller process with its own database.
+- **Hosted amd64 and the breadth workflow.** All Server Jobs native and breadth evidence here
+  is local arm64. No hosted amd64 run of the new breadth item, the 1/2/4 GiB measurements or a
+  full hosted Server Jobs build was made for #413; the required merge checks and any hosted
+  breadth dispatch belong to the pull request that follows this record.
 
 ## Handoff
 
