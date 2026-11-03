@@ -18,6 +18,13 @@
     "src": "uswds-init.ts",
     "isEntry": true
   },
+  "jobs-time.ts": {
+    "file": "assets/jobs-time-0kDZB7mQ.js",
+    "name": "jobs-time",
+    "src": "jobs-time.ts",
+    "isEntry": true,
+    "imports": ["_shared-B7PI925R.js"]
+  },
   "fonts/inter.woff2": {
     "file": "assets/inter-DO1Apj_S.woff2",
     "src": "fonts/inter.woff2"

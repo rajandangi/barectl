@@ -191,6 +191,64 @@ class JobsPageTests(ControllerConfigTestCase):
         connect.assert_not_called()
         alias.assert_not_called()
 
+    def test_range_and_filter_gets_change_nothing_on_the_server(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        before = DiscoveryAttempt.objects.count()
+        with (
+            mock.patch("discovery.ssh.connect") as connect,
+            mock.patch("discovery.ssh.connect_alias") as alias,
+        ):
+            response = self.client.get(
+                self.url,
+                {
+                    "range": "today",
+                    "site": "alpha",
+                    "work": "create_http_site",
+                    "result": "finished",
+                    "tz": "Europe/London",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Times are shown in Europe/London")
+        self.assertEqual(DiscoveryAttempt.objects.count(), before)
+        connect.assert_not_called()
+        alias.assert_not_called()
+
+    def test_an_unknown_or_missing_zone_is_labelled_utc(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        for query in ({}, {"tz": "Not/AZone"}):
+            with self.subTest(query=query):
+                response = self.client.get(self.url, query)
+                self.assertContains(response, "Times are shown in UTC")
+
+    def test_the_zone_exchange_returns_only_the_jobs_panel(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(
+            self.url,
+            {"tz": "Europe/London"},
+            headers={"HX-Request": "true", "HX-Request-Type": "partial"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="jobs-panel"')
+        self.assertContains(response, "Times are shown in Europe/London")
+        self.assertNotContains(response, "<html")
+        self.assertIn("HX-Request-Type", response.headers["Vary"])
+
+    def test_without_change_permission_no_filter_controls_or_counts_are_rendered(self) -> None:
+        record_jobs(self.server, changes=(self.a_finished_change(),))
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertNotContains(response, "Type of work")
+        self.assertNotContains(response, "Past 7 days")
+        self.assertNotContains(response, "Show results")
+
     def test_a_failed_check_keeps_the_previous_rows_and_says_they_may_be_stale(self) -> None:
         record_jobs(self.server, changes=(self.a_finished_change(),))
         self.grant("view_server", "view_changes", "add_discoveryattempt")

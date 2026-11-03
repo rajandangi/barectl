@@ -16,9 +16,11 @@ from servers.models import Server
 
 from . import presentation
 from .automatic import AutomaticRow
+from .filters import Selection
 from .models import Coverage
 from .observation import ObservedChange, ProviderCoverage
 from .testing import change
+from .timezones import resolve_zone
 
 
 class JobsPresentationTests(TestCase):
@@ -39,6 +41,8 @@ class JobsPresentationTests(TestCase):
         cache_warning: str = "",
         may_view_changes: bool = True,
         full_read: bool = True,
+        selection: Selection | None = None,
+        zone: str | None = None,
     ) -> presentation.JobsView:
         from dataclasses import replace
 
@@ -72,7 +76,13 @@ class JobsPresentationTests(TestCase):
             ),
         )
         snapshot = Snapshot(collected, self.now, "web.example.com")
-        return presentation.present(snapshot, self.server, may_view_changes=may_view_changes)
+        return presentation.present(
+            snapshot,
+            self.server,
+            may_view_changes=may_view_changes,
+            selection=selection,
+            zone=resolve_zone(zone),
+        )
 
     def change_row(self, group: presentation.JobGroup, index: int = 0) -> presentation.JobRow:
         row = group.rows[index]
@@ -104,7 +114,14 @@ class JobsPresentationTests(TestCase):
 
     def test_a_line_without_kind_or_site_names_a_generic_change(self) -> None:
         (row,) = (
-            self.view(change(unit="barectl-apply-" + "a" * 32 + ".service", kind_slug="", sites=()))
+            self.view(
+                change(
+                    unit="barectl-apply-" + "a" * 32 + ".service",
+                    kind_slug="",
+                    sites=(),
+                    finished_at=self.now,
+                )
+            )
             .groups[-1]
             .rows
         )
@@ -257,6 +274,7 @@ class JobsPresentationTests(TestCase):
         self.assertEqual([group.key for group in view.groups], ["automatic"])
         self.assertEqual(view.groups[0].rows, ())
         self.assertEqual(view.notices, ())
+        self.assertIsNone(view.filters)
 
     def test_without_change_permission_automatic_work_is_still_shown(self) -> None:
         from .testing import scheduled
@@ -359,3 +377,109 @@ class JobsPresentationTests(TestCase):
         )
         self.assertFalse(view.target_stack)
         self.assertEqual(view.groups, ())
+
+    def test_range_and_filters_narrow_recent_results_only(self) -> None:
+        old = self.now - timedelta(days=20)
+        view = self.view(
+            change(
+                unit="barectl-apply-" + "a" * 32 + ".service",
+                sites=("alpha",),
+                result_class="failed",
+                finished_at=self.now,
+            ),
+            change(
+                unit="barectl-apply-" + "b" * 32 + ".service",
+                sites=("beta",),
+                result_class="failed",
+                finished_at=self.now,
+            ),
+            change(
+                unit="barectl-apply-" + "c" * 32 + ".service",
+                sites=("beta",),
+                finished_at=self.now,
+            ),
+            change(
+                unit="barectl-apply-" + "d" * 32 + ".service",
+                sites=("alpha",),
+                running=True,
+                started_at=self.now,
+            ),
+            change(
+                unit="barectl-apply-" + "e" * 32 + ".service",
+                sites=("alpha",),
+                finished_at=old,
+            ),
+            selection=Selection.parse({"site": "beta"}),
+        )
+        attention, running, _, recent = view.groups
+        self.assertEqual(len(attention.rows), 2)
+        self.assertEqual(len(running.rows), 1)
+        self.assertEqual([row.sites for row in recent.rows], [("beta",), ("beta",)])
+        self.assertEqual(view.filters.shown if view.filters else None, 2)
+
+    def test_recent_results_are_newest_first(self) -> None:
+        view = self.view(
+            change(
+                unit="barectl-apply-" + "a" * 32 + ".service",
+                finished_at=self.now - timedelta(hours=2),
+            ),
+            change(
+                unit="barectl-apply-" + "b" * 32 + ".service",
+                finished_at=self.now,
+            ),
+            change(
+                unit="barectl-apply-" + "c" * 32 + ".service",
+                finished_at=self.now - timedelta(hours=1),
+            ),
+        )
+        recent = view.groups[-1]
+        rows = [self.change_row(recent, index) for index in range(len(recent.rows))]
+        self.assertEqual(
+            [row.finished_at for row in rows],
+            [self.now, self.now - timedelta(hours=1), self.now - timedelta(hours=2)],
+        )
+
+    def test_a_row_without_a_usable_time_is_counted_in_a_notice(self) -> None:
+        view = self.view(
+            change(unit="barectl-apply-" + "a" * 32 + ".service", finished_at=self.now),
+            change(unit="barectl-apply-" + "b" * 32 + ".service"),
+            change(unit="barectl-apply-" + "c" * 32 + ".service"),
+        )
+        self.assertEqual(len(view.groups[-1].rows), 1)
+        self.assertIn("2 results have no usable time", "\n".join(n.text for n in view.notices))
+
+    def test_one_untimed_row_is_worded_in_the_singular(self) -> None:
+        view = self.view(change(unit="barectl-apply-" + "a" * 32 + ".service"))
+        self.assertIn("1 result has no usable time", "\n".join(n.text for n in view.notices))
+
+    def test_a_filtered_empty_list_says_no_available_results_match(self) -> None:
+        view = self.view(
+            change(
+                unit="barectl-apply-" + "a" * 32 + ".service",
+                sites=("beta",),
+                finished_at=self.now,
+            ),
+            selection=Selection.parse({"site": "alpha"}),
+        )
+        recent = view.groups[-1]
+        self.assertEqual(recent.rows, ())
+        self.assertIn("No available Barectl change results match", recent.empty)
+        self.assertNotIn("nothing ran", recent.empty.lower())
+
+    def test_the_view_names_the_selected_zone_and_its_filter_choices(self) -> None:
+        view = self.view(
+            change(
+                unit="barectl-apply-" + "a" * 32 + ".service",
+                sites=("alpha",),
+                finished_at=self.now,
+            ),
+            selection=Selection.parse({"range": "30d", "site": "alpha"}),
+            zone="Asia/Tokyo",
+        )
+        self.assertEqual(view.zone.label, "Asia/Tokyo")
+        self.assertEqual(
+            [option.value for option in view.filters.ranges if option.selected]
+            if view.filters
+            else [],
+            ["30d"],
+        )
