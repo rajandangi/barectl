@@ -173,6 +173,7 @@ delivered by [#412](https://github.com/rajandangi/barectl/issues/412),
 | Automatic work from Phase C's projection (#289) | `3c356baf` |
 | Backup runs and schedules from Phase D's observation (#286) | `50df7d5c` |
 | Qualification code and documents (#413) | The `jobs/413-qualification` head that follows `50df7d5c` |
+| Review fixes and the native-read cost fix | `88f7848f` (integration head) |
 
 **Environments.** The measurements below are local arm64: an Apple M4 Pro with 14 CPUs and
 64 GiB host memory; the Docker VM exposes 14 CPUs and 15.7 GiB. The server image is the
@@ -201,8 +202,20 @@ connection.
 
 The L5 fixture enabled all three provider families in the same read: one scheduled task,
 one queue worker, one cache observation and one backup observation, plus the change rows.
+These Check now figures were taken before the final `88f7848f` read change described below,
+so they are conservative: that change removed work from every discovery.
 The journal read is line-capped, not byte-capped; the 91-line answer stayed at about 50 KiB,
 well inside the 64 KiB SSH answer bound.
+
+**Native-read cost.** The first delivered read priced the Running group with the retained
+unit state of all `barectl-apply-*` units and read the journal twice. At the 100-unit
+retention cap that cost about 2.6 s per discovery on the 1 GiB lane, and the hosted Native
+shards missed their 300 s target. `88f7848f` filters the running read to units systemd
+reports as `running` or `activating` (4 ms at the cap) and reads the oldest retained time
+and the bounded history in one authorized command instead of two. The full retained
+inventory read remains cleanup's, which needs it; a retained unit that printed no stage or
+result line is therefore not listed, while the journal still supplies every run that
+reached the server.
 
 **Breadth: rotation and boot.** `JobsSurvivingEvidence` is a new `breadth`-tagged scenario,
 never in the merge build. It starts from L5, performs a real scheduled-tasks change and
