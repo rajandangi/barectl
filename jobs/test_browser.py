@@ -117,10 +117,9 @@ class JobsBrowserTests(BrowserTestCase):
         self.context.close()
         self.open_context(width=1280, height=900, timezone_id="Europe/London")
         self.sign_in()
-        self.page.goto(f"{self.live_server_url}/servers/{self.server.pk}/jobs/")
-        # The page sends the viewer's zone in a background request that replaces the panel;
-        # wait for that swap so a later click cannot land on a detached row.
-        expect(self.page).to_have_url(re.compile(r"[?&]tz="))
+        # Name the zone in the URL: the page then renders it without a background exchange,
+        # so a later click cannot land on a panel that a swap replaces underneath it.
+        self.page.goto(f"{self.live_server_url}/servers/{self.server.pk}/jobs/?tz=Europe%2FLondon")
         self.page.wait_for_load_state("networkidle")
 
     def test_jobs_groups_details_check_and_narrow_layout(self) -> None:
