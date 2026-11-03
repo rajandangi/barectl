@@ -3,6 +3,7 @@ from unittest import mock
 from discovery.fakes import FakeServer, record_attempt, run_worker
 from discovery.services import request_discovery
 from operations.models import RemoteOperation
+from servers.views import SECTIONS
 
 from .models import Server
 from .testing import ControllerConfigTestCase
@@ -14,15 +15,8 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         with mock.patch("discovery.ssh.connect_alias") as connect:
-            for suffix, title in (
-                ("", "Sites"),
-                ("sites/", "Sites"),
-                ("security/", "Security"),
-                ("activity/", "Activity"),
-                ("jobs/", "Jobs"),
-                ("settings/", "Settings"),
-                ("advanced/", "Advanced"),
-            ):
+            for key, title in SECTIONS.items():
+                suffix = "" if key == "sites" else f"{key}/"
                 with self.subTest(section=title):
                     response = self.client.get(
                         f"/servers/{server.pk}/{suffix}",
@@ -33,6 +27,14 @@ class ServerSectionTests(ControllerConfigTestCase):
                     self.assertContains(response, f'aria-current="page">{title}</a>')
             connect.assert_not_called()
         self.assertFalse(RemoteOperation.objects.exists())
+
+    def test_navigation_lists_the_exported_sections_in_order(self) -> None:
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        body = self.client.get(f"/servers/{server.pk}/").content.decode()
+        positions = [body.index(f">{title}</a>") for title in SECTIONS.values()]
+        self.assertEqual(positions, sorted(positions))
 
     def test_removed_sections_redirect_to_their_new_homes(self) -> None:
         self.grant("view_server", "view_siteobservation")

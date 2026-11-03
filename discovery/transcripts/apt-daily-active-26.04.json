@@ -11,7 +11,7 @@
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:VZmyooiP2FNRiYzq20EBZGnwowFcrP7i30A3BWeFAHk"
+    "host_key": "ssh-ed25519 SHA256:6a08sbNxg0wd9eq/QwfhztwrROau3MGTXvG+67j5huo"
   },
   "commands": [
     {
@@ -38,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:        14219568 kB\nMemAvailable:   14953308 kB\nBuffers:             148 kB\nCached:           449936 kB\nSwapCached:            0 kB\nActive:           738584 kB\nInactive:         527048 kB\nActive(anon):     589416 kB\nInactive(anon):   248804 kB\nActive(file):     149168 kB\nInactive(file):   278244 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17472732 kB\nDirty:               556 kB\nWriteback:             0 kB\nAnonPages:        803912 kB\nMapped:           138484 kB\nShmem:             22716 kB\nKReclaimable:     563504 kB\nSlab:             721568 kB\nSReclaimable:     563504 kB\nSUnreclaim:       158064 kB\nKernelStack:       10080 kB\nPageTables:        15596 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    2946136 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71400 kB\nVmallocChunk:          0 kB\nPercpu:             7616 kB\nAnonHugePages:     32768 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:        12998984 kB\nMemAvailable:   14422860 kB\nBuffers:             152 kB\nCached:          1235948 kB\nSwapCached:            0 kB\nActive:           942584 kB\nInactive:        1460104 kB\nActive(anon):     742508 kB\nInactive(anon):   603608 kB\nActive(file):     200076 kB\nInactive(file):   856496 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17472732 kB\nDirty:               616 kB\nWriteback:           256 kB\nAnonPages:       1155952 kB\nMapped:           331048 kB\nShmem:            180072 kB\nKReclaimable:     624480 kB\nSlab:             788720 kB\nSReclaimable:     624480 kB\nSUnreclaim:       164240 kB\nKernelStack:        9408 kB\nPageTables:        26064 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3966356 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71580 kB\nVmallocChunk:          0 kB\nPercpu:             9016 kB\nAnonHugePages:     36864 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n574787420160 473737129984 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n573646569472 472533389312 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -94,7 +94,7 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:        14182092 kB\nMemAvailable:   14920312 kB\nBuffers:             148 kB\nCached:           454412 kB\nSwapCached:            0 kB\nActive:           749472 kB\nInactive:         531528 kB\nActive(anon):     600304 kB\nInactive(anon):   248804 kB\nActive(file):     149168 kB\nInactive(file):   282724 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17472732 kB\nDirty:              3924 kB\nWriteback:             0 kB\nAnonPages:        814968 kB\nMapped:           138084 kB\nShmem:             22716 kB\nKReclaimable:     563504 kB\nSlab:             721760 kB\nSReclaimable:     563504 kB\nSUnreclaim:       158256 kB\nKernelStack:       10144 kB\nPageTables:        20696 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    2976392 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71400 kB\nVmallocChunk:          0 kB\nPercpu:             7784 kB\nAnonHugePages:     34816 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:        12958948 kB\nMemAvailable:   14387168 kB\nBuffers:             152 kB\nCached:          1240548 kB\nSwapCached:            0 kB\nActive:           950532 kB\nInactive:        1464448 kB\nActive(anon):     750456 kB\nInactive(anon):   603608 kB\nActive(file):     200076 kB\nInactive(file):   860840 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17472732 kB\nDirty:              4092 kB\nWriteback:           256 kB\nAnonPages:       1163808 kB\nMapped:           332540 kB\nShmem:            180072 kB\nKReclaimable:     624480 kB\nSlab:             788720 kB\nSReclaimable:     624480 kB\nSUnreclaim:       164240 kB\nKernelStack:        9440 kB\nPageTables:        32432 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3986724 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71580 kB\nVmallocChunk:          0 kB\nPercpu:             9128 kB\nAnonHugePages:     38912 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -997,7 +997,7 @@
     {
       "command": "ss -Hlnptu",
       "exit": 0,
-      "stdout": "udp UNCONN 0      0      127.0.0.11:51677 0.0.0.0:*                                                       \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=111,fd=3),(\"systemd\",pid=1,fd=109))\ntcp LISTEN 0      4096   127.0.0.11:35299 0.0.0.0:*                                                       \ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=111,fd=4),(\"systemd\",pid=1,fd=110))\n",
+      "stdout": "udp UNCONN 0      0      127.0.0.11:59181 0.0.0.0:*                                                       \ntcp LISTEN 0      4096   127.0.0.11:36081 0.0.0.0:*                                                       \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=110,fd=3),(\"systemd\",pid=1,fd=109))\ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=110,fd=4),(\"systemd\",pid=1,fd=110))\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1088,7 +1088,7 @@
     {
       "command": "printenv SSH_CONNECTION",
       "exit": 0,
-      "stdout": "192.168.107.7 39942 192.168.107.6 22\n",
+      "stdout": "192.168.107.7 36852 192.168.107.6 22\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1242,7 +1242,7 @@
     {
       "command": "iptables-save",
       "exit": 0,
-      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Tue Nov  3 03:56:09 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:35299\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:51677\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 35299 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 51677 -j SNAT --to-source :53\nCOMMIT\n# Completed on Tue Nov  3 03:56:09 2026\n",
+      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Tue Nov  3 05:06:15 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:36081\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:59181\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 36081 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 59181 -j SNAT --to-source :53\nCOMMIT\n# Completed on Tue Nov  3 05:06:15 2026\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1340,7 +1340,7 @@
     {
       "command": "find /var/log/unattended-upgrades -maxdepth 1 -type f -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1",
       "exit": 0,
-      "stdout": "1793678166.3761857340 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
+      "stdout": "1793682372.0281107470 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1354,7 +1354,7 @@
     {
       "command": "tail -n 60 '/var/log/unattended-upgrades/unattended-upgrades-shutdown.log'",
       "exit": 0,
-      "stdout": "2026-11-03 03:56:06,376 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-11-03 03:56:06,376 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
+      "stdout": "2026-11-03 05:06:12,028 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-11-03 05:06:12,028 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
       "truncated": false,
       "stdin_sha256": null
     },

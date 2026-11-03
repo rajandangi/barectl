@@ -767,23 +767,9 @@ def _read_offsite(value: dict[str, object]) -> "OffsiteStorage | None":  # noqa:
 
 def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ...]) -> None:
     from backups.integrity import record as record_integrity
-    from backups.models import BackupObservation
+    from backups.models import BackupObservation, BackupRunObservation, BackupTimerObservation
 
-    def run_document(run: object) -> dict[str, object]:
-        from dataclasses import asdict
-
-        from backups.observation import BackupRun
-
-        return asdict(run) if isinstance(run, BackupRun) else {}
-
-    def timer_document(timer: object) -> dict[str, object]:
-        from dataclasses import asdict
-
-        from backups.observation import BackupTimer
-
-        return asdict(timer) if isinstance(timer, BackupTimer) else {}
-
-    BackupObservation.objects.bulk_create(
+    created = BackupObservation.objects.bulk_create(
         BackupObservation(
             snapshot=snapshot,
             identifier=backup.identifier,
@@ -814,11 +800,54 @@ def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ..
                 if backup.copy is not None
                 else {}
             ),
-            runs=[run_document(run) for run in backup.runs],
-            timers=[timer_document(timer) for timer in backup.timers],
+            runs_truncated=backup.runs_truncated,
+            timers_truncated=backup.timers_truncated,
         )
         for backup in backups
     )
+    run_rows: list[BackupRunObservation] = []
+    timer_rows: list[BackupTimerObservation] = []
+    for observation, backup in zip(created, backups, strict=True):
+        run_rows.extend(
+            BackupRunObservation(
+                observation=observation,
+                kind=run.kind,
+                result_class=run.result_class,
+                reason=run.reason,
+                at=run.at,
+                point=run.point,
+                scope=run.scope,
+                origin=run.origin,
+                snapshots=run.snapshots,
+                size=run.size,
+                offsite=run.offsite,
+                location=run.location,
+                checked=run.checked,
+                subset=run.subset,
+                onsite_deleted=run.onsite.deleted if run.onsite else 0,
+                onsite_kept=run.onsite.kept if run.onsite else 0,
+                onsite_skipped=run.onsite.skipped if run.onsite else 0,
+                onsite_failed=run.onsite.failed if run.onsite else 0,
+                offsite_deleted=run.offsite_counts.deleted if run.offsite_counts else 0,
+                offsite_kept=run.offsite_counts.kept if run.offsite_counts else 0,
+                offsite_skipped=run.offsite_counts.skipped if run.offsite_counts else 0,
+                offsite_failed=run.offsite_counts.failed if run.offsite_counts else 0,
+            )
+            for run in backup.runs
+        )
+        timer_rows.extend(
+            BackupTimerObservation(
+                observation=observation,
+                work=timer.work,
+                location=timer.location,
+                on=timer.on,
+                next_elapse_us=timer.next_elapse_us,
+                last_trigger_us=timer.last_trigger_us,
+            )
+            for timer in backup.timers
+        )
+    BackupRunObservation.objects.bulk_create(run_rows)
+    BackupTimerObservation.objects.bulk_create(timer_rows)
     for backup in backups:
         record_integrity(snapshot.server, backup.identifier, backup.integrity)
 
@@ -873,6 +902,8 @@ _OBSERVATION_ROWS = (
     "automation",
     "workers",
     "backups",
+    "backups__runs",
+    "backups__timers",
     "security__rules",
     "security__listeners",
     "security__pending_updates",
@@ -1394,53 +1425,69 @@ def _read_backup(row: object) -> ObservedBackup:
         _read_offsite(row.offsite),
         copy,
         (),
-        tuple(_read_run(value) for value in row.runs if isinstance(value, dict)),
-        tuple(_read_timer(value) for value in row.timers if isinstance(value, dict)),
+        tuple(_read_run(value) for value in row.runs.all()),
+        tuple(_read_timer(value) for value in row.timers.all()),
+        row.runs_truncated,
+        row.timers_truncated,
     )
 
 
-def _read_run(value: dict[str, object]) -> BackupRun:
+def _read_run(value: object) -> BackupRun:
+    from backups.models import BackupRunObservation
     from backups.observation import BackupRun, CleanupCounts
 
-    def counts(key: str) -> CleanupCounts | None:
-        raw = value.get(key)
-        if not isinstance(raw, dict):
+    if not isinstance(value, BackupRunObservation):
+        raise TypeError("Not a backup run observation.")
+
+    def counts(prefix: str) -> CleanupCounts | None:
+        if value.kind != "cleanup":
             return None
+        if prefix == "onsite":
+            return CleanupCounts(
+                value.onsite_deleted,
+                value.onsite_kept,
+                value.onsite_skipped,
+                value.onsite_failed,
+            )
         return CleanupCounts(
-            int(str(raw.get("deleted", 0))),
-            int(str(raw.get("kept", 0))),
-            int(str(raw.get("skipped", 0))),
-            int(str(raw.get("failed", 0))),
+            value.offsite_deleted,
+            value.offsite_kept,
+            value.offsite_skipped,
+            value.offsite_failed,
         )
 
     return BackupRun(
-        str(value.get("kind", "")),
-        str(value.get("result_class", "")),
-        str(value.get("reason", "")),
-        str(value.get("at", "")),
-        str(value.get("point", "")),
-        str(value.get("scope", "")),
-        str(value.get("origin", "")),
-        int(str(value.get("snapshots", 0))),
-        int(str(value.get("size", 0))),
-        str(value.get("offsite", "")),
-        str(value.get("location", "")),
-        int(str(value.get("checked", 0))),
-        str(value.get("subset", "")),
+        value.kind,
+        value.result_class,
+        value.reason,
+        value.at,
+        value.point,
+        value.scope,
+        value.origin,
+        value.snapshots,
+        value.size,
+        value.offsite,
+        value.location,
+        value.checked,
+        value.subset,
         counts("onsite"),
-        counts("offsite_counts"),
+        counts("offsite"),
     )
 
 
-def _read_timer(value: dict[str, object]) -> BackupTimer:
+def _read_timer(value: object) -> BackupTimer:
+    from backups.models import BackupTimerObservation
     from backups.observation import BackupTimer
 
+    if not isinstance(value, BackupTimerObservation):
+        raise TypeError("Not a backup timer observation.")
+
     return BackupTimer(
-        str(value.get("work", "")),
-        str(value.get("location", "")),
-        value.get("on") is True,
-        int(str(value.get("next_elapse_us", 0))),
-        int(str(value.get("last_trigger_us", 0))),
+        value.work,
+        value.location,
+        value.on,
+        value.next_elapse_us,
+        value.last_trigger_us,
     )
 
 

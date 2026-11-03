@@ -187,8 +187,8 @@ class JobsBrowserTests(BrowserTestCase):
         expect(page).to_have_url(re.compile(r"[?&]site=alpha.*[?&]result=failed"))
         expect(recent_rows).not_to_contain_text("beta")
         expect(recent_rows).to_contain_text("alpha")
-        expect(recent_rows).to_contain_text("Failed")
-        expect(recent_rows).not_to_contain_text("Finished")
+        expect(recent_rows.locator("p").filter(has_text="Failed")).to_have_count(1)
+        expect(recent_rows.locator("p").filter(has_text="Finished")).to_have_count(0)
         expect(page.get_by_label("Result", exact=True)).to_be_focused()
 
         # Back and forward restore the same bookmarkable selection.
@@ -230,5 +230,19 @@ class JobsBrowserTests(BrowserTestCase):
         row = page.locator("li.barectl-job-row", has_text="Create PHP site").first
         row.get_by_text("Show details").click()
         expect(row.get_by_text("Result class")).to_be_visible()
-        expect(row.get_by_text("Finished")).to_be_visible()
+        expect(row.get_by_text("Finished", exact=True)).to_be_visible()
+        expect(row.locator("dt", has_text="Started")).to_be_visible()
+        expect(row.locator("dt", has_text="Finished")).to_be_visible()
         expect(row.get_by_text("barectl-apply-" + "a" * 32)).to_be_visible()
+
+    def test_first_visit_without_a_snapshot_explains_and_offers_one_check(self) -> None:
+        DiscoveryAttempt.objects.filter(server=self.server).delete()
+        page = self.page
+        page.reload()
+        expect(page.locator("#jobs-empty")).to_contain_text(
+            "Run a check to read it for the first time"
+        )
+        expect(page.get_by_role("button", name="Check now")).to_have_count(1)
+        page.get_by_role("button", name="Check now").click()
+        expect(page.get_by_text("Barectl queued a check")).to_be_visible()
+        expect(page.get_by_role("button", name="Check now")).to_have_count(0)

@@ -7,7 +7,7 @@ the page, the last-checked time and a plain notice, and exposes no row text or c
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Final, Literal
+from typing import Literal
 
 from django.urls import reverse
 from django.utils import timezone
@@ -19,6 +19,7 @@ from operations import engine
 from operations.models import ChangeRun
 from servers.models import Server
 
+from . import results
 from .automatic import AutomaticRow, automatic_work
 from .backups import BackupRunRow, BackupTimerRow, BackupWork, backup_work
 from .filters import Filtered, Filters, Selection, filter_recent, start_of_range
@@ -43,16 +44,6 @@ AUTOMATIC_EMPTY = (
 NOT_READ = "Automatic work is read by a full check of this server. Run a check to read it."
 RECENT_EMPTY = "No available Barectl change or backup results."
 FILTERED_EMPTY = "No available Barectl change or backup results match these filters."
-
-_RESULT_LABELS: Final[dict[str, str]] = {
-    "succeeded": "Finished",
-    "partial": "Partly applied",
-    "refused": "Refused",
-    "failed": "Failed",
-    "timed_out": "Timed out",
-    "lock_busy": "Skipped because other work held the server",
-}
-_FAILED = frozenset({"partial", "refused", "failed", "timed_out", "lock_busy", ""})
 
 
 @dataclass(frozen=True)
@@ -79,7 +70,7 @@ class JobRow:
     other_controller: bool = False
     needs_attention: bool = False
     running: bool = False
-    kind_slug: str = ""
+    work_type: str = ""
 
     @property
     def when(self) -> datetime | None:
@@ -92,6 +83,8 @@ class JobRow:
             ("Invocation", self.invocation or "Not reported"),
             ("Result class", self.result_class or "No result line"),
             ("Reason", self.reason or "Not reported"),
+            ("Started", self.started_at.isoformat() if self.started_at else "Not reported"),
+            ("Finished", self.finished_at.isoformat() if self.finished_at else "Not reported"),
         )
 
 
@@ -159,7 +152,7 @@ def present(
             else ()
         ),
     )
-    recent_backups = _recent_backups(backups.runs)
+    recent_backups = backups.runs
     if not may_view_changes:
         return JobsView(
             last_checked=snapshot.collected_at,
@@ -256,10 +249,6 @@ def _automatic_empty(
     return "" if rows else AUTOMATIC_EMPTY
 
 
-def _recent_backups(rows: tuple[BackupRunRow, ...]) -> tuple[BackupRunRow, ...]:
-    return tuple(row for row in rows if not row.running)
-
-
 def _rows(changes: tuple[ObservedChange, ...], server: Server) -> tuple[JobRow, ...]:
     runs = _local_runs(changes, server)
     return tuple(_row(change, runs.get((change.unit, change.invocation_id))) for change in changes)
@@ -298,18 +287,16 @@ def _row(change: ObservedChange, run_id: int | None) -> JobRow:
         finished_at=change.finished_at,
         run_url=reverse("run_detail", args=(run_id,)) if run_id is not None else "",
         other_controller=run_id is None,
-        needs_attention=not change.running and change.result_class in _FAILED,
+        needs_attention=not change.running and change.result_class in results.ATTENTION,
         running=change.running,
-        kind_slug=change.kind_slug,
+        work_type=change.kind_slug,
     )
 
 
 def _summary(change: ObservedChange) -> str:
     if change.running:
         return "Running when the server was last checked."
-    label = _RESULT_LABELS.get(change.result_class)
-    if label is None:
-        return "Could not confirm"
+    label = results.label(change.result_class)
     if change.result_class == "refused":
         reason = engine.reason_text(change.result_class, change.reason)
         return f"{label}: {reason}" if reason else label

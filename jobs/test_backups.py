@@ -63,6 +63,10 @@ class BackupJobsTests(TestCase):
         group = next(group for group in view.groups if group.key == "automatic")
         return tuple(row for row in group.rows if isinstance(row, BackupTimerRow))
 
+    def test_a_run_details_its_server_time(self) -> None:
+        row = self.recent(self.view(run(at=self.now)))[0]
+        self.assertIn(("Time", self.now.isoformat()), row.detail_lines)
+
     def test_each_result_class_has_its_plain_result(self) -> None:
         expected = {
             "succeeded": "Finished",
@@ -128,9 +132,15 @@ class BackupJobsTests(TestCase):
 
     def test_timers_are_on_or_off_with_only_systemds_next_elapse(self) -> None:
         next_elapse = int((self.now + timedelta(hours=4)).timestamp() * 1_000_000)
+        last_run = int((self.now - timedelta(hours=2)).timestamp() * 1_000_000)
         view = self.view(
             timers=(
-                timer(work="backup", on=True, next_elapse_us=next_elapse),
+                timer(
+                    work="backup",
+                    on=True,
+                    next_elapse_us=next_elapse,
+                    last_trigger_us=last_run,
+                ),
                 timer(work="check", location="onsite", on=False, next_elapse_us=0),
             )
         )
@@ -139,6 +149,10 @@ class BackupJobsTests(TestCase):
         check_row = next(row for row in rows if row.work_type != BACKUP_SCHEDULE)
         self.assertEqual(backup_row.state, "On")
         self.assertEqual(backup_row.next_run_at, self.now + timedelta(hours=4))
+        self.assertEqual(backup_row.last_run_at, self.now - timedelta(hours=2))
+        self.assertIn(
+            ("Last run", (self.now - timedelta(hours=2)).isoformat()), backup_row.detail_lines
+        )
         self.assertFalse(backup_row.next_run_unknown)
         self.assertEqual(check_row.state, "Off")
         self.assertFalse(check_row.next_run_unknown)

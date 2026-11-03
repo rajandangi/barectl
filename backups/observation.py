@@ -227,14 +227,14 @@ class BackupTimer:
 
     @property
     def next_at(self) -> datetime | None:
-        return _moment(self.next_elapse_us)
+        return _from_microseconds(self.next_elapse_us)
 
     @property
     def last_at(self) -> datetime | None:
-        return _moment(self.last_trigger_us)
+        return _from_microseconds(self.last_trigger_us)
 
 
-def _moment(microseconds: int) -> datetime | None:
+def _from_microseconds(microseconds: int) -> datetime | None:
     if microseconds <= 0:
         return None
     try:
@@ -261,6 +261,9 @@ class ObservedBackup:
     # Additive Phase D evidence for Jobs (#286): recent runs and the site's timers.
     runs: tuple[BackupRun, ...] = ()
     timers: tuple[BackupTimer, ...] = ()
+    # The bounded read dropped older evidence; Jobs says the list is incomplete.
+    runs_truncated: bool = False
+    timers_truncated: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -418,6 +421,8 @@ def _valid_site(value: object) -> bool:
         "integrity",
         "runs",
         "timers",
+        "runs_truncated",
+        "timers_truncated",
     }:
         return False
     if not set(value) >= _SITE_KEYS:
@@ -430,6 +435,9 @@ def _valid_site(value: object) -> bool:
         return False
     if "timers" in value and not _valid_timers(value["timers"]):
         return False
+    for key in ("runs_truncated", "timers_truncated"):
+        if key in value and type(value[key]) is not bool:
+            return False
     return (
         isinstance(value["identifier"], str)
         and convention.SITE_IDENTIFIER.fullmatch(value["identifier"]) is not None
@@ -754,6 +762,8 @@ def _observation(row: dict[str, object], offsite: OffsiteStorage | None) -> Obse
         integrity_of(row),
         runs,
         timers,
+        row.get("runs_truncated") is True,
+        row.get("timers_truncated") is True,
     )
 
 

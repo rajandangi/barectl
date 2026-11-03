@@ -26,6 +26,8 @@ from discovery.models import ObservationOutcome
 from discovery.snapshot import Snapshot
 from servers.models import Server
 
+from . import results
+
 CAPTURE: Final = "backup"
 COPY: Final = "backup_copy"
 CHECK: Final = "backup_check"
@@ -53,7 +55,9 @@ UNREADABLE: Final = "Barectl could not read this server's backups."
 NO_BACKUPS: Final = "No backup runs or schedules were found on this server."
 COULD_NOT_CONFIRM: Final = "Could not confirm this run finished."
 NO_RESULT_LINE: Final = "The server kept no result line for this run."
-_FAILED: Final = frozenset({"partial", "failed", "refused", "lock_busy", ""})
+TRUNCATED_RUNS: Final = "Some older backup runs are not shown, so this list is not complete."
+TRUNCATED_TIMERS: Final = "Some backup schedules are not shown, so this list is not complete."
+# Phase D's own wording differs for a few classes; the class-to-key mapping is shared.
 _RESULT_LABELS: Final[dict[str, str]] = {
     "succeeded": "Finished",
     "partial": "Partly saved",
@@ -90,10 +94,6 @@ class BackupRunRow:
     def sites(self) -> tuple[str, ...]:
         return (self.identifier,)
 
-    @property
-    def kind_slug(self) -> str:
-        return self.work_type
-
 
 @dataclass(frozen=True)
 class BackupTimerRow:
@@ -106,6 +106,7 @@ class BackupTimerRow:
     state: str
     next_run_at: datetime | None = None
     next_run_unknown: bool = False
+    last_run_at: datetime | None = None
     link_url: str = ""
     link_label: str = ""
     needs_attention: bool = False
@@ -140,6 +141,8 @@ class BackupTimerRow:
             lines.append(("Location", "On this server" if self.location == "onsite" else "Offsite"))
         if self.next_run_at is not None:
             lines.append(("Next run", self.next_run_at.isoformat()))
+        if self.last_run_at is not None:
+            lines.append(("Last run", self.last_run_at.isoformat()))
         return tuple(lines)
 
 
@@ -160,15 +163,20 @@ def backup_work(snapshot: Snapshot, server: Server) -> BackupWork:
         return BackupWork((), (), (observation.warning or UNREADABLE,), "")
     runs: list[BackupRunRow] = []
     timers: list[BackupTimerRow] = []
+    warnings: list[str] = []
     for backup in observation.value:
         timers.extend(_timer_rows(backup, server))
         runs.extend(_run_row(backup, run, server) for run in backup.runs)
+        if backup.runs_truncated:
+            warnings.append(TRUNCATED_RUNS)
+        if backup.timers_truncated:
+            warnings.append(TRUNCATED_TIMERS)
     runs.sort(key=_order, reverse=True)
     timers.sort(key=lambda row: (row.identifier, _timer_order(row.work_type), row.location))
     return BackupWork(
         tuple(runs),
         tuple(timers),
-        (),
+        tuple(dict.fromkeys(warnings)),
         NO_BACKUPS if not runs and not timers else "",
     )
 
@@ -220,6 +228,7 @@ def _timer_row(
         state=state,
         next_run_at=next_run,
         next_run_unknown=(next_run is None) if timer is None or timer.on else False,
+        last_run_at=timer.last_at if timer is not None else None,
         link_url=_schedule_url(server, identifier),
         link_label=f"Open {TIMER_TITLE[work_type].lower()}",
     )
@@ -235,7 +244,7 @@ def _run_row(backup: ObservedBackup, run: BackupRun, server: Server) -> BackupRu
     title = WORK_TITLE[work_type]
     headline, detail = _sentences(backup, run)
     findings = _findings(run, backup)
-    needs_attention = run.result_class in _FAILED or (
+    needs_attention = results.word(run.result_class).attention or (
         run.kind == "capture" and run.offsite == "failed"
     )
     summary = _summary(run)
@@ -254,6 +263,7 @@ def _run_row(backup: ObservedBackup, run: BackupRun, server: Server) -> BackupRu
             ("Site", backup.identifier),
             ("Type of work", title),
             ("Result class", _RESULT_LABELS.get(run.result_class, run.result_class)),
+            *((("Time", run.at),) if run.at else ()),
             *((("Recovery point", run.short_point),) if run.point else ()),
             *((("What happened", f"{headline} {detail}".strip()),) if needs_attention else ()),
             *findings,

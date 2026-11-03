@@ -102,6 +102,7 @@ class JobsPresentationTests(TestCase):
                 unit="barectl-apply-" + "a" * 32 + ".service",
                 kind_slug="create_http_site",
                 sites=("alpha",),
+                started_at=self.now,
                 finished_at=self.now,
             )
         )
@@ -111,6 +112,8 @@ class JobsPresentationTests(TestCase):
         self.assertEqual(row.title, "Create PHP site")
         self.assertEqual(row.sites, ("alpha",))
         self.assertEqual(row.summary, "Finished")
+        self.assertIn(("Started", self.now.isoformat()), row.detail_lines)
+        self.assertIn(("Finished", self.now.isoformat()), row.detail_lines)
 
     def test_a_line_without_kind_or_site_names_a_generic_change(self) -> None:
         (row,) = (

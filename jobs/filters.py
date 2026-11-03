@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from operations import engine
 from sites import names as site_names
 
+from .results import RESULT_CHOICES, filter_key
 from .timezones import start_of_local_day
 
 TODAY: Final = "today"
@@ -29,17 +30,6 @@ RANGE_CHOICES: Final = (
 )
 _RANGE_DAYS: Final = {value: days_back for value, _, days_back in RANGE_CHOICES}
 
-# The issue's plain result words, matched to the engine's result classes.
-RESULT_CHOICES: Final = (
-    ("finished", "Finished", "succeeded"),
-    ("partial", "Partly applied", "partial"),
-    ("refused", "Refused", "refused"),
-    ("failed", "Failed", "failed"),
-    ("timed_out", "Timed out", "timed_out"),
-    ("skipped", "Skipped", "lock_busy"),
-    ("unconfirmed", "Could not confirm", ""),
-)
-_RESULT_KEYS: Final = {result_class: key for key, _, result_class in RESULT_CHOICES}
 # Backup runs are Recent results too, so Type of work can narrow them (#286).
 BACKUP_WORK_LABELS: Final = {
     "backup": "Backup",
@@ -67,7 +57,7 @@ class Filterable(Protocol):
     def sites(self) -> tuple[str, ...]: ...
 
     @property
-    def kind_slug(self) -> str: ...
+    def work_type(self) -> str: ...
 
     @property
     def result_class(self) -> str: ...
@@ -181,10 +171,10 @@ def _when(row: Filterable) -> datetime:
 def _matches(row: Filterable, selection: Selection) -> bool:
     if selection.site and selection.site not in row.sites:
         return False
-    if selection.work and row.kind_slug != selection.work:
+    if selection.work and row.work_type != selection.work:
         return False
     if selection.result:
-        return _RESULT_KEYS.get(row.result_class, "unconfirmed") == selection.result
+        return filter_key(row.result_class) == selection.result
     return True
 
 
@@ -201,10 +191,10 @@ def _site_options(rows: Sequence[Filterable], selection: Selection) -> tuple[Opt
 def _work_options(rows: Sequence[Filterable], selection: Selection) -> tuple[Option, ...]:
     counts: dict[str, int] = {}
     for row in rows:
-        if row.kind_slug and (
-            engine.kind_of(row.kind_slug) is not None or row.kind_slug in BACKUP_WORK_LABELS
+        if row.work_type and (
+            engine.kind_of(row.work_type) is not None or row.work_type in BACKUP_WORK_LABELS
         ):
-            counts[row.kind_slug] = counts.get(row.kind_slug, 0) + 1
+            counts[row.work_type] = counts.get(row.work_type, 0) + 1
     options = [
         Option(slug, _work_label(slug), count, slug == selection.work)
         for slug, count in counts.items()
@@ -216,7 +206,7 @@ def _work_options(rows: Sequence[Filterable], selection: Selection) -> tuple[Opt
 def _result_options(rows: Sequence[Filterable], selection: Selection) -> tuple[Option, ...]:
     counts: dict[str, int] = {}
     for row in rows:
-        key = _RESULT_KEYS.get(row.result_class, "unconfirmed")
+        key = filter_key(row.result_class)
         counts[key] = counts.get(key, 0) + 1
     return tuple(
         Option(key, label, counts.get(key, 0), key == selection.result)

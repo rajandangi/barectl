@@ -226,9 +226,9 @@ class BackupObservation(models.Model):
     # The non-secret offsite location and the newest copy result (#403).
     offsite = models.JSONField(default=dict, blank=True)
     copy = models.JSONField(default=dict, blank=True)
-    # Jobs' bounded recent runs and each site's timers, additive to the fields above (#286).
-    runs = models.JSONField(default=list, blank=True)
-    timers = models.JSONField(default=list, blank=True)
+    # Jobs' bounded recent runs and each site's timers are child rows below (#286).
+    runs_truncated = models.BooleanField(default=False)
+    timers_truncated = models.BooleanField(default=False)
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()
@@ -243,3 +243,67 @@ class BackupObservation(models.Model):
     def __str__(self) -> str:
         state = "backed up" if self.enabled else "not backed up"
         return f"{state}: {self.identifier} in {self.snapshot}"
+
+
+class BackupRunObservation(models.Model):
+    """One recent backup, copy, check or cleanup run from Phase D's safe result line.
+
+    It is bounded evidence for Jobs, never authority: the next discovery replaces it from
+    the server's journal. The cleanup counts are typed columns so each location's findings
+    stay separate.
+    """
+
+    observation = models.ForeignKey(
+        BackupObservation, on_delete=models.CASCADE, related_name="runs"
+    )
+    kind = models.CharField(max_length=10)
+    result_class = models.CharField(max_length=20, blank=True)
+    reason = models.CharField(max_length=500, blank=True)
+    at = models.CharField(max_length=40, blank=True)
+    point = models.CharField(max_length=16, blank=True)
+    scope = models.CharField(max_length=12, blank=True)
+    origin = models.CharField(max_length=12, blank=True)
+    snapshots = models.PositiveSmallIntegerField(default=0)
+    size = models.BigIntegerField(default=0)
+    offsite = models.CharField(max_length=8, blank=True)
+    location = models.CharField(max_length=8, blank=True)
+    checked = models.PositiveSmallIntegerField(default=0)
+    subset = models.CharField(max_length=8, blank=True)
+    onsite_deleted = models.PositiveIntegerField(default=0)
+    onsite_kept = models.PositiveIntegerField(default=0)
+    onsite_skipped = models.PositiveIntegerField(default=0)
+    onsite_failed = models.PositiveIntegerField(default=0)
+    offsite_deleted = models.PositiveIntegerField(default=0)
+    offsite_kept = models.PositiveIntegerField(default=0)
+    offsite_skipped = models.PositiveIntegerField(default=0)
+    offsite_failed = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.kind} run of {self.observation.identifier}"
+
+
+class BackupTimerObservation(models.Model):
+    """One site timer systemd reported, on or off, with its next and last elapse."""
+
+    observation = models.ForeignKey(
+        BackupObservation, on_delete=models.CASCADE, related_name="timers"
+    )
+    work = models.CharField(max_length=10)
+    location = models.CharField(max_length=8, blank=True)
+    on = models.BooleanField(default=False)
+    next_elapse_us = models.BigIntegerField(default=0)
+    last_trigger_us = models.BigIntegerField(default=0)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        state = "on" if self.on else "off"
+        return f"{self.work} timer {state}: {self.observation.identifier}"

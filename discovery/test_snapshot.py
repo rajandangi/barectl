@@ -4,6 +4,13 @@ from typing import override
 
 from django.test import TestCase
 
+from backups.models import BackupObservation, BackupRunObservation, BackupTimerObservation
+from backups.observation import (
+    BackupRun,
+    BackupTimer,
+    CleanupCounts,
+    ObservedBackup,
+)
 from bootstrap.standing import HostJudgment, Standing
 from servers.models import Server
 
@@ -44,6 +51,56 @@ class SnapshotStorageTests(TestCase):
             current_snapshot(self.server),
             Snapshot(COLLECTED, COLLECTED_AT, "web.example.com", self.server.snapshots.get().pk),
         )
+
+    def test_backup_runs_and_timers_read_back_from_typed_rows(self) -> None:
+        backup = ObservedBackup(
+            "alpha",
+            "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1",
+            True,
+            True,
+            (),
+            True,
+            "",
+            None,
+            None,
+            None,
+            (),
+            (
+                BackupRun(
+                    "cleanup",
+                    "failed",
+                    "backup_prune",
+                    "2026-11-03T10:00:00+00:00",
+                    "0123456789abcdef",
+                    "all",
+                    "scheduled",
+                    1,
+                    4096,
+                    "",
+                    "onsite",
+                    0,
+                    "",
+                    CleanupCounts(2, 1, 3, 4),
+                    CleanupCounts(0, 0, 0, 0),
+                ),
+            ),
+            (BackupTimer("backup", "", True, 1_762_000_000_000_000, 1_761_000_000_000_000),),
+            True,
+            False,
+        )
+        collected = replace(
+            COLLECTED, backups=Observation(OBSERVED, ("journalctl",), "", (backup,))
+        )
+        save_snapshot(self.attempt(), collected, COLLECTED_AT)
+        stored = current_snapshot(self.server)
+        if stored is None:
+            self.fail("The snapshot was stored.")
+        self.assertEqual(stored.collected.backups.value, (backup,))
+        observation = BackupObservation.objects.get()
+        self.assertTrue(observation.runs_truncated)
+        self.assertFalse(observation.timers_truncated)
+        self.assertEqual(BackupRunObservation.objects.get().onsite_failed, 4)
+        self.assertTrue(BackupTimerObservation.objects.get().on)
 
     def test_a_components_profile_state_reads_back(self) -> None:
         deviation = "nginx 1.2 is installed but is not one of the profile's packages."
