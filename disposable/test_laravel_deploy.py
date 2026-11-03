@@ -267,7 +267,6 @@ class LaravelDeployCase(ScenarioTestCase):
                 self, kinds.INSTALL, PreparationInputs(self.database_engine, git=True), timeout=180
             )
         self.assertIn("active", self.native(f"systemctl is-active {self.database_name()}.service"))
-        self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
 
     def database_name(self) -> str:
         return "postgresql" if self.database_engine == "postgresql" else "mariadb"

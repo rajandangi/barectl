@@ -230,6 +230,14 @@ class AccessChangeWindowTests(ChangeTestCase):
         self.assertNotContains(page, "Access check:")
 
 
+class ResultReasonTests(SimpleTestCase):
+    def test_database_reload_is_catalogued_with_its_recovery_message(self) -> None:
+        self.assertIn("database_reload", engine.RESULT_REASONS)
+        message = engine.reason_text("partial", "database_reload")
+        self.assertIn("could not restart every running PHP master and site proxy", message)
+        self.assertIn("prepare a new review", message)
+
+
 class AccessRecoveryContractTests(SimpleTestCase):
     def test_failure_effects_and_recovery_message_agree(self) -> None:
         from .recovery_testing import FailurePhase, assert_access_failure

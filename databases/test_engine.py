@@ -313,6 +313,30 @@ class EngineReviewTests(ControllerConfigTestCase):
         self.assertIn(observation.digest_command("mariadb"), text)
         self.assertIn("skip-networking", text)
 
+    def test_the_install_restarts_the_units_a_package_transaction_unbinds(self) -> None:
+        draft = self.review(evidence(simulation=mariadb_simulation()))
+        self.assertIn("recover", draft.stages)
+        self.assertLess(draft.stages.index("harden"), draft.stages.index("recover"))
+        self.assertLess(draft.stages.index("recover"), draft.stages.index("verify"))
+        details = cast(list[dict[str, str]], draft.document["details"])
+        restarted = next(
+            item["value"] for item in details if item["label"] == "Restarted after install"
+        )
+        for unit in ("php-fpm@*.service", "php-fpm-site-*@*.service", "haproxy-site@*.service"):
+            self.assertIn(unit, restarted)
+        self.assertIn("restart every running PHP master and site proxy", draft.effects[0].text)
+        self.assertTrue(
+            any(
+                "restarted after the package database changed" in text
+                for text in draft.postconditions
+            )
+        )
+        self.assertIn(b"restart_affected_units", engine.BODY_BYTES)
+        self.assertIn(b"systemctl list-units --type=service --state=running", engine.BODY_BYTES)
+        self.assertIn(b"barectl-restarted", engine.BODY_BYTES)
+        self.assertIn(b"stage recover", engine.BODY_BYTES)
+        self.assertIn(b'"reason":"database_reload"', engine.BODY_BYTES)
+
 
 class RemovalReviewTests(ControllerConfigTestCase):
     def removal(self, *, usage: tuple[str, ...], installed: bool = True) -> ReviewDraft:

@@ -3,7 +3,8 @@
 # docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md
 # One reviewed Valkey package, installed by exactly one APT transaction whose resolved
 # actions the inline guard admits, then the distribution's shared unit is stopped and
-# masked and the units a daemon-reload unbinds are restarted (#428).
+# masked and the running units its daemon-reload unbinds are restarted by the shared
+# recovery shell (#428).
 set -eu
 reported=0
 result() { reported=1; printf 'barectl-result %s\n' "$1"; }
@@ -67,7 +68,7 @@ stage mask
 valkey_mask || { result '{"class":"partial","reason":"valkey_mask"}'; exit 2; }
 
 stage recover
-valkey_recover || { result '{"class":"partial","reason":"valkey_reload"}'; exit 2; }
+restart_affected_units || { result '{"class":"partial","reason":"valkey_reload"}'; exit 2; }
 
 stage verify
 [ "$(dpkg-query -W -f='${Version}' "$versioned")" = "$version" ] || exit 2
