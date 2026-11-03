@@ -14,6 +14,7 @@ from automation.observation import ObservedSchedule
 from automation.worker_observation import ObservedWorker
 from automation.workers import WorkerDefinition
 from bootstrap.standing import HostJudgment, Standing
+from jobs.observation import PROVIDER, JobReading, ObservedChange, ProviderCoverage
 from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
@@ -23,6 +24,7 @@ from sites.bodies.pool import SitePool
 if TYPE_CHECKING:
     from backups.observation import ObservedBackup, OffsiteStorage
     from cache.models import CacheObservation
+    from jobs.models import JobCoverage, JobObservation
     from security.observation import SecurityState
 
 from .models import (
@@ -250,6 +252,10 @@ class CollectedSnapshot:
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
     certificate_email: str = ""
     certificate_email_state: str = ""
+    # The server's own Barectl change runs and their coverage (Phase E #285).
+    jobs: Observation[JobReading] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", JobReading())
+    )
 
     @property
     def capacity(self) -> tuple[Observation[object], ...]:
@@ -327,6 +333,9 @@ def save_snapshot(
         offsite_status=collected.offsite.outcome,
         offsite_source=_joined(collected.offsite.source),
         offsite_warning=collected.offsite.warning,
+        jobs_status=collected.jobs.outcome,
+        jobs_source=_joined(collected.jobs.source),
+        jobs_warning=collected.jobs.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -417,6 +426,7 @@ def save_snapshot(
     _save_workers(snapshot, collected.workers.value)
     _save_backups(snapshot, collected.backups.value)
     _save_security(snapshot, collected.security.value, collected.security.source)
+    _save_jobs(snapshot, collected.jobs.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -802,6 +812,40 @@ class AttemptSnapshot(NamedTuple):
     snapshot: Snapshot | None
 
 
+def _save_jobs(snapshot: DiscoverySnapshot, reading: JobReading) -> None:
+    from jobs.models import JobCoverage, JobObservation
+
+    JobObservation.objects.bulk_create(
+        JobObservation(
+            snapshot=snapshot,
+            provider=PROVIDER,
+            unit=row.unit,
+            invocation_id=row.invocation_id,
+            kind_slug=row.kind_slug,
+            sites=list(row.sites),
+            result_class=row.result_class,
+            reason=row.reason,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            running=row.running,
+            active_state=row.active_state,
+            sub_state=row.sub_state,
+            exec_main_status=row.exec_main_status,
+        )
+        for row in reading.changes
+    )
+    JobCoverage.objects.bulk_create(
+        JobCoverage(
+            snapshot=snapshot,
+            provider=item.provider,
+            state=item.state,
+            warning=item.warning,
+            oldest_at=item.oldest_at,
+        )
+        for item in reading.coverage
+    )
+
+
 _OBSERVATION_ROWS = (
     "runtimes",
     "components",
@@ -816,6 +860,8 @@ _OBSERVATION_ROWS = (
     "security__rules",
     "security__listeners",
     "security__pending_updates",
+    "jobs",
+    "job_coverage",
 )
 
 
@@ -960,6 +1006,15 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             _read_offsite(row.offsite),
         ),
         security=_read_security(row),
+        jobs=Observation(
+            ObservationOutcome(row.jobs_status),
+            _reads(row.jobs_source),
+            row.jobs_warning,
+            JobReading(
+                tuple(_read_job(item) for item in row.jobs.all()),
+                tuple(_read_job_coverage(item) for item in row.job_coverage.all()),
+            ),
+        ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
             {
@@ -1024,6 +1079,27 @@ def _read_cache(row: CacheObservation) -> ObservedCache:
         row.client,
         row.unit_state,
     )
+
+
+def _read_job(row: JobObservation) -> ObservedChange:
+    return ObservedChange(
+        unit=row.unit,
+        invocation_id=row.invocation_id,
+        kind_slug=row.kind_slug,
+        sites=tuple(site for site in row.sites if isinstance(site, str)),
+        result_class=row.result_class,
+        reason=row.reason,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        running=row.running,
+        active_state=row.active_state,
+        sub_state=row.sub_state,
+        exec_main_status=row.exec_main_status,
+    )
+
+
+def _read_job_coverage(row: JobCoverage) -> ProviderCoverage:
+    return ProviderCoverage(row.provider, row.state, row.warning, row.oldest_at)
 
 
 def _read_site(row: SiteObservation) -> ObservedSite:

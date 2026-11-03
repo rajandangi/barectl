@@ -69,6 +69,8 @@ else:
             unit = os.environ['RECOVERY_UNIT']
             evidence = native.inspect(shell, unit)
             outcome = engine.read_result(shell, unit)
+        from jobs.presentation import present as present_jobs
+        jobs = present_jobs(snapshot, server, may_view_changes=True)
         sites = snapshot.collected.sites.value
         print(json.dumps({
             'sites': [{'identifier': row.identifier, 'runtime': row.php_version,
@@ -78,6 +80,11 @@ else:
             'preparations': ChangePreparation.objects.count(), 'runs': ChangeRun.objects.count(),
             'native_result': outcome.result_class if outcome else None,
             'unit_populated': evidence.populated,
+            'jobs': [
+                {'title': row.title, 'sites': list(row.sites), 'summary': row.summary,
+                 'result_class': row.result_class}
+                for group in jobs.groups for row in group.rows
+            ],
         }))
 """
 
@@ -176,6 +183,18 @@ class HttpSiteControllerRecovery(ScenarioTestCase):
                 self.assertEqual(discovered["runs"], 0)
                 self.assertEqual(discovered["native_result"], "succeeded")
                 self.assertFalse(discovered["unit_populated"])
+                jobs = discovered["jobs"]
+                if not isinstance(jobs, list):
+                    self.fail("The fresh controller did not report Jobs rows.")
+                self.assertIn(
+                    {
+                        "title": "Create PHP site",
+                        "sites": ["s3recovery"],
+                        "summary": "Finished",
+                        "result_class": "succeeded",
+                    },
+                    jobs,
+                )
                 runtimes = discovered["runtimes"]
                 if not isinstance(runtimes, list):
                     self.fail("The fresh controller did not report runtime observations.")

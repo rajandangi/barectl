@@ -76,6 +76,10 @@ class AcceptanceSweepTests(BrowserTestCase):
             "link", name="Security"
         ).click()
         self.assert_no_native_terms()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Jobs"
+        ).click()
+        self.assert_no_native_terms()
         page.goto(f"{self.live_server_url}/servers/{self.server.pk}/")
         page.get_by_role("link", name="alpha.example.com").first.click()
         self.assert_no_native_terms(allowed=("caddy",))
@@ -98,6 +102,8 @@ class AcceptanceSweepTests(BrowserTestCase):
         page.goto(f"{self.live_server_url}/servers/{self.server.pk}/")
         self.assertLessEqual(page.locator(selector).count(), 1)
         page.get_by_role("link", name="alpha.example.com").first.click()
+        self.assertLessEqual(page.locator(selector).count(), 1)
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/jobs/")
         self.assertLessEqual(page.locator(selector).count(), 1)
 
     def test_detail_is_two_activations_from_a_resource(self) -> None:
@@ -124,6 +130,13 @@ class AcceptanceSweepTests(BrowserTestCase):
                 ),
                 0,
             )
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/jobs/")
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
 
 
 @tag("browser")

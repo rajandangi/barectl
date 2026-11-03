@@ -145,11 +145,12 @@ def _more_options_open(form: ServerForm) -> bool:
     return (port not in (None, "", 22, "22")) or bool(alias)
 
 
-Section = Literal["sites", "security", "activity", "advanced", "settings"]
+Section = Literal["sites", "security", "activity", "jobs", "advanced", "settings"]
 _SECTIONS: dict[Section, str] = {
     "sites": "Sites",
     "security": "Security",
     "activity": "Activity",
+    "jobs": "Jobs",
     "advanced": "Advanced",
     "settings": "Settings",
 }
@@ -360,6 +361,38 @@ def _advanced_section(
         context["security_reads"] = check_reads(security)
 
 
+def _jobs_context(request: HttpRequest, state: DiscoveryState, context: dict[str, object]) -> None:
+    from jobs.presentation import FORBIDDEN, NOT_TARGET_STACK, present
+
+    may_view_changes = request.user.has_perm(VIEW_CHANGES)
+    view = present(state.snapshot, state.server, may_view_changes=may_view_changes)
+    context.update(
+        jobs_view=view,
+        jobs_forbidden="" if may_view_changes else FORBIDDEN,
+        jobs_not_target_stack="" if view.target_stack else NOT_TARGET_STACK,
+        jobs_check_url=reverse("server_verify", args=(state.server.pk,)),
+        jobs_can_check=(
+            view.target_stack
+            and state.can_request
+            and state.alias_usable
+            and request.user.has_perm("discovery.add_discoveryattempt")
+        ),
+        jobs_check_progress=_check_progress(state),
+    )
+
+
+def _check_progress(state: DiscoveryState) -> str:
+    if state.attempt is not None and state.attempt.status == Status.QUEUED:
+        return "Barectl queued a check. It starts in a moment."
+    if state.attempt is not None and state.attempt.status == Status.RUNNING:
+        return "Barectl is checking the server now. The results below are from an earlier check."
+    if state.other_active:
+        return "Another operation is using this server. Check now returns when it finishes."
+    if not state.alias_usable:
+        return "The server's SSH alias is unavailable. Edit the connection to check again."
+    return ""
+
+
 def server_page(
     request: HttpRequest,
     pk: int,
@@ -422,6 +455,8 @@ def server_page(
                 show_servers=False,
             )
         )
+    if section == "jobs":
+        _jobs_context(request, state, context)
     if section == "advanced":
         context["presented"] = state.presentation
     if section == "security":
@@ -883,6 +918,7 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     if not isinstance(request.user, User):
         raise Http404
+    jobs = request.POST.get("next") == "jobs"
     try:
         request_discovery(server, user=request.user)
     except Server.DoesNotExist:
@@ -890,11 +926,11 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
         raise Http404 from None
     except OperationRefused:
         messages.error(request, "The connection changed. Reload and request a new check.")
-        return redirect("server_detail", pk=pk)
+        return redirect("server_jobs", pk=pk) if jobs else redirect("server_detail", pk=pk)
     if _is_fragment_request(request):
         return _discovery_fragment(request, server, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")
-    return redirect("server_detail", pk=pk)
+    return redirect("server_jobs", pk=pk) if jobs else redirect("server_detail", pk=pk)
 
 
 @never_cache

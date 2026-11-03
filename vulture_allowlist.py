@@ -138,6 +138,9 @@ if TYPE_CHECKING:
     from disposable.test_target_shape import JudgeByShape
     from disposable.test_vm_lane import VmReboot, VmRestart
     from disposable.test_wordpress_create import WordPressCreateMariaDB
+    from jobs.apps import JobsConfig
+    from jobs.models import Coverage
+    from jobs.presentation import JobRow, JobsView
     from laravel import configuration as laravel_configuration
     from laravel.apps import LaravelConfig
     from laravel.bodies import settings as laravel_settings_body
@@ -587,6 +590,16 @@ if TYPE_CHECKING:
     _automation_templates_and_extension_points = (
         AutomationConfig,
         ScheduleView("", "", "", "", None, "", False, False).last_run,
+    )
+    # The Jobs section is rendered by Django templates, which read these fields by name;
+    # the app config is Django's, and two coverage states are written as strings by the
+    # reader so the stored choice still covers them.
+    _jobs_templates_and_config = (
+        JobsConfig,
+        JobsView(None, True, True).automatic_empty,
+        JobRow("", "", (), "", "", "", "", "", None, None).detail_lines,
+        Coverage.ACCESS_DENIED,
+        Coverage.READ_FAILED,
     )
     # Django's form validation calls the settings form's clean_<field> by name, and the
     # settings bodies are read as resources by their change kinds.

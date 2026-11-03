@@ -91,6 +91,8 @@
           never establishes the server's current state.
         </p>
         {% include "servers/_activity_rows.html" %}
+      {% elif section == "jobs" %}
+        {% include "servers/_jobs.html" %}
       {% endif %}
     </div>
   </div>
