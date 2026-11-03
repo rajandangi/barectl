@@ -162,8 +162,7 @@ class SecurityUpdates(ScenarioTestCase):
         wait_result(self, submitted, timeout=120)
         self.assertEqual(self._version("openssl"), SECURITY_OPENSSL)
         expected = (
-            'barectl-result {"change_kind":"install_ubuntu_updates",'
-            '"sites":[],"class":"succeeded"}'
+            'barectl-result {"change_kind":"install_ubuntu_updates","sites":[],"class":"succeeded"}'
         )
         # journald publishes a unit's last lines a moment after the run's reader saw them.
         end = time.monotonic() + 5

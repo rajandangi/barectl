@@ -340,14 +340,14 @@ def journal_shell(
     root: str = "0",
     authorized: bool = True,
 ) -> ReplayShell:
+    combined = f"{observation.OLDEST_MARK}\n{oldest}\n{observation.HISTORY_MARK}\n{history}"
     commands: list[tuple[str, Recorded]] = [
         (native.RUNNING_STATES, Recorded(ssh.CommandResult(0, units))),
         ("id -u", Recorded(ssh.CommandResult(0, f"{root}\n"))),
-        (observation.HISTORY_COMMAND, Recorded(ssh.CommandResult(0, history))),
-        (observation.OLDEST_COMMAND, Recorded(ssh.CommandResult(0, oldest))),
+        (observation.JOURNAL_COMMAND, Recorded(ssh.CommandResult(0, combined))),
     ]
     if root != "0":
-        argv = ["/usr/bin/sh", "-c", observation.HISTORY_COMMAND]
+        argv = ["/usr/bin/sh", "-c", observation.JOURNAL_COMMAND]
         commands.append(
             (
                 native.authorization(argv),
@@ -356,17 +356,6 @@ def journal_shell(
         )
         if authorized:
             commands.append(
-                (native.privileged(argv, root=False), Recorded(ssh.CommandResult(0, history)))
-            )
-        argv = ["/usr/bin/sh", "-c", observation.OLDEST_COMMAND]
-        commands.append(
-            (
-                native.authorization(argv),
-                Recorded(ssh.CommandResult(0 if authorized else 1, "")),
-            )
-        )
-        if authorized:
-            commands.append(
-                (native.privileged(argv, root=False), Recorded(ssh.CommandResult(0, oldest)))
+                (native.privileged(argv, root=False), Recorded(ssh.CommandResult(0, combined)))
             )
     return ReplayShell(Transcript("jobs-test", {}, "26.04", "x86_64", HOST_KEY, tuple(commands)))
