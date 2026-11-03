@@ -1302,8 +1302,14 @@ def _prepare_all_stage(options: argparse.Namespace, lanes: int, output: Output) 
                 layers=PREPARATION_LAYERS,
                 lanes=lanes,
             )
-            for layer in ("L0", "fixture", *PREPARATION_LAYERS):
+            for layer in ("L0", "fixture"):
                 images.store(layer)
+            for layer in PREPARATION_LAYERS:
+                images.store(layer, replace=True)
+                if not images.archive_matches(layer):
+                    raise ScenarioError(
+                        f"The {layer} snapshot archive does not hold {images.tag(layer)}."
+                    )
             for future in specials:
                 future.result()
             for layer in SPECIAL_LAYERS:

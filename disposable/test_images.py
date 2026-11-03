@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 from pathlib import Path
@@ -41,6 +42,55 @@ class SnapshotArchiveTests(SimpleTestCase):
             self.assertTrue((Path(directory) / "l1.tar").exists())
             loaded.clear()
             self.assertTrue(images.load("L1"))
+
+    def test_replace_overwrites_an_archive_left_by_an_older_key(self) -> None:
+        saved: list[str] = []
+
+        def docker(*arguments: str, timeout: float = 0) -> str:
+            saved.append(arguments[0])
+            if arguments[0] == "save":
+                Path(arguments[2]).write_bytes(b"fresh")
+            return ""
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"BARECTL_NATIVE_L0_CACHE": directory}),
+            mock.patch.object(images, "tag", return_value="barectl-disposable-l0:26.04-key"),
+            mock.patch.object(images, "docker", side_effect=docker),
+            mock.patch.object(images, "exists", return_value=True),
+        ):
+            archive = Path(directory) / "l1.tar"
+            archive.write_bytes(b"stale")
+            images.store("L1")
+            self.assertEqual(archive.read_bytes(), b"stale")
+            images.store("L1", replace=True)
+            self.assertEqual(archive.read_bytes(), b"fresh")
+
+    def test_archive_matches_reads_the_saved_image_tag(self) -> None:
+        import json
+        import tarfile
+
+        def archive(directory: Path, layers: list[dict[str, object]]) -> Path:
+            path = directory / "l1.tar"
+            payload = json.dumps(layers).encode()
+            with tarfile.open(path, "w") as saved:
+                info = tarfile.TarInfo("manifest.json")
+                info.size = len(payload)
+                saved.addfile(info, io.BytesIO(payload))
+            return path
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = archive(root, [{"RepoTags": ["barectl-disposable-l0:26.04-old"]}])
+            with (
+                mock.patch.dict(os.environ, {"BARECTL_NATIVE_L0_CACHE": str(root)}),
+                mock.patch.object(images, "tag", return_value="barectl-disposable-l0:26.04-new"),
+            ):
+                self.assertFalse(images.archive_matches("L1"))
+                archive(root, [{"RepoTags": ["barectl-disposable-l0:26.04-new"]}])
+                self.assertTrue(images.archive_matches("L1"))
+            path.unlink()
+            self.assertFalse(images.archive_matches("L1"))
 
     def test_archived_reports_a_keyed_archive_without_loading_it(self) -> None:
         with (

@@ -271,15 +271,29 @@ def load(layer: str) -> bool:
     if archive is None or not archive.exists():
         return False
     docker("load", "--input", str(archive), timeout=600)
-    return exists(image)
+    if exists(image):
+        return True
+    print(  # noqa: T201 - the preparation stage reports why it rebuilds
+        f"{archive.name} does not hold {image}; the layer will be prepared again.",
+        file=sys.stderr,
+    )
+    return False
 
 
-def store(layer: str) -> None:
-    """Write the keyed image to the cache archive, if one is configured and missing."""
+def store(layer: str, *, replace: bool = False) -> None:
+    """Write the keyed image to the cache archive, if one is configured and missing.
+
+    ``replace`` lets a preparation stage overwrite an archive left by an older cache key;
+    without it the file's name alone would keep stale bytes in place.
+    """
     image = tag(layer)
     archive = _archive(layer)
-    if archive is None or archive.exists() or not exists(image):
+    if archive is None or not exists(image):
         return
+    if archive.exists():
+        if not replace:
+            return
+        archive.unlink()
     archive.parent.mkdir(parents=True, exist_ok=True)
     descriptor, partial = tempfile.mkstemp(dir=archive.parent, suffix=".partial")
     os.close(descriptor)
@@ -288,6 +302,28 @@ def store(layer: str) -> None:
         os.replace(partial, archive)
     finally:
         Path(partial).unlink(missing_ok=True)
+
+
+def archive_matches(layer: str = "L0") -> bool:
+    """Whether the saved archive names this host's keyed image, not an older one."""
+    archive = _archive(layer)
+    if archive is None or not archive.exists():
+        return False
+    import tarfile
+
+    try:
+        with tarfile.open(archive) as saved:
+            member = saved.extractfile("manifest.json")
+            if member is None:
+                return False
+            manifest = json.loads(member.read())
+    except OSError, ValueError, tarfile.TarError:
+        return False
+    if not isinstance(manifest, list):
+        return False
+    return any(
+        isinstance(entry, dict) and tag(layer) in entry.get("RepoTags", []) for entry in manifest
+    )
 
 
 def archived(layer: str = "L0") -> bool:

@@ -859,7 +859,8 @@ class PrepareAllTests(SimpleTestCase):
             ensured.append(layer)
             return "image"
 
-        def store(layer: str) -> None:
+        def store(layer: str, *, replace: bool = False) -> None:
+            self.assertFalse(replace is False and layer in scenarios.PREPARATION_LAYERS)
             stored.append(layer)
 
         def prepare(*arguments: object, **options: object) -> list[object]:
@@ -875,6 +876,7 @@ class PrepareAllTests(SimpleTestCase):
             patch("disposable.images.load", return_value=False),
             patch("disposable.images.ensure", side_effect=ensure),
             patch("disposable.images.store", side_effect=store),
+            patch("disposable.images.archive_matches", return_value=True),
             patch("disposable.scenarios.mirror.fixture_ca"),
             patch.object(scenarios, "controller_key", return_value=Path("key")),
             patch.object(scenarios, "prepare_layers", side_effect=prepare),
@@ -911,6 +913,7 @@ class PrepareAllTests(SimpleTestCase):
                     patch("disposable.images.load", return_value=False),
                     patch("disposable.images.ensure", return_value="image"),
                     patch("disposable.images.store"),
+                    patch("disposable.images.archive_matches", return_value=True),
                     patch.object(scenarios, "controller_key", return_value=Path("key")),
                     patch.object(scenarios, "prepare_layers", return_value=[]),
                     patch.object(scenarios, "write_results"),
