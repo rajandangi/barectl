@@ -264,7 +264,7 @@
     "disposable/lock.py": "f7a21b9b758a8835b432dbc517d7b1eeac9ed3ad4e1de662d1a7dfad9a403a9a",
     "disposable/locking.py": "b5dab02a215ffc03e81c8884b44d4b6e0c9db35a1c6b796b295ae33fdb6bcfa5",
     "disposable/machine.py": "585e4b36ea5de8e2d301ae01d03a09c8d477fe3baa9f5b30f7225907470c988b",
-    "disposable/mirror.py": "388032a57e6ea938350aed8d7484abf5e34a69566011872bf9dd6b2d22178736",
+    "disposable/mirror.py": "2047c15ba1e24321987117145d78112b9cc7fea41b10692902115e96d54ba4be",
     "disposable/native_mirror/__init__.py": "a6177e522dfd1ee3137c0c10d27ecb620a6c5c693600a2a9cd7c3f9848f29f34",
     "disposable/native_mirror/dns.py": "be4b37057c0ec421b00b792dbafa00a1e2ae36aa619aec3916712a1057696727",
     "disposable/native_mirror/forward.py": "5039b244ace2e02208a84b19356acf82d48c1e7ced918eff28a41b3961a003f7",
@@ -309,7 +309,7 @@
     "disposable/test_locking.py": "b709d928befd18b5a5efc6ec35d1ef876dd19e0ed9d00c4a16d5d2d46c62215a",
     "disposable/test_logs_journal.py": "95d105e7fcb244a7e7eb27db867faa3677525c0cbc5c9ffa3b05d582733ab6d6",
     "disposable/test_logs_validators.py": "bb1356b3a55fa8588aeb7576fa2d7298b89afaa4a0a6cc799ff3abca4183f95c",
-    "disposable/test_mirror.py": "4aa55023dcd3d8f19a763b2f84000786ae522cffd8db7d4240e913d0853de228",
+    "disposable/test_mirror.py": "b3dcb8b113620fc497a635d78c9f9aa2ed0f4bf7785c0132668265ea69eaa072",
     "disposable/test_mirror_nix.py": "47005ef659002f8fc70d6bfe4c257dd71608e8cb8ecb87ec90dd764450d3af73",
     "disposable/test_native_fixtures.py": "470b2f356b98dc9e2956bfbaab52cae3e4193cb10fbc511dbaa90b4d7fdcd248",
     "disposable/test_native_mirror.py": "7fbc827cc4b241cbd583448c7e09eeff7c694051a86a93a83b65661716c97104",
@@ -338,10 +338,10 @@
     "disposable/test_target_reconstruction.py": "42588d2dac8b6a123e7b6e37544b3fe9fae198cd1cd2b000bf4c0386c013fd52",
     "disposable/test_target_shape.py": "c6b77201f2be029187555a061b761f2b8aa12adb4189607f345e3b7dbe159c68",
     "disposable/test_verification.py": "12b97f34b1bec2f759d9a3e60ae17ad77904560bd5542d091a94219679c4b04d",
-    "disposable/test_vm_lane.py": "491fd34ca9b9d89c50ad5b77d4c7055261b6daf82134d816c61f05ac47718e0d",
+    "disposable/test_vm_lane.py": "0936e73f83f72bd45b4427c732f77883fec27f7fa8e25a8195224383a84e9c73",
     "disposable/test_wordpress_create.py": "4c2e7c8de3e5b44b9b352d4a8bba2786a5ce76292e4104c1c2e2769f2cfd6d56",
     "disposable/verification.py": "55d527e046c2d5b0f05a39f4e2b7cd1319fb77f2dff0d9d481a279274ec0b027",
-    "disposable/vm.py": "d54e9de8570456cb9e740d4620dd36721f87114e9759a45c6cf9ff6e94796328",
+    "disposable/vm.py": "3cf8d884df78534e57722c01f5917dab7acdf906a01a58bd3442ecff651715d8",
     "disposable/vm_lane.py": "dfb7149245dadec17e18ab520ea85f436510f39f898a02314a2e58d4a55b5e36",
     "disposable/wordpress_testing.py": "0c45819ec8595cebfea317045309a11135ef94b5d6fd30e22a97bd6590f09249",
     "docker/disposable-server/Dockerfile": "e460664041c8f6a01c38a545af7eea5640e5d8e18c96777331036bb0a6076870",
@@ -717,5 +717,5 @@
     "unknown-runtime-26.04": "508e599cab6fc39a165e302cf6d48488546c1c0a6d208282d8d75eb7e9e9c04e",
     "valkey-installed-26.04": "aa929e289fe1cbf97b339946f3167dfabdc96d98e427cf4f700450b23bf23f7c"
   },
-  "audit_digest": "fa0817db13a553ac171b63563e9660ce3e6202d99fd4bd31cc786eddd7fbd3ca"
+  "audit_digest": "0e4a9f1da38fbf9ff15c9be6c0342bcfd9335e77a3d7a68ce57b6b37b53619cf"
 }
