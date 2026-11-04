@@ -135,29 +135,6 @@ valkey_mask() {{
   [ "$(systemctl show -p ActiveState --value {UNIT})" = inactive ] || return 1
   [ -z "$(ss -Hltn 'sport = :{PORT}')" ] || return 1
 }}
-valkey_restart() {{
-  systemctl is-active --quiet -- "$1" || return 0
-  systemctl restart -- "$1" || return 1
-  printf 'barectl-restarted %s\\n' "$1"
-}}
-valkey_recover() {{
-  for unit in php-fpm@php84.service php-fpm@php85.service; do
-    valkey_restart "$unit" || return 1
-  done
-  for cfg in /etc/haproxy/sites/*.cfg; do
-    [ -e "$cfg" ] || continue
-    identifier=${{cfg##*/}}
-    identifier=${{identifier%.cfg}}
-    case "$identifier" in
-      [a-z][a-z0-9][a-z0-9]*) ;;
-      *) continue ;;
-    esac
-    valkey_restart "haproxy-site@$identifier.service" || return 1
-    for entry in php84 php85; do
-      valkey_restart "php-fpm-site-$entry@$identifier.service" || return 1
-    done
-  done
-}}
 valkey_verify() {{
   expected=$1
   [ "$(systemctl show -p LoadState --value {UNIT})" = masked ] || return 1

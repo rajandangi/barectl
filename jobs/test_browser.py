@@ -230,13 +230,14 @@ class JobsBrowserTests(BrowserTestCase):
         expect(page.get_by_text("checking the server now")).to_be_visible()
         expect(page.locator("li.barectl-job-row", has_text="Create PHP site").first).to_be_visible()
 
-        row = page.locator("li.barectl-job-row", has_text="Create PHP site").first
+        unit = "barectl-apply-" + "a" * 32
+        row = page.locator("li.barectl-job-row", has_text=unit).first
         row.get_by_text("Show details").click()
         expect(row.get_by_text("Result class")).to_be_visible()
         expect(row.get_by_text("Finished", exact=True)).to_be_visible()
         expect(row.locator("dt", has_text="Started")).to_be_visible()
         expect(row.locator("dt", has_text="Finished")).to_be_visible()
-        expect(row.get_by_text("barectl-apply-" + "a" * 32)).to_be_visible()
+        expect(row.get_by_text(unit)).to_be_visible()
 
     def test_first_visit_without_a_snapshot_explains_and_offers_one_check(self) -> None:
         DiscoveryAttempt.objects.filter(server=self.server).delete()

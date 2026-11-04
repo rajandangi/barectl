@@ -107,7 +107,7 @@ systemctl restart php-fpm@php84             # the runtime's diagnostic master; n
 systemctl restart nix-daemon
 ```
 
-Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Settings**, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)), and restart each running `haproxy-site@<id>` so its loaded execution evidence is bound again. A restarted proxy loads its persisted server state and reports that server's check-health counter, which discovery accepts as an integer.
+Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Settings**, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)), and restart each running `haproxy-site@<id>` so its loaded execution evidence is bound again. A restarted proxy loads its persisted server state and reports that server's check-health counter, which discovery accepts as an integer. The database-engine install and removal and the Valkey install kind bodies restart these units themselves in the same reviewed change and print each unit to the run's journal ([databases](databases.md#restarting-units-after-the-package-transaction-428), [object cache](object-cache.md#restarting-units-after-the-package-transaction-428)); manual package work still needs the same restart.
 
 ## After a change stopped partway
 

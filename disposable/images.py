@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 from collections.abc import Sequence
@@ -27,6 +28,10 @@ IMAGE = "barectl-disposable-l0"
 RELEASE = "26.04"
 # Raise when an L0 layer's native behavior or contents change.
 L0_FORMAT = "2"
+# Raise when a prepared layer's contents change beyond the bodies its key names. GitHub cache
+# keys are immutable, so this also retires an archive saved under a key whose tag it no
+# longer holds.
+PREPARED_FORMAT = "2"
 
 
 def base(release: str = RELEASE) -> str:
@@ -113,6 +118,7 @@ def prepared_wordpress_inputs(l1_key: str | None = None) -> bytes:
     digest.update(
         f"{wordpress_convention.CORE_VERSION} {wordpress_convention.CORE_ARCHIVE_SIZE}".encode()
     )
+    digest.update(f"prepared-wordpress-{PREPARED_FORMAT}".encode())
     return digest.digest()
 
 
@@ -126,7 +132,7 @@ def prepared_cache_inputs(l3_key: str | None = None) -> bytes:
     digest.update(cache_engine.BODY_BYTES)
     digest.update(client_change.BODY_BYTES)
     # The layer also carries a second site, so a per-site cache can be proved isolated.
-    digest.update(b"l4-other-site-v1")
+    digest.update(f"l4-other-site-{PREPARED_FORMAT}".encode())
     return digest.digest()
 
 
@@ -148,9 +154,9 @@ def prepared_laravel_cache_inputs(l1_key: str | None = None) -> bytes:
         client_change.BODY_BYTES,
     ):
         digest.update(body)
-    # The fixture files the preparation pushes live in the scenario; bump this when they
-    # change so the key cannot serve a stale image.
-    digest.update(b"l5-laravel-cache-v1")
+    # The fixture files the preparation pushes live in the scenario; the prepared format
+    # retires a key when they or the layer's contents change.
+    digest.update(f"l5-laravel-cache-{PREPARED_FORMAT}".encode())
     return digest.digest()
 
 

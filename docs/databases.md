@@ -23,11 +23,25 @@ Installing is one reviewed change:
   inline `DPkg::Pre-Install-Pkgs` guard, which refuses unless APT's resolved actions are
   exactly the reviewed ones ([ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md)).
   It rechecks a precondition digest under the mutation lock, starts and enables the engine's
-  service, applies the hardening below, and reports one `barectl-result` line. Barectl never
-  rolls a package transaction back.
+  service, applies the hardening below, restarts the running units the transaction's
+  `daemon-reload` unbinds, and reports one `barectl-result` line. Barectl never rolls a
+  package transaction back.
 - **Git** can be named in the same reviewed transaction, so a later Laravel creation
   ([#382](https://github.com/rajandangi/barectl/issues/382)) installs it with the engine in
   one change.
+
+### Restarting units after the package transaction (#428)
+
+A package transaction runs `systemctl daemon-reload`, which clears the loaded execution
+metadata of running units. Without recovery, the foundation's diagnostic PHP masters and
+each site's PHP master and proxy read as unverifiable on the next discovery even though they
+serve traffic. The database-engine kind body therefore restarts exactly the running units it
+affects — `php-fpm@php84.service`, `php-fpm@php85.service`, and each site's
+`php-fpm-site-<runtime>@<id>.service` and `haproxy-site@<id>.service` — through the same
+fixed recovery shell the Valkey install uses ([object cache](object-cache.md#restarting-units-after-the-package-transaction-428)),
+and prints each restarted unit to the run's journal as `barectl-restarted <unit>`. Discovery
+derives the running units from systemd, so Barectl keeps no marker on the server. If a
+restart fails the run is partly applied with `database_reload`, never a silent success.
 
 ### Hardening
 
@@ -43,7 +57,8 @@ principal, database or password exists until a site has one.
 
 ## Remove a database engine (implemented, #378)
 
-**Remove** is a reviewed change that removes the engine's packages and stops its service.
+**Remove** is a reviewed change that removes the engine's packages, stops its service and
+has its kind body restart the units the package transaction unbinds.
 It is refused while the engine holds any database, so a site's data can never be stranded,
 and it never drops a database or deletes data itself. Removing an engine so the other one
 can be installed is ordinary administration; Barectl refuses to install the second engine

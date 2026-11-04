@@ -1,6 +1,7 @@
 import io
 import os
 import tempfile
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -42,6 +43,19 @@ class SnapshotArchiveTests(SimpleTestCase):
             self.assertTrue((Path(directory) / "l1.tar").exists())
             loaded.clear()
             self.assertTrue(images.load("L1"))
+
+    def test_an_archive_without_the_keyed_tag_reports_and_rebuilds(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"BARECTL_NATIVE_L0_CACHE": directory}),
+            mock.patch.object(images, "tag", return_value="barectl-disposable-l0:26.04-key"),
+            mock.patch.object(images, "docker"),
+            mock.patch.object(images, "exists", return_value=False),
+            redirect_stderr(io.StringIO()) as error,
+        ):
+            (Path(directory) / "l1.tar").write_bytes(b"image")
+            self.assertFalse(images.load("L1"))
+        self.assertIn("does not hold", error.getvalue())
 
     def test_replace_overwrites_an_archive_left_by_an_older_key(self) -> None:
         saved: list[str] = []
@@ -159,6 +173,18 @@ class PreparedWordPressLayerTests(SimpleTestCase):
     def test_the_prepared_wordpress_cache_key_names_the_l3_layer(self) -> None:
         with mock.patch.object(images, "key", return_value="abcd1234"):
             self.assertEqual(images.cache_key("L3"), "l3-abcd1234")
+
+    def test_a_prepared_format_bump_retires_the_prepared_layer_keys(self) -> None:
+        builders = (
+            images.prepared_wordpress_inputs,
+            images.prepared_cache_inputs,
+            images.prepared_laravel_cache_inputs,
+        )
+        for builder in builders:
+            with self.subTest(builder=builder.__name__):
+                before = builder("aaaa")
+                with mock.patch.object(images, "PREPARED_FORMAT", "3"):
+                    self.assertNotEqual(builder("aaaa"), before)
 
     def test_an_unbuilt_l3_is_not_built_from_the_dockerfile(self) -> None:
         with (

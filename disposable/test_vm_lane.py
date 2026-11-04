@@ -8,6 +8,7 @@ configuration checks that need neither QEMU nor a guest.
 
 import contextlib
 import io
+import os
 import socket
 import tempfile
 import threading
@@ -173,6 +174,73 @@ class AcceleratorTests(SimpleTestCase):
     def test_an_explicit_accelerator_wins(self) -> None:
         with patch.dict("os.environ", {"BARECTL_VM_ACCEL": "tcg"}, clear=True):
             self.assertEqual(vm.accelerator(), "tcg")
+
+
+class KvmProbeTests(SimpleTestCase):
+    """A readable /dev/kvm is not a usable one: QEMU needs the KVM API to answer."""
+
+    def test_an_unopenable_device_is_not_usable(self) -> None:
+        with (
+            patch("os.open", side_effect=PermissionError("Permission denied")),
+            patch("os.close") as close,
+            patch("fcntl.ioctl") as ioctl,
+        ):
+            self.assertFalse(vm._kvm_usable())
+        ioctl.assert_not_called()
+        close.assert_not_called()
+
+    def test_a_device_that_refuses_the_api_version_probe_is_not_usable(self) -> None:
+        with (
+            patch("os.open", return_value=7) as open_device,
+            patch("os.close") as close,
+            patch("fcntl.ioctl", side_effect=PermissionError("denied")) as ioctl,
+        ):
+            self.assertFalse(vm._kvm_usable())
+        open_device.assert_called_once_with("/dev/kvm", os.O_RDWR)
+        ioctl.assert_called_once_with(7, vm.KVM_GET_API_VERSION, 0)
+        close.assert_called_once_with(7)
+
+    def test_a_device_that_cannot_create_a_virtual_machine_is_not_usable(self) -> None:
+        def ioctl(descriptor: int, request: int, argument: int = 0) -> int:
+            if request == vm.KVM_GET_API_VERSION:
+                return 12
+            raise PermissionError("denied")
+
+        with (
+            patch("os.open", return_value=7),
+            patch("os.close") as close,
+            patch("fcntl.ioctl", side_effect=ioctl),
+        ):
+            self.assertFalse(vm._kvm_usable())
+        self.assertEqual([item.args for item in close.call_args_list], [(7,)])
+
+    def test_a_device_with_another_api_version_is_not_usable(self) -> None:
+        with (
+            patch("os.open", return_value=7),
+            patch("os.close") as close,
+            patch("fcntl.ioctl", return_value=9) as ioctl,
+        ):
+            self.assertFalse(vm._kvm_usable())
+        ioctl.assert_called_once_with(7, vm.KVM_GET_API_VERSION, 0)
+        self.assertEqual([item.args for item in close.call_args_list], [(7,)])
+
+    def test_a_device_that_answers_every_probe_is_usable_and_closes_each_descriptor(
+        self,
+    ) -> None:
+        def ioctl(descriptor: int, request: int, argument: int = 0) -> int:
+            return vm.KVM_API_VERSION if request == vm.KVM_GET_API_VERSION else 9
+
+        with (
+            patch("os.open", return_value=7),
+            patch("os.close") as close,
+            patch("fcntl.ioctl", side_effect=ioctl) as probe,
+        ):
+            self.assertTrue(vm._kvm_usable())
+        self.assertEqual(
+            [item.args for item in probe.call_args_list],
+            [(7, vm.KVM_GET_API_VERSION, 0), (7, vm.KVM_CREATE_VM, 0)],
+        )
+        self.assertEqual([item.args for item in close.call_args_list], [(9,), (7,)])
 
 
 class CloudImagePinTests(SimpleTestCase):

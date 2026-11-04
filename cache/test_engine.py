@@ -22,6 +22,7 @@ from discovery.snapshot import (
     WebStackComponentObservation,
     save_snapshot,
 )
+from operations import recovery
 from operations.consent import Scope, consent_of
 from operations.engine import BodyContext, ReviewDraft
 from operations.inputs import PreparationInputs
@@ -176,6 +177,11 @@ class InstallReviewTests(ControllerConfigTestCase):
             details,
         )
         self.assertIn({"label": "Download size", "value": "2.8 MB"}, details)
+        restarted = next(
+            item["value"] for item in details if item["label"] == "Restarted after install"
+        )
+        for unit in recovery.UNIT_PATTERNS:
+            self.assertIn(unit, restarted)
         self.assertEqual(draft.stages, engine.STAGES)
         self.assertIn("6379", " ".join(draft.postconditions))
 
@@ -273,14 +279,19 @@ class InstallReviewTests(ControllerConfigTestCase):
             importlib.resources.files("cache.bodies")
             .joinpath("install.sh")
             .read_text()
-            .replace("# VALKEY_FUNCTIONS", observation.body_functions())
+            .replace(
+                "# VALKEY_FUNCTIONS",
+                recovery.shell() + observation.body_functions(),
+            )
             .rstrip("\n")
             .encode(),
         )
         self.assertFalse(engine.BODY_BYTES.endswith(b"\n"))
         self.assertIn(b"valkey_mask", engine.BODY_BYTES)
-        self.assertIn(b"valkey_recover", engine.BODY_BYTES)
+        self.assertIn(b"restart_affected_units", engine.BODY_BYTES)
+        self.assertIn(b"systemctl list-units --type=service --state=running", engine.BODY_BYTES)
         self.assertIn(b"barectl-restarted", engine.BODY_BYTES)
+        self.assertNotIn(b"valkey_recover", engine.BODY_BYTES)
 
     def test_a_review_without_a_transaction_is_not_a_body(self) -> None:
         draft = self.review(evidence(installed=valkey_observation()))

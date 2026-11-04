@@ -90,6 +90,7 @@ SOURCES = (
     "logs/bodies/read.py",
     "logs/bodies/rotation.py",
     "operations/bodies/clear_runs.sh",
+    "operations/recovery.py",
     "runtimes/bodies/add.sh",
     "runtimes/bodies/defaults.py",
     "runtimes/bodies/php-fpm@.service",

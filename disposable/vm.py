@@ -10,6 +10,7 @@ the mirror.
 """
 
 import contextlib
+import fcntl
 import hashlib
 import json
 import logging
@@ -52,6 +53,10 @@ SSH_PORT = 22
 DOWNLOAD_ATTEMPTS = 4
 DOWNLOAD_CHUNK = 4 * 1024 * 1024
 BOOT_TIMEOUT = 600.0
+KVM_GET_API_VERSION = 0xAE00
+KVM_CREATE_VM = 0xAE01
+# The API version QEMU's KVM accelerator requires.
+KVM_API_VERSION = 12
 _MACHINES = {
     "x86_64": "amd64",
     "amd64": "amd64",
@@ -365,13 +370,28 @@ def _free_port(used: set[int]) -> int:
 
 
 def _kvm_usable() -> bool:
-    """Present is not enough: hosted runners often expose /dev/kvm without access."""
+    """Probe the KVM API: a readable device is not necessarily a usable one.
+
+    Hosted runners expose ``/dev/kvm`` that opens yet refuses the ioctls QEMU issues,
+    so KVM is selected only when the API reports version 12 and can create a virtual
+    machine. Every descriptor the probe obtains is closed on every path.
+    """
     try:
-        descriptor = os.open("/dev/kvm", os.O_RDWR)
+        device = os.open("/dev/kvm", os.O_RDWR)
     except OSError:
         return False
-    os.close(descriptor)
-    return True
+    machine: int | None = None
+    try:
+        if fcntl.ioctl(device, KVM_GET_API_VERSION, 0) != KVM_API_VERSION:
+            return False
+        machine = fcntl.ioctl(device, KVM_CREATE_VM, 0)
+        return True
+    except OSError:
+        return False
+    finally:
+        if machine is not None:
+            os.close(machine)
+        os.close(device)
 
 
 def accelerator() -> str:

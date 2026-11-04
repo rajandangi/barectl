@@ -3,13 +3,14 @@ import json
 import os
 import re
 import shutil
+import socket
 import ssl
 import subprocess
 import tempfile
 import threading
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
@@ -40,6 +41,76 @@ class DownloadTests(SimpleTestCase):
             self.assertEqual(mirror.download("https://example.test/x"), b"payload")
             self.assertEqual(urlopen.call_count, 2)
             sleep.assert_called_once()
+
+    def test_a_5xx_that_outlasts_every_retry_is_unavailable(self) -> None:
+        with (
+            patch("disposable.mirror.time.sleep"),
+            patch("disposable.mirror.urllib.request.urlopen") as urlopen,
+        ):
+            urlopen.side_effect = urllib.error.HTTPError(
+                "https://example.test/x", 503, "unavailable", Message(), None
+            )
+            with self.assertRaises(mirror.MirrorUnavailable) as raised:
+                mirror.download("https://example.test/x")
+            self.assertIsInstance(raised.exception, mirror.MirrorError)
+            self.assertIn("503", str(raised.exception))
+            self.assertEqual(urlopen.call_count, 8)
+
+    def test_a_removed_file_is_a_real_error_without_retries(self) -> None:
+        with (
+            patch("disposable.mirror.time.sleep") as sleep,
+            patch("disposable.mirror.urllib.request.urlopen") as urlopen,
+        ):
+            urlopen.side_effect = urllib.error.HTTPError(
+                "https://example.test/x", 404, "gone", Message(), None
+            )
+            with self.assertRaises(mirror.MirrorError) as raised:
+                mirror.download("https://example.test/x")
+            self.assertNotIsInstance(raised.exception, mirror.MirrorUnavailable)
+            self.assertIn("404", str(raised.exception))
+            self.assertEqual(urlopen.call_count, 1)
+            sleep.assert_not_called()
+
+    def test_an_unresolvable_host_is_a_real_error_not_an_outage(self) -> None:
+        with (
+            patch("disposable.mirror.time.sleep") as sleep,
+            patch("disposable.mirror.urllib.request.urlopen") as urlopen,
+        ):
+            urlopen.side_effect = urllib.error.URLError(
+                socket.gaierror(-2, "Name or service not known")
+            )
+            with self.assertRaises(mirror.MirrorError) as raised:
+                mirror.download("https://no-such-host.invalid/x")
+            self.assertNotIsInstance(raised.exception, mirror.MirrorUnavailable)
+            self.assertEqual(urlopen.call_count, 1)
+            sleep.assert_not_called()
+
+
+class TransientTests(SimpleTestCase):
+    def http_error(self, code: int) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError("https://example.test/x", code, "error", Message(), None)
+
+    def test_408_429_and_5xx_are_transient(self) -> None:
+        for code in (408, 429, 500, 503):
+            with self.subTest(code=code):
+                self.assertTrue(mirror._transient(self.http_error(code)))
+
+    def test_other_responses_are_permanent(self) -> None:
+        for code in (407, 430, 499, 404, 410):
+            with self.subTest(code=code):
+                self.assertFalse(mirror._transient(self.http_error(code)))
+
+    def test_a_connection_failure_is_transient(self) -> None:
+        self.assertTrue(
+            mirror._transient(urllib.error.URLError(ConnectionRefusedError(111, "refused")))
+        )
+
+    def test_a_dns_failure_is_not_transient(self) -> None:
+        self.assertFalse(
+            mirror._transient(
+                urllib.error.URLError(socket.gaierror(-2, "Name or service not known"))
+            )
+        )
 
 
 class ManifestTests(SimpleTestCase):
@@ -156,18 +227,90 @@ class FetchTests(SimpleTestCase):
         ):
             mirror.fetch(mirror.Manifest((target,)), Path(directory))
 
+    def test_still_fails_on_an_entry_upstream_cannot_answer_for(self) -> None:
+        target = mirror.Entry("cache.nixos.org", "x.narinfo", "f" * 64, 7, "a")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                mirror, "download", side_effect=mirror.MirrorUnavailable("upstream is down")
+            ),
+            self.assertRaises(mirror.MirrorUnavailable),
+        ):
+            mirror.fetch(mirror.Manifest((target,)), Path(directory))
+
 
 class DriftTests(SimpleTestCase):
     def test_reports_an_entry_whose_upstream_bytes_changed(self) -> None:
         manifest = mirror.Manifest((entry("nar/x.nar"),))
         with patch.object(mirror, "download", return_value=b"different"):
-            self.assertEqual(len(mirror.drift(manifest)), 1)
+            report = mirror.drift(manifest)
+        self.assertEqual(len(report.changed), 1)
+        self.assertEqual(report.unavailable, ())
 
     def test_reports_nothing_when_upstream_matches(self) -> None:
         data = b"same"
         target = mirror.Entry("cache.nixos.org", "x", mirror.sha256(data), len(data), "a")
         with patch.object(mirror, "download", return_value=data):
-            self.assertEqual(mirror.drift(mirror.Manifest((target,))), [])
+            report = mirror.drift(mirror.Manifest((target,)))
+        self.assertEqual(report, mirror.DriftReport((), ()))
+
+    def test_a_transient_503_that_outlasts_the_retries_is_unavailable_not_drift(self) -> None:
+        manifest = mirror.Manifest((entry("nar/x.nar"),))
+        with (
+            patch("disposable.mirror.time.sleep"),
+            patch("disposable.mirror.urllib.request.urlopen") as urlopen,
+        ):
+            urlopen.side_effect = urllib.error.HTTPError(
+                "https://example.test/x", 503, "unavailable", Message(), None
+            )
+            report = mirror.drift(manifest)
+        self.assertEqual(report.changed, ())
+        self.assertEqual(len(report.unavailable), 1)
+        self.assertIn("503", report.unavailable[0])
+
+    def test_a_removed_file_is_real_drift(self) -> None:
+        manifest = mirror.Manifest((entry("nar/x.nar"),))
+        with patch.object(
+            mirror, "download", side_effect=mirror.MirrorError("HTTP Error 404: Not Found")
+        ):
+            report = mirror.drift(manifest)
+        self.assertEqual(len(report.changed), 1)
+        self.assertIn("404", report.changed[0])
+        self.assertEqual(report.unavailable, ())
+
+
+class DriftCommandTests(SimpleTestCase):
+    def test_only_unavailable_entries_exit_zero_with_a_warning(self) -> None:
+        target = entry()
+        output, warning = io.StringIO(), io.StringIO()
+        with (
+            patch.object(mirror, "load", return_value=mirror.Manifest((target,))),
+            patch.object(
+                mirror,
+                "download",
+                side_effect=mirror.MirrorUnavailable("HTTP Error 503: Service Unavailable"),
+            ),
+            redirect_stdout(output),
+            redirect_stderr(warning),
+        ):
+            self.assertEqual(mirror.main(["drift"]), 0)
+        self.assertIn("warning", warning.getvalue())
+        self.assertIn("could not be checked", warning.getvalue())
+        self.assertIn(target.url, warning.getvalue())
+        self.assertNotIn("drifted", output.getvalue())
+
+    def test_real_drift_still_exits_one(self) -> None:
+        target = entry()
+        output = io.StringIO()
+        with (
+            patch.object(mirror, "load", return_value=mirror.Manifest((target,))),
+            patch.object(mirror, "download", return_value=b"different"),
+            redirect_stdout(output),
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(mirror.main(["drift"]), 1)
+        self.assertIn("1 entries drifted", output.getvalue())
+        self.assertIn(target.url, output.getvalue())
 
 
 class ArchitectureTests(SimpleTestCase):

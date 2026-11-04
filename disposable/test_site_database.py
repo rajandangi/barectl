@@ -24,6 +24,15 @@ DOMAIN = "sdbalpha.example.com"
 OTHER = "ssdbother"
 MARIADB_SOCKET = "/run/mysqld/mysqld.sock"
 MYSQL = "mariadb --no-defaults --protocol=socket --socket=" + MARIADB_SOCKET + " --user=root -N -B"
+RUNNING_UNITS = (
+    "php-fpm@php84.service",
+    "php-fpm@php85.service",
+    f"haproxy-site@{IDENTIFIER}.service",
+    f"php-fpm-site-php84@{IDENTIFIER}.service",
+)
+# The site proxy, the site's PHP master and the foundation's PHP 8.4 master must be running
+# when the install's recovery restarts them; the PHP 8.5 master may be absent.
+REQUIRED_UNITS = tuple(unit for unit in RUNNING_UNITS if unit != "php-fpm@php85.service")
 
 
 def write(test: ScenarioTestCase, shell: RemoteShell, path: str, content: str) -> None:
@@ -53,6 +62,21 @@ class SiteDatabaseCase(ScenarioTestCase):
 
         inputs = PreparationInputs("php84", IDENTIFIER, (DOMAIN,))
         return apply_change(self, sites_change.CREATE_SITE, inputs, timeout=120)
+
+    def invocations(self) -> dict[str, str]:
+        """The invocation of each running unit the package transaction will unbind."""
+        running: dict[str, str] = {}
+        for unit in RUNNING_UNITS:
+            state = self.native(f"systemctl is-active {unit} || true").strip()
+            if state == "active":
+                running[unit] = self.native(
+                    f"systemctl show -p InvocationID --value {unit}"
+                ).strip()
+        return running
+
+    def assert_recovery_subjects(self, before: dict[str, str]) -> None:
+        self.assertLessEqual(set(REQUIRED_UNITS), set(before), before)
+        self.assertLessEqual(set(before), set(RUNNING_UNITS), before)
 
     def bind(self, *, timeout: float = 120) -> ChangeReview:
         from databases import site
@@ -118,13 +142,20 @@ class SiteDatabaseMariaDB(SiteDatabaseCase):
 
         with self.shell() as shell:
             self.router(shell)
+        # Create the site first: its PHP master and proxy are running when the engine
+        # install's package transaction reloads systemd, so #428's recovery must restart them
+        # before the site review's live protections are read again.
+        self.create_site()
+        before = self.invocations()
+        self.assert_recovery_subjects(before)
+        with self.shell() as shell:
             apply_change(self, kinds.INSTALL, PreparationInputs("mariadb"), timeout=150)
         self.assertIn("active", self.native("systemctl is-active mariadb.service"))
-        # A package transaction reloads systemd and clears the running foundation masters'
-        # loaded-execution metadata; restart them, as ordinary administration, so the site
-        # review's live protections are current again.
-        self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
-        self.create_site()
+        after = self.invocations()
+        self.assertEqual(set(after), set(before), after)
+        for unit, invocation in before.items():
+            with self.subTest(unit=unit):
+                self.assertNotEqual(after[unit], invocation)
         self.isolation_database()
         review = self.bind()
         self.assertEqual(review.document["principal"], "s" + IDENTIFIER)
@@ -280,13 +311,20 @@ class SiteDatabasePostgreSQL(SiteDatabaseCase):
 
         with self.shell() as shell:
             self.router(shell)
+        # Create the site first: its PHP master and proxy are running when the engine
+        # install's package transaction reloads systemd, so #428's recovery must restart them
+        # before the site review's live protections are read again.
+        self.create_site()
+        before = self.invocations()
+        self.assert_recovery_subjects(before)
+        with self.shell() as shell:
             apply_change(self, kinds.INSTALL, PreparationInputs("postgresql"), timeout=180)
         self.assertIn("active", self.native("systemctl is-active postgresql.service"))
-        # A package transaction reloads systemd and clears the running foundation masters'
-        # loaded-execution metadata; restart them, as ordinary administration, so the site
-        # review's live protections are current again.
-        self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
-        self.create_site()
+        after = self.invocations()
+        self.assertEqual(set(after), set(before), after)
+        for unit, invocation in before.items():
+            with self.subTest(unit=unit):
+                self.assertNotEqual(after[unit], invocation)
         role = f"CREATE ROLE {OTHER} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE"
         database = (
             f"CREATE DATABASE {OTHER} OWNER {OTHER} TEMPLATE template0 ENCODING 'UTF8' "
