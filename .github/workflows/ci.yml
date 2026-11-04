@@ -66,7 +66,12 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: uv run playwright install --with-deps chromium
+      # The live server and the test share the application database. A file database keeps
+      # the production WAL and busy-timeout behaviour; SQLite's in-memory shared cache
+      # returns SQLITE_LOCKED to the test while the server writes (docs/quality.md).
       - run: uv run python manage.py test --tag browser
+        env:
+          BARECTL_TEST_DATABASE: ${{ runner.temp }}/barectl-browser.sqlite3
   dependency-audit:
     runs-on: ubuntu-26.04
     steps:
