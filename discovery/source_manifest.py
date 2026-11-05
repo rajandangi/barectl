@@ -16,6 +16,10 @@ REPOSITORY = Path(__file__).resolve().parent.parent
 MANIFEST = Path(__file__).resolve().with_name("transcript_sources.json")
 FORMAT = 1
 
+# Native mutation bodies. Their text is staged for a change and never replayed by a
+# recorded transcript, so a change here does not need a capture pass.
+MUTATION_SOURCES = ("operations/recovery.py",)
+
 # Python modules that build fixed native reads whose command text a transcript embeds.
 # docs/quality.md#recorded-transcripts lists the recording pass.
 COMMAND_SOURCES = (
@@ -90,7 +94,6 @@ SOURCES = (
     "logs/bodies/read.py",
     "logs/bodies/rotation.py",
     "operations/bodies/clear_runs.sh",
-    "operations/recovery.py",
     "runtimes/bodies/add.sh",
     "runtimes/bodies/defaults.py",
     "runtimes/bodies/php-fpm@.service",
@@ -171,7 +174,7 @@ def baseline_document(
     changed = sorted(
         path for path in set(recorded) & set(current) if recorded[path] != current[path]
     )
-    if removed:
+    if removed and not set(removed) <= set(MUTATION_SOURCES):
         raise BaselineRefused(
             "Shared sources were removed; run scripts/record-all-transcripts.sh: "
             + ", ".join(removed)

@@ -104,6 +104,19 @@ class BaselineTests(SimpleTestCase):
         with self.assertRaisesMessage(source_manifest.BaselineRefused, "were removed"):
             self.baseline({"a.py": "1"}, {})
 
+    def test_a_removed_mutation_source_refreshes_without_a_capture_pass(self) -> None:
+        document = source_manifest.baseline_document(
+            {"operations/recovery.py": "1", "a.py": "1"},
+            {"a.py": "1"},
+            current_inputs={"new.py": "input"},
+            command_inputs={"a.py": "1"},
+            capture_pins={"ubuntu": "pin"},
+            capture_states={"state": "hash"},
+            audit_digest="a" * 64,
+        )
+        self.assertEqual(document["sources"], {"a.py": "1"})
+        self.assertEqual(document["capture_command_inputs"], {"a.py": "1"})
+
 
 class SourceManifestTests(SimpleTestCase):
     def test_every_embedded_resource_is_a_shared_source(self) -> None:
@@ -129,3 +142,9 @@ class SourceManifestTests(SimpleTestCase):
             "a module that builds transcript commands is missing from SOURCES; changing "
             "its command text would leave every replay silently current",
         )
+
+    def test_a_mutation_source_is_not_a_recorded_command_source(self) -> None:
+        for path in source_manifest.MUTATION_SOURCES:
+            with self.subTest(path=path):
+                self.assertTrue((REPOSITORY / path).is_file())
+                self.assertNotIn(path, source_manifest.SOURCES)

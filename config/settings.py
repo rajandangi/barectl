@@ -1,8 +1,34 @@
 import json
 import os
+import sys
+import tempfile
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
+
+
+def _test_tag(argv: list[str]) -> str:
+    """The first tag selected by Django's test command, in either spelling."""
+    for index, argument in enumerate(argv):
+        if argument in ("--tag", "-t") and index + 1 < len(argv):
+            return argv[index + 1]
+        if argument.startswith("--tag="):
+            return argument.partition("=")[2]
+    return ""
+
+
+def selected_test_database(argv: list[str], configured: str | None) -> str | None:
+    """A file database for browser tests, so the live server and test share WAL and timeout.
+
+    Django's in-memory shared-cache test database returns ``SQLITE_LOCKED`` to the test
+    while the browser's live server writes (docs/quality.md#local-commands).
+    """
+    if configured:
+        return configured
+    if _test_tag(argv) == "browser":
+        return str(Path(tempfile.gettempdir()) / f"barectl-browser-{os.getpid()}.sqlite3")
+    return None
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = os.environ.get("BARECTL_DEBUG", "0") == "1"
@@ -68,7 +94,7 @@ TEMPLATES = [
     }
 ]
 WSGI_APPLICATION = "config.wsgi.application"
-test_database = os.environ.get("BARECTL_TEST_DATABASE") or None
+test_database = selected_test_database(sys.argv, os.environ.get("BARECTL_TEST_DATABASE") or None)
 if test_database and (test_database.startswith("file:") or test_database == ":memory:"):
     raise ImproperlyConfigured("Set BARECTL_TEST_DATABASE to a filesystem path, or leave it unset.")
 if test_database and Path(test_database).resolve() == (BASE_DIR / "db.sqlite3").resolve():

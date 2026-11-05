@@ -10,3 +10,5 @@ knip.json
 vulture_allowlist.py
 docker/disposable-server/quiet-run.sh
 scripts/watch-checks.sh
+scripts/check-log.sh
+.github/workflows/ci.yml

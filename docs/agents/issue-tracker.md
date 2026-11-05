@@ -11,7 +11,7 @@ Reading pull-request checks, the failed job's assertion and a flaky re-run is in
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Comment on an issue**: `gh issue comment <number> --body-file <file>`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
-- **Close**: `gh issue close <number> --comment "..."`
+- **Close**: `gh issue close <number> --comment "..."`. When a pull request resolves tickets, put one `Closes #<number>` line in its body so the merge closes them; the repository's pull-request template prompts for it.
 
 Run commands from the Barectl clone. When running elsewhere, pass `--repo rajandangi/barectl`. Use `--body-file` for multiline issue, comment, and PR bodies. Use this configuration when the user invokes an engineering workflow; it is not a standing instruction to publish issues or comments without a task.
 
