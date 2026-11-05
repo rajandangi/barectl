@@ -276,7 +276,7 @@
     "disposable/scenario_testing.py": "63079131ce2568febf03dc3ba72886c4f5fa67414248a0c40ab42f64510a4562",
     "disposable/scenarios.py": "5480e227b7a6a30bbbd4b48f5306ba73c0f8b09753cb3ec964b8221efde40eca",
     "disposable/shard_times.py": "8a96b50f6fff8c724363c3fb177a6e5ccb6027b4397b8378c5997678e297f6fb",
-    "disposable/test_automation.py": "f623e1afd82ab285effeb35c80d483643e8177b4a5385e964d3452be13585206",
+    "disposable/test_automation.py": "86c82235a44ef0246c2784b3e8e9d114019b623a02f9e0f55427f05dcbfbbbc9",
     "disposable/test_automation_validators.py": "0e66acac1d6d7fa078c79689b59a1ee8cf72ed2633e36ace16093294e0aae6c8",
     "disposable/test_backups.py": "d18ccb9bf56d6af23012e1c2ff00be742384f8da35b86e8473325b95365438d8",
     "disposable/test_breadth.py": "a99de960c0e5ecb40c291d9ab4cca2ad475dcf6b8963144b8d1dc43f10e7996b",
@@ -715,5 +715,5 @@
     "unknown-runtime-26.04": "10755de18623ac81ff48796f263b65606d50f275367a55d9ef2fc2f99959a101",
     "valkey-installed-26.04": "3d58984fc4472cfa09ff300d718ddf6e4e43309060508a50daf823df9c79b69c"
   },
-  "audit_digest": "e066e08c5a16a9a816b5d14e32acdab66df7a900327b245dc443599a51e1e23e"
+  "audit_digest": "38ab819107314edb6c94eecac135129628f1cbe6888aac8d7bf1fec3ac288e18"
 }

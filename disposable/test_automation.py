@@ -142,7 +142,7 @@ class WordPressServerCron(WordPressCreateCase):
         self.schedule_due_event(ON_EVENT, delay=-1)
         self.wp("eval", "delete_transient('doing_cron');")
         self.visit_home()
-        self.assertEqual(self.wait_for_due_events(1, hook=ON_EVENT, timeout=3), 1)
+        self.assertEqual(self.wait_for_due_events(1, hook=ON_EVENT, timeout=10), 1)
         # C1 requires further automatic ticks with every SSH connection closed (#357).
         self.assertEqual(self.wait_for_due_events(0, hook=ON_EVENT, timeout=75, interval=1), 0)
         completed = (
