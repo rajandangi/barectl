@@ -29,6 +29,7 @@
       <form method="post" action="{{ jobs_check_url }}">
         {% csrf_token %}
         <input type="hidden" name="next" value="jobs">
+        <input type="hidden" name="tz" value="{{ jobs_view.zone.info.key }}">
         <button class="usa-button" type="submit">Check now</button>
       </form>
     {% elif jobs_view.may_view_changes and jobs_view.target_stack and not jobs_check_progress %}

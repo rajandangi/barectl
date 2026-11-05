@@ -140,6 +140,7 @@ class JobsPageTests(ControllerConfigTestCase):
         client.force_login(self.user)
         page = client.get(self.url)
         self.assertContains(page, 'name="next" value="jobs"')
+        self.assertContains(page, 'name="tz"')
         csrf = page.cookies["csrftoken"].value
         refused = client.post(reverse("server_verify", args=(self.server.pk,)), {"next": "jobs"})
         self.assertEqual(refused.status_code, 403)
@@ -152,6 +153,19 @@ class JobsPageTests(ControllerConfigTestCase):
             DiscoveryAttempt.objects.filter(
                 server=self.server, status=DiscoveryAttempt.Status.QUEUED
             ).exists()
+        )
+
+    def test_check_now_keeps_the_viewer_zone_in_its_return_url(self) -> None:
+        self.grant("view_server", "view_changes", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("server_verify", args=(self.server.pk,)),
+            {"next": "jobs", "tz": "Europe/London"},
+        )
+        self.assertRedirects(
+            response,
+            f"{self.url}?tz=Europe%2FLondon",
+            fetch_redirect_response=False,
         )
 
     def test_check_now_needs_the_discovery_request_permission(self) -> None:

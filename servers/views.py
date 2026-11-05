@@ -825,6 +825,11 @@ def site_page_response(  # noqa: C901 - one dispatcher for the site sections
     return render(request, "sites/detail.html", context, status=status)
 
 
+def _jobs_url(server: Server, zone: str) -> str:
+    url = reverse("server_jobs", args=(server.pk,))
+    return f"{url}?{urlencode({'tz': zone})}" if zone else url
+
+
 def _activity_rows_url(server: Server | None, site: str) -> str:
     query = {}
     if server is not None:
@@ -952,6 +957,7 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     if not isinstance(request.user, User):
         raise Http404
     jobs = request.POST.get("next") == "jobs"
+    zone = request.POST.get("tz", "")
     try:
         request_discovery(server, user=request.user)
     except Server.DoesNotExist:
@@ -959,11 +965,11 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
         raise Http404 from None
     except OperationRefused:
         messages.error(request, "The connection changed. Reload and request a new check.")
-        return redirect("server_jobs", pk=pk) if jobs else redirect("server_detail", pk=pk)
+        return redirect(_jobs_url(server, zone)) if jobs else redirect("server_detail", pk=pk)
     if _is_fragment_request(request):
         return _discovery_fragment(request, server, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")
-    return redirect("server_jobs", pk=pk) if jobs else redirect("server_detail", pk=pk)
+    return redirect(_jobs_url(server, zone)) if jobs else redirect("server_detail", pk=pk)
 
 
 @never_cache

@@ -504,7 +504,7 @@
     "servers/testing.py": "c56b297faa5a444bdf3f39312ae3f444e9417fe612a811e140308d54aeff7b9b",
     "servers/tests.py": "d6d7fcc867147364b9097b457153726327b16acc7dff84cf400ed511476cd51e",
     "servers/trust.py": "c1b4e995d736935d8633b880521014ab4bcbc60eb997b2ce5f05234129bd95e7",
-    "servers/views.py": "33f0d5eace32d0435adfb3b3b816c739aa04ca4fb73c1d9c8077c9005441a697",
+    "servers/views.py": "9b372740475e9c7f716c6bb9fa5afbd78af53cc9c1a1b33b2e6c638d1e96932d",
     "sites/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "sites/apps.py": "278a23a3dac837017052bbc06bf282fbce1a910c0a9a339c8d4983c3b9ece799",
     "sites/bodies/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -715,5 +715,5 @@
     "unknown-runtime-26.04": "10755de18623ac81ff48796f263b65606d50f275367a55d9ef2fc2f99959a101",
     "valkey-installed-26.04": "3d58984fc4472cfa09ff300d718ddf6e4e43309060508a50daf823df9c79b69c"
   },
-  "audit_digest": "afcb0fc8a4134128364408c18ce4aae1488c58b0e8d8924096f558bc2e9358f3"
+  "audit_digest": "e066e08c5a16a9a816b5d14e32acdab66df7a900327b245dc443599a51e1e23e"
 }
