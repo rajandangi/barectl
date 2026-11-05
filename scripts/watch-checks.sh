@@ -15,5 +15,15 @@ log=${2:-"$HOME/.cache/barectl/pr-$pr-checks.log"}
 mkdir -p "$(dirname "$log")"
 status=0
 gh pr checks "$pr" --watch --interval 20 >"$log" 2>&1 || status=$?
-tail -n 30 "$log"
+if [ "$status" -eq 0 ]; then
+    printf 'All checks passed for PR #%s.\n' "$pr"
+    exit 0
+fi
+failures=$(awk -F '\t' 'NF >= 4 && $2 != "pass" {print}' "$log")
+if [ -n "$failures" ]; then
+    printf '%s\n' "$failures" | tail -n 40
+else
+    tail -n 20 "$log"
+fi
+printf 'Full checks log: %s\n' "$log"
 exit "$status"

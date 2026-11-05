@@ -10,6 +10,8 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
+from config.settings import selected_test_database
+
 from .verification import (
     BUILD_GATES,
     aggregate,
@@ -97,6 +99,26 @@ class BuildDeadlineTests(SimpleTestCase):
                 mock.patch("disposable.verification.time.time", return_value=1050),
             ):
                 self.assertEqual(build_command(Path("native.log"), ".env")[-1], expected)
+
+
+class BrowserTestDatabaseTests(SimpleTestCase):
+    def test_the_browser_tag_selects_a_file_database(self) -> None:
+        expected = str(Path(tempfile.gettempdir()) / f"barectl-browser-{os.getpid()}.sqlite3")
+        self.assertEqual(
+            selected_test_database(["manage.py", "test", "--tag", "browser"], None), expected
+        )
+        self.assertEqual(
+            selected_test_database(["manage.py", "test", "--tag=browser"], None), expected
+        )
+
+    def test_another_tag_or_an_explicit_path_keeps_its_database(self) -> None:
+        self.assertIsNone(
+            selected_test_database(["manage.py", "test", "--exclude-tag", "browser"], None)
+        )
+        custom = str(Path(tempfile.gettempdir()) / "other.sqlite3")
+        self.assertEqual(
+            selected_test_database(["manage.py", "test", "--tag", "browser"], custom), custom
+        )
 
 
 class VerificationRunnerTests(SimpleTestCase):

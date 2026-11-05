@@ -6,6 +6,15 @@ Reusable brief for an autonomous agent delivering a specification and its sub-is
 
 Fetch the parent issue, every sub-issue and their comments to the notes directory (`gh issue view <n> --json body --jq .body >"$NOTES/issue-<n>.md"`) and read or grep those files. Keeping the full bodies out of the working context avoids spending it on specification text you are not using in this turn. Read every issue's comments, labels and native blocking relationships before planning. Add every blocking edge with GitHub's native dependency API and record the resulting graph in the parent; the frontier is read from the tracker, not inferred from issue numbers. Work from the live tracker rather than remembered state. Then read `README.md`, `CONTRIBUTING.md`, `GLOSSARY.md`, the specification the parent names, and the ADRs and qualification records it links. `AGENTS.md` is already in context; do not read it again.
 
+Query the parent's sub-issues before planning:
+
+```bash
+gh api repos/<owner>/<repo>/issues/<parent>/sub_issues \
+  --jq '.[] | "\(.number)\t\(.state)\t\(.title)"'
+```
+
+If every sub-issue is closed, the parent's phased work is delivered. The frontier is then the open issues that name a remaining defect in that specification: list them with `gh issue list --state open`, record them in the parent, and work those. Reopen or invent no ticket.
+
 Follow the agreed phase order and the tracker's blocking edges, not issue-number order. Record consequential decisions, the alternatives checked and source links in the owning issue. Resolve routine product, architecture and implementation decisions yourself; do not interview the user or request repeated confirmation.
 
 Before running tests in a new worktree, run `scripts/worktree-setup.sh` from inside it. It copies the controller-local `.env`, installs the locked dependencies and builds the production assets. A missing `static/dist` makes browser tests fail as HTTP 500s, not as a useful test failure.
@@ -66,7 +75,7 @@ The runner takes the host-wide native lock itself (`disposable/locking.py`), so 
 
 `run` and `follow` wait until completion. The legacy bounded `wait` is an observation deadline, not a command deadline; its exit 124 must never be treated as a completed test. Keep the owning tool session alive when a command outlasts a bounded observation. The native harness owns test deadlines. Full recording passes can legitimately exceed nine minutes.
 
-For CI, use `scripts/watch-checks.sh <pr> "$NOTES/pr-checks.log"` in a persistent tool session. One runner owns each command and its wait. Report a changed stage, failure or completion; avoid repeated full log reads while the state is unchanged. Consult the build's verification ledger before rerunning a gate already completed by another phase. Reuse evidence only when its recorded inputs still match and policy permits; pre-push hooks and exact-head required CI remain mandatory.
+For CI, use `scripts/watch-checks.sh <pr> "$NOTES/pr-checks.log"` in a persistent tool session. One runner owns each command and its wait. Report a changed stage, failure or completion; avoid repeated full log reads while the state is unchanged. Read a failed job with `scripts/check-log.sh <run-or-job>`; it prints the failing jobs and their assertions, not the full log. Consult the build's verification ledger before rerunning a gate already completed by another phase. Reuse evidence only when its recorded inputs still match and policy permits; pre-push hooks and exact-head required CI remain mandatory.
 
 Never report the task done while a command is still running. If a stored dependency genuinely blocks safe progress, document exactly what it blocks and continue every independent authorized step; do not stop the run. Do not stop half-way; finish the specification and its sub-issues end to end.
 
