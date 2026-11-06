@@ -24,6 +24,7 @@ from operations.models import ChangeReview
 
 from . import observation
 from .bodies.common import NativeState
+from .bodies.reasons import SITE_REASONS
 from .change import SiteEvidence, dns_evidence, dns_warnings
 from .configuration import SiteSettings, render_caddy, render_laravel_caddy, render_wordpress_caddy
 
@@ -246,4 +247,6 @@ SET_SITE_DOMAINS: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_DOMAINS,
+    reasons=SITE_REASONS,
+    body_sources=("sites/bodies/common.py", "sites/bodies/domains.py"),
 )

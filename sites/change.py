@@ -20,6 +20,7 @@ from runtimes.catalog import Architecture, architecture_of
 
 from . import observation
 from .bodies.common import CADDY_OUTSIDE, NativeState
+from .bodies.reasons import SITE_REASONS
 from .configuration import PHP_RUNTIMES, SiteSettings, render_caddy, render_pool
 
 SLUG: Final = "create_http_site"
@@ -461,4 +462,10 @@ CREATE_SITE: Final = ChangeKind(
     refresh_discovery=True,
     input_choices=PHP_RUNTIMES,
     input_shape=InputShape.SITE_CREATE,
+    reasons=SITE_REASONS,
+    body_sources=(
+        "sites/bodies/common.py",
+        "sites/bodies/create.py",
+        "sites/bodies/logrotate.py",
+    ),
 )

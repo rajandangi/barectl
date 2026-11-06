@@ -22,6 +22,7 @@ from runtimes.catalog import Architecture, architecture_of, load
 
 from . import observation
 from .bodies.common import NODE_INTERRUPTED, SiteNodeState
+from .bodies.reasons import SITE_REASONS
 
 CHOICES: Final = ("nodejs_22", "nodejs_24")
 SLUG: Final = "set_site_node"
@@ -250,4 +251,6 @@ SET_SITE_NODE: Final = ChangeKind(
     refresh_discovery=True,
     input_choices=CHOICES,
     input_shape=InputShape.SITE_RUNTIME,
+    reasons=SITE_REASONS,
+    body_sources=("sites/bodies/common.py", "sites/bodies/node.py"),
 )
