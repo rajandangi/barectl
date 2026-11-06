@@ -425,7 +425,7 @@
     "operations/cleanup.py": "35c7d3f5bc6eba3ad785a67591ee443910b33af240aed0d3d762b12c06403a8b",
     "operations/confidential.py": "9c9181ca6ed7698d86dae4aaa2bbea48574dbe8d172a13377210775cba7333f2",
     "operations/consent.py": "62b38a324de4ff32fca599e97cd34f5df89157181d743cc62e62a4f203c5d08d",
-    "operations/engine.py": "07c17ba6b77948a12798df863696af9c5cb1b7d3f4e0ca6604c43c3fd2562939",
+    "operations/engine.py": "47e71fe38dacd8f6cecab31cccb0d4c2d936662e2399ae4635669021185d3346",
     "operations/fakes.py": "4d0d2b1f6ea17d49e5eb5661013966936b6af59c8a17802942f54bf668e16781",
     "operations/forms.py": "b1ca54be549fb256e21348e17aa559d49f92eb0f9bf9fa217bfd25f50dc7182c",
     "operations/inputs.py": "a9567c4d8be96f57f9e62e9258e1493a3ab1b6f74e5810e989ea539e46e91c7c",
@@ -434,6 +434,7 @@
     "operations/native.py": "c896ee3988c42e97951ddec946fc95678cd6cf440a6b058e7838a0b668219eb0",
     "operations/plain_words.py": "3c1d888abc545dbaab20fc061a90b97cb8b0fe6d34978475be9c63e1b55cb6de",
     "operations/presentation.py": "4e35403b987e29c273e16472b96e91d3349bdd6fd143f9dd990292df6306a491",
+    "operations/reasons.py": "cfb612459649e568982d98a06ba3d43f00a87332a48d4c2016532870b5ecdf2a",
     "operations/recovery.py": "65956fea460a3a66ca7117b9f72e2848010ab87279063f30cd30797c31acc222",
     "operations/recovery_testing.py": "af6165cabb47b9429308b278cadcb19a36c95a14975c5b99cfcf9ddb8df3e20b",
     "operations/revert.py": "7ddfcffbc5abaa4403cf8185199e28217aab16241155ce6dcad963e70f7c2de2",
@@ -715,5 +716,5 @@
     "unknown-runtime-26.04": "10755de18623ac81ff48796f263b65606d50f275367a55d9ef2fc2f99959a101",
     "valkey-installed-26.04": "3d58984fc4472cfa09ff300d718ddf6e4e43309060508a50daf823df9c79b69c"
   },
-  "audit_digest": "38ab819107314edb6c94eecac135129628f1cbe6888aac8d7bf1fec3ac288e18"
+  "audit_digest": "6d0915da52f41ee60725bafaa84841ad7130f4bb7f4e7c4a006324b845e3281f"
 }
