@@ -164,6 +164,7 @@ def baseline_document(
     capture_pins: Mapping[str, str],
     capture_states: Mapping[str, str],
     audit_digest: str,
+    command_neutral: bool = False,
 ) -> dict[str, object]:
     """The manifest for additions that no recorded command embeds.
 
@@ -179,10 +180,11 @@ def baseline_document(
             "Shared sources were removed; run scripts/record-all-transcripts.sh: "
             + ", ".join(removed)
         )
-    if changed:
+    if changed and not command_neutral:
         raise BaselineRefused(
-            "Shared source text changed; run scripts/record-all-transcripts.sh: "
-            + ", ".join(changed)
+            "Shared source text changed; run scripts/record-all-transcripts.sh, or "
+            "scripts/refresh-transcript-baseline.sh --command-neutral when the edit cannot "
+            "change a recorded command: " + ", ".join(changed)
         )
     return {
         "version": FORMAT,
@@ -195,8 +197,13 @@ def baseline_document(
     }
 
 
-def refresh_baseline() -> tuple[str, ...]:
-    """Update the manifest for added harness-only sources, refusing anything else."""
+def refresh_baseline(*, command_neutral: bool = False) -> tuple[str, ...]:
+    """Refresh the manifest for added harness-only or proven command-neutral sources.
+
+    ``command_neutral`` is set only by ``scripts/refresh-transcript-baseline.sh
+    --command-neutral`` after it replays every recorded transcript, so a changed command
+    still needs the full recording pass.
+    """
     document = json.loads(MANIFEST.read_text(encoding="utf-8"))
     recorded = read()
     current = digests()
@@ -222,6 +229,7 @@ def refresh_baseline() -> tuple[str, ...]:
         capture_pins=transcripts.current_pins(),
         capture_states=states,
         audit_digest=provenance.audit_digest(inputs),
+        command_neutral=command_neutral,
     )
     temporary = MANIFEST.with_suffix(".tmp")
     temporary.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
@@ -265,9 +273,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    if arguments == ["refresh-baseline"]:
+    if arguments in (["refresh-baseline"], ["refresh-baseline", "--command-neutral"]):
         try:
-            added = refresh_baseline()
+            added = refresh_baseline(command_neutral=len(arguments) == 2)
         except BaselineRefused as error:
             print(str(error), file=sys.stderr)  # noqa: T201
             return 1
@@ -275,7 +283,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if arguments:
         print(  # noqa: T201
-            "usage: python -m discovery.source_manifest [write|refresh-baseline]",
+            "usage: python -m discovery.source_manifest "
+            "[write|refresh-baseline [--command-neutral]]",
             file=sys.stderr,
         )
         return 2

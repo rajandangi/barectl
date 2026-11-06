@@ -10,19 +10,14 @@ from django.test import SimpleTestCase
 
 from operations import engine, reasons
 from operations.models import Result
+from operations.reason_testing import assert_declared_sentences
 
 from .bodies.reasons import REMOVAL_REASONS, SITE_REASONS
 
 
 class SharedSiteReasonTests(SimpleTestCase):
     def test_every_declared_pair_has_a_sentence(self) -> None:
-        for reason in SITE_REASONS:
-            for outcome in reason.outcomes:
-                with self.subTest(reason=reason.name, outcome=outcome.value):
-                    self.assertEqual(
-                        engine.reason_text(outcome.value, reason.name),
-                        reason.sentence(outcome),
-                    )
+        assert_declared_sentences(self, (SITE_REASONS,))
 
     def test_a_domains_change_that_stops_partway_names_the_domains_step(self) -> None:
         sentence = engine.reason_text("partial", "site_domains")
@@ -106,13 +101,7 @@ class RemovalReasonTests(SimpleTestCase):
     """A site removal names the step that stopped (#500)."""
 
     def test_every_removal_reason_has_a_sentence_for_every_outcome(self) -> None:
-        for reason in REMOVAL_REASONS:
-            for outcome in reason.outcomes:
-                with self.subTest(reason=reason.name, outcome=outcome.value):
-                    self.assertEqual(
-                        engine.reason_text(outcome.value, reason.name),
-                        reason.sentence(outcome),
-                    )
+        assert_declared_sentences(self, (REMOVAL_REASONS,))
 
     def test_every_reason_the_removal_body_prints_is_accepted(self) -> None:
         body = Path("sites/bodies/remove.py").read_text()
@@ -172,13 +161,7 @@ class RemovalReasonTests(SimpleTestCase):
         self.assertNotEqual(sentence, reasons.OUTCOME_SENTENCES[Result.REFUSED])
 
     def test_no_removal_reason_falls_back_to_the_class_sentence(self) -> None:
-        for reason in REMOVAL_REASONS:
-            for outcome in reason.outcomes:
-                with self.subTest(reason=reason.name, outcome=outcome.value):
-                    self.assertNotEqual(
-                        engine.reason_text(outcome.value, reason.name),
-                        reasons.OUTCOME_SENTENCES[outcome],
-                    )
+        assert_declared_sentences(self, (REMOVAL_REASONS,))
 
     def test_the_removal_declaration_matches_the_body_it_stages(self) -> None:
         self.assertEqual(reasons.manifest_errors(), [])

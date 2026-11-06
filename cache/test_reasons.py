@@ -8,6 +8,7 @@ from django.test import SimpleTestCase
 
 from operations import engine, reasons
 from operations.models import Result
+from operations.reason_testing import assert_declared_sentences
 
 from .engine import INSTALL
 from .instance import SET_SITE_OBJECT_CACHE
@@ -68,17 +69,7 @@ class ObjectCacheReasonTests(SimpleTestCase):
 
 class CacheVocabularyTests(SimpleTestCase):
     def test_every_declared_cache_pair_has_its_own_sentence(self) -> None:
-        for kind in KINDS:
-            for reason in kind.reasons:
-                for outcome in reason.outcomes:
-                    with self.subTest(kind=kind.slug, reason=reason.name, outcome=outcome.value):
-                        self.assertEqual(
-                            _sentence(outcome, reason.name),
-                            reason.sentence(outcome),
-                        )
-                        self.assertNotEqual(
-                            _sentence(outcome, reason.name), reasons.OUTCOME_SENTENCES[outcome]
-                        )
+        assert_declared_sentences(self, tuple(kind.reasons for kind in KINDS))
 
     def test_every_cache_body_declares_what_it_prints(self) -> None:
         self.assertEqual(reasons.manifest_errors(), [])

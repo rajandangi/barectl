@@ -165,6 +165,8 @@ uv run --env-file .env python -m discovery.transcript_provenance affected ubuntu
 
 Adding a harness-only file that no recorded command embeds does not need a full recording pass. Run `scripts/refresh-transcript-baseline.sh`; it updates the source digests, capture inputs and audit digest, and refuses a changed or removed shared read source (a removed mutation source is allowed), changed pins or changed transcript bytes. Any command-source or transcript change still needs `scripts/record-all-transcripts.sh`.
 
+When a shared-source edit cannot change a recorded command—adding registration metadata to a kind module, for example—run `scripts/refresh-transcript-baseline.sh --command-neutral`. It replays every stored transcript first and rewrites the manifest only when the replay still matches exactly. A real command or transcript change still needs the full pass.
+
 A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
 
 ```bash

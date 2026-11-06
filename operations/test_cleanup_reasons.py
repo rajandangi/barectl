@@ -2,24 +2,14 @@
 
 from django.test import SimpleTestCase
 
-from operations import engine, reasons
+from operations import engine
 from operations.bodies.cleanup_reasons import CLEANUP_REASONS
+from operations.reason_testing import assert_declared_sentences
 
 
 class CleanupReasonTests(SimpleTestCase):
     def test_every_declared_reason_has_its_own_sentence(self) -> None:
-        for reason in CLEANUP_REASONS:
-            for outcome in reason.outcomes:
-                with self.subTest(reason=reason.name, outcome=outcome.value):
-                    sentence = engine.reason_text(outcome.value, reason.name)
-                    self.assertEqual(sentence, reason.sentence(outcome))
-                    self.assertNotEqual(sentence, reasons.OUTCOME_SENTENCES[outcome])
-                    line = engine.parse_result_line(
-                        f'barectl-result {{"class":"{outcome.value}","reason":"{reason.name}"}}'
-                    )
-                    if line is None:
-                        self.fail("The result line did not parse.")
-                    self.assertEqual(line.reason, reason.name)
+        assert_declared_sentences(self, (CLEANUP_REASONS,))
 
     def test_a_cleanup_that_stops_partway_names_its_own_cause(self) -> None:
         sentence = engine.reason_text("partial", "cleanup")

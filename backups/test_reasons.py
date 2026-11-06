@@ -10,6 +10,7 @@ from typing import override
 from django.test import SimpleTestCase
 
 from operations import engine, reasons
+from operations.reason_testing import assert_declared_sentences
 
 from . import change, connect, export, keys, offsite, reopen, restore, retention
 from .bodies.reasons import (
@@ -176,23 +177,13 @@ class DeclaredReasonAssertions(SimpleTestCase):
         return ()
 
     def test_every_declared_reason_has_its_own_sentence(self) -> None:
+        assert_declared_sentences(
+            self,
+            (self.declared(),),
+            skip_parse=frozenset({"backup_paused", "restore_paused"}),
+        )
         for reason in self.declared():
-            for outcome in reason.outcomes:
-                with self.subTest(reason=reason.name, outcome=outcome.value):
-                    sentence = engine.reason_text(outcome.value, reason.name)
-                    self.assertEqual(sentence, reason.sentence(outcome))
-                    self.assertTrue(reasons.accepted(reason.name))
-                    if outcome in reasons.OUTCOME_SENTENCES:
-                        self.assertNotEqual(sentence, reasons.OUTCOME_SENTENCES[outcome])
-                    line = engine.parse_result_line(
-                        f'barectl-result {{"class":"{outcome.value}","reason":"{reason.name}"}}'
-                    )
-                    # A staged pause is not the run's outcome, so the parser deliberately
-                    # keeps reading past it (operations.engine.parse_result_line).
-                    if line is None:
-                        self.assertIn(reason.name, ("backup_paused", "restore_paused"))
-                    else:
-                        self.assertEqual(line.reason, reason.name)
+            self.assertTrue(reasons.accepted(reason.name))
 
 
 class OffsiteReasonTests(DeclaredReasonAssertions):

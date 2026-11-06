@@ -104,6 +104,32 @@ class BaselineTests(SimpleTestCase):
         with self.assertRaisesMessage(source_manifest.BaselineRefused, "were removed"):
             self.baseline({"a.py": "1"}, {})
 
+    def test_a_proven_command_neutral_edit_refreshes_without_a_capture_pass(self) -> None:
+        document = source_manifest.baseline_document(
+            {"a.py": "1"},
+            {"a.py": "2"},
+            current_inputs={"new.py": "input"},
+            command_inputs={"a.py": "1"},
+            capture_pins={"ubuntu": "pin"},
+            capture_states={"state": "hash"},
+            audit_digest="a" * 64,
+            command_neutral=True,
+        )
+        self.assertEqual(document["sources"], {"a.py": "2"})
+
+    def test_a_command_neutral_refresh_still_refuses_a_removed_shared_source(self) -> None:
+        with self.assertRaisesMessage(source_manifest.BaselineRefused, "were removed"):
+            source_manifest.baseline_document(
+                {"a.py": "1"},
+                {},
+                current_inputs={"new.py": "input"},
+                command_inputs={"a.py": "1"},
+                capture_pins={"ubuntu": "pin"},
+                capture_states={"state": "hash"},
+                audit_digest="a" * 64,
+                command_neutral=True,
+            )
+
     def test_a_removed_mutation_source_refreshes_without_a_capture_pass(self) -> None:
         document = source_manifest.baseline_document(
             {"operations/recovery.py": "1", "a.py": "1"},

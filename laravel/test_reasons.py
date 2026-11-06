@@ -8,6 +8,7 @@ from django.test import SimpleTestCase
 
 from operations import engine, reasons
 from operations.models import Result
+from operations.reason_testing import assert_declared_sentences
 
 from .bodies.reasons import (
     CREATE_REASONS,
@@ -21,13 +22,7 @@ _DECLARATIONS = (CREATE_REASONS, DEPLOY_REASONS, ROLLBACK_REASONS, EDIT_REASONS)
 
 class LaravelReasonTests(SimpleTestCase):
     def test_every_declared_pair_has_its_own_sentence(self) -> None:
-        for declared in _DECLARATIONS:
-            for reason in declared:
-                for outcome in reason.outcomes:
-                    with self.subTest(reason=reason.name, outcome=outcome.value):
-                        sentence = engine.reason_text(outcome.value, reason.name)
-                        self.assertEqual(sentence, reason.sentence(outcome))
-                        self.assertNotEqual(sentence, reasons.OUTCOME_SENTENCES[outcome])
+        assert_declared_sentences(self, _DECLARATIONS)
 
     def test_a_deploy_that_stops_names_the_step_and_not_the_class_sentence(self) -> None:
         cases = (

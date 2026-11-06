@@ -354,9 +354,14 @@ _SHELL_CLASS = re.compile(
     r"(?m)(?:^|[;&|{])\s*(refused|partial|failed|lock_busy|timed_out)"
     r"\s+([a-z][a-z0-9_]*)\s*(?:;|$)"
 )
-_CALL = re.compile(r'\b(refused|failed)\("([a-z][a-z0-9_]*)"\)')
+_CALL = re.compile(r'\b(refused|failed|partial|succeeded)\("([a-z][a-z0-9_]*)"\)')
 _CALL_WITH_CLASS = re.compile(
     r"\b[A-Za-z_][A-Za-z0-9_]*\(\s*"
+    r'"(refused|partial|failed|lock_busy|timed_out|succeeded)"\s*,\s*'
+    r'"([a-z][a-z0-9_]*)"'
+)
+_DOCUMENT_RESULT = re.compile(
+    r"document_result\([^,\n]+,\s*"
     r'"(refused|partial|failed|lock_busy|timed_out|succeeded)"\s*,\s*'
     r'"([a-z][a-z0-9_]*)"'
 )
@@ -380,6 +385,8 @@ def printed_pairs(text: str) -> dict[str, set[str]]:
     for match in _CALL.finditer(text):
         add(match.group(2), match.group(1))
     for match in _CALL_WITH_CLASS.finditer(text):
+        add(match.group(2), match.group(1))
+    for match in _DOCUMENT_RESULT.finditer(text):
         add(match.group(2), match.group(1))
     for match in _REFUSED_CALL.finditer(text):
         add(match.group(1), "refused")
