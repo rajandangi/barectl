@@ -3,7 +3,7 @@
 from django.test import SimpleTestCase
 
 from operations import engine, reasons
-from operations.bodies.reasons import CLEANUP_REASONS
+from operations.bodies.cleanup_reasons import CLEANUP_REASONS
 
 
 class CleanupReasonTests(SimpleTestCase):

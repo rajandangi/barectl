@@ -15,7 +15,7 @@ from discovery.ssh import RemoteShell
 from operations.inputs import EMPTY_INPUTS, PreparationInputs
 
 from . import native
-from .bodies.reasons import CLEANUP_REASONS
+from .bodies.cleanup_reasons import CLEANUP_REASONS
 from .consent import DeclaredEffect, Scope
 from .engine import BodyContext, ChangeKind, NativeBody, ReviewDraft, current_units
 from .models import ChangeReview

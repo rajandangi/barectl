@@ -55,12 +55,12 @@ OBJECT_CACHE_REASONS: Final = (
         "object_cache",
         {
             Result.REFUSED: (
-                "The object cache change stopped before it began, so no cache instance, "
-                "connection or plugin changed. Read the run's journal, then prepare a new "
-                "review."
+                "The object cache change stopped before it finished. Nothing on the server was "
+                "rolled back; read the run's journal, then prepare a new review that proposes "
+                "only what remains."
             ),
             Result.PARTIAL: (
-                "The object cache change stopped after it began. Nothing on the server was "
+                "The object cache change stopped before it finished. Nothing on the server was "
                 "rolled back; read the run's journal, then prepare a new review that proposes "
                 "only what remains."
             ),

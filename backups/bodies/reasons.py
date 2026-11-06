@@ -474,17 +474,6 @@ CLEANUP_CLOCK: Final = ResultReason(
     },
 )
 
-RESTIC_RUNTIME_CONFIG: Final = ResultReason(
-    "runtime_config",
-    {
-        Result.REFUSED: (
-            "The runtime configuration step could not be written or verified, so the run "
-            "stopped before changing anything. Check the run's journal on the server, then "
-            "prepare a new review."
-        ),
-    },
-)
-
 RESTORE_SITE: Final = ResultReason(
     "restore_site",
     {
@@ -772,7 +761,6 @@ ENABLE_REASONS: Final = (
     BACKUP_SITE,
     BACKUP_KEY,
     BACKUP_CHECK,
-    RESTIC_RUNTIME_CONFIG,
     *INTEGRITY_REASONS,
 )
 BACKUP_REASONS: Final = (
@@ -902,6 +890,8 @@ SCHEDULE_REASONS: Final = (
     BACKUP_REPOSITORY,
     BACKUP_LOCK,
     BACKUP_UNKNOWN,
+    BACKUP_DISK,
+    BACKUP_VERIFY,
     SCHEDULE_TIMER,
     SCHEDULE_UNITS,
     SCHEDULE_INSTALL,

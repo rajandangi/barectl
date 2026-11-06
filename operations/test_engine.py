@@ -626,6 +626,21 @@ class UnreadableResultTests(ChangeTestCase):
         self.assertEqual(row.failure, engine.UNREADABLE_RESULT_FAILURE)
         self.assertIn("Unreadable result line", row.failure)
 
+    def test_a_succeeded_run_with_an_unreadable_line_still_says_unreadable(self) -> None:
+        self.systemd.units[EXITED] = finished_unit(0)
+        self.systemd.result_text = "barectl-result {not json"
+        self.retain_submitted_unit()
+        run = self.apply(self.change())
+        self.assertEqual(run.status, Status.SUCCEEDED)
+        self.assertEqual(run.execution, Result.SUCCEEDED)
+        self.assertEqual(run.verification, Verification.PASSED)
+        self.assertEqual(run.result_reason, engine.UNREADABLE_RESULT_REASON)
+        self.assertEqual(run.failure, engine.UNREADABLE_RESULT_FAILURE)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, engine.UNREADABLE_RESULT)
+        (row,) = activity.change_rows(self.server)
+        self.assertEqual(row.failure, run.failure)
+
     def test_an_absent_result_line_keeps_the_generic_failure(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         self.systemd.result_class = None

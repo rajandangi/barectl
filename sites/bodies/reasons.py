@@ -35,16 +35,6 @@ SITE_REASONS: Final = (
         },
     ),
     ResultReason(
-        "runtime_config",
-        {
-            Result.PARTIAL: (
-                "The runtime configuration could not be changed or verified, so the run "
-                "stopped partway. Read the run's journal on the server, then prepare a new "
-                "review of what remains."
-            ),
-        },
-    ),
-    ResultReason(
         "site_client",
         {
             Result.PARTIAL: (
@@ -156,9 +146,9 @@ REMOVAL_REASONS: Final = (
         {
             Result.REFUSED: (
                 "Barectl could not make Caddy's disk and running configurations agree before "
-                "removing the site's route, so the removal stopped after removing its backup "
-                "units and before removing its Caddy configuration. The site's Caddy route "
-                "still serves. Read the run's journal on the server, then prepare a new review."
+                "removing the site's route, so the removal stopped before changing the site's "
+                "Caddy route. The route still serves. Read the run's journal on the server, "
+                "then prepare a new review."
             ),
         },
     ),

@@ -22,7 +22,24 @@ SETTINGS_SECRET: Final = ResultReason(
     },
 )
 
+RUNTIME_CONFIG: Final = ResultReason(
+    "runtime_config",
+    {
+        Result.REFUSED: (
+            "The runtime configuration step could not be written or verified, so the run "
+            "stopped before changing anything. Check the run's journal on the server, then "
+            "prepare a new review."
+        ),
+        Result.PARTIAL: (
+            "The runtime configuration could not be changed or verified, so the run "
+            "stopped partway. Read the run's journal on the server, then prepare a new "
+            "review of what remains."
+        ),
+    },
+)
+
 SHARED_REASONS: Final = (
+    RUNTIME_CONFIG,
     ResultReason(
         "precondition",
         {
@@ -37,9 +54,7 @@ SHARED_REASONS: Final = (
         "runtime_cache",
         {
             Result.REFUSED: (
-                "The selected runtime's locked build is unavailable from the signed cache, so "
-                "the run stopped before changing anything. Check the server's network access, "
-                "then prepare a new review."
+                "The locked runtime closure is unavailable from the signed cache. Nothing changed."
             ),
         },
     ),

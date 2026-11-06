@@ -350,22 +350,18 @@ _PAIR_CLASS_FIRST = re.compile(
 _PAIR_REASON_FIRST = re.compile(
     r'"reason"\s*:\s*"([a-z][a-z0-9_]*)"[^\n}]*?"class"\s*:\s*"([a-z_]+)"'
 )
-_REFUSED = re.compile(r"(?m)(?:^|[;&|{])\s*refused\s+([a-z][a-z0-9_]*)\s*(?:;|$)")
-_FAIL = re.compile(
-    r"(?m)(?:^|[;&|{])\s*fail\s+(refused|partial|failed|lock_busy|timed_out)"
-    r"\s+([a-z][a-z0-9_]*)\s*(?:;|$)"
-)
 _SHELL_CLASS = re.compile(
     r"(?m)(?:^|[;&|{])\s*(refused|partial|failed|lock_busy|timed_out)"
     r"\s+([a-z][a-z0-9_]*)\s*(?:;|$)"
 )
 _CALL = re.compile(r'\b(refused|failed)\("([a-z][a-z0-9_]*)"\)')
-_EXPORT = re.compile(r'ExportRefused\("([a-z][a-z0-9_]*)"\)')
-_RESULT = re.compile(
-    r'result\(\s*"(refused|partial|failed|lock_busy|timed_out|succeeded)"\s*,\s*'
+_CALL_WITH_CLASS = re.compile(
+    r"\b[A-Za-z_][A-Za-z0-9_]*\(\s*"
+    r'"(refused|partial|failed|lock_busy|timed_out|succeeded)"\s*,\s*'
     r'"([a-z][a-z0-9_]*)"'
 )
-_DOCUMENT_RESULT = re.compile(r'document_result\([^,]+,\s*"([a-z_]+)",\s*"([a-z][a-z0-9_]*)"')
+_REFUSED_CALL = re.compile(r'\b_refused\(\s*["\']([a-z][a-z0-9_]*)["\']\s*\)')
+_EXPORT = re.compile(r'ExportRefused\("([a-z][a-z0-9_]*)"\)')
 
 
 def printed_pairs(text: str) -> dict[str, set[str]]:
@@ -383,12 +379,12 @@ def printed_pairs(text: str) -> dict[str, set[str]]:
         add(match.group(2), match.group(1))
     for match in _CALL.finditer(text):
         add(match.group(2), match.group(1))
+    for match in _CALL_WITH_CLASS.finditer(text):
+        add(match.group(2), match.group(1))
+    for match in _REFUSED_CALL.finditer(text):
+        add(match.group(1), "refused")
     for match in _EXPORT.finditer(text):
         add(match.group(1), "refused")
-    for match in _RESULT.finditer(text):
-        add(match.group(2), match.group(1))
-    for match in _DOCUMENT_RESULT.finditer(text):
-        add(match.group(2), match.group(1))
     return pairs
 
 
@@ -456,6 +452,29 @@ def _vocabulary_errors(  # noqa: C901 - one walk that reports every drift
     return errors
 
 
+def admission_errors() -> list[str]:
+    """Every reason the engine's own admission prelude can print, declared exactly once."""
+    import inspect
+
+    from . import engine
+
+    prelude = "\n".join(
+        inspect.getsource(function)
+        for function in (engine.payload, engine._backup_step, engine._sites_step)
+    )
+    printed = set(printed_pairs(prelude))
+    expected = {reason.name for reason in ADMISSION}
+    errors = [
+        f"admission prelude prints {name!r}, which ADMISSION does not declare."
+        for name in sorted(printed - expected)
+    ]
+    errors.extend(
+        f"ADMISSION declares {name!r}, which the admission prelude cannot print."
+        for name in sorted(expected - printed)
+    )
+    return errors
+
+
 def manifest_errors() -> list[str]:
     """Every drift between a declared vocabulary and its composed text.
 
@@ -472,4 +491,5 @@ def manifest_errors() -> list[str]:
     for name, (declared, sources) in _BODY_VOCABULARIES.items():
         if sources:
             errors.extend(_vocabulary_errors(name, declared, sources, shared))
+    errors.extend(admission_errors())
     return errors

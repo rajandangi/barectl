@@ -273,7 +273,7 @@ def _stopped_step(steps: tuple[PlainStep, ...]) -> str:
     )
 
 
-def _run_words(
+def _run_words(  # noqa: C901 - one sentence per run outcome
     outcome: RunOutcome, server_name: str, run: ChangeRun, steps: tuple[PlainStep, ...]
 ) -> tuple[str, str]:
     if outcome == RunOutcome.QUEUED:
@@ -287,6 +287,8 @@ def _run_words(
             ),
         )
     if outcome == RunOutcome.SUCCEEDED:
+        if run.failure == engine.UNREADABLE_RESULT_FAILURE:
+            return "Done", run.failure
         return "Done", "Barectl finished this change and checked it on the server."
     if outcome == RunOutcome.RECONCILING:
         if run.failure == engine.UNREADABLE_RESULT_FAILURE:

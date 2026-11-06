@@ -176,6 +176,7 @@ MISMATCH = (
 )
 UNREADABLE_EVIDENCE = "The unit's native state could not be read."
 UNREADABLE_RESULT = "Unreadable result line"
+UNREADABLE_RESULT_REASON = "unreadable_result"
 UNREADABLE_RESULT_FAILURE = (
     f"{UNREADABLE_RESULT}. Barectl could not read the server's own result line, so it "
     "cannot say what the run reported. The outcome comes from the server's exit evidence."
@@ -1507,7 +1508,10 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
     if result_evidence is ResultEvidence.UNREADABLE:
         failure = UNREADABLE_RESULT_FAILURE
     succeeded = outcome == Result.SUCCEEDED and verification == Verification.PASSED
-    if succeeded:
+    stored_reason = reason
+    if result_evidence is ResultEvidence.UNREADABLE:
+        stored_reason = UNREADABLE_RESULT_REASON
+    elif succeeded:
         failure = ""
     with transaction.atomic():
         if not lifecycle.finish(
@@ -1517,7 +1521,7 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
         ChangeRun.objects.filter(pk=run.pk).update(
             execution=outcome,
             exit_status=exit_status,
-            result_reason=reason,
+            result_reason=stored_reason,
             verification=verification,
             window_outcome=window.value if window is not None else "",
             invocation_id=evidence.invocation_id if evidence is not None else run.invocation_id,

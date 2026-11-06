@@ -124,9 +124,9 @@ WORKER_REASONS: Final = (
         "queue_workers",
         {
             Result.REFUSED: (
-                "Barectl could not change the site's queue workers, so the run stopped. The "
-                "site may be partly changed; check the run's journal on the server, then "
-                "prepare a new review."
+                "Barectl could not change the site's queue workers, so the run stopped before "
+                "changing them. Check the run's journal on the server, then prepare a new "
+                "review."
             ),
         },
     ),
