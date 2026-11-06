@@ -18,7 +18,7 @@ from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import server_state
 from servers.models import Server
-from servers.preparation import server_facts, stored_server_facts
+from servers.preparation import server_facts
 from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 from sites.preparation import site_facts
@@ -98,7 +98,7 @@ def context_for_site(
     downloads.expire(server, identifier)
     target = _target(snapshot, site)
     managed = target and site is not None and site.state == "managed"
-    facts = server_facts(state, user) if isinstance(user, User) else stored_server_facts(state)
+    facts = server_facts(state, user)
     observed = site_facts(snapshot, identifier)
 
     def decide(requirements: preparation.Requirements) -> preparation.Decision:
@@ -132,26 +132,6 @@ def context_for_site(
         ),
         "backups_target": target,
         "backups_site_reason": _sentence(base),
-        "backups_can_enable": False,
-        "backups_enable_reason": "",
-        "backups_can_back_up": False,
-        "backups_back_up_reason": "",
-        "backups_can_back_up_full": False,
-        "backups_back_up_full_reason": "",
-        "backups_can_copy": False,
-        "backups_copy_reason": "",
-        "backups_can_reopen": False,
-        "backups_reopen_reason": "",
-        "backups_can_restore": False,
-        "backups_restore_reason": "",
-        "backups_can_delete_removed": False,
-        "backups_delete_removed_reason": "",
-        "backups_can_export": False,
-        "backups_export_reason": "",
-        "backups_can_set_retention": False,
-        "backups_set_retention_reason": "",
-        "backups_can_keep": False,
-        "backups_keep_reason": "",
         "backups_can_download": user.has_perms(
             ("servers.view_server", VIEW_SITES, "operations.change_shared")
         ),
@@ -161,41 +141,40 @@ def context_for_site(
         "backups_database_reason": ("" if view.database else view.database_reason),
         "backups_kit_lines": presentation.kit_lines(server.name, identifier, collected),
     }
-    if isinstance(user, User):
-        context["backups_can_enable"], context["backups_enable_reason"] = _offered(enable, True, "")
-        context["backups_can_back_up"], context["backups_back_up_reason"] = _offered(
-            base,
-            enabled and view.database,
-            view.database_reason or "Enable backups before taking a backup.",
-        )
-        context["backups_can_back_up_full"], context["backups_back_up_full_reason"] = _offered(
-            base, enabled, "Enable backups before taking a backup."
-        )
-        context["backups_can_copy"], context["backups_copy_reason"] = _offered(
-            base,
-            enabled and view.offsite is not None,
-            "Enable backups and set up offsite storage before copying a point offsite.",
-        )
-        context["backups_can_reopen"], context["backups_reopen_reason"] = _offered(
-            reopen,
-            view.reopen,
-            "This site is not paused by a full backup, so there is nothing to reopen.",
-        )
-        context["backups_can_restore"], context["backups_restore_reason"] = _offered(
-            destructive, enabled, "Enable backups before restoring a recovery point."
-        )
-        context["backups_can_delete_removed"], context["backups_delete_removed_reason"] = _offered(
-            destructive, True, ""
-        )
-        context["backups_can_export"], context["backups_export_reason"] = _offered(
-            export, enabled, "Enable backups before exporting a recovery point."
-        )
-        context["backups_can_set_retention"], context["backups_set_retention_reason"] = _offered(
-            destructive, enabled, "Enable backups before setting retention."
-        )
-        context["backups_can_keep"], context["backups_keep_reason"] = _offered(
-            base, enabled, "Enable backups before keeping a recovery point."
-        )
+    context["backups_can_enable"], context["backups_enable_reason"] = _offered(enable, True, "")
+    context["backups_can_back_up"], context["backups_back_up_reason"] = _offered(
+        base,
+        enabled and view.database,
+        view.database_reason or "Enable backups before taking a backup.",
+    )
+    context["backups_can_back_up_full"], context["backups_back_up_full_reason"] = _offered(
+        base, enabled, "Enable backups before taking a backup."
+    )
+    context["backups_can_copy"], context["backups_copy_reason"] = _offered(
+        base,
+        enabled and view.offsite is not None,
+        "Enable backups and set up offsite storage before copying a point offsite.",
+    )
+    context["backups_can_reopen"], context["backups_reopen_reason"] = _offered(
+        reopen,
+        view.reopen,
+        "This site is not paused by a full backup, so there is nothing to reopen.",
+    )
+    context["backups_can_restore"], context["backups_restore_reason"] = _offered(
+        destructive, enabled, "Enable backups before restoring a recovery point."
+    )
+    context["backups_can_delete_removed"], context["backups_delete_removed_reason"] = _offered(
+        destructive, True, ""
+    )
+    context["backups_can_export"], context["backups_export_reason"] = _offered(
+        export, enabled, "Enable backups before exporting a recovery point."
+    )
+    context["backups_can_set_retention"], context["backups_set_retention_reason"] = _offered(
+        destructive, enabled, "Enable backups before setting retention."
+    )
+    context["backups_can_keep"], context["backups_keep_reason"] = _offered(
+        base, enabled, "Enable backups before keeping a recovery point."
+    )
     retention.context_for_site(server, identifier, context)
     schedule.context_for_site(server, identifier, context)
     return context
