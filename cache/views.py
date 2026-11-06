@@ -30,6 +30,20 @@ from .presentation import site_context
 from .reading import READ_PERMISSIONS, request_reading
 
 BUSY = "Wait for the current operation before preparing this change."
+CACHE_NOT_READY = (
+    "This site is not ready for an object cache change. Run discovery, resolve the server's "
+    "findings, or wait for the current change."
+)
+
+
+def _cache_refusal(context: dict[str, object], action: str) -> str:
+    """The gate's sentence for a withheld cache action, or empty when it is allowed."""
+    prepares = action in ("client", "on")
+    allowed = context["object_cache_can_prepare" if prepares else "object_cache_can_turn_off"]
+    if allowed:
+        return ""
+    reason = context["object_cache_reason" if prepares else "object_cache_turn_off_reason"]
+    return str(reason) or CACHE_NOT_READY
 
 
 @never_cache
@@ -101,6 +115,10 @@ def prepare_site_cache(request: HttpRequest, pk: int, identifier: str) -> HttpRe
         messages.error(request, "Choose a supported object cache action.")
         return redirect("site_settings", pk=pk, identifier=identifier)
     action = str(form.cleaned_data["action"])
+    refusal = _cache_refusal(context, action)
+    if refusal:
+        messages.error(request, refusal)
+        return redirect("site_settings", pk=pk, identifier=identifier)
     inputs: dict[str, object]
     if action == "client":
         slug = "set_site_php_client"
@@ -110,18 +128,6 @@ def prepare_site_cache(request: HttpRequest, pk: int, identifier: str) -> HttpRe
             "php_client": True,
         }
     else:
-        allowed = (
-            context["object_cache_can_prepare"]
-            if action == "on"
-            else context["object_cache_can_turn_off"]
-        )
-        if not allowed:
-            messages.error(
-                request,
-                "This site is not ready for an object cache change. Run discovery, resolve "
-                "the server's findings, or wait for the current change.",
-            )
-            return redirect("site_settings", pk=pk, identifier=identifier)
         slug = SET_SITE_OBJECT_CACHE_SLUG
         memory = int(str(form.cleaned_data["memory"])) if action == "on" else 0
         inputs = {

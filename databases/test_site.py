@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from bootstrap.standing import HostJudgment, Standing
 from discovery.fakes import COLLECTED, record_attempt
-from discovery.models import DiscoveryAttempt, ObservationOutcome
+from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import (
     CollectedSnapshot,
     Observation,
@@ -222,8 +222,12 @@ class SiteBindingPageTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         self.server = Server.objects.create(name="DB", ssh_alias="db.example.com")
 
-    def snapshot(self, *components: WebStackComponentObservation) -> None:
-        collected = _collected(*components, site_identifier=IDENTIFIER)
+    def snapshot(
+        self,
+        *components: WebStackComponentObservation,
+        state: SiteState = SiteState.MANAGED,
+    ) -> None:
+        collected = _collected(*components, site_identifier=IDENTIFIER, state=state)
         attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
         save_snapshot(attempt, collected, timezone.now())
 
@@ -258,6 +262,24 @@ class SiteBindingPageTests(ControllerConfigTestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_a_not_following_site_withholds_adding_a_database_with_the_gate_sentence(
+        self,
+    ) -> None:
+        self.snapshot(
+            _component(binding.MARIADB, "1:11.8.6-5ubuntu0.1"),
+            state=SiteState.NOT_FOLLOWING,
+        )
+        page_url = f"/servers/{self.server.pk}/sites/{IDENTIFIER}/database/"
+        prepare_url = f"{page_url}prepare/"
+        sentence = "This site does not follow the supported convention; Barectl can only remove it."
+        response = self.client.get(page_url)
+        self.assertNotContains(response, "Add database")
+        self.assertContains(response, sentence)
+        refusal = self.client.post(prepare_url, {}, follow=True)
+        self.assertEqual(refusal.redirect_chain[0][0], page_url)
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
+
 
 class SiteBindingInputTests(ControllerConfigTestCase):
     def test_the_shape_accepts_one_identifier(self) -> None:
@@ -272,9 +294,10 @@ class SiteBindingInputTests(ControllerConfigTestCase):
 
 
 def _collected(
-    *components: WebStackComponentObservation, site_identifier: str
+    *components: WebStackComponentObservation,
+    site_identifier: str,
+    state: SiteState = SiteState.MANAGED,
 ) -> CollectedSnapshot:
-    from discovery.models import SiteState
     from discovery.snapshot import ObservedSite, SiteAccount
 
     site_value = ObservedSite(
@@ -282,7 +305,7 @@ def _collected(
         (f"{site_identifier}.example.com",),
         "php84",
         SiteAccount(1001, 1001, f"/var/www/{site_identifier}", "/usr/sbin/nologin"),
-        SiteState.MANAGED,
+        state,
         ObservationOutcome.OBSERVED,
         file=f"/etc/caddy/sites/{site_identifier}.caddy",
     )

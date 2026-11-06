@@ -124,6 +124,31 @@ def attach_current_connection(server: Server, attempt: DiscoveryAttempt) -> None
     attempt.save(update_fields=["connection"])
 
 
+def record_site_state(
+    server: Server,
+    *,
+    identifier: str = "alpha",
+    state: SiteState,
+    missing: tuple[str, ...] = (),
+) -> None:
+    """Replace one observed site's convention shape in the current snapshot."""
+    snapshot = current_snapshot(server)
+    if snapshot is None:
+        raise AssertionError("No snapshot.")
+    observed = snapshot.collected.sites
+    sites = tuple(
+        replace(row, state=state, missing=missing) if row.identifier == identifier else row
+        for row in observed.value
+    )
+    attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+    attach_current_connection(server, attempt)
+    save_snapshot(
+        attempt,
+        replace(snapshot.collected, sites=replace(observed, value=sites)),
+        timezone.now(),
+    )
+
+
 def record_php85_installed(server: Server) -> None:
     """A host where PHP 8.5 was installed and discovery verified its service."""
     record_http_sites(server)

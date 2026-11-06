@@ -1,5 +1,7 @@
 """A site's PHP settings form queues a reviewed native pool change through the worker."""
 
+from dataclasses import replace
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -7,11 +9,9 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
@@ -21,6 +21,7 @@ from .bodies.pool import SitePool
 from .names import valid_identifier
 from .pool_change import SLUG
 from .pool_forms import SitePoolForm
+from .preparation import decide_for_site
 
 
 def _site(state: DiscoveryState, identifier: str) -> tuple[ObservedSite | None, SitePool | None]:
@@ -38,23 +39,13 @@ def context_for_site(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
-    site, pool = _site(state, identifier)
-    allowed = (
-        site is not None
-        and pool is not None
-        and state.snapshot is not None
-        and state.snapshot.collected.standing is not None
-        and state.snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and site.file.startswith("/etc/caddy/sites/")
-        and site.state == SiteState.MANAGED
-    )
+    _, pool = _site(state, identifier)
+    decision = decide_for_site(state, user, identifier, replace(preparation.SITE, pool=True))
     return {
         "site_pool": pool,
         "site_pool_form": SitePoolForm(pool=pool),
-        "site_pool_can_prepare": allowed
-        and state.can_prepare_changes
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-        and not services.read_changes(server).polling,
+        "site_pool_can_prepare": decision.allowed,
+        "site_pool_reason": decision.reason.sentence if decision.reason else "",
     }
 
 
@@ -70,7 +61,9 @@ def prepare_pool(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
     form = SitePoolForm(request.POST, pool=pool)
     if not context["site_pool_can_prepare"] or not form.is_valid():
         messages.error(
-            request, "Choose PHP settings within the supported bounds from a current observation."
+            request,
+            str(context["site_pool_reason"])
+            or "Choose PHP settings within the supported bounds from a current observation.",
         )
         return redirect("site_settings", pk=pk, identifier=identifier)
     try:

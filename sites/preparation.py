@@ -13,7 +13,7 @@ from servers.preparation import server_facts
 from sites.bodies.common import SITE_GATED
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import User
+    from django.contrib.auth.models import AnonymousUser, User
 
     from servers.discovery_state import DiscoveryState
 
@@ -107,7 +107,7 @@ def site_facts(snapshot: Snapshot | None, identifier: str) -> preparation.SiteFa
 
 def decide_for_site(
     state: DiscoveryState,
-    user: User,
+    user: User | AnonymousUser,
     identifier: str,
     requirements: preparation.Requirements,
 ) -> preparation.Decision:

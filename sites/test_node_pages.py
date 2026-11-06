@@ -8,15 +8,16 @@ from django.test import Client
 from django.utils import timezone
 
 from discovery.fakes import record_attempt
-from discovery.models import DiscoveryAttempt
+from discovery.models import DiscoveryAttempt, SiteState
 from discovery.snapshot import current_snapshot, save_snapshot
 from operations.services import read_changes
 from runtimes.observation import RuntimeObservation
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 
+from .bodies.common import NODE_INTERRUPTED
 from .node_change import SLUG
-from .ui_testing import record_http_sites, record_step_run
+from .ui_testing import record_http_sites, record_site_state, record_step_run
 
 
 def record_node_sites(
@@ -128,6 +129,26 @@ class SiteNodeSettingsTests(ControllerConfigTestCase):
         rows = read_changes(self.server).rows
         self.assertEqual(rows[0].preparation.kind_slug, SLUG)
         self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
+
+    def test_an_interrupted_node_selection_still_offers_the_node_card(self) -> None:
+        record_site_state(
+            self.server,
+            state=SiteState.PARTLY_APPLIED,
+            missing=(NODE_INTERRUPTED,),
+        )
+        response = self.client.get(self.settings_url)
+        self.assertContains(response, "Finish or reverse the Node.js change")
+
+    def test_a_not_following_site_withholds_the_node_card_with_the_gate_sentence(self) -> None:
+        record_site_state(self.server, state=SiteState.NOT_FOLLOWING)
+        sentence = "This site does not follow the supported convention; Barectl can only remove it."
+        response = self.client.get(self.settings_url)
+        self.assertNotContains(response, "?change=node#change-node")
+        self.assertContains(response, sentence)
+        refusal = self.client.post(self.url, {"selection": "nodejs_24"}, follow=True)
+        self.assertEqual(refusal.redirect_chain[0][0], self.settings_url)
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
 
     def test_viewer_cannot_submit_a_node_change(self) -> None:
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))

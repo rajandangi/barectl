@@ -6,6 +6,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from bootstrap.standing import Standing
+from discovery.models import SiteState
 from operations.consent import Scope
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from servers.models import Server
@@ -13,7 +14,7 @@ from servers.testing import ControllerConfigTestCase
 from sites.bodies.common import NativeState
 from sites.domains_change import SLUG, DomainsEvidence, body, review
 from sites.forms import SiteDomainsForm
-from sites.ui_testing import record_http_sites
+from sites.ui_testing import record_http_sites, record_site_state
 
 
 def evidence(
@@ -226,6 +227,28 @@ class DomainsPageTests(ControllerConfigTestCase):
             },
         )
         self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
+
+    def test_a_not_following_site_withholds_the_domains_card_with_the_gate_sentence(
+        self,
+    ) -> None:
+        from operations.services import read_changes
+
+        record_site_state(self.server, state=SiteState.NOT_FOLLOWING)
+        sentence = "This site does not follow the supported convention; Barectl can only remove it."
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/settings/")
+        self.assertNotContains(response, "Change domains and HTTPS")
+        self.assertContains(response, sentence)
+        refusal = self.client.post(
+            f"/servers/{self.server.pk}/sites/alpha/settings/domains/prepare/",
+            {"names": "alpha.example.com"},
+            follow=True,
+        )
+        self.assertEqual(
+            refusal.redirect_chain[0][0],
+            f"/servers/{self.server.pk}/sites/alpha/settings/",
+        )
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
 
     def test_a_viewer_cannot_prepare_a_domains_change(self) -> None:
         from operations.services import read_changes
