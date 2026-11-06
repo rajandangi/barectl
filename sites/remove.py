@@ -32,6 +32,7 @@ from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of
 
 from . import observation
+from .bodies.reasons import REMOVAL_REASONS, SITE_REASONS
 from .bodies.remove import backup_key, backup_paths, backup_repository
 from .configuration import PHP_RUNTIMES
 from .names import canonical_name, valid_identifier
@@ -785,4 +786,11 @@ REMOVE: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_REMOVE,
+    reasons=(*SITE_REASONS, *REMOVAL_REASONS),
+    body_sources=(
+        "sites/bodies/common.py",
+        "sites/bodies/remove.py",
+        "automation/convention.py",
+        "automation/bodies/units.py",
+    ),
 )
