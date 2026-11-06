@@ -44,6 +44,7 @@ from sites.configuration import (
 from sites.names import valid_identifier
 
 from . import convention, kit, observation
+from .bodies.reasons import BACKUP_REASONS, ENABLE_REASONS, FULL_REASONS
 
 ENABLE_SLUG: Final = "enable_backups"
 ENABLE_LABEL: Final = "Enable backups"
@@ -1073,6 +1074,12 @@ ENABLE: Final = ChangeKind(
     refresh_discovery=True,
     input_shape=InputShape.SITE,
     writes_secrets=True,
+    reasons=ENABLE_REASONS,
+    body_sources=(
+        "backups/bodies/enable.py",
+        "backups/bodies/native.py",
+        "backups/bodies/integrity.py",
+    ),
 )
 
 BACK_UP_NOW: Final = ChangeKind(
@@ -1084,6 +1091,8 @@ BACK_UP_NOW: Final = ChangeKind(
     verify=verify_backup,
     refresh_discovery=True,
     input_shape=InputShape.SITE,
+    reasons=BACKUP_REASONS,
+    body_sources=("backups/bodies/native.py", "backups/bodies/backup.py"),
 )
 
 BACK_UP_FULL: Final = ChangeKind(
@@ -1095,4 +1104,11 @@ BACK_UP_FULL: Final = ChangeKind(
     verify=verify_full,
     refresh_discovery=True,
     input_shape=InputShape.BACKUP_CAPTURE,
+    reasons=FULL_REASONS,
+    body_sources=(
+        "backups/bodies/full.py",
+        "backups/bodies/native.py",
+        "backups/bodies/paused.py",
+        "sites/bodies/common.py",
+    ),
 )
