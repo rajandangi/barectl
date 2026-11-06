@@ -57,10 +57,10 @@
       </form>
     {% elif blocking %}
       {% include "operations/_blocking_operation.html" with after="Prepare the domains and HTTPS change after it finishes." %}
+      {% if site_domains_reason %}<p class="barectl-note">{{ site_domains_reason }}</p>{% endif %}
     {% else %}
       <p class="barectl-note">
-        Run discovery, resolve the server's findings, or wait for the current change before
-        changing the names and HTTPS setting.
+        {{ site_domains_reason|default:"Run discovery, resolve the server's findings, or wait for the current change before changing the names and HTTPS setting." }}
       </p>
     {% endif %}
   </section>

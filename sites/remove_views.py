@@ -8,10 +8,8 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
 from backups import presentation as backup_presentation
-from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome
 from discovery.presentation import VIEW_SITES
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import server_state
@@ -19,6 +17,7 @@ from servers.models import Server
 from sites.names import canonical_name, valid_identifier
 
 from . import remove as remove_kind
+from .preparation import decide_for_site
 
 SLUG = remove_kind.SLUG
 
@@ -42,25 +41,25 @@ def context_for_site(
         if snapshot is not None
         else None
     )
-    allowed = (
-        site is not None
-        and snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and snapshot.collected.sites.outcome == ObservationOutcome.OBSERVED
-        and site.outcome == ObservationOutcome.OBSERVED
-        and site.file == f"/etc/caddy/sites/{identifier}.caddy"
+    decision = decide_for_site(
+        state,
+        user,
+        identifier,
+        preparation.Requirements(
+            site=True,
+            convention=False,
+            allow_not_following=True,
+            # Removal is the way out of a partly applied or not-following site.
+            allow_partly_applied=True,
+            needs=frozenset({preparation.Need.CHANGE, preparation.Need.SITE}),
+        ),
     )
     return {
         "site_remove_has_backups": backup is not None and backup.enabled,
         "site_remove_domains": names,
         "site_remove_primary": names[0] if names else "",
-        "site_remove_can_prepare": (
-            allowed
-            and state.can_prepare_changes
-            and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-            and not services.read_changes(server).polling
-        ),
+        "site_remove_can_prepare": decision.allowed,
+        "site_remove_reason": decision.reason.sentence if decision.reason else "",
     }
 
 
@@ -75,8 +74,11 @@ def prepare_remove(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
     if not context["site_remove_can_prepare"]:
         messages.error(
             request,
-            "Run discovery, resolve the server's findings and wait for any current operation "
-            "before preparing this site's removal.",
+            str(context["site_remove_reason"])
+            or (
+                "Run discovery, resolve the server's findings and wait for any current operation "
+                "before preparing this site's removal."
+            ),
         )
         return redirect("site_settings", pk=pk, identifier=identifier)
     primary = str(context["site_remove_primary"])

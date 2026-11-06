@@ -7,11 +7,9 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome, SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
@@ -20,6 +18,7 @@ from servers.models import Server
 from .domains_change import SLUG
 from .forms import SiteDomainsForm
 from .names import valid_identifier
+from .preparation import decide_for_site
 
 
 def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
@@ -36,30 +35,16 @@ def context_for_site(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
-    snapshot = state.snapshot
     site = _site(state, identifier)
     names = tuple(site.server_names) if site is not None else ()
     https = bool(site.https) if site is not None else True
-    allowed = (
-        site is not None
-        and snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and snapshot.collected.sites.outcome == ObservationOutcome.OBSERVED
-        and site.outcome == ObservationOutcome.OBSERVED
-        and site.state == SiteState.MANAGED
-        and site.file == f"/etc/caddy/sites/{identifier}.caddy"
-    )
+    decision = decide_for_site(state, user, identifier, preparation.SITE)
     return {
         "site_domains": names,
         "site_https": https,
         "site_domains_form": SiteDomainsForm(initial={"names": "\n".join(names), "https": https}),
-        "site_domains_can_prepare": (
-            allowed
-            and state.can_prepare_changes
-            and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-            and not services.read_changes(server).polling
-        ),
+        "site_domains_can_prepare": decision.allowed,
+        "site_domains_reason": decision.reason.sentence if decision.reason else "",
     }
 
 
@@ -75,8 +60,11 @@ def prepare_domains(request: HttpRequest, pk: int, identifier: str) -> HttpRespo
     if not context["site_domains_can_prepare"] or not form.is_valid():
         messages.error(
             request,
-            "Choose the site's names from a current, complete site observation. "
-            "Run discovery and resolve the server's findings first.",
+            str(context["site_domains_reason"])
+            or (
+                "Choose the site's names from a current, complete site observation. "
+                "Run discovery and resolve the server's findings first."
+            ),
         )
         return redirect("site_settings", pk=pk, identifier=identifier)
     try:

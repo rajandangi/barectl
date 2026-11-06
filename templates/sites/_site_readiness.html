@@ -10,22 +10,24 @@
       This site detects a Laravel application, whose own readiness check is <code>/up</code>.
       Its Deploy and Roll back keep that check.
     </p>
+  {% endif %}
+  {% if site_readiness_can_prepare %}
+    <form method="post"
+          action="{% url 'site_readiness_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      <label class="usa-label"
+             for="{{ site_readiness_form.readiness.id_for_label }}">Readiness path</label>
+      <div class="usa-hint"
+           id="{{ site_readiness_form.readiness.id_for_label }}_hint">
+        {{ site_readiness_form.readiness.help_text }}
+      </div>
+      {{ site_readiness_form.readiness }}
+      <button class="usa-button" type="submit">Change readiness path</button>
+    </form>
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Change the readiness path after it finishes." %}
+    {% if site_readiness_reason %}<p class="barectl-note">{{ site_readiness_reason }}</p>{% endif %}
   {% else %}
-    {% if site_readiness_can_prepare %}
-      <form method="post"
-            action="{% url 'site_readiness_prepare' server.pk identifier %}">
-        {% csrf_token %}
-        <label class="usa-label"
-               for="{{ site_readiness_form.readiness.id_for_label }}">Readiness path</label>
-        <div class="usa-hint"
-             id="{{ site_readiness_form.readiness.id_for_label }}_hint">
-          {{ site_readiness_form.readiness.help_text }}
-        </div>
-        {{ site_readiness_form.readiness }}
-        <button class="usa-button" type="submit">Change readiness path</button>
-      </form>
-    {% elif blocking %}
-      {% include "operations/_blocking_operation.html" with after="Change the readiness path after it finishes." %}
-    {% endif %}
+    <p class="barectl-note">{{ site_readiness_reason }}</p>
   {% endif %}
 </section>

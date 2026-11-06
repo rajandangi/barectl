@@ -104,7 +104,14 @@ class ScheduledTasksPageTests(ControllerConfigTestCase):
         reason = "This site is partly applied; finish the change that is already in progress first."
         self.assertIn("Scheduled tasks", html)
         self.assertIn("Queue workers", html)
-        self.assertEqual(html.count(reason), 2)
+        scheduled = html.split('aria-labelledby="scheduled-tasks"', 1)[1].split(
+            'aria-labelledby="queue-workers"', 1
+        )[0]
+        workers = html.split('aria-labelledby="queue-workers"', 1)[1].split(
+            'aria-labelledby="site-remove-heading"', 1
+        )[0]
+        self.assertIn(reason, scheduled)
+        self.assertIn(reason, workers)
         self.assertNotIn("site_scheduled_tasks_prepare", html)
         self.assertNotIn("site_queue_workers_prepare", html)
 

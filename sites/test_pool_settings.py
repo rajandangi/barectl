@@ -1,12 +1,16 @@
 """Site PHP settings: form bounds, review consent, native rendering and reconstruction."""
 
+from dataclasses import replace
 from typing import cast, override
 from unittest import mock
 
 from django.test import SimpleTestCase
+from django.utils import timezone
 
 from bootstrap.standing import Standing
-from discovery.snapshot import current_snapshot
+from discovery.fakes import record_attempt
+from discovery.models import DiscoveryAttempt, SiteState
+from discovery.snapshot import current_snapshot, save_snapshot
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from operations.services import read_changes
 from servers.models import Server
@@ -21,7 +25,7 @@ from sites.bodies.pool import (
 from sites.configuration import SiteSettings, render_pool
 from sites.pool_change import PoolEvidence, review
 from sites.pool_forms import SitePoolForm
-from sites.ui_testing import record_http_sites
+from sites.ui_testing import record_http_sites, record_site_state
 
 
 def pool(**values: object) -> SitePool:
@@ -270,3 +274,48 @@ class SitePoolPageTests(ControllerConfigTestCase):
         self.assertContains(response, "PHP settings")
         self.assertContains(response, 'name="max_children"')
         self.assertContains(response, 'value="2"')
+
+    def test_a_partly_applied_site_withholds_php_settings_and_refuses_the_post(self) -> None:
+        record_site_state(self.server, state=SiteState.PARTLY_APPLIED)
+        sentence = (
+            "This site is partly applied; finish the change that is already in progress first."
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/settings/")
+        self.assertNotContains(response, 'name="max_children"')
+        self.assertContains(response, sentence)
+        refusal = self.client.post(
+            self.url, {"process_manager": "static", "max_children": "4"}, follow=True
+        )
+        self.assertEqual(
+            refusal.redirect_chain[0][0],
+            f"/servers/{self.server.pk}/sites/alpha/settings/",
+        )
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
+
+    def test_a_site_without_an_observed_pool_withholds_with_that_reason(self) -> None:
+        self.record_without_pool()
+        sentence = "Barectl has not observed this site's PHP settings."
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/settings/")
+        self.assertNotContains(response, 'name="max_children"')
+        self.assertContains(response, sentence, html=True)
+        refusal = self.client.post(
+            self.url, {"process_manager": "static", "max_children": "4"}, follow=True
+        )
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
+
+    def record_without_pool(self) -> None:
+        snapshot = current_snapshot(self.server)
+        if snapshot is None:
+            self.fail("No setup snapshot.")
+        observed = snapshot.collected.sites
+        sites = tuple(
+            replace(site, pool=None) if site.identifier == "alpha" else site
+            for site in observed.value
+        )
+        save_snapshot(
+            record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED),
+            replace(snapshot.collected, sites=replace(observed, value=sites)),
+            timezone.now(),
+        )
