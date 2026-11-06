@@ -28,7 +28,7 @@ class Attention:
 
 
 def needs_attention(
-    server: int, collected: CollectedSnapshot, *, can_set_up: bool
+    server: int, collected: CollectedSnapshot, *, can_set_up: bool, set_up_reason: str = ""
 ) -> tuple[Attention, ...]:
     """Host findings first, then the sites' and runtimes' own findings."""
     standing = collected.standing
@@ -48,7 +48,10 @@ def needs_attention(
                 *(
                     ("Set up server", reverse("server_setup", args=(server,)))
                     if can_set_up
-                    else ("An operator with prepare permission can review the setup change.",)
+                    else (
+                        set_up_reason
+                        or "An operator with prepare permission can review the setup change.",
+                    )
                 ),
             ),
         )

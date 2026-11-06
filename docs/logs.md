@@ -137,9 +137,11 @@ The file is installed by every create path (Create site, Create WordPress site, 
 Laravel site) after the layout exists. A host without the logrotate package keeps its site;
 the file is absent and the Logs section says the server does not run logrotate. For a site
 created earlier, or whose file was edited outside the supported shape, the Logs section
-offers the reviewed **Set up log rotation** change (`set_up_log_rotation`, Site consent). It
-publishes only the reviewed text, after `logrotate --debug` accepts it; failure leaves the
-previous file and nothing else changes.
+offers the reviewed **Set up log rotation** change (`set_up_log_rotation`, Site consent). The
+card and its POST ask the [preparation gate](architecture.md#module-map); a site whose
+rotation is already supported withholds the card, and a refused offer shows the gate's one
+sentence. It publishes only the reviewed text, after `logrotate --debug` accepts it; failure
+leaves the previous file and nothing else changes.
 
 **Why the file rotates as root.** The site log directory is `caddy:site 0750`. logrotate's
 `su` runs the whole rotation as the named account, which cannot rename or create files in a

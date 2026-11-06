@@ -7,22 +7,22 @@ pages; they never connect.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from django.contrib.auth.models import AnonymousUser, User
 from django.db import transaction
 from django.utils import timezone
 
-from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import CollectedSnapshot, ObservedSite
-from operations import lifecycle
+from operations import lifecycle, preparation
 from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import VIEW_CHANGES, VIEW_EVIDENCE, RemoteOperation
-from servers.discovery_state import server_state
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites.names import valid_identifier
+from sites.preparation import decide_for_site
 
 from . import read as log_read
 from .models import PAGE_LIFETIME, LogRead
@@ -86,7 +86,8 @@ def context_for_site(
     target = site is not None and site.file.startswith("/etc/caddy/sites/")
     application = _application(server, identifier, site)
     sources = catalogue(site, application) if allowed and target else ()
-    snapshot = server_state(server).snapshot
+    state = server_state(server)
+    snapshot = state.snapshot
     views = tuple(
         SourceView(
             entry,
@@ -98,6 +99,11 @@ def context_for_site(
     chosen = next((view for view in views if view.source.slug == selected), None)
     active = any(view.active for view in views)
     rotation, rotation_files = _rotation_evidence(server, identifier, chosen, site)
+    decision = (
+        rotation_decision(state, identifier, user)
+        if isinstance(user, User)
+        else preparation.Decision(False)
+    )
     from .forms import LogFilterForm
 
     page = chosen.page if chosen is not None else None
@@ -121,7 +127,8 @@ def context_for_site(
         "logs_rotation": rotation,
         "logs_rotation_note": _rotation_note(rotation),
         "logs_rotation_files": rotation_files,
-        "logs_rotation_can_prepare": rotation_can_prepare(server, identifier, user, rotation),
+        "logs_rotation_can_prepare": decision.allowed,
+        "logs_rotation_reason": decision.reason.sentence if decision.reason is not None else "",
         "logs_filter": LogFilterForm(
             initial={
                 "term": chosen.read.term if chosen is not None and chosen.read else "",
@@ -243,17 +250,13 @@ def _rotation_note(state: str) -> str:
     return "This site's log rotation file was edited outside the supported settings."
 
 
-def rotation_can_prepare(
-    server: Server, identifier: str, user: User | AnonymousUser, state: str = ""
-) -> bool:
+def rotation_decision(state: DiscoveryState, identifier: str, user: User) -> preparation.Decision:
     """Whether the reviewed Log rotation action is offered for an existing site."""
-    site = _observed_site(server, identifier)
-    return (
-        site is not None
-        and state != "supported"
-        and site.state == SiteState.MANAGED
-        and user.has_perm(VIEW_CHANGES)
-        and lifecycle.active_operation(server) is None
+    return decide_for_site(
+        state,
+        user,
+        identifier,
+        replace(preparation.SITE, rotation_unsupported=True),
     )
 
 

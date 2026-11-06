@@ -196,6 +196,83 @@ class LogsPageTests(ControllerConfigTestCase):
         self.assertEqual(preparation.kind_slug, "set_up_log_rotation")
         self.assertEqual(preparation.inputs, {"version": 1, "identifier": "alpha"})
 
+    def test_a_missing_rotation_is_offered_and_a_supported_one_is_withheld(self) -> None:
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "view_evidence",
+        )
+        record_log_site(self.server, log_rotation="missing")
+        offered = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertContains(offered, "Set up log rotation")
+        self.assertNotContains(offered, "Log rotation is already set up for this site.")
+        record_log_site(self.server, log_rotation="supported")
+        withheld = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertNotContains(withheld, "Set up log rotation")
+        self.assertContains(withheld, "Log rotation is already set up for this site.")
+        from operations.preparation import ReasonName
+        from servers.discovery_state import server_state
+
+        decision = services.rotation_decision(server_state(self.server), "alpha", self.user)
+        self.assertIsNotNone(decision.reason)
+        self.assertEqual(
+            decision.reason.name if decision.reason else None, ReasonName.LOG_ROTATION_SUPPORTED
+        )
+
+    def test_the_rotation_card_requires_the_permission_its_post_requires(self) -> None:
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "view_evidence",
+        )
+        record_log_site(self.server, log_rotation="missing")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertNotContains(response, "Set up log rotation")
+        self.assertContains(response, "Your account does not have permission to prepare changes.")
+
+    def test_a_running_log_read_does_not_withhold_the_rotation_card(self) -> None:
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "view_evidence",
+        )
+        record_log_site(self.server, log_rotation="missing")
+        LogRead.objects.create(
+            server=self.server,
+            ssh_alias=self.server.ssh_alias,
+            requested_by=self.user,
+            identifier="alpha",
+            source="php_errors",
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertContains(response, "Set up log rotation")
+
+    def test_a_withheld_rotation_preparation_is_refused_with_the_gate_sentence(self) -> None:
+        from django.contrib.messages import get_messages
+
+        from operations.models import ChangePreparation
+
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "view_evidence",
+        )
+        record_log_site(self.server, log_rotation="supported")
+        response = self.client.post(f"/servers/{self.server.pk}/sites/alpha/logs/rotation/prepare/")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertEqual(ChangePreparation.objects.count(), 0)
+        self.assertEqual(
+            [str(message) for message in get_messages(response.wsgi_request)],
+            ["Log rotation is already set up for this site."],
+        )
+
 
 class LogReadWorkerTests(ControllerConfigTestCase):
     @override

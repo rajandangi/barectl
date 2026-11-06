@@ -50,7 +50,7 @@
       {% endfor %}
       {% if not can_add_runtime %}
         <p class="barectl-note">
-          Adding a version needs a ready server and permission to prepare changes.
+          {{ can_add_runtime_reason|default:"Adding a version needs a ready server and permission to prepare changes." }}
         </p>
       {% endif %}
     {% endif %}
@@ -117,6 +117,8 @@
                   class="usa-button usa-button--outline">Remove {{ engine.label }}</button>
         </form>
       {% endfor %}
+    {% elif database_reason %}
+      <p class="barectl-note">{{ database_reason }}</p>
     {% endif %}
   {% else %}
     <p>No observation yet. Check the connection to read the server's database engine.</p>
@@ -169,6 +171,8 @@
         <button type="submit"
                 class="usa-button usa-button--outline margin-top-2">Change certificate email</button>
       </form>
+    {% elif certificate_email_panel.reason %}
+      <p class="barectl-note">{{ certificate_email_panel.reason }}</p>
     {% endif %}
   {% else %}
     <p>The certificate contact email has not been observed yet. Run discovery to read it from the server.</p>
