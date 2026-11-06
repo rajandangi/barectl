@@ -149,9 +149,7 @@
       {% else %}
         <p>Barectl has no current release information for this site yet.</p>
       {% endif %}
-      {% if blocking %}
-        <p class="barectl-note">Wait for the active operation before preparing a Deploy.</p>
-      {% elif deploy_can_prepare %}
+      {% if deploy_can_prepare %}
         <form class="usa-form"
               method="post"
               action="{% url 'site_deploy_prepare' server.pk identifier %}">
@@ -159,9 +157,10 @@
           <button class="usa-button" type="submit">Deploy</button>
         </form>
       {% else %}
+        <p class="barectl-note">{{ deploy_reason }}</p>
         <p class="barectl-note">
           <a href="{% url 'site_deployments' server.pk identifier %}">Open Deployments</a>
-          to deploy or roll back once the site's current release is observed.
+          to review the site's releases.
         </p>
       {% endif %}
     {% elif not has_wordpress %}

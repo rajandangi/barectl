@@ -36,6 +36,55 @@ class SiteDeployPageTests(ControllerConfigTestCase):
         self.assertIn("Managed", body)
         self.assertIn("Retained", body)
         self.assertIn("2023-11-14 22:13 UTC", body)
+        self.assertIn(f"/servers/{self.server.pk}/sites/alpha/deployments/deploy/prepare/", body)
+        self.assertIn(f"/servers/{self.server.pk}/sites/alpha/deployments/rollback/prepare/", body)
+
+    def unreadable_releases(self) -> None:
+        from discovery.models import ObservationOutcome
+        from discovery.snapshot import ObservedSetting
+        from sites.ui_testing import record_site_settings
+
+        record_site_settings(
+            self.server,
+            application="laravel",
+            settings=(ObservedSetting("alpha", "laravel", "APP_ENV", "a" * 64, "production"),),
+            releases=(),
+            releases_outcome=ObservationOutcome.INACCESSIBLE,
+        )
+
+    def test_deploy_and_roll_back_agree_when_releases_are_unreadable(self) -> None:
+        from sites.deploy_views import deploy_context
+
+        self.unreadable_releases()
+        context = deploy_context(self.server, "alpha", self.user)
+        sentence = "Barectl could not read this site's releases."
+        self.assertFalse(context["deploy_can_prepare"])
+        self.assertFalse(context["rollback_can_prepare"])
+        self.assertEqual(context["deploy_reason"], sentence)
+        self.assertEqual(context["rollback_reason"], sentence)
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/deployments/")
+        self.assertContains(response, sentence, html=True)
+        self.assertNotContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/deployments/deploy/prepare/",
+        )
+        self.assertNotContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/deployments/rollback/prepare/",
+        )
+
+    def test_a_withheld_deploy_form_is_refused_with_the_gate_sentence(self) -> None:
+        self.unreadable_releases()
+        response = self.client.post(self.deploy_url, follow=True)
+        self.assertEqual(self._rows(), [])
+        self.assertContains(response, "Barectl could not read this site's releases.", html=True)
+
+    def test_a_withheld_roll_back_form_is_refused_with_the_gate_sentence(self) -> None:
+        release = f"{3:040x}-{'a' * 16}"
+        self.unreadable_releases()
+        response = self.client.post(self.rollback_url, {"release": release}, follow=True)
+        self.assertEqual(self._rows(), [])
+        self.assertContains(response, "Barectl could not read this site's releases.", html=True)
 
     def test_deploy_prepare_queues_only_the_versioned_identifier(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):

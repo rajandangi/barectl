@@ -6,6 +6,8 @@ Laravel identity comes from the settings and release rows, never from
 
 from typing import TYPE_CHECKING
 
+from django.contrib.auth.models import AnonymousUser, User
+
 from discovery.models import ObservationOutcome, SiteState
 from discovery.snapshot import CollectedSnapshot, Snapshot
 from operations import preparation
@@ -13,9 +15,9 @@ from servers.preparation import server_facts
 from sites.bodies.common import SITE_GATED
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AnonymousUser, User
-
     from servers.discovery_state import DiscoveryState
+
+type Account = User | AnonymousUser
 
 # The same interruption evidence the Backups section uses (backups/presentation.py).
 _INTERRUPTED_BY_PAUSE = frozenset(
@@ -107,7 +109,7 @@ def site_facts(snapshot: Snapshot | None, identifier: str) -> preparation.SiteFa
 
 def decide_for_site(
     state: DiscoveryState,
-    user: User | AnonymousUser,
+    user: Account,
     identifier: str,
     requirements: preparation.Requirements,
 ) -> preparation.Decision:

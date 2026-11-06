@@ -101,10 +101,7 @@
       <button class="usa-button" type="submit">Review adding the constant</button>
     </form>
   {% else %}
-    <p class="barectl-note">
-      Editing WordPress settings needs site changes and the manage-secrets permission, and
-      a current, complete WordPress site observation.
-    </p>
+    <p class="barectl-note">{{ wordpress_settings_reason }}</p>
   {% endif %}
 </section>
 <section class="barectl-card"
@@ -128,13 +125,8 @@
       {{ wordpress_password_form.admin_username }}
       <button class="usa-button" type="submit">Review password reset</button>
     </form>
-  {% elif blocking %}
-    {% include "operations/_blocking_operation.html" with after="Prepare the password reset after it finishes." %}
   {% else %}
-    <p class="barectl-note">
-      Resetting a password needs site changes and the manage-secrets permission, and a
-      current, complete WordPress observation.
-    </p>
+    <p class="barectl-note">{{ wordpress_password_reason }}</p>
   {% endif %}
 </section>
 <section class="barectl-card" aria-labelledby="site-wordpress-core-heading">
@@ -150,11 +142,7 @@
       {% csrf_token %}
       <button class="usa-button usa-button--outline" type="submit">Review core verification</button>
     </form>
-  {% elif blocking %}
-    {% include "operations/_blocking_operation.html" with after="Prepare the core verification after it finishes." %}
   {% else %}
-    <p class="barectl-note">
-      Verifying core files needs site changes and a current, complete WordPress observation.
-    </p>
+    <p class="barectl-note">{{ wordpress_core_reason }}</p>
   {% endif %}
 </section>
