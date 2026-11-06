@@ -12,6 +12,7 @@ Reading pull-request checks, the failed job's assertion and a flaky re-run is in
 - **Comment on an issue**: `gh issue comment <number> --body-file <file>`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`. When a pull request resolves tickets, put one `Closes #<number>` line in its body so the merge closes them; the repository's pull-request template prompts for it.
+- **Verify after a merge**: GitHub closes linked issues asynchronously. Read `gh pr view <number> --json closingIssuesReferences` and re-check `gh issue view <number> --json state` after the merge; a just-merged pull request can still show a linked issue open for a short time. A manual close is a no-op when auto-close has already run.
 
 Run commands from the Barectl clone. When running elsewhere, pass `--repo rajandangi/barectl`. Use `--body-file` for multiline issue, comment, and PR bodies. Use this configuration when the user invokes an engineering workflow; it is not a standing instruction to publish issues or comments without a task.
 

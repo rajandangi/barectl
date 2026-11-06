@@ -7,6 +7,7 @@ from django.test import SimpleTestCase
 from bootstrap.bodies.reasons import CERTIFICATE_EMAIL_REASONS, FOUNDATION_REASONS
 from operations import engine, reasons
 from operations.models import Result
+from operations.reason_testing import assert_declared_sentences
 
 
 class ReasonAssertions(SimpleTestCase):
@@ -14,18 +15,7 @@ class ReasonAssertions(SimpleTestCase):
         return ()
 
     def test_every_declared_reason_has_its_own_sentence(self) -> None:
-        for reason in self.declared():
-            for outcome in reason.outcomes:
-                with self.subTest(reason=reason.name, outcome=outcome.value):
-                    sentence = engine.reason_text(outcome.value, reason.name)
-                    self.assertEqual(sentence, reason.sentence(outcome))
-                    self.assertNotEqual(sentence, reasons.OUTCOME_SENTENCES[outcome])
-                    line = engine.parse_result_line(
-                        f'barectl-result {{"class":"{outcome.value}","reason":"{reason.name}"}}'
-                    )
-                    if line is None:
-                        self.fail("The result line did not parse.")
-                    self.assertEqual(line.reason, reason.name)
+        assert_declared_sentences(self, (self.declared(),))
 
 
 class FoundationReasonTests(ReasonAssertions):

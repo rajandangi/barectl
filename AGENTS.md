@@ -6,7 +6,7 @@ Each phase's specification is a GitHub issue and the single source of truth for 
 
 ## Long-running work
 
-Native builds, the cloud-image VM lane and transcript passes run for minutes. Start them with `docker/disposable-server/quiet-run.sh run LOG -- CMD`, the foreground runner, or a background tool session, and keep that session alive. Do not kill and rerun a lane to check progress; read its log or resume the same run. See [long-running commands](docs/agents/orchestration.md#long-running-commands).
+Native builds, the cloud-image VM lane and transcript passes run for minutes. Start them with `docker/disposable-server/quiet-run.sh run LOG -- CMD`, the foreground runner, or a background tool session, and keep that session alive. Do not kill and rerun a lane to check progress; read its log or resume the same run. Read a failed required check with `scripts/check-log.sh <run-or-job>`; it prints the failing assertions, not the full log. See [long-running commands](docs/agents/orchestration.md#long-running-commands).
 
 ## Official guidance first
 

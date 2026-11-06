@@ -602,6 +602,34 @@ class JournalEvidenceTests(ChangeTestCase):
         self.assertIsNone(engine.read_result(self.remote, unit))
 
 
+class SitesDigestTests(SimpleTestCase):
+    def test_the_site_identifier_read_is_ordered_before_its_digest(self) -> None:
+        from types import SimpleNamespace
+
+        from discovery.ssh import RemoteShell
+        from operations.lifecycle import OperationRefused
+        from sites import observation
+
+        self.assertIn("LC_ALL=C sort", observation.SITE_IDENTIFIERS_COMMAND)
+
+        def shell(stdout: str) -> mock.Mock:
+            result = SimpleNamespace(stdout=stdout, exit_status=0, truncated=False)
+            return mock.Mock(spec=RemoteShell, run=mock.Mock(return_value=result))
+
+        draft = engine.ReviewDraft(
+            kind="fixture",
+            intent="",
+            sites_read=observation.SITE_IDENTIFIERS_COMMAND,
+            current_sites=("alpha", "beta"),
+        )
+        self.assertEqual(
+            engine._sites_digest(shell("alpha\nbeta\n"), draft),
+            hashlib.sha256(b"alpha\nbeta\n").hexdigest(),
+        )
+        with self.assertRaises(OperationRefused):
+            engine._sites_digest(shell("beta\nalpha\n"), draft)
+
+
 class UnreadableResultTests(ChangeTestCase):
     def retain_submitted_unit(self) -> None:
         self.systemd.on_submit = lambda: setattr(

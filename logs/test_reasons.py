@@ -3,23 +3,13 @@
 from django.test import SimpleTestCase
 
 from logs.bodies.reasons import LOG_ROTATION_REASONS
-from operations import engine, reasons
+from operations import engine
+from operations.reason_testing import assert_declared_sentences
 
 
 class LogRotationReasonTests(SimpleTestCase):
     def test_every_declared_reason_has_its_own_sentence(self) -> None:
-        for reason in LOG_ROTATION_REASONS:
-            for outcome in reason.outcomes:
-                with self.subTest(reason=reason.name, outcome=outcome.value):
-                    sentence = engine.reason_text(outcome.value, reason.name)
-                    self.assertEqual(sentence, reason.sentence(outcome))
-                    self.assertNotEqual(sentence, reasons.OUTCOME_SENTENCES[outcome])
-                    line = engine.parse_result_line(
-                        f'barectl-result {{"class":"{outcome.value}","reason":"{reason.name}"}}'
-                    )
-                    if line is None:
-                        self.fail("The result line did not parse.")
-                    self.assertEqual(line.reason, reason.name)
+        assert_declared_sentences(self, (LOG_ROTATION_REASONS,))
 
     def test_log_rotation_names_the_missing_tool_or_the_refused_file(self) -> None:
         missing = engine.reason_text("refused", "logrotate_missing")

@@ -8,6 +8,7 @@ from django.test import SimpleTestCase
 
 from operations import engine, reasons
 from operations.models import Result
+from operations.reason_testing import assert_declared_sentences
 
 from .change import ADD_RUNTIME
 from .defaults import SET_DEFAULT_NODE, SET_DEFAULT_PHP
@@ -84,17 +85,7 @@ class RuntimeStepReasonTests(SimpleTestCase):
 
 class RuntimeVocabularyTests(SimpleTestCase):
     def test_every_declared_runtime_pair_has_its_own_sentence(self) -> None:
-        for kind in KINDS:
-            for reason in kind.reasons:
-                for outcome in reason.outcomes:
-                    with self.subTest(kind=kind.slug, reason=reason.name, outcome=outcome.value):
-                        self.assertEqual(
-                            _sentence(outcome, reason.name),
-                            reason.sentence(outcome),
-                        )
-                        self.assertNotEqual(
-                            _sentence(outcome, reason.name), reasons.OUTCOME_SENTENCES[outcome]
-                        )
+        assert_declared_sentences(self, tuple(kind.reasons for kind in KINDS))
 
     def test_every_runtime_body_declares_what_it_prints(self) -> None:
         self.assertEqual(reasons.manifest_errors(), [])

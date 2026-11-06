@@ -26,6 +26,7 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 ## Behaviour prose names the layer
 
 - When a document or review describes a refusal, verification or ordering, name where it runs: engine admission, kind body, worker or discovery. Do not attribute shared engine behavior to a kind's body. This is a judgement call; quote the owning layer in the finding.
+- A `Result.REFUSED` reason's sentence describes only what did not happen; a step that ran is `Result.PARTIAL`. The run screen prefixes a refusal with "Nothing changed:", so a refusal that claims work happened contradicts the page. Quote the reason and outcome in the finding.
 
 ## Required evidence
 

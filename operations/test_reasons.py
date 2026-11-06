@@ -176,6 +176,40 @@ class ManifestTests(SimpleTestCase):
 
         self.assertTrue(any(source in error and "undeclared_reason" in error for error in errors))
 
+    def test_every_known_result_helper_shape_is_scanned(self) -> None:
+        cases = (
+            ('result("partial", "one")\n', "one", "partial"),
+            ('_fail("refused", "two")\n', "two", "refused"),
+            ('report("partial", "three")\n', "three", "partial"),
+            ('refused("four")\n', "four", "refused"),
+            ('failed("five")\n', "five", "failed"),
+            ('partial("six")\n', "six", "partial"),
+            ('document_result(document, "failed", "seven", point="")\n', "seven", "failed"),
+            ('emit_result({"class": "refused", "reason": "eight"})\n', "eight", "refused"),
+            ("refused nine\n", "nine", "refused"),
+            ("partial ten\n", "ten", "partial"),
+            ('ExportRefused("eleven")\n', "eleven", "refused"),
+        )
+        for text, reason, result_class in cases:
+            with self.subTest(text=text):
+                self.assertIn(result_class, reasons.printed_pairs(text).get(reason, set()))
+
+    def test_an_undeclared_reason_is_caught_in_every_helper_shape(self) -> None:
+        bodies = (
+            'result("refused", "undeclared_reason")\n',
+            '_fail("refused", "undeclared_reason")\n',
+            'report("refused", "undeclared_reason")\n',
+            'document_result(document, "refused", "undeclared_reason", point="")\n',
+            "refused undeclared_reason\n",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                source = self._source(body)
+                errors = reasons._vocabulary_errors("test", (), (source,))
+                self.assertTrue(
+                    any(source in error and "undeclared_reason" in error for error in errors)
+                )
+
     def test_it_fails_when_a_declaration_cannot_be_printed(self) -> None:
         source = self._source("print('nothing here')\n")
         declared = (reasons.ResultReason("declared_but_absent", {Result.REFUSED: "Refused."}),)
