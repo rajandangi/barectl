@@ -13,7 +13,7 @@ from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt
 from operations.activity_testing import record_change, record_run
 from operations.engine import ReviewDraft, save_review
-from operations.fakes import BOOT_ID
+from operations.fakes import BOOT_ID, PREPARE_PERMISSIONS
 from operations.models import ChangePreparation, ChangeRun, RemoteOperation, Result
 from servers.models import Server
 from servers.testing import HTMX_FRAGMENT, ControllerConfigTestCase
@@ -55,6 +55,24 @@ class ActivityPageTests(ControllerConfigTestCase):
         content = self.client.get("/activity/").content.decode()
         self.assertIn(f'href="/changes/{preparation.pk}/"', content)
         self.assertIn("Prepared", content)
+
+    def test_a_withheld_activity_preparation_link_shows_the_gate_sentence(self) -> None:
+        self.signed_in(*PREPARE_PERMISSIONS)
+        record_http_sites(self.web)
+        preparation = record_change(self.web, kind_slug="set_up_log_rotation", site="alpha")
+        run = record_run(
+            preparation,
+            status=RemoteOperation.Status.FAILED,
+            execution=Result.FAILED,
+        )
+        record_change(self.web, status="queued")
+        content = self.client.get(f"/runs/{run.pk}/").content.decode()
+        self.assertNotIn("Try again", content)
+        self.assertIn(
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+            content,
+        )
 
     def test_a_viewer_without_the_change_permission_sees_checks_only(self) -> None:
         self.signed_in()
