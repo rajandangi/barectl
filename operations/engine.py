@@ -195,12 +195,6 @@ OUTCOME_UNKNOWN_REACHED = (
     f"changed. {_ACKNOWLEDGED}"
 )
 
-# Compatibility aliases while each area ticket moves its kinds onto their own declaration
-# (#495). Ticket #506 deletes these names and the legacy fallback in ``operations.reasons``.
-AFFECTED_SITES_CHANGED = reasons.AFFECTED_SITES_CHANGED
-_REFUSED_REASONS = reasons._LEGACY_SENTENCES
-_FAILURES = reasons.OUTCOME_SENTENCES
-
 VERIFICATION_FAILED = (
     "The run completed, but its postconditions do not hold. Inspect the server through "
     "ordinary administration, then prepare a new review."
@@ -388,7 +382,6 @@ SITE_IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}")
 RESULT_CLASSES: Final = frozenset(
     {"succeeded", "refused", "partial", "failed", "lock_busy", "timed_out"}
 )
-RESULT_REASONS: Final = reasons.accepted_reasons()
 
 
 @dataclass(frozen=True)

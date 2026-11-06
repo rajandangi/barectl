@@ -65,8 +65,8 @@ class RestartReviewTests(SimpleTestCase):
         from operations import engine
 
         for reason in ("restart_work", "restart_evidence", "restart_apply"):
-            self.assertIn(reason, engine.RESULT_REASONS)
-            self.assertIn(reason, engine._REFUSED_REASONS)
+            self.assertTrue(engine.reason_text("refused", reason))
+            self.assertTrue(engine.reason_text("partial", reason))
 
     def test_the_restart_is_a_shared_server_change_naming_sites_and_packages(self) -> None:
         draft = restart.review(evidence(), PreparationInputs("on"))

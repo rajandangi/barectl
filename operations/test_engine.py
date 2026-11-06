@@ -29,7 +29,7 @@ from discovery.snapshot import save_snapshot
 from operations.models import RemoteOperation
 from servers.registration import RemovalBlocked, remove_server
 
-from . import activity, engine, native
+from . import activity, engine, native, reasons
 from .consent import DeclaredEffect, Scope
 from .fakes import (
     APPLY_PERMISSIONS,
@@ -233,7 +233,7 @@ class AccessChangeWindowTests(ChangeTestCase):
 
 class ResultReasonTests(SimpleTestCase):
     def test_database_reload_is_catalogued_with_its_recovery_message(self) -> None:
-        self.assertIn("database_reload", engine.RESULT_REASONS)
+        self.assertIn("database_reload", reasons.accepted_reasons())
         message = engine.reason_text("partial", "database_reload")
         self.assertIn("The database engine change was applied", message)
         self.assertIn("could not restart every running PHP master and site proxy", message)

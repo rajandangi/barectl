@@ -89,10 +89,14 @@ class ResultReasonRegistrationTests(SimpleTestCase):
 
         self.assertEqual(engine.reason_text("refused", reason), "Shared wording.")
 
-    def test_every_reason_accepted_before_the_change_is_still_accepted(self) -> None:
-        for reason in reasons.LEGACY_REASONS:
-            with self.subTest(reason=reason):
-                self.assertTrue(reasons.accepted(reason))
+    def test_every_retired_reason_is_still_recognized(self) -> None:
+        for reason in reasons.RETIRED_REASONS:
+            with self.subTest(reason=reason.name):
+                self.assertTrue(reasons.accepted(reason.name))
+                self.assertEqual(
+                    engine.reason_text("partial", reason.name),
+                    reason.sentence(Result.PARTIAL),
+                )
 
     def test_an_invented_reason_is_still_unreadable_evidence(self) -> None:
         self.assertFalse(reasons.accepted("invented_reason"))
@@ -123,3 +127,81 @@ class AdmissionVocabularyTests(SimpleTestCase):
 class ComposerManifestTests(SimpleTestCase):
     def test_every_declared_vocabulary_matches_its_composed_text(self) -> None:
         self.assertEqual(reasons.manifest_errors(), [])
+
+
+class RetiredVocabularyTests(SimpleTestCase):
+    def test_a_retired_reason_parses_and_shows_the_outcome_sentence(self) -> None:
+        for reason in reasons.RETIRED_REASONS:
+            with self.subTest(reason=reason.name):
+                line = engine.parse_result_line(
+                    'barectl-result {"class":"partial","reason":"' + reason.name + '"}'
+                )
+                self.assertIsNotNone(line)
+                if line is None:
+                    self.fail(f"Retired reason {reason.name!r} did not parse.")
+                self.assertEqual(line.reason, reason.name)
+                self.assertEqual(
+                    engine.reason_text("partial", reason.name),
+                    reason.sentence(Result.PARTIAL),
+                )
+
+    def test_no_registered_kind_declares_a_retired_reason(self) -> None:
+        for slug, declared in reasons._KIND_REASONS.items():
+            for reason in declared:
+                with self.subTest(kind=slug, reason=reason.name):
+                    self.assertNotIn(reason.name, reasons.RETIRED)
+
+
+class ManifestTests(SimpleTestCase):
+    def _source(self, text: str, name: str = "body.txt") -> str:
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        (Path(directory.name) / name).write_text(text)
+        patcher = mock.patch.object(reasons, "REPOSITORY", Path(directory.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return name
+
+    def test_the_real_manifest_is_empty(self) -> None:
+        self.assertEqual(reasons.manifest_errors(), [])
+
+    def test_it_fails_when_a_body_prints_an_undeclared_reason(self) -> None:
+        source = self._source('result("refused", "undeclared_reason")\n')
+
+        errors = reasons._vocabulary_errors("test", (), (source,))
+
+        self.assertTrue(any(source in error and "undeclared_reason" in error for error in errors))
+
+    def test_it_fails_when_a_declaration_cannot_be_printed(self) -> None:
+        source = self._source("print('nothing here')\n")
+        declared = (reasons.ResultReason("declared_but_absent", {Result.REFUSED: "Refused."}),)
+
+        errors = reasons._vocabulary_errors("test", declared, (source,))
+
+        self.assertTrue(
+            any("declared_but_absent" in error and "cannot print" in error for error in errors)
+        )
+
+    def test_it_fails_when_a_reason_is_paired_with_an_undeclared_outcome(self) -> None:
+        source = self._source('result("partial", "partial_only")\n')
+        declared = (reasons.ResultReason("partial_only", {Result.REFUSED: "Refused."}),)
+
+        errors = reasons._vocabulary_errors("test", declared, (source,))
+
+        self.assertTrue(any("partial_only" in error and "partial" in error for error in errors))
+
+    def test_a_retired_reason_cannot_be_produced_fresh(self) -> None:
+        retired = reasons.RETIRED_REASONS[0]
+        source = self._source(f'result("refused", "{retired.name}")\n')
+
+        errors = reasons._vocabulary_errors("test", (), (source,))
+
+        self.assertTrue(any("retired" in error and retired.name in error for error in errors))
+
+    def test_a_declared_pair_must_have_a_sentence(self) -> None:
+        with self.assertRaises(ValueError):
+            reasons.ResultReason("empty_sentence", {Result.REFUSED: " "})
