@@ -33,6 +33,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 
 from . import observation
+from .bodies.reasons import AUTOMATIC_UPDATES_REASONS
 from .presentation import RESTART_DISCLOSURE, custom_updates
 
 SLUG: Final = "set_automatic_security_updates"
@@ -580,4 +581,6 @@ SET_AUTOMATIC_SECURITY_UPDATES: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_choices=STATES,
+    reasons=AUTOMATIC_UPDATES_REASONS,
+    body_sources=("security/bodies/automatic_updates.sh",),
 )

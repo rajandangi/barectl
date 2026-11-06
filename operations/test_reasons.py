@@ -118,3 +118,8 @@ class AdmissionVocabularyTests(SimpleTestCase):
 
         self.assertIn("scheduled backup still had processes", sentence)
         self.assertNotIn("without reporting how far it got", sentence)
+
+
+class ComposerManifestTests(SimpleTestCase):
+    def test_every_declared_vocabulary_matches_its_composed_text(self) -> None:
+        self.assertEqual(reasons.manifest_errors(), [])
