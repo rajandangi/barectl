@@ -209,9 +209,9 @@ RESTIC_RUNTIME_CONFIG: Final = ResultReason(
     "runtime_config",
     {
         Result.REFUSED: (
-            "Barectl could not install or verify the pinned backup tool's runtime profile, so "
-            "the backup stopped before changing anything. Check the run's journal on the "
-            "server, then prepare a new review."
+            "The runtime configuration step could not be written or verified, so the run "
+            "stopped before changing anything. Check the run's journal on the server, then "
+            "prepare a new review."
         ),
     },
 )

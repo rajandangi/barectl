@@ -7,6 +7,7 @@ environment steps it reached before it stopped.
 
 from typing import Final
 
+from laravel.bodies.reasons import LARAVEL_COMMON_REASONS
 from operations.models import Result
 from operations.reasons import ResultReason
 
@@ -103,33 +104,9 @@ OBJECT_CACHE_REASONS: Final = (
             ),
         },
     ),
-    ResultReason(
-        "laravel_environment",
-        {
-            Result.PARTIAL: (
-                "The site's environment step could not be written safely, so the cache change "
-                "is partly applied and the site may still use its previous cache store. Run "
-                "discovery, then prepare a new review of what remains."
-            ),
-        },
-    ),
-    ResultReason(
-        "laravel_config",
-        {
-            Result.PARTIAL: (
-                "The environment changed, but Laravel's cached configuration could not be "
-                "rebuilt, so the site may still serve the previous configuration. Check the "
-                "run's journal, then prepare a new review."
-            ),
-        },
-    ),
-    ResultReason(
-        "laravel_worker",
-        {
-            Result.PARTIAL: (
-                "The environment changed, but a running worker did not restart cleanly. The new "
-                "configuration is written; check the worker and restart it from Settings."
-            ),
-        },
+    *(
+        reason
+        for reason in LARAVEL_COMMON_REASONS
+        if reason.name in {"laravel_environment", "laravel_config", "laravel_worker"}
     ),
 )
