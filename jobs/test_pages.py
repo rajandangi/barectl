@@ -13,6 +13,7 @@ from django.utils import timezone
 from discovery.fakes import STALE, FakeServer, claim_task, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
+from operations import engine
 from servers.models import ConnectionDefinition, Server
 from servers.testing import ControllerConfigTestCase
 
@@ -98,6 +99,26 @@ class JobsPageTests(ControllerConfigTestCase):
         self.assertContains(response, "Result class")
         self.assertContains(response, "Started on another computer")
         self.assertNotContains(response, "No available Barectl change results.")
+
+    def test_an_unreadable_stored_result_line_is_not_reported_as_absent(self) -> None:
+        now = timezone.now()
+        record_jobs(
+            self.server,
+            changes=(
+                self.a_finished_change(result_class="", finished_at=now),
+                self.a_finished_change(
+                    unit="barectl-apply-" + "b" * 32 + ".service",
+                    result_class="",
+                    finished_at=None,
+                    started_at=now,
+                ),
+            ),
+        )
+        self.grant("view_server", "view_changes")
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, engine.UNREADABLE_RESULT)
+        self.assertContains(response, "No result line")
 
     def test_without_jobs_evidence_the_page_explains_how_to_begin(self) -> None:
         self.grant("view_server", "view_changes", "add_discoveryattempt")

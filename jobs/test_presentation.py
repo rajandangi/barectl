@@ -11,6 +11,7 @@ from automation.status import ScheduleStatus
 from automation.worker_observation import ObservedWorker
 from automation.worker_status import WorkerStatus
 from discovery.snapshot import ObservedCache
+from operations import engine
 from operations.activity_testing import record_change, record_run
 from servers.models import Server
 
@@ -150,6 +151,34 @@ class JobsPresentationTests(TestCase):
                     )
                 )
                 self.assertEqual(view.groups[-1].rows[0].summary, expected)
+
+    def test_an_unreadable_result_line_is_not_an_absent_one(self) -> None:
+        unreadable = self.change_row(
+            self.view(
+                change(
+                    unit="barectl-apply-" + "a" * 32 + ".service",
+                    result_class="",
+                    result_evidence=engine.ResultEvidence.UNREADABLE,
+                    finished_at=self.now,
+                )
+            ).groups[-1]
+        )
+        absent = self.change_row(
+            self.view(
+                change(
+                    unit="barectl-apply-" + "b" * 32 + ".service",
+                    result_class="",
+                    result_evidence=engine.ResultEvidence.ABSENT,
+                    started_at=self.now,
+                )
+            ).groups[-1]
+        )
+        self.assertEqual(unreadable.summary, engine.UNREADABLE_RESULT)
+        self.assertIn(("Result class", engine.UNREADABLE_RESULT), unreadable.detail_lines)
+        self.assertIn(("Reason", engine.UNREADABLE_RESULT_FAILURE), unreadable.detail_lines)
+        self.assertEqual(absent.summary, "Could not confirm")
+        self.assertIn(("Result class", "No result line"), absent.detail_lines)
+        self.assertIn(("Reason", "Not reported"), absent.detail_lines)
 
     def test_a_refusal_names_its_plain_reason(self) -> None:
         (row,) = (

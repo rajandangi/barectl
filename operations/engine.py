@@ -17,6 +17,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Final
 
 from django.contrib.auth.models import User
@@ -174,6 +175,11 @@ MISMATCH = (
     "Barectl recorded, so its evidence cannot be attributed to this run."
 )
 UNREADABLE_EVIDENCE = "The unit's native state could not be read."
+UNREADABLE_RESULT = "Unreadable result line"
+UNREADABLE_RESULT_FAILURE = (
+    f"{UNREADABLE_RESULT}. Barectl could not read the server's own result line, so it "
+    "cannot say what the run reported. The outcome comes from the server's exit evidence."
+)
 _ACKNOWLEDGED = (
     "An operator acknowledged this after Barectl proved that the run can no longer start or "
     "still be running. Inspect the server through ordinary administration and prepare a new "
@@ -478,25 +484,51 @@ def _read_journal(shell: RemoteShell, unit: str) -> str:
     return result.stdout
 
 
+class ResultEvidence(StrEnum):
+    """What a run's journal holds about its result: a line, an unreadable line or none."""
+
+    PRESENT = "present"
+    UNREADABLE = "unreadable"
+    ABSENT = "absent"
+
+
 @dataclass(frozen=True)
 class JournalEvidence:
-    """What a run's journal holds: its result line, and the last reviewed stage it reported."""
+    """What a run's journal holds: its result line, and the last reviewed stage it reported.
+
+    ``result_evidence`` keeps the parser's refusal distinct from an absent line, so a run
+    that printed something Barectl could not read is never described as printing nothing.
+    """
 
     line: ResultLine | None
     stage: str
+    result_evidence: ResultEvidence = ResultEvidence.ABSENT
 
 
 def read_journal(shell: RemoteShell, unit: str, stages: object) -> JournalEvidence:
     text = _read_journal(shell, unit)
+    stage = parse_progress(text, stages)
     try:
         line = parse_result_line(text)
     except native.Unreadable:
-        line = None
-    return JournalEvidence(line, parse_progress(text, stages))
+        return JournalEvidence(None, stage, ResultEvidence.UNREADABLE)
+    return JournalEvidence(
+        line,
+        stage,
+        ResultEvidence.PRESENT if line is not None else ResultEvidence.ABSENT,
+    )
 
 
 def read_result(shell: RemoteShell, unit: str) -> ResultLine | None:
-    return read_journal(shell, unit, ()).line
+    """The journal's result line, or ``None`` when it holds none.
+
+    Raises ``native.Unreadable`` when a line is present but not in the engine's form, so a
+    caller cannot mistake unreadable evidence for absence.
+    """
+    journal = read_journal(shell, unit, ())
+    if journal.result_evidence is ResultEvidence.UNREADABLE:
+        raise native.Unreadable("The result line is not in the engine's form.")
+    return journal.line
 
 
 def _line_result(line: ResultLine) -> tuple[Result, str]:
@@ -1168,16 +1200,29 @@ def _watch_reboot(run: ChangeRun, kind: ChangeKind) -> None:
                     return
                 boot_id = _boot_id(shell)
                 if boot_id and boot_id != review.boot_id:
-                    line = read_result(shell, run.unit_name)
-                    if line is None:
+                    journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+                    if journal.result_evidence is ResultEvidence.ABSENT:
                         # The unit's journal may still be publishing its last line as the
                         # server boots; give it one short settle before calling it unknown.
                         time.sleep(JOURNAL_SETTLE_SECONDS)
-                        line = read_result(shell, run.unit_name)
-                    if line is None:
+                        journal = read_journal(
+                            shell, run.unit_name, run.review.document.get("stages")
+                        )
+                    if journal.result_evidence is ResultEvidence.UNREADABLE:
+                        _reboot_unknown(run, failure=UNREADABLE_RESULT_FAILURE)
+                        return
+                    if journal.result_evidence is ResultEvidence.ABSENT:
                         _reboot_unknown(run, failure=RESTART_NO_RESULT)
                         return
-                    _conclude(shell, run, kind, None, line, Status.RUNNING)
+                    _conclude(
+                        shell,
+                        run,
+                        kind,
+                        None,
+                        journal.line,
+                        Status.RUNNING,
+                        result_evidence=journal.result_evidence,
+                    )
                     return
         except ConnectionFailed:
             pass
@@ -1258,9 +1303,9 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
             # the journal. Allow systemd's journal to publish the result line after the
             # unit has been collected before treating it as missing evidence.
             journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
-            if journal.line is not None:
-                _conclude(shell, run, kind, None, journal.line, Status.RUNNING)
-            elif acknowledged:
+            if _journal_settles_missing(shell, run, kind, journal):
+                return
+            if acknowledged:
                 missing_since = missing_since or time.monotonic()
                 if time.monotonic() - missing_since < JOURNAL_SETTLE_SECONDS:
                     time.sleep(min(0.1, JOURNAL_SETTLE_SECONDS))
@@ -1277,14 +1322,43 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
         )
         _record(run.pk, Status.RUNNING, progress_stage=stage)
         if evidence.terminal:
-            line = read_result(shell, run.unit_name)
-            _conclude(shell, run, kind, evidence, line, Status.RUNNING)
+            journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+            _conclude(
+                shell,
+                run,
+                kind,
+                evidence,
+                journal.line,
+                Status.RUNNING,
+                result_evidence=journal.result_evidence,
+            )
             return
         _record(run.pk, Status.RUNNING, execution=Result.RUNNING)
         if time.monotonic() >= deadline:
             lifecycle.reconcile(run.pk, f"{STILL_RUNNING} {UNCERTAIN}")
             return
         time.sleep(POLL_INTERVAL)
+
+
+def _journal_settles_missing(
+    shell: RemoteShell, run: ChangeRun, kind: ChangeKind, journal: JournalEvidence
+) -> bool:
+    """Conclude a missing unit from a present or unreadable result line, if it has one."""
+    if journal.result_evidence is ResultEvidence.PRESENT:
+        _conclude(
+            shell,
+            run,
+            kind,
+            None,
+            journal.line,
+            Status.RUNNING,
+            result_evidence=journal.result_evidence,
+        )
+        return True
+    if journal.result_evidence is ResultEvidence.UNREADABLE:
+        _reconcile_unreadable(run, journal.stage)
+        return True
+    return False
 
 
 def _reconcile_missing(run: ChangeRun, stage: str) -> None:
@@ -1294,6 +1368,13 @@ def _reconcile_missing(run: ChangeRun, stage: str) -> None:
         return
     _record(run.pk, Status.RUNNING, progress_stage=stage)
     lifecycle.reconcile(run.pk, f"{STOPPED_SILENTLY} {NEVER_AGAIN}")
+
+
+def _reconcile_unreadable(run: ChangeRun, stage: str) -> None:
+    """The unit is gone, but its journal holds a result line Barectl could not read."""
+    if stage:
+        _record(run.pk, Status.RUNNING, progress_stage=stage)
+    lifecycle.reconcile(run.pk, UNREADABLE_RESULT_FAILURE)
 
 
 def _conclude_rejected(run: ChangeRun) -> None:
@@ -1377,9 +1458,16 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
     line: ResultLine | None,
     source: RemoteOperation.Status,
     revision: int | None = None,
+    *,
+    result_evidence: ResultEvidence = ResultEvidence.PRESENT,
 ) -> None:
     """A controller-side failure while verifying never becomes a remote failure: the known
-    outcome is kept and verification is recorded as unavailable."""
+    outcome is kept and verification is recorded as unavailable.
+
+    The execution outcome comes from the result line when it parsed and from the native
+    unit otherwise. A line Barectl could not read keeps that same execution outcome but
+    words its failure as unreadable evidence, never as the absence of a result.
+    """
     if line is not None:
         outcome, reason = _line_result(line)
     elif evidence is not None:
@@ -1423,6 +1511,8 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
     ):
         verification = Verification.UNAVAILABLE
         failure = WINDOW_NOT_CONFIRMED
+    if result_evidence is ResultEvidence.UNREADABLE:
+        failure = UNREADABLE_RESULT_FAILURE
     succeeded = outcome == Result.SUCCEEDED and verification == Verification.PASSED
     if succeeded:
         failure = ""
@@ -1504,8 +1594,17 @@ def _check(run: ChangeRun) -> None:
                     run.pk, f"{STILL_RUNNING} Check its outcome again later.", revision=revision
                 )
                 return
-            line = read_result(shell, run.unit_name)
-            _conclude(shell, run, kind, evidence, line, Status.RECONCILING, revision)
+            journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+            _conclude(
+                shell,
+                run,
+                kind,
+                evidence,
+                journal.line,
+                Status.RECONCILING,
+                revision,
+                result_evidence=journal.result_evidence,
+            )
     finally:
         if closing is not None:
             # The acknowledgement was used, whatever the check found; a newer one waits
@@ -1513,6 +1612,46 @@ def _check(run: ChangeRun) -> None:
             ChangeRun.objects.filter(pk=run.pk, closure_requested_at=closing).update(
                 closure_requested_at=None
             )
+
+
+def _missing_journal(
+    shell: RemoteShell,
+    run: ChangeRun,
+    kind: ChangeKind,
+    journal: JournalEvidence,
+    revision: int,
+    closing: bool,
+) -> bool:
+    """Conclude from a missing unit's present or unreadable result line, if it has one."""
+    if journal.result_evidence is ResultEvidence.PRESENT:
+        if _record(run.pk, Status.RECONCILING, revision):
+            _conclude(
+                shell,
+                run,
+                kind,
+                None,
+                journal.line,
+                Status.RECONCILING,
+                revision,
+                result_evidence=journal.result_evidence,
+            )
+        return True
+    if journal.result_evidence is ResultEvidence.UNREADABLE:
+        if _record_missing(run, journal, revision, UNREADABLE_RESULT_FAILURE) and closing:
+            _close_unknown(shell, run, revision, reached=bool(journal.stage))
+        return True
+    return False
+
+
+def _record_missing(run: ChangeRun, journal: JournalEvidence, revision: int, failure: str) -> bool:
+    """Record a missing unit's outcome and explanation, keeping any stage it reported."""
+    changes: dict[str, object] = {"execution": Result.NOT_FOUND}
+    if journal.stage:
+        changes["progress_stage"] = journal.stage
+    if not _record(run.pk, Status.RECONCILING, revision, **changes):
+        return False
+    lifecycle.note(run.pk, failure, revision=revision)
+    return True
 
 
 def _check_missing(
@@ -1526,9 +1665,7 @@ def _check_missing(
     """The unit is gone: its journal's result line settles the outcome, and an
     acknowledgement may close it as unknown once the proofs hold."""
     journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
-    if journal.line is not None:
-        if _record(run.pk, Status.RECONCILING, revision):
-            _conclude(shell, run, kind, None, journal.line, Status.RECONCILING, revision)
+    if _missing_journal(shell, run, kind, journal, revision, closing):
         return
     if evidence.boot_id != run.review.boot_id:
         reason = f"{RESTARTED} {UNCERTAIN}"
@@ -1536,13 +1673,7 @@ def _check_missing(
         reason = f"{STOPPED_SILENTLY} {NEVER_AGAIN}"
     else:
         reason = f"{NOT_FOUND} {UNCERTAIN}"
-    changes: dict[str, object] = {"execution": Result.NOT_FOUND}
-    if journal.stage:
-        changes["progress_stage"] = journal.stage
-    if not _record(run.pk, Status.RECONCILING, revision, **changes):
-        return
-    lifecycle.note(run.pk, reason, revision=revision)
-    if closing:
+    if _record_missing(run, journal, revision, reason) and closing:
         _close_unknown(shell, run, revision, reached=bool(journal.stage))
 
 

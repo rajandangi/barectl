@@ -56,9 +56,11 @@ class JobCoverage(models.Model):
 class JobObservation(models.Model):
     """One observed Barectl change run, from its unit or its journal result line.
 
-    ``result_class`` is empty when no result line was available: the presentation words
-    that as Could not confirm and never as success or failure. Only the unit, invocation,
-    the two timestamps and the parsed outcome are kept; journal messages never are.
+    ``result_class`` is empty when no readable result line was available: the presentation
+    words that as Could not confirm or an unreadable result line, never as success or
+    failure. A result-line time with no class marks a line Barectl could not read. Only the
+    unit, invocation, the two timestamps and the parsed outcome are kept; journal messages
+    never are.
     """
 
     snapshot = models.ForeignKey(DiscoverySnapshot, on_delete=models.CASCADE, related_name="jobs")

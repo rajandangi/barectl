@@ -71,6 +71,7 @@ class JobRow:
     needs_attention: bool = False
     running: bool = False
     work_type: str = ""
+    result_evidence: engine.ResultEvidence = engine.ResultEvidence.ABSENT
 
     @property
     def when(self) -> datetime | None:
@@ -81,7 +82,14 @@ class JobRow:
         return (
             ("Unit", self.unit),
             ("Invocation", self.invocation or "Not reported"),
-            ("Result class", self.result_class or "No result line"),
+            (
+                "Result class",
+                (
+                    engine.UNREADABLE_RESULT
+                    if self.result_evidence is engine.ResultEvidence.UNREADABLE
+                    else self.result_class or "No result line"
+                ),
+            ),
             ("Reason", self.reason or "Not reported"),
             ("Started", self.started_at.isoformat() if self.started_at else "Not reported"),
             ("Finished", self.finished_at.isoformat() if self.finished_at else "Not reported"),
@@ -280,7 +288,7 @@ def _row(change: ObservedChange, run_id: int | None) -> JobRow:
         sites=change.sites,
         summary=summary,
         result_class=change.result_class,
-        reason=engine.reason_text(change.result_class, change.reason) if change.reason else "",
+        reason=_reason(change),
         unit=change.unit,
         invocation=change.invocation_id,
         started_at=change.started_at,
@@ -290,12 +298,21 @@ def _row(change: ObservedChange, run_id: int | None) -> JobRow:
         needs_attention=not change.running and change.result_class in results.ATTENTION,
         running=change.running,
         work_type=change.kind_slug,
+        result_evidence=change.result_evidence,
     )
+
+
+def _reason(change: ObservedChange) -> str:
+    if change.result_evidence is engine.ResultEvidence.UNREADABLE:
+        return engine.UNREADABLE_RESULT_FAILURE
+    return engine.reason_text(change.result_class, change.reason) if change.reason else ""
 
 
 def _summary(change: ObservedChange) -> str:
     if change.running:
         return "Running when the server was last checked."
+    if change.result_evidence is engine.ResultEvidence.UNREADABLE:
+        return engine.UNREADABLE_RESULT
     label = results.label(change.result_class)
     if change.result_class == "refused":
         reason = engine.reason_text(change.result_class, change.reason)

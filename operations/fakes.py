@@ -62,6 +62,9 @@ class EngineUnit:
     # The kind and reviewed sites the engine writes into every result line.
     change_kind: str = ""
     sites: tuple[str, ...] = ()
+    # A raw result line the engine cannot read, for the unreadable-evidence tests;
+    # ``None`` generates the line from ``result_class``.
+    result_text: str | None = None
     # The ``barectl-stage`` lines the payload printed before its result line, if any.
     stages: tuple[str, ...] = ()
     invocation_id: str = "0f" * 16
@@ -72,6 +75,8 @@ class EngineUnit:
     def journal(self) -> str:
         """The engine's journal read, which lists the newest line first."""
         stages = "".join(f"barectl-stage {stage}\n" for stage in reversed(self.stages))
+        if self.result_text is not None:
+            return f"{self.result_text}\n{stages}"
         if self.result_class is None:
             return stages
         line: dict[str, object] = {"class": self.result_class}
@@ -150,6 +155,10 @@ class EngineSystemd:
     # What a submitted unit reports: the structured result line's class and reason.
     result_class: str | None = "succeeded"
     reason: str = ""
+    # A raw result line the engine cannot read, and the unit's own exit status when the
+    # result line is absent or unreadable. ``None`` follows ``result_class``.
+    result_text: str | None = None
+    exit_status: int | None = None
     # systemd-run refuses the unit and creates nothing.
     reject: bool = False
     # The connection ends after systemd-run started the unit, before its answer arrives.
@@ -310,9 +319,14 @@ class EngineSystemd:
             return CommandResult(1, "")
         change_kind, sites = _result_fields(command)
         unit = EngineUnit(
-            exit_status=_EXIT_STATUSES.get(self.result_class or "", 0),
+            exit_status=(
+                self.exit_status
+                if self.exit_status is not None
+                else _EXIT_STATUSES.get(self.result_class or "", 0)
+            ),
             result_class=self.result_class,
             reason=self.reason,
+            result_text=self.result_text,
             body_path=next(
                 iter(re.findall(r"/run/lock/barectl/body-[0-9a-f]{32}\.sh", command)), ""
             ),
