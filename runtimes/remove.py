@@ -29,6 +29,7 @@ from operations.models import ChangeReview
 from sites.observation import SITE_IDENTIFIERS_COMMAND
 
 from . import observation as runtime_observation
+from .bodies.reasons import REMOVE_REASONS
 from .catalog import Architecture, Build, Kind, architecture_of, load
 from .configuration import render
 from .defaults import DefaultsObservation
@@ -404,4 +405,6 @@ REMOVE_RUNTIME: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_choices=PHP_ENTRIES,
+    reasons=REMOVE_REASONS,
+    body_sources=("runtimes/bodies/remove.py", "runtimes/bodies/defaults.py"),
 )

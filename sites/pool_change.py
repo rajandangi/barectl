@@ -20,6 +20,7 @@ from operations.models import ChangeReview
 from . import observation
 from .bodies.common import NativeState
 from .bodies.pool import SitePool
+from .bodies.reasons import SITE_REASONS
 
 SLUG: Final = "set_site_pool"
 BODY_SOURCE: Final = (
@@ -194,4 +195,6 @@ SET_SITE_POOL: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_POOL,
+    reasons=SITE_REASONS,
+    body_sources=("sites/bodies/common.py", "sites/bodies/pool_change.py"),
 )

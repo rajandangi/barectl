@@ -10,7 +10,7 @@ class OperationsConfig(AppConfig):
     @override
     def ready(self) -> None:
         # Importing these modules registers the change engine's kinds and steps.
-        from . import cleanup, confidential, engine
+        from . import body_reasons, cleanup, confidential, engine  # noqa: F401 - registration
 
         engine.register_kind(cleanup.CLEANUP_RUNS)
         # A worker process mints a fresh sealing key at start, so a value sealed for an

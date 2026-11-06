@@ -32,6 +32,7 @@ from sites.configuration import (
 )
 
 from . import change as backups_change
+from .bodies.reasons import REOPEN_REASONS
 
 SLUG: Final = "reopen_site"
 LABEL: Final = "Reopen site"
@@ -258,4 +259,6 @@ REOPEN_SITE: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE,
+    reasons=REOPEN_REASONS,
+    body_sources=("backups/bodies/reopen.py", "sites/bodies/common.py"),
 )

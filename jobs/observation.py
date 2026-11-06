@@ -92,8 +92,10 @@ NO_EVIDENCE = (
 class ObservedChange:
     """One observed change run, from its retained unit or its journal lines.
 
-    ``result_class`` is empty when no result line could be read. ``started_at`` is the
-    first stage line's time and ``finished_at`` the result line's time, both server UTC.
+    ``result_class`` is empty when the row has no readable result. ``result_evidence``
+    keeps a result line Barectl could not read distinct from the run printing none.
+    ``started_at`` is the first stage line's time and ``finished_at`` the result line's
+    time, both server UTC.
     """
 
     unit: str
@@ -108,6 +110,22 @@ class ObservedChange:
     active_state: str = ""
     sub_state: str = ""
     exec_main_status: int | None = None
+    result_evidence: engine.ResultEvidence = engine.ResultEvidence.ABSENT
+
+
+def stored_result_evidence(
+    result_class: str, finished_at: datetime | None
+) -> engine.ResultEvidence:
+    """The result evidence a stored row keeps without a column of its own.
+
+    A stored class means the line parsed. A result-line time without a class means a line
+    was present but unreadable. Neither means the run reported no result line.
+    """
+    if result_class:
+        return engine.ResultEvidence.PRESENT
+    if finished_at is not None:
+        return engine.ResultEvidence.UNREADABLE
+    return engine.ResultEvidence.ABSENT
 
 
 @dataclass(frozen=True)
@@ -271,6 +289,7 @@ class _Group:
     kind_slug: str = ""
     sites: tuple[str, ...] = ()
     result_seen: bool = False
+    result_evidence: engine.ResultEvidence = engine.ResultEvidence.ABSENT
 
 
 @dataclass(frozen=True)
@@ -310,6 +329,7 @@ def _parse(text: str) -> tuple[list[ObservedChange], bool, int]:
             reason=group.reason,
             started_at=group.started_at,
             finished_at=group.finished_at,
+            result_evidence=group.result_evidence,
         )
         for group in groups.values()
     ]
@@ -360,9 +380,12 @@ def _apply(group: _Group, entry: _Entry) -> bool:
     try:
         parsed = engine.parse_result_line(entry.message)
     except native.Unreadable:
+        group.result_evidence = engine.ResultEvidence.UNREADABLE
         return True
     if parsed is None:
+        group.result_evidence = engine.ResultEvidence.UNREADABLE
         return True
+    group.result_evidence = engine.ResultEvidence.PRESENT
     group.result_class = parsed.result_class
     group.reason = parsed.reason
     group.kind_slug = parsed.change_kind

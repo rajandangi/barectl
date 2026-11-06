@@ -29,7 +29,7 @@ from discovery.snapshot import save_snapshot
 from operations.models import RemoteOperation
 from servers.registration import RemovalBlocked, remove_server
 
-from . import engine, native
+from . import activity, engine, native, reasons
 from .consent import DeclaredEffect, Scope
 from .fakes import (
     APPLY_PERMISSIONS,
@@ -39,6 +39,7 @@ from .fakes import (
     RECORDED_SYSTEMD_UNIT,
     ChangeTestCase,
     EngineSystemd,
+    EngineUnit,
     finished_unit,
 )
 from .inputs import PreparationInputs
@@ -232,7 +233,7 @@ class AccessChangeWindowTests(ChangeTestCase):
 
 class ResultReasonTests(SimpleTestCase):
     def test_database_reload_is_catalogued_with_its_recovery_message(self) -> None:
-        self.assertIn("database_reload", engine.RESULT_REASONS)
+        self.assertIn("database_reload", reasons.accepted_reasons())
         message = engine.reason_text("partial", "database_reload")
         self.assertIn("The database engine change was applied", message)
         self.assertIn("could not restart every running PHP master and site proxy", message)
@@ -579,6 +580,85 @@ class ResultLineInJournalTests(SiteKindTestCase):
         )
 
 
+class JournalEvidenceTests(ChangeTestCase):
+    def test_reading_distinguishes_a_result_line_from_unreadable_and_absent(self) -> None:
+        unit = "barectl-apply-" + "a" * 32 + ".service"
+        self.systemd.journal_units[unit] = EngineUnit(result_class="succeeded")
+        present = engine.read_journal(self.remote, unit, ())
+        self.assertIs(present.result_evidence, engine.ResultEvidence.PRESENT)
+        self.assertEqual(present.line, engine.ResultLine("succeeded", ""))
+
+        self.systemd.journal_units[unit] = EngineUnit(result_text="barectl-result {not json")
+        unreadable = engine.read_journal(self.remote, unit, ())
+        self.assertIs(unreadable.result_evidence, engine.ResultEvidence.UNREADABLE)
+        self.assertIsNone(unreadable.line)
+        with self.assertRaises(native.Unreadable):
+            engine.read_result(self.remote, unit)
+
+        self.systemd.journal_units[unit] = EngineUnit(result_class=None)
+        absent = engine.read_journal(self.remote, unit, ())
+        self.assertIs(absent.result_evidence, engine.ResultEvidence.ABSENT)
+        self.assertIsNone(absent.line)
+        self.assertIsNone(engine.read_result(self.remote, unit))
+
+
+class UnreadableResultTests(ChangeTestCase):
+    def retain_submitted_unit(self) -> None:
+        self.systemd.on_submit = lambda: setattr(
+            next(iter(self.systemd.journal_units.values())), "retained", True
+        )
+
+    def test_an_unreadable_result_line_says_so_on_the_run_and_activity(self) -> None:
+        self.systemd.units[EXITED] = finished_unit(1)
+        self.systemd.result_class = "failed"
+        self.systemd.result_text = "barectl-result {not json"
+        self.retain_submitted_unit()
+        run = self.apply(self.change())
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Result.FAILED)
+        self.assertEqual(run.verification, Verification.NOT_APPLICABLE)
+        self.assertEqual(run.failure, engine.UNREADABLE_RESULT_FAILURE)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, engine.UNREADABLE_RESULT)
+        self.assertContains(page, "could not read the server")
+        (row,) = activity.change_rows(self.server)
+        self.assertEqual(row.failure, run.failure)
+        self.assertEqual(row.failure, engine.UNREADABLE_RESULT_FAILURE)
+        self.assertIn("Unreadable result line", row.failure)
+
+    def test_a_succeeded_run_with_an_unreadable_line_still_says_unreadable(self) -> None:
+        self.systemd.units[EXITED] = finished_unit(0)
+        self.systemd.result_text = "barectl-result {not json"
+        self.retain_submitted_unit()
+        run = self.apply(self.change())
+        self.assertEqual(run.status, Status.SUCCEEDED)
+        self.assertEqual(run.execution, Result.SUCCEEDED)
+        self.assertEqual(run.verification, Verification.PASSED)
+        self.assertEqual(run.result_reason, engine.UNREADABLE_RESULT_REASON)
+        self.assertEqual(run.failure, engine.UNREADABLE_RESULT_FAILURE)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, engine.UNREADABLE_RESULT)
+        (row,) = activity.change_rows(self.server)
+        self.assertEqual(row.failure, run.failure)
+
+    def test_an_absent_result_line_keeps_the_generic_failure(self) -> None:
+        self.systemd.units[EXITED] = finished_unit(1)
+        self.systemd.result_class = None
+        self.systemd.exit_status = 3
+        self.retain_submitted_unit()
+        run = self.apply(self.change())
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Result.FAILED)
+        self.assertEqual(run.verification, Verification.NOT_APPLICABLE)
+        self.assertIn("failed without reporting how far it got", run.failure)
+        self.assertNotIn(engine.UNREADABLE_RESULT, run.failure)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, "failed without reporting how far it got")
+        self.assertNotContains(page, "Unreadable result line")
+        (row,) = activity.change_rows(self.server)
+        self.assertEqual(row.failure, run.failure)
+
+
 class EngineReconciliationTests(ChangeTestCase):
     def lost(self) -> ChangeRun:
         self.systemd.units[EXITED] = finished_unit(1)
@@ -606,6 +686,21 @@ class EngineReconciliationTests(ChangeTestCase):
         self.assertEqual(checked.status, Status.RECONCILING)
         self.assertEqual(checked.execution, Result.NOT_FOUND)
         self.assertIn("no result line in its journal", checked.failure)
+
+    def test_a_missing_unit_with_an_unreadable_result_line_says_so(self) -> None:
+        from .cleanup import STAGES
+
+        run = self.lost()
+        unit = self.systemd.journal_units[run.unit_name]
+        unit.result_class = None
+        unit.result_text = "barectl-result {not json"
+        unit.stages = STAGES[:2]
+        checked = self.check(run)
+        self.assertEqual(checked.status, Status.RECONCILING)
+        self.assertEqual(checked.execution, Result.NOT_FOUND)
+        self.assertEqual(checked.progress_stage, STAGES[1])
+        self.assertIn(engine.UNREADABLE_RESULT, checked.failure)
+        self.assertNotIn("no result line in its journal", checked.failure)
 
     def test_stage_lines_without_a_result_show_the_run_reached_the_server(self) -> None:
         from .cleanup import STAGES

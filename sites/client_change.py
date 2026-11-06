@@ -30,6 +30,7 @@ from runtimes.extensions import build as redis_build
 
 from . import observation
 from .bodies.common import NativeState, SiteRecord
+from .bodies.reasons import SITE_REASONS
 
 SLUG: Final = "set_site_php_client"
 BODY_SOURCE: Final = (
@@ -254,4 +255,6 @@ SET_SITE_PHP_CLIENT: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_CLIENT,
+    reasons=SITE_REASONS,
+    body_sources=("sites/bodies/common.py", "sites/bodies/client_change.py"),
 )

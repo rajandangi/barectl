@@ -11,6 +11,7 @@ class BackupsConfig(AppConfig):
         from operations.engine import register_kind
 
         from . import check  # noqa: F401 - registers the backup check step
+        from .bodies import reasons as body_reasons  # noqa: F401 - registers the integrity body
         from .change import BACK_UP_FULL, BACK_UP_NOW, ENABLE
         from .connect import CONNECT
         from .export import EXPORT

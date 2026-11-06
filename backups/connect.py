@@ -28,6 +28,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 
 from . import convention, observation
+from .bodies.reasons import CONNECT_REASONS
 
 SLUG: Final = "connect_existing_backup_storage"
 LABEL: Final = "Connect existing backup storage"
@@ -334,4 +335,9 @@ CONNECT: Final = ChangeKind(
     refresh_discovery=True,
     input_shape=InputShape.CONNECT_OFFSITE_STORAGE,
     writes_secrets=True,
+    reasons=CONNECT_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/connect.py",
+    ),
 )

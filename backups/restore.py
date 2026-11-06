@@ -44,6 +44,7 @@ from sites.names import valid_identifier
 
 from . import change, check, convention, observation
 from .bodies import restore as restore_body
+from .bodies.reasons import RESTORE_REASONS
 
 SLUG: Final = "restore_database"
 LABEL: Final = "Restore"
@@ -1250,4 +1251,11 @@ RESTORE: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_RECOVERY_POINT,
+    reasons=RESTORE_REASONS,
+    body_sources=(
+        "backups/bodies/restore.py",
+        "backups/bodies/native.py",
+        "backups/bodies/paused.py",
+        "sites/bodies/common.py",
+    ),
 )

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from django.test import SimpleTestCase
 
 from discovery.fakes import kept_text
-from operations import native
+from operations import engine, native
 
 from . import observation
 from .testing import (
@@ -85,7 +85,21 @@ class RecordedChangeJobsTests(SimpleTestCase):
         )
         (row,) = reading.changes
         self.assertEqual(row.result_class, "")
+        self.assertIs(row.result_evidence, engine.ResultEvidence.UNREADABLE)
         self.assertEqual(reading.coverage[0].state, "unreadable")
+
+    def test_a_run_with_no_result_line_is_absent_not_unreadable(self) -> None:
+        reading = observation.read(
+            journal_shell(
+                units=BOOT + "\n",
+                history=line("barectl-stage preflight", usec=1_762_000_000_100_000),
+            )
+        )
+        (row,) = reading.changes
+        self.assertEqual(row.result_class, "")
+        self.assertIs(row.result_evidence, engine.ResultEvidence.ABSENT)
+        self.assertIsNone(row.finished_at)
+        self.assertEqual(reading.coverage[0].state, "complete")
 
     def test_a_missing_timestamp_is_unreadable_not_an_invented_time(self) -> None:
         reading = observation.read(

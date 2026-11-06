@@ -27,6 +27,8 @@ from sites.bodies.logrotate import (
     logrotate_render,
 )
 
+from .bodies.reasons import LOG_ROTATION_REASONS
+
 SLUG: Final = "set_up_log_rotation"
 BODY_SOURCE: Final = importlib.resources.files("logs.bodies").joinpath("rotation.py").read_text()
 BODY_BYTES: Final = (
@@ -253,4 +255,6 @@ SET_UP_LOG_ROTATION: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_LOG_ROTATION,
+    reasons=LOG_ROTATION_REASONS,
+    body_sources=("logs/bodies/rotation.py",),
 )

@@ -26,6 +26,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 
 from . import convention, observation, offsite
+from .bodies.reasons import PASSPHRASE_REASONS
 
 SLUG: Final = "replace_recovery_passphrase"
 LABEL: Final = "Replace recovery passphrase"
@@ -260,4 +261,9 @@ REPLACE: Final = ChangeKind(
     refresh_discovery=True,
     input_shape=InputShape.REPLACE_RECOVERY_PASSPHRASE,
     writes_secrets=True,
+    reasons=PASSPHRASE_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/keys.py",
+    ),
 )

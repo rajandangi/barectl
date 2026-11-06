@@ -24,10 +24,12 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from sites import observation as site_observation
 from sites.bodies.common import SITE_GATED, NativeState, SiteRecord
+from sites.bodies.reasons import SITE_REASONS
 from sites.configuration import PHP_RUNTIMES
 from wordpress import observation as wordpress_observation
 
 from . import convention, observation
+from .bodies.reasons import SCHEDULE_REASONS
 from .bodies.source import AUTOMATION_SOURCE, without_imports
 from .status import STATUS_SENTENCE, ScheduleStatus
 
@@ -405,4 +407,6 @@ SET_WORDPRESS_SERVER_CRON: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.AUTOMATION_SCHEDULE,
+    reasons=(*SITE_REASONS, *SCHEDULE_REASONS),
+    body_sources=("sites/bodies/common.py", "automation/bodies/schedule.py"),
 )

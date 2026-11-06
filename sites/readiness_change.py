@@ -22,6 +22,7 @@ from operations.models import ChangeReview
 
 from . import observation
 from .bodies.common import NativeState
+from .bodies.reasons import SITE_REASONS
 from .change import membership_command
 
 SLUG: Final = "set_site_readiness"
@@ -176,4 +177,6 @@ SET_SITE_READINESS: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_READINESS,
+    reasons=SITE_REASONS,
+    body_sources=("sites/bodies/common.py", "sites/bodies/readiness.py"),
 )

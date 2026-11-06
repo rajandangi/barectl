@@ -15,6 +15,7 @@ from discovery.ssh import RemoteShell
 from operations.inputs import EMPTY_INPUTS, PreparationInputs
 
 from . import native
+from .bodies.cleanup_reasons import CLEANUP_REASONS
 from .consent import DeclaredEffect, Scope
 from .engine import BodyContext, ChangeKind, NativeBody, ReviewDraft, current_units
 from .models import ChangeReview
@@ -244,4 +245,6 @@ CLEANUP_RUNS: Final = ChangeKind(
     body=body,
     verify=verify,
     capacity=native.CLEANUP_CEILING,
+    reasons=CLEANUP_REASONS,
+    body_sources=("operations/bodies/clear_runs.sh",),
 )

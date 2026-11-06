@@ -24,6 +24,7 @@ from runtimes.catalog import Architecture, architecture_of, load
 from . import observation
 from .bodies.admission import state_rows
 from .bodies.php_runtime import PHPState, missing_php_modules
+from .bodies.reasons import SITE_REASONS
 
 CHOICES: Final = ("php84", "php85")
 SLUG: Final = "set_site_php"
@@ -393,4 +394,6 @@ SET_SITE_PHP: Final = ChangeKind(
     input_choices=CHOICES,
     input_shape=InputShape.SITE_RUNTIME,
     refresh_discovery=True,
+    reasons=SITE_REASONS,
+    body_sources=("sites/bodies/common.py", "sites/bodies/php_runtime.py"),
 )

@@ -36,6 +36,8 @@ from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 
+from .bodies.reasons import CERTIFICATE_EMAIL_REASONS
+
 SLUG: Final = "set_certificate_email"
 LABEL: Final = "Change certificate contact email"
 MAIN_PATH: Final = "/etc/caddy/Caddyfile"
@@ -356,4 +358,6 @@ SET_CERTIFICATE_EMAIL: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_shape=InputShape.CERTIFICATE_EMAIL,
+    reasons=CERTIFICATE_EMAIL_REASONS,
+    body_sources=("bootstrap/bodies/certificate_email.py",),
 )

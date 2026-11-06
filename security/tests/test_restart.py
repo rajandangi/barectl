@@ -62,11 +62,19 @@ def evidence(
 
 class RestartReviewTests(SimpleTestCase):
     def test_every_restart_refusal_and_result_reason_is_in_the_engine_contract(self) -> None:
-        from operations import engine
+        from operations import reasons
+        from operations.models import Result
 
-        for reason in ("restart_work", "restart_evidence", "restart_apply"):
-            self.assertIn(reason, engine.RESULT_REASONS)
-            self.assertIn(reason, engine._REFUSED_REASONS)
+        for reason, outcome in (
+            ("restart_work", Result.REFUSED),
+            ("restart_evidence", Result.REFUSED),
+            ("restart_apply", Result.PARTIAL),
+        ):
+            self.assertTrue(reasons.accepted(reason))
+            self.assertTrue(reasons.sentence(outcome, reason))
+            self.assertNotEqual(
+                reasons.sentence(outcome, reason), reasons.OUTCOME_SENTENCES[outcome]
+            )
 
     def test_the_restart_is_a_shared_server_change_naming_sites_and_packages(self) -> None:
         draft = restart.review(evidence(), PreparationInputs("on"))

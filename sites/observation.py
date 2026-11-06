@@ -268,7 +268,7 @@ def python_command(source: str, arguments: tuple[str, ...]) -> str:
 
 SITE_IDENTIFIERS_COMMAND: Final = (
     "find /etc/caddy/sites -maxdepth 1 -type f -name '*.caddy' -printf '%f\\n' "
-    "| sed 's/\\.caddy$//'"
+    "| sed 's/\\.caddy$//' | LC_ALL=C sort"
 )
 
 PROXY_INVENTORY_COMMAND: Final = python_command(

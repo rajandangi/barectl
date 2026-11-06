@@ -22,6 +22,7 @@ from sites.bodies.common import NativeState, SiteRecord
 from sites.configuration import SiteSettings, render_laravel_caddy
 
 from . import observation
+from .bodies.reasons import ROLLBACK_REASONS
 from .change import releases_of
 from .configuration import GATE_TEMPLATE, ROLLBACK_ACKNOWLEDGEMENT
 
@@ -232,4 +233,10 @@ ROLLBACK_SITE: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.LARAVEL_ROLLBACK,
+    reasons=ROLLBACK_REASONS,
+    body_sources=(
+        "sites/bodies/common.py",
+        "laravel/bodies/common.py",
+        "laravel/bodies/rollback.py",
+    ),
 )

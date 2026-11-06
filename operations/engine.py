@@ -17,6 +17,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Final
 
 from django.contrib.auth.models import User
@@ -26,7 +27,7 @@ from django.utils import timezone
 
 from discovery import ssh
 from discovery.ssh import ConnectionFailed, RemoteShell
-from operations import apt, confidential, lifecycle, native, revert
+from operations import apt, confidential, lifecycle, native, reasons, revert
 from operations.lifecycle import OperationRefused
 from operations.models import RemoteOperation
 
@@ -174,6 +175,12 @@ MISMATCH = (
     "Barectl recorded, so its evidence cannot be attributed to this run."
 )
 UNREADABLE_EVIDENCE = "The unit's native state could not be read."
+UNREADABLE_RESULT = "Unreadable result line"
+UNREADABLE_RESULT_REASON = "unreadable_result"
+UNREADABLE_RESULT_FAILURE = (
+    f"{UNREADABLE_RESULT}. Barectl could not read the server's own result line, so it "
+    "cannot say what the run reported. The outcome comes from the server's exit evidence."
+)
 _ACKNOWLEDGED = (
     "An operator acknowledged this after Barectl proved that the run can no longer start or "
     "still be running. Inspect the server through ordinary administration and prepare a new "
@@ -189,643 +196,6 @@ OUTCOME_UNKNOWN_REACHED = (
     f"changed. {_ACKNOWLEDGED}"
 )
 
-AFFECTED_SITES_CHANGED = (
-    "Affected sites changed, review again: the sites this shared change reaches differ "
-    "from the reviewed list, so the run stopped before changing anything."
-)
-_RELOAD_FAILURE = (
-    "Barectl could not restart every running PHP master and site proxy, so discovery may "
-    "report them outside supported settings until the server is restarted. Read the run's "
-    "journal on the server, then prepare a new review."
-)
-_REFUSED_REASONS: Final[dict[str, str]] = {
-    "runtime_cache": (
-        "The locked runtime closure is unavailable from the signed cache. Nothing changed."
-    ),
-    "apt_active": (
-        "Package maintenance still has processes. Wait for it to finish and review again."
-    ),
-    "apt_unreadable": "Package maintenance process state could not be read. Review again.",
-    "unsafe_lock": (
-        "The lock directory /run/lock/barectl or its lock file is not a root-owned private "
-        "directory with an empty lock file, so the run stopped before changing anything. "
-        "Remove it through ordinary administration, then prepare again."
-    ),
-    "boot": (
-        "The server restarted after the change was reviewed, so the run stopped before "
-        "changing anything. Prepare a new review."
-    ),
-    "deadline": (
-        "The review's admission deadline had passed on the server's clock when the run "
-        "started, so it stopped before changing anything. Prepare a new review."
-    ),
-    "active_run": (
-        "Another barectl run still had processes on the server, so this run stopped before "
-        "changing anything. Prepare a new review after it finishes."
-    ),
-    "revert_active": (
-        "A firewall or sign-in change is inside its confirmation window, or its put-back has "
-        "not finished. The server keeps the change it can restore on its own, so this run "
-        "stopped before changing anything. Wait for the window to close, then prepare again."
-    ),
-    "revert_preimage": (
-        "Barectl could not save the previous access settings, so it stopped before "
-        "changing anything. Check the run's journal on the server, then prepare again."
-    ),
-    "revert_arm": (
-        "Barectl could not arm the automatic put-back, so it stopped before changing anything."
-    ),
-    "firewall_ports": (
-        "The server's SSH ports changed or no longer agree, so the run stopped before "
-        "changing the firewall. Prepare a new review."
-    ),
-    "firewall_outside": (
-        "Another packet filter or a rule outside the supported shape appeared on the server, "
-        "so the run stopped before changing the firewall."
-    ),
-    "firewall_package": (
-        "The firewall's package transaction did not match the reviewed one, so the run "
-        "stopped before changing the firewall. Prepare a new review."
-    ),
-    "firewall_standard": (
-        "The rule to remove is no longer an extra allowance, or the standard web and SSH "
-        "allowances were asked for. The run stopped before changing the firewall. Prepare a "
-        "new review."
-    ),
-    "firewall_apply": (
-        "The firewall change stopped partway. The server restores the previous firewall on "
-        "its own; check the run's journal if it does not."
-    ),
-    "firewall_verify": (
-        "The firewall did not read back as the reviewed change. The server restores the "
-        "previous firewall on its own; check the run's journal if it does not."
-    ),
-    "sign_in_syntax": (
-        "OpenSSH rejected the configuration. The server restores the previous sign-in "
-        "settings on its own."
-    ),
-    "sign_in_reload": (
-        "SSH could not reload. The server restores the previous sign-in settings on its own."
-    ),
-    "sign_in_verify": (
-        "The effective sign-in settings do not match the reviewed policy. The server "
-        "restores the previous settings on its own."
-    ),
-    "sign_in_apply": (
-        "The sign-in change stopped partway. The server restores the previous settings on its own."
-    ),
-    "active_backup": (
-        "This site's scheduled backup still had processes on the server, so this run stopped "
-        "before changing anything. Prepare a new review after it finishes."
-    ),
-    "capacity": (
-        "The server kept too many finished barectl runs when this run held the lock, so it "
-        "stopped before changing anything. Clear finished runs with a reviewed cleanup, "
-        "then prepare again."
-    ),
-    "affected_sites": AFFECTED_SITES_CHANGED,
-    "evidence": (
-        "The reviewed evidence changed on the server, so the run stopped before changing "
-        "anything. Prepare a new review."
-    ),
-    "release_absent": (
-        "The release this change names is no longer retained on the server, so the run "
-        "stopped before changing anything. Prepare a new review from the current release "
-        "list."
-    ),
-    "database_engine": (
-        "The server's resolved package set differs from the reviewed one, so Barectl stopped "
-        "before changing packages. Prepare a new review."
-    ),
-    "database_reload": "The database engine change was applied, but " + _RELOAD_FAILURE,
-    "valkey_server": (
-        "The server's resolved package set differs from the reviewed one, so Barectl stopped "
-        "before changing packages. Prepare a new review."
-    ),
-    "valkey_mask": (
-        "Valkey was installed, but Barectl could not stop and mask the distribution's shared "
-        "service, so it may still run. Read the run's journal on the server, stop and mask "
-        "valkey-server.service through ordinary administration, then prepare a new review."
-    ),
-    "valkey_reload": "Valkey was installed and masked, but " + _RELOAD_FAILURE,
-    "site_readiness": (
-        "The site did not answer its readiness path as required: the home page must answer "
-        "below 500, and a path other than / must answer exactly 200. Check the site's code or "
-        "choose another path, then prepare a new review."
-    ),
-    "readiness_publish": (
-        "Barectl could not publish and verify the site's new readiness path, so the previous "
-        "Caddy file is still serving. Check the run's journal, then prepare a new review."
-    ),
-    "site_pool": (
-        "Barectl could not prove the site's new PHP settings after reloading its own master, "
-        "so it restored the previous pool. Check the run's journal, then prepare a new review."
-    ),
-    "object_cache": (
-        "The object cache change stopped before it finished. Nothing on the server was "
-        "rolled back; read the run's journal, then prepare a new review that proposes only "
-        "what remains."
-    ),
-    "object_cache_instance": (
-        "The site's own cache instance did not start or is not the reviewed shape. Read the "
-        "run's journal on the server, then prepare a new review."
-    ),
-    "object_cache_wiring": (
-        "The cache instance is running, but Barectl could not finish the site's WordPress "
-        "connection. Read the run's journal, then prepare a new review."
-    ),
-    "object_cache_plugin": (
-        "The pinned Redis Object Cache plugin could not be installed, activated or connected. "
-        "Read the run's journal on the server, then prepare a new review."
-    ),
-    "object_cache_verify": (
-        "The object cache changed, but the site did not report the reviewed state afterwards. "
-        "Read the run's journal, then prepare a new review that proposes only what remains."
-    ),
-    "site_client": (
-        "Barectl could not prove the site's cache PHP client after restarting its own master. "
-        "Check the run's journal, then prepare a new review."
-    ),
-    "logrotate_missing": (
-        "This server does not run logrotate, so the run stopped before changing anything. "
-        "Install and enable it with ordinary administration, check the server again, then "
-        "prepare a new review."
-    ),
-    "rotation_invalid": (
-        "logrotate refused the reviewed rotation file, so Barectl did not keep it. Check the "
-        "run's journal, then prepare a new review."
-    ),
-    "automatic_updates_package": (
-        "The reviewed unattended-upgrades package transaction did not match the server's "
-        "resolved one, so Barectl stopped before further changes. Prepare a new review."
-    ),
-    "automatic_updates_configure": (
-        "Ubuntu's automatic-update settings were not accepted. Read the server again before "
-        "preparing a new review."
-    ),
-    "automatic_updates_verify": (
-        "The automatic-update settings did not read back as reviewed. Read the server again "
-        "before preparing a new review."
-    ),
-    "automatic_updates_settings": (
-        "The server's customized automatic-update settings changed during the run, so Barectl "
-        "stopped without overwriting them. Check them through ordinary administration."
-    ),
-    "automatic_updates_failed": (
-        "The automatic-updates change stopped before reporting its outcome. Read the server "
-        "again before preparing a new review."
-    ),
-    "updates_refresh": (
-        "Ubuntu's package lists were not refreshed, so nothing was installed. Check the "
-        "server's configured Ubuntu archive, then prepare a new review."
-    ),
-    "updates_refresh_failed": (
-        "The package-list refresh stopped before reporting its outcome. Read the server "
-        "again before preparing a new review."
-    ),
-    "updates_transaction": (
-        "The server's resolved package transaction differs from the reviewed one, so "
-        "Barectl stopped before changing packages. Check for updates and prepare a new "
-        "review."
-    ),
-    "updates_hold": (
-        "A reviewed package is now held with apt-mark hold, so Barectl stopped before "
-        "changing packages. Release the hold through ordinary administration, then prepare "
-        "a new review."
-    ),
-    "updates_conffile": (
-        "A reviewed package's configuration file differs from the package's own copy, so "
-        "Barectl stopped before changing packages. Restore or confirm it through ordinary "
-        "administration, then prepare a new review."
-    ),
-    "updates_pending": (
-        "Ubuntu's package database has an unfinished package state, so Barectl stopped "
-        "before changing packages. Finish it through ordinary administration, then prepare "
-        "a new review."
-    ),
-    "updates_verify": (
-        "The reviewed packages were installed, but a package version or the package "
-        "database did not read back as expected. Read the server again before preparing a "
-        "new review."
-    ),
-    "updates_failed": (
-        "The updates change stopped before reporting its outcome. Read the server again "
-        "before preparing a new review that proposes only what remains."
-    ),
-    "restart_work": (
-        "A site backup, copy, check or cleanup, or Ubuntu's package maintenance, still had "
-        "processes on the server, so the restart stopped before changing anything. Prepare "
-        "a new review after it finishes."
-    ),
-    "restart_evidence": (
-        "The packages that asked for a restart changed after the review, so the restart "
-        "stopped before changing anything. Read the server again and prepare a new review."
-    ),
-    "restart_apply": (
-        "The restart stopped before asking the server to start again. Read the server "
-        "through ordinary administration and prepare a new review."
-    ),
-    "site_database": (
-        "The site's own PHP master did not answer as the site user through its driver, or the "
-        "database catalog changed, so Barectl stopped before creating the binding. Prepare a "
-        "new review."
-    ),
-    "site_database_driver": (
-        "The site's own PHP master did not load its driver or answer as the site user, so "
-        "Barectl stopped before creating the binding. Check the site's PHP master, then "
-        "prepare a new review."
-    ),
-    "laravel_source": (
-        "The site's repository or branch could not be resolved to a commit without fetch, "
-        "so the run stopped before changing anything. Check the repository and branch, then "
-        "prepare a new review."
-    ),
-    "laravel_fetch": (
-        "The reviewed commit could not be fetched, so the run stopped before switching code. "
-        "The previous release is still serving."
-    ),
-    "laravel_composer": (
-        "The release's dependencies could not be installed in isolation, so the run stopped "
-        "before switching code. The previous release is still serving."
-    ),
-    "laravel_platform": (
-        "The release requires a PHP version or extension the site's runtime does not provide, "
-        "so the run stopped before switching code. The previous release is still serving."
-    ),
-    "laravel_migrations": (
-        "A migration failed or the schema could not be verified, so Barectl kept the "
-        "maintenance page up and did not open the new release or reactivate older code. Read "
-        "the run's journal on the server, then prepare a new review."
-    ),
-    "laravel_gate": (
-        "Barectl could not establish the maintenance page, so the run stopped before "
-        "changing code. Review again."
-    ),
-    "laravel_readiness": (
-        "The new release did not answer its readiness check, so it was not opened to "
-        "visitors. The maintenance page is still up; read the run's journal and prepare a "
-        "new review."
-    ),
-    "laravel_disk": (
-        "The server lacks the free space the review stated, so the run stopped before "
-        "changing anything. Free space on the server, then prepare a new review."
-    ),
-    "laravel_release": (
-        "The new release could not be published in the site's release layout, so the run "
-        "stopped before switching code. The previous release is still serving."
-    ),
-    "laravel_shared": (
-        "The site's shared environment, storage or cache is missing or unsafe, so the run "
-        "stopped before switching code. The previous release is still serving."
-    ),
-    "laravel_environment": (
-        "The site's environment file changed, is outside the supported layout or could not "
-        "be rewritten safely, so nothing changed. Run discovery and prepare a new review."
-    ),
-    "laravel_config": (
-        "The environment changed, but Laravel's cached configuration could not be rebuilt, "
-        "so the site may still serve the previous configuration. Check the run's journal, "
-        "then prepare a new review."
-    ),
-    "laravel_environment_managed": (
-        "The selected environment key is managed by the site's object cache, so nothing "
-        "changed. Change the object cache setting instead."
-    ),
-    "laravel_worker": (
-        "The environment changed, but a running worker did not restart cleanly. The new "
-        "configuration is written; check the worker and restart it from Settings."
-    ),
-    "wordpress_settings": (
-        "The private WordPress configuration changed, is outside the supported grammar or "
-        "could not be rewritten safely, so nothing changed. Run discovery and prepare a new "
-        "review."
-    ),
-    "settings_secret": (
-        "The confidential value could not be used, so nothing changed. Prepare a new review "
-        "and type the value again."
-    ),
-    "wordpress_archive": (
-        "The pinned WordPress archive could not be downloaded, so the run stopped before "
-        "installing application files. Check the run's journal, then prepare a new review."
-    ),
-    "wordpress_archive_digest": (
-        "The downloaded WordPress archive did not match the pinned size or SHA-256, so it was "
-        "discarded and nothing was installed. Check the server's network and prepare a new "
-        "review."
-    ),
-    "wordpress_extract": (
-        "The pinned WordPress archive could not be extracted safely, so no application files "
-        "were published. Check the run's journal, then prepare a new review."
-    ),
-    "wordpress_configuration": (
-        "The private WordPress configuration is missing or outside the supported grammar, so "
-        "Barectl did not overwrite it. Correct it through ordinary administration, then "
-        "prepare a new review."
-    ),
-    "wordpress_install": (
-        "WordPress did not complete its installation, so the maintenance gate is still up. "
-        "Read the run's journal on the server, then prepare a new review."
-    ),
-    "wordpress_tables": (
-        "The site's WordPress tables already exist without a complete installation, so "
-        "Barectl did not reinstall into them. Inspect the database through ordinary "
-        "administration and prepare a new review."
-    ),
-    "wordpress_gate": (
-        "Barectl could not establish the maintenance gate, so the run stopped before "
-        "installing application files. Review again."
-    ),
-    "wordpress_publish": (
-        "Barectl could not publish the verified site route, so the maintenance gate stays up. "
-        "Read the run's journal and prepare a new review."
-    ),
-    "wordpress_readiness": (
-        "The site did not answer its home, login and permalink pages over HTTPS, so Barectl "
-        "restored the maintenance gate. Read the run's journal and prepare a new review."
-    ),
-    "wordpress_create": (
-        "The run stopped after changing the server, so the WordPress installation is partly "
-        "applied and the maintenance gate stays up. Read the unit's journal on the server, "
-        "then prepare a new review of what remains."
-    ),
-    "wordpress_secret": (
-        "The confidential administrator password could not be used, so nothing changed. "
-        "Prepare a new review and type the password again."
-    ),
-    "wordpress_password": (
-        "Barectl did not set a new password: WordPress has no user with that login, the user "
-        "is not an administrator, or the value cannot be a password. The site is unchanged. "
-        "Check the username and prepare a new review."
-    ),
-    "wordpress_password_unverified": (
-        "The password update ran, but Barectl could not confirm it: WordPress did not store "
-        "the new password, or its sign-in page did not accept it. The password may have "
-        "changed, so try signing in before preparing another review."
-    ),
-    "wordpress_checksums": (
-        "Barectl compared the installed WordPress core with the official checksums for the "
-        "reviewed version and found files that do not match. Nothing on the server changed. "
-        "Inspect the site through ordinary administration and replace the affected files "
-        "from the official release."
-    ),
-    "wordpress_checksums_unavailable": (
-        "Barectl could not compare the WordPress core with the official checksums: the "
-        "checksum service could not be reached or WP-CLI could not read the site. Nothing "
-        "on the server changed. Check the server's network access and prepare a new review."
-    ),
-    "certificate_email": (
-        "Barectl could not publish, reload and verify the reviewed certificate contact "
-        "email. The previous main configuration was restored where it had been replaced. "
-        "Check the run's journal on the server, then prepare a new review."
-    ),
-    "automation": (
-        "Barectl could not change the site's scheduled tasks, so nothing more was changed. "
-        "Check the run's journal on the server, then prepare a new review."
-    ),
-    "automation_site": (
-        "The site's account, files or private configuration were not the reviewed ones, so "
-        "the run stopped before changing anything. Run discovery again and prepare a new "
-        "review."
-    ),
-    "automation_start": (
-        "Barectl could not start the site's scheduled task. Nothing was handed over: page "
-        "loads still run cron. Check the run's journal, then prepare a new review."
-    ),
-    "automation_tick": (
-        "The first scheduled run did not finish successfully within the reviewed wait, so "
-        "Barectl did not hand cron over and page loads still run it. The server task stays "
-        "installed and reports its next result; prepare a new review to finish."
-    ),
-    "automation_configuration": (
-        "Barectl could not set or clear the site's cron setting in the private WordPress "
-        "configuration. Check the run's journal, then prepare a new review."
-    ),
-    "automation_units": (
-        "Barectl could not remove the site's scheduled task, so it may still be installed. "
-        "Check the run's journal, then prepare a new review."
-    ),
-    "queue_workers": (
-        "Barectl could not change the site's queue workers, so the run stopped. The site "
-        "may be partly changed; check the run's journal on the server, then prepare a new "
-        "review."
-    ),
-    "queue_workers_site": (
-        "The site's account, current release or private files were not the reviewed ones, "
-        "so the run stopped before changing anything. Run discovery again and prepare a new "
-        "review."
-    ),
-    "queue_workers_activation": (
-        "The site's current release changed before the workers could start, so the run "
-        "stopped without changing them. Deploy again, then prepare a new review."
-    ),
-    "queue_workers_environment": (
-        "Barectl could not write the site's retry interval, so no worker was started. Check "
-        "the run's journal, then prepare a new review."
-    ),
-    "queue_workers_start": (
-        "Barectl could not confirm that every queue worker process is running. Check the "
-        "run's journal, then prepare a new review."
-    ),
-    "queue_workers_stop": (
-        "Barectl could not confirm that every queue worker stopped. Check the run's journal, "
-        "then prepare a new review."
-    ),
-    "automation_scheduler": (
-        "The site's Laravel files, account or scheduler units were not the reviewed ones, so "
-        "the run stopped before changing anything. Run discovery again and prepare a new "
-        "review."
-    ),
-    "automation_run": (
-        "The scheduler started one run, but it did not finish successfully. Nothing else was "
-        "changed. Scheduled tasks shows the run's result; check the application and prepare a "
-        "new review."
-    ),
-    "automation_running": (
-        "The scheduler run is still going after the reviewed wait, so Barectl stopped waiting. "
-        "It keeps running on the server; Scheduled tasks shows its result when it finishes."
-    ),
-    "automation_fence": (
-        "The site's background work did not stop within its budget, so the run stopped before "
-        "changing anything and the site's background work stays paused. Check the run's "
-        "journal, then prepare a new review."
-    ),
-    "automation_restore": (
-        "The change verified, but Barectl could not prove the site's background work started "
-        "again, so it stays paused and the change is partly applied. Check the run's journal, "
-        "then prepare a new review."
-    ),
-    "backup_site": (
-        "The site's Linux account could not be read, so the backup stopped before changing "
-        "anything. Run discovery and prepare a new review."
-    ),
-    "backup_repository": (
-        "The site's backup repository could not be read or created, so nothing was captured. "
-        "Read the run's journal on the server, then prepare a new review."
-    ),
-    "backup_password": (
-        "The recovery passphrase did not open the site's repository, so nothing was captured. "
-        "Prepare a new review and type the passphrase you stored."
-    ),
-    "backup_key": (
-        "The server key could not be added or did not open the repository, so units cannot "
-        "take backups yet. The passphrase still opens it. Prepare a new review to finish."
-    ),
-    "backup_dump": (
-        "The database dump failed, so restic saved no recovery point. Check the site's "
-        "database and prepare a new review."
-    ),
-    "backup_disk": (
-        "The server does not have the free space the review keeps in reserve, so nothing was "
-        "captured and no older backup was removed. Free space, then prepare a new review."
-    ),
-    "backup_lock": (
-        "The site was busy with another change, so the backup was skipped. Prepare a new "
-        "review after that change finishes."
-    ),
-    "backup_verify": (
-        "The capture finished but no complete recovery point could be verified in the "
-        "repository. Read the run's journal on the server and prepare a new review."
-    ),
-    "backup_unknown": (
-        "The backup tool reported an error Barectl does not recognize, so nothing is recorded "
-        "as saved. Read the run's journal on the server and prepare a new review."
-    ),
-    "backup_files": (
-        "The site's files could not be copied, so the point is incomplete and the site stays "
-        "paused. Read the run's journal, then reopen the site and prepare a new review."
-    ),
-    "backup_idle": (
-        "The site's running work did not finish within the reviewed wait, so the files were "
-        "not copied and the site stays paused. Read the run's journal, then reopen the site."
-    ),
-    "backup_paused": (
-        "The full backup stopped after pausing the site. Nothing after that ran. Reopen the "
-        "site, then prepare a new review."
-    ),
-    "backup_gate": (
-        "Barectl could not publish or remove the maintenance page, so the site stays paused. "
-        "Read the run's journal, then reopen the site."
-    ),
-    "offsite_bucket": (
-        "The bucket did not answer a write and a listing with the reviewed keys, so Barectl "
-        "did not keep the offsite storage setting. Check the bucket and keys, then prepare a "
-        "new review."
-    ),
-    "offsite_repository": (
-        "An offsite repository could not be initialised or opened. The copies already in the "
-        "bucket are unchanged. Check the bucket and keys, then prepare a new review."
-    ),
-    "offsite_key": (
-        "The offsite access keys or recovery passphrase could not be used, so nothing was "
-        "copied. Prepare a new review and type the values again."
-    ),
-    "offsite_copy": (
-        "The offsite copy did not finish. The recovery point saved on this server is "
-        "unchanged; copy it offsite again when the storage is reachable."
-    ),
-    "offsite_remove": (
-        "Barectl could not remove the offsite setting from the server. The copies already in "
-        "the bucket are unchanged. Check the run's journal and prepare a new review."
-    ),
-    "site_reopen": (
-        "Barectl could not prove that the site serves its files again, so it may still show "
-        "the maintenance page. Read the run's journal and prepare a new review."
-    ),
-    "removed_backup": (
-        "Barectl could not delete the removed site's backups, so they stay where they are. "
-        "Read the run's journal on the server, then prepare a new review."
-    ),
-    "restore_site": (
-        "The site's Linux account could not be read, so the restore stopped before changing "
-        "anything. Run discovery and prepare a new review."
-    ),
-    "restore_repository": (
-        "The site's backup repository could not be read, so nothing was restored. Read the "
-        "run's journal on the server, then prepare a new review."
-    ),
-    "restore_evidence": (
-        "The site's reviewed files changed before the run started, so nothing was restored. "
-        "Run discovery and prepare a new review."
-    ),
-    "restore_lock": (
-        "The site was busy with another change, so the restore was skipped. Prepare a new "
-        "review after that change finishes."
-    ),
-    "restore_disk": (
-        "The server does not have the free space the review keeps in reserve, so nothing was "
-        "restored. Free space, then prepare a new review."
-    ),
-    "restore_point": (
-        "The recovery point is missing or incomplete, so nothing was restored. Check backups "
-        "and prepare a new review."
-    ),
-    "restore_engine": (
-        "The recovery point was made by a different database version than this site uses, so "
-        "nothing was restored. Prepare a new review from a matching point."
-    ),
-    "restore_target": (
-        "The site's database changed since the review, so nothing was restored. Prepare a new "
-        "review against the current site."
-    ),
-    "restore_dump": (
-        "The recovery point's database copy was truncated, so nothing was restored and the "
-        "site still serves. Prepare a new review from a complete point."
-    ),
-    "restore_safety": (
-        "The safety backup could not be taken or checked, so nothing was overwritten. Read the "
-        "run's journal and prepare a new review."
-    ),
-    "restore_gate": (
-        "Barectl could not publish the maintenance page, so the site's database was not "
-        "changed. Read the run's journal, then prepare a new review."
-    ),
-    "restore_paused": (
-        "The restore stopped after pausing the site. Nothing after that ran. Reopen the site, "
-        "then prepare a new review."
-    ),
-    "restore_idle": (
-        "The site's running requests or background work did not finish within the reviewed "
-        "wait, so the database was not changed and the site stays paused. Reopen the site."
-    ),
-    "restore_import": (
-        "The database import did not finish, so the site stays paused and the data may be "
-        "partly replaced. Read the run's journal, then reopen the site and check what remained."
-    ),
-    "restore_data": (
-        "The import finished but its data checks did not pass, so the site stays paused. Read "
-        "the run's journal, then reopen the site and check the data."
-    ),
-    "restore_readiness": (
-        "The data was imported but the site did not answer its readiness check, so it stays "
-        "paused. Read the run's journal, then reopen the site and check the application."
-    ),
-    "restore_open": (
-        "Barectl could not remove the maintenance page, so the site stays paused. Read the "
-        "run's journal and prepare a new review."
-    ),
-}
-_FAILURES: Final[dict[Result, str]] = {
-    Result.REFUSED: "The run stopped before changing anything.",
-    Result.LOCK_BUSY: (
-        "Another change held Barectl's mutation lock on the server, so the run stopped "
-        "before changing anything. Prepare a new review after that change finishes."
-    ),
-    Result.PARTIAL: (
-        "The run stopped after changing the server, so the change is partly applied and "
-        "no rollback happens. Read the unit's journal on the server, then prepare a new "
-        "review of what remains."
-    ),
-    Result.FAILED: (
-        "The run failed without reporting how far it got, so what changed is unknown and "
-        "no rollback happens. Read the unit's journal on the server, then prepare a new "
-        "review before any later change."
-    ),
-    Result.TIMED_OUT: (
-        f"The run reached its {native.RUNTIME_MAX} limit and systemd stopped it; what "
-        "changed is unknown and no rollback happens. Read the unit's journal on the "
-        "server, then prepare a new review."
-    ),
-}
 VERIFICATION_FAILED = (
     "The run completed, but its postconditions do not hold. Inspect the server through "
     "ordinary administration, then prepare a new review."
@@ -976,6 +346,13 @@ class ChangeKind:
     # Success means a new boot ID on a fresh verified connection, and no connection within
     # the ten-minute policy leaves the outcome unknown (docs/security.md#restart).
     restarts_host: bool = False
+    # The reasons this kind's staged body can print, declared by the fragments it stages.
+    # Registration merges the engine's admission vocabulary and indexes each sentence by
+    # reason and outcome (#495).
+    reasons: tuple[reasons.ResultReason, ...] = ()
+    # The repository-relative body text files this kind stages. The composer manifest reads
+    # them and proves the declaration matches what the text can print.
+    body_sources: tuple[str, ...] = ()
 
 
 _KINDS: dict[str, ChangeKind] = {}
@@ -983,6 +360,7 @@ _KINDS: dict[str, ChangeKind] = {}
 
 def register_kind(kind: ChangeKind) -> None:
     _KINDS[kind.slug] = kind
+    reasons.register_kind(kind)
 
 
 def kind_of(slug: str) -> ChangeKind | None:
@@ -1004,195 +382,6 @@ RESULT_PREFIX: Final = "barectl-result "
 SITE_IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}")
 RESULT_CLASSES: Final = frozenset(
     {"succeeded", "refused", "partial", "failed", "lock_busy", "timed_out"}
-)
-RESULT_REASONS: Final = frozenset(
-    {
-        "",
-        "unsafe_lock",
-        "boot",
-        "deadline",
-        "active_run",
-        "revert_active",
-        "revert_preimage",
-        "revert_arm",
-        "firewall_ports",
-        "firewall_outside",
-        "firewall_package",
-        "firewall_standard",
-        "firewall_apply",
-        "firewall_verify",
-        "sign_in_syntax",
-        "sign_in_reload",
-        "sign_in_verify",
-        "sign_in_apply",
-        "capacity",
-        "affected_sites",
-        "evidence",
-        "cleanup",
-        "precondition",
-        "privilege",
-        "platform",
-        "headroom",
-        "nix_incomplete",
-        "foreign_stack",
-        "download",
-        "installer_digest",
-        "foundation",
-        "apt_active",
-        "apt_unreadable",
-        "runtime_cache",
-        "runtime_realise",
-        "runtime_config",
-        "runtime_start",
-        "site_create",
-        "site_caddy",
-        "site_readiness",
-        "readiness_publish",
-        "site_remove",
-        "site_remove_evidence",
-        "site_remove_gate",
-        "site_remove_caddy",
-        "site_remove_services",
-        "site_remove_configuration",
-        "site_remove_database",
-        "site_remove_certificate",
-        "site_remove_files",
-        "site_remove_accounts",
-        "site_remove_verify",
-        "database_engine",
-        "database_reload",
-        "valkey_server",
-        "valkey_mask",
-        "valkey_reload",
-        "site_client",
-        "object_cache",
-        "object_cache_instance",
-        "object_cache_wiring",
-        "object_cache_plugin",
-        "object_cache_verify",
-        "site_database",
-        "site_database_driver",
-        "site_database_principal",
-        "site_database_database",
-        "site_database_privileges",
-        "site_database_schema",
-        "site_database_after",
-        "site_database_proof",
-        "site_database_probe",
-        "laravel_source",
-        "laravel_fetch",
-        "laravel_composer",
-        "laravel_platform",
-        "laravel_migrations",
-        "laravel_gate",
-        "laravel_readiness",
-        "laravel_disk",
-        "laravel_release",
-        "laravel_shared",
-        "laravel_environment",
-        "laravel_environment_managed",
-        "laravel_config",
-        "laravel_worker",
-        "wordpress_settings",
-        "settings_secret",
-        "release_absent",
-        "wordpress_archive",
-        "wordpress_archive_digest",
-        "wordpress_extract",
-        "wordpress_configuration",
-        "wordpress_install",
-        "wordpress_tables",
-        "wordpress_gate",
-        "wordpress_publish",
-        "wordpress_readiness",
-        "wordpress_create",
-        "wordpress_secret",
-        "wordpress_password",
-        "wordpress_password_unverified",
-        "wordpress_checksums",
-        "wordpress_checksums_unavailable",
-        "certificate_email",
-        "automation",
-        "automation_site",
-        "automation_start",
-        "automation_tick",
-        "automation_configuration",
-        "automation_units",
-        "queue_workers",
-        "queue_workers_site",
-        "queue_workers_activation",
-        "queue_workers_environment",
-        "queue_workers_start",
-        "queue_workers_stop",
-        "automation_scheduler",
-        "automation_run",
-        "automation_running",
-        "automation_fence",
-        "automation_restore",
-        "backup_site",
-        "backup_repository",
-        "backup_password",
-        "backup_key",
-        "backup_dump",
-        "backup_disk",
-        "backup_lock",
-        "backup_verify",
-        "backup_unknown",
-        "backup_partial",
-        "backup_files",
-        "backup_idle",
-        "backup_paused",
-        "backup_gate",
-        "backup_offsite",
-        "schedule_timer",
-        "schedule_units",
-        "schedule_install",
-        "offsite_bucket",
-        "offsite_repository",
-        "offsite_key",
-        "offsite_copy",
-        "offsite_remove",
-        "removed_backup",
-        "site_reopen",
-        "restore_site",
-        "restore_repository",
-        "restore_evidence",
-        "restore_lock",
-        "restore_disk",
-        "restore_point",
-        "restore_engine",
-        "restore_dump",
-        "restore_target",
-        "restore_safety",
-        "restore_gate",
-        "restore_paused",
-        "restore_idle",
-        "restore_import",
-        "restore_data",
-        "restore_readiness",
-        "restore_files",
-        "restore_config",
-        "restore_open",
-        "restore_done",
-        "logrotate_missing",
-        "rotation_invalid",
-        "automatic_updates_package",
-        "automatic_updates_configure",
-        "automatic_updates_verify",
-        "automatic_updates_settings",
-        "automatic_updates_failed",
-        "updates_refresh",
-        "updates_refresh_failed",
-        "updates_transaction",
-        "updates_hold",
-        "updates_conffile",
-        "updates_pending",
-        "updates_verify",
-        "updates_failed",
-        "restart_work",
-        "restart_evidence",
-        "restart_apply",
-    }
 )
 
 
@@ -1230,7 +419,7 @@ def parse_result_line(text: str) -> ResultLine | None:
         if not isinstance(result_class, str) or result_class not in RESULT_CLASSES:
             raise native.Unreadable("The result line is not in the engine's form.")
         reason = value.get("reason", "")
-        if not isinstance(reason, str) or reason not in RESULT_REASONS:
+        if not isinstance(reason, str) or not reasons.accepted(reason):
             raise native.Unreadable("The result line is not in the engine's form.")
         change_kind = value.get("change_kind", "")
         if not isinstance(change_kind, str) or (change_kind and kind_of(change_kind) is None):
@@ -1289,25 +478,51 @@ def _read_journal(shell: RemoteShell, unit: str) -> str:
     return result.stdout
 
 
+class ResultEvidence(StrEnum):
+    """What a run's journal holds about its result: a line, an unreadable line or none."""
+
+    PRESENT = "present"
+    UNREADABLE = "unreadable"
+    ABSENT = "absent"
+
+
 @dataclass(frozen=True)
 class JournalEvidence:
-    """What a run's journal holds: its result line, and the last reviewed stage it reported."""
+    """What a run's journal holds: its result line, and the last reviewed stage it reported.
+
+    ``result_evidence`` keeps the parser's refusal distinct from an absent line, so a run
+    that printed something Barectl could not read is never described as printing nothing.
+    """
 
     line: ResultLine | None
     stage: str
+    result_evidence: ResultEvidence = ResultEvidence.ABSENT
 
 
 def read_journal(shell: RemoteShell, unit: str, stages: object) -> JournalEvidence:
     text = _read_journal(shell, unit)
+    stage = parse_progress(text, stages)
     try:
         line = parse_result_line(text)
     except native.Unreadable:
-        line = None
-    return JournalEvidence(line, parse_progress(text, stages))
+        return JournalEvidence(None, stage, ResultEvidence.UNREADABLE)
+    return JournalEvidence(
+        line,
+        stage,
+        ResultEvidence.PRESENT if line is not None else ResultEvidence.ABSENT,
+    )
 
 
 def read_result(shell: RemoteShell, unit: str) -> ResultLine | None:
-    return read_journal(shell, unit, ()).line
+    """The journal's result line, or ``None`` when it holds none.
+
+    Raises ``native.Unreadable`` when a line is present but not in the engine's form, so a
+    caller cannot mistake unreadable evidence for absence.
+    """
+    journal = read_journal(shell, unit, ())
+    if journal.result_evidence is ResultEvidence.UNREADABLE:
+        raise native.Unreadable("The result line is not in the engine's form.")
+    return journal.line
 
 
 def _line_result(line: ResultLine) -> tuple[Result, str]:
@@ -1979,16 +1194,29 @@ def _watch_reboot(run: ChangeRun, kind: ChangeKind) -> None:
                     return
                 boot_id = _boot_id(shell)
                 if boot_id and boot_id != review.boot_id:
-                    line = read_result(shell, run.unit_name)
-                    if line is None:
+                    journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+                    if journal.result_evidence is ResultEvidence.ABSENT:
                         # The unit's journal may still be publishing its last line as the
                         # server boots; give it one short settle before calling it unknown.
                         time.sleep(JOURNAL_SETTLE_SECONDS)
-                        line = read_result(shell, run.unit_name)
-                    if line is None:
+                        journal = read_journal(
+                            shell, run.unit_name, run.review.document.get("stages")
+                        )
+                    if journal.result_evidence is ResultEvidence.UNREADABLE:
+                        _reboot_unknown(run, failure=UNREADABLE_RESULT_FAILURE)
+                        return
+                    if journal.result_evidence is ResultEvidence.ABSENT:
                         _reboot_unknown(run, failure=RESTART_NO_RESULT)
                         return
-                    _conclude(shell, run, kind, None, line, Status.RUNNING)
+                    _conclude(
+                        shell,
+                        run,
+                        kind,
+                        None,
+                        journal.line,
+                        Status.RUNNING,
+                        result_evidence=journal.result_evidence,
+                    )
                     return
         except ConnectionFailed:
             pass
@@ -2069,9 +1297,9 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
             # the journal. Allow systemd's journal to publish the result line after the
             # unit has been collected before treating it as missing evidence.
             journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
-            if journal.line is not None:
-                _conclude(shell, run, kind, None, journal.line, Status.RUNNING)
-            elif acknowledged:
+            if _journal_settles_missing(shell, run, kind, journal):
+                return
+            if acknowledged:
                 missing_since = missing_since or time.monotonic()
                 if time.monotonic() - missing_since < JOURNAL_SETTLE_SECONDS:
                     time.sleep(min(0.1, JOURNAL_SETTLE_SECONDS))
@@ -2088,14 +1316,43 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
         )
         _record(run.pk, Status.RUNNING, progress_stage=stage)
         if evidence.terminal:
-            line = read_result(shell, run.unit_name)
-            _conclude(shell, run, kind, evidence, line, Status.RUNNING)
+            journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+            _conclude(
+                shell,
+                run,
+                kind,
+                evidence,
+                journal.line,
+                Status.RUNNING,
+                result_evidence=journal.result_evidence,
+            )
             return
         _record(run.pk, Status.RUNNING, execution=Result.RUNNING)
         if time.monotonic() >= deadline:
             lifecycle.reconcile(run.pk, f"{STILL_RUNNING} {UNCERTAIN}")
             return
         time.sleep(POLL_INTERVAL)
+
+
+def _journal_settles_missing(
+    shell: RemoteShell, run: ChangeRun, kind: ChangeKind, journal: JournalEvidence
+) -> bool:
+    """Conclude a missing unit from a present or unreadable result line, if it has one."""
+    if journal.result_evidence is ResultEvidence.PRESENT:
+        _conclude(
+            shell,
+            run,
+            kind,
+            None,
+            journal.line,
+            Status.RUNNING,
+            result_evidence=journal.result_evidence,
+        )
+        return True
+    if journal.result_evidence is ResultEvidence.UNREADABLE:
+        _reconcile_unreadable(run, journal.stage)
+        return True
+    return False
 
 
 def _reconcile_missing(run: ChangeRun, stage: str) -> None:
@@ -2105,6 +1362,13 @@ def _reconcile_missing(run: ChangeRun, stage: str) -> None:
         return
     _record(run.pk, Status.RUNNING, progress_stage=stage)
     lifecycle.reconcile(run.pk, f"{STOPPED_SILENTLY} {NEVER_AGAIN}")
+
+
+def _reconcile_unreadable(run: ChangeRun, stage: str) -> None:
+    """The unit is gone, but its journal holds a result line Barectl could not read."""
+    if stage:
+        _record(run.pk, Status.RUNNING, progress_stage=stage)
+    lifecycle.reconcile(run.pk, UNREADABLE_RESULT_FAILURE)
 
 
 def _conclude_rejected(run: ChangeRun) -> None:
@@ -2117,18 +1381,7 @@ def _conclude_rejected(run: ChangeRun) -> None:
 
 
 def _failure(outcome: Result, reason: str) -> str:
-    if outcome == Result.REFUSED and reason == "sign_in_syntax":
-        return "OpenSSH rejected the existing configuration before Barectl changed anything."
-    if outcome == Result.REFUSED and reason == "sign_in_apply":
-        return "Barectl could not prepare the sign-in file before changing the server."
-    if outcome == Result.FAILED and reason == "sign_in_apply":
-        return (
-            "The sign-in file write may have changed the server. The server is restoring "
-            "the previous settings on its own."
-        )
-    if reason in _REFUSED_REASONS and outcome in (Result.REFUSED, Result.PARTIAL):
-        return _REFUSED_REASONS[reason]
-    return _FAILURES.get(outcome, "")
+    return reasons.sentence(outcome, reason)
 
 
 def reason_text(result_class: str, reason: str) -> str:
@@ -2199,9 +1452,16 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
     line: ResultLine | None,
     source: RemoteOperation.Status,
     revision: int | None = None,
+    *,
+    result_evidence: ResultEvidence = ResultEvidence.PRESENT,
 ) -> None:
     """A controller-side failure while verifying never becomes a remote failure: the known
-    outcome is kept and verification is recorded as unavailable."""
+    outcome is kept and verification is recorded as unavailable.
+
+    The execution outcome comes from the result line when it parsed and from the native
+    unit otherwise. A line Barectl could not read keeps that same execution outcome but
+    words its failure as unreadable evidence, never as the absence of a result.
+    """
     if line is not None:
         outcome, reason = _line_result(line)
     elif evidence is not None:
@@ -2245,8 +1505,13 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
     ):
         verification = Verification.UNAVAILABLE
         failure = WINDOW_NOT_CONFIRMED
+    if result_evidence is ResultEvidence.UNREADABLE:
+        failure = UNREADABLE_RESULT_FAILURE
     succeeded = outcome == Result.SUCCEEDED and verification == Verification.PASSED
-    if succeeded:
+    stored_reason = reason
+    if result_evidence is ResultEvidence.UNREADABLE:
+        stored_reason = UNREADABLE_RESULT_REASON
+    elif succeeded:
         failure = ""
     with transaction.atomic():
         if not lifecycle.finish(
@@ -2256,7 +1521,7 @@ def _conclude(  # noqa: C901 - the one conclusion every outcome class shares
         ChangeRun.objects.filter(pk=run.pk).update(
             execution=outcome,
             exit_status=exit_status,
-            result_reason=reason,
+            result_reason=stored_reason,
             verification=verification,
             window_outcome=window.value if window is not None else "",
             invocation_id=evidence.invocation_id if evidence is not None else run.invocation_id,
@@ -2326,8 +1591,17 @@ def _check(run: ChangeRun) -> None:
                     run.pk, f"{STILL_RUNNING} Check its outcome again later.", revision=revision
                 )
                 return
-            line = read_result(shell, run.unit_name)
-            _conclude(shell, run, kind, evidence, line, Status.RECONCILING, revision)
+            journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+            _conclude(
+                shell,
+                run,
+                kind,
+                evidence,
+                journal.line,
+                Status.RECONCILING,
+                revision,
+                result_evidence=journal.result_evidence,
+            )
     finally:
         if closing is not None:
             # The acknowledgement was used, whatever the check found; a newer one waits
@@ -2335,6 +1609,46 @@ def _check(run: ChangeRun) -> None:
             ChangeRun.objects.filter(pk=run.pk, closure_requested_at=closing).update(
                 closure_requested_at=None
             )
+
+
+def _missing_journal(
+    shell: RemoteShell,
+    run: ChangeRun,
+    kind: ChangeKind,
+    journal: JournalEvidence,
+    revision: int,
+    closing: bool,
+) -> bool:
+    """Conclude from a missing unit's present or unreadable result line, if it has one."""
+    if journal.result_evidence is ResultEvidence.PRESENT:
+        if _record(run.pk, Status.RECONCILING, revision):
+            _conclude(
+                shell,
+                run,
+                kind,
+                None,
+                journal.line,
+                Status.RECONCILING,
+                revision,
+                result_evidence=journal.result_evidence,
+            )
+        return True
+    if journal.result_evidence is ResultEvidence.UNREADABLE:
+        if _record_missing(run, journal, revision, UNREADABLE_RESULT_FAILURE) and closing:
+            _close_unknown(shell, run, revision, reached=bool(journal.stage))
+        return True
+    return False
+
+
+def _record_missing(run: ChangeRun, journal: JournalEvidence, revision: int, failure: str) -> bool:
+    """Record a missing unit's outcome and explanation, keeping any stage it reported."""
+    changes: dict[str, object] = {"execution": Result.NOT_FOUND}
+    if journal.stage:
+        changes["progress_stage"] = journal.stage
+    if not _record(run.pk, Status.RECONCILING, revision, **changes):
+        return False
+    lifecycle.note(run.pk, failure, revision=revision)
+    return True
 
 
 def _check_missing(
@@ -2348,9 +1662,7 @@ def _check_missing(
     """The unit is gone: its journal's result line settles the outcome, and an
     acknowledgement may close it as unknown once the proofs hold."""
     journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
-    if journal.line is not None:
-        if _record(run.pk, Status.RECONCILING, revision):
-            _conclude(shell, run, kind, None, journal.line, Status.RECONCILING, revision)
+    if _missing_journal(shell, run, kind, journal, revision, closing):
         return
     if evidence.boot_id != run.review.boot_id:
         reason = f"{RESTARTED} {UNCERTAIN}"
@@ -2358,13 +1670,7 @@ def _check_missing(
         reason = f"{STOPPED_SILENTLY} {NEVER_AGAIN}"
     else:
         reason = f"{NOT_FOUND} {UNCERTAIN}"
-    changes: dict[str, object] = {"execution": Result.NOT_FOUND}
-    if journal.stage:
-        changes["progress_stage"] = journal.stage
-    if not _record(run.pk, Status.RECONCILING, revision, **changes):
-        return
-    lifecycle.note(run.pk, reason, revision=revision)
-    if closing:
+    if _record_missing(run, journal, revision, reason) and closing:
         _close_unknown(shell, run, revision, reached=bool(journal.stage))
 
 

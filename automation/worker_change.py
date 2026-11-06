@@ -25,9 +25,11 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from sites import observation as site_observation
 from sites.bodies.common import SITE_GATED, NativeState, SiteRecord
+from sites.bodies.reasons import SITE_REASONS
 from sites.configuration import PHP_RUNTIMES
 
 from . import convention, worker_observation, worker_preconditions, workers
+from .bodies.reasons import WORKER_REASONS
 from .worker_status import STATUS_SENTENCE
 
 SLUG: Final = "set_laravel_queue_workers"
@@ -548,4 +550,6 @@ SET_LARAVEL_QUEUE_WORKERS: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.LARAVEL_QUEUE_WORKERS,
+    reasons=(*SITE_REASONS, *WORKER_REASONS),
+    body_sources=("sites/bodies/common.py", "automation/bodies/worker.py"),
 )

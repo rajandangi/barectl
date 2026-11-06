@@ -372,6 +372,10 @@ _Avoid_: Deployment, provisioning run
 What native evidence established about a change run: succeeded, refused before changes, partly applied, failed or timed out. Separate from verification and from the run's lifecycle state.
 _Avoid_: Result, status
 
+**Result reason**:
+The fixed wire value a native body pairs with one execution outcome in its single result line, carrying one plain sentence for each outcome it can be paired with. The body's composer declares it, so a reason the body can print and the wording the operator reads are the same declaration. A reason no current body prints is retired: it is still recognized when read, and never offered.
+_Avoid_: Error code, status message, failure text
+
 **Verification outcome**:
 Whether a review's postconditions held when checked with fresh reads after a successful execution, or why they could not be checked.
 _Avoid_: Health check

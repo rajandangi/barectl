@@ -25,6 +25,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 
 from . import observation
+from .bodies.reasons import ENGINE_REASONS
 from .packages import (
     PackageAction,
     Simulation,
@@ -664,6 +665,8 @@ INSTALL: Final = ChangeKind(
     refresh_discovery=True,
     input_choices=ENGINE_CHOICES,
     input_shape=InputShape.DATABASE_ENGINE,
+    reasons=ENGINE_REASONS,
+    body_sources=("databases/bodies/install.sh",),
 )
 REMOVE: Final = ChangeKind(
     slug=REMOVE_SLUG,
@@ -674,4 +677,6 @@ REMOVE: Final = ChangeKind(
     verify=verify_removal,
     refresh_discovery=True,
     input_choices=ENGINE_CHOICES,
+    reasons=ENGINE_REASONS,
+    body_sources=("databases/bodies/remove.sh",),
 )
