@@ -81,12 +81,7 @@
       {{ environment_form.key }}
       <button class="usa-button" type="submit">Review adding the key</button>
     </form>
-  {% elif blocking %}
-    {% include "operations/_blocking_operation.html" with after="Prepare an environment change after it finishes." %}
   {% else %}
-    <p class="barectl-note">
-      Editing the environment needs site changes and the manage-secrets permission, and a
-      current, complete Laravel site observation.
-    </p>
+    <p class="barectl-note">{{ environment_reason }}</p>
   {% endif %}
 </section>

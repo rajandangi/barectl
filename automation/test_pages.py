@@ -8,7 +8,7 @@ from django.test import SimpleTestCase
 
 from automation.observation import ObservedSchedule
 from automation.status import ScheduleStatus
-from automation.testing import record_schedule, schedule
+from automation.testing import record_laravel_schedule, record_schedule, schedule
 from discovery.snapshot import current_snapshot
 from servers.attention import needs_attention
 from servers.models import Server
@@ -77,8 +77,36 @@ class ScheduledTasksPageTests(ControllerConfigTestCase):
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
         html = self.settings_page()
         self.assertIn("Scheduled tasks", html)
-        self.assertIn("permission to change this site", html)
+        self.assertIn("Your account does not have permission to prepare changes.", html)
         self.assertNotIn("site_scheduled_tasks_prepare", html)
+
+    def test_a_withheld_scheduled_tasks_form_is_refused_with_the_gate_sentence(self) -> None:
+        from discovery.models import SiteState
+        from operations.services import read_changes
+
+        record_schedule(self.server, state=SiteState.PARTLY_APPLIED)
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/shop/settings/scheduled-tasks/prepare/",
+            {"state": "on"},
+            follow=True,
+        )
+        self.assertEqual(read_changes(self.server).rows, [])
+        self.assertContains(
+            response,
+            "This site is partly applied; finish the change that is already in progress first.",
+        )
+
+    def test_a_partly_applied_laravel_site_withholds_both_automation_changes(self) -> None:
+        from discovery.models import SiteState
+
+        record_laravel_schedule(self.server, state=SiteState.PARTLY_APPLIED)
+        html = self.settings_page()
+        reason = "This site is partly applied; finish the change that is already in progress first."
+        self.assertIn("Scheduled tasks", html)
+        self.assertIn("Queue workers", html)
+        self.assertEqual(html.count(reason), 2)
+        self.assertNotIn("site_scheduled_tasks_prepare", html)
+        self.assertNotIn("site_queue_workers_prepare", html)
 
     def test_preparing_needs_the_site_change_permission(self) -> None:
         record_schedule(self.server)

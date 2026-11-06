@@ -4,6 +4,8 @@ Opening the section makes no SSH connection: it reads the latest observation. Pr
 action queues a review in the worker, which reads the site's native evidence once.
 """
 
+from dataclasses import replace
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -11,17 +13,16 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import MANAGE_SECRETS
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites.names import valid_identifier
+from sites.preparation import decide_for_site
 
 from .actions import CORE_SLUG, PASSWORD_SLUG
 from .forms import WordPressPasswordForm
@@ -40,22 +41,23 @@ def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
     )
 
 
+def _requirements(*, secret: bool) -> preparation.Requirements:
+    needs = preparation.SITE.needs | {preparation.Need.SECRET} if secret else preparation.SITE.needs
+    return replace(
+        preparation.SITE,
+        needs=needs,
+        application="wordpress",
+        no_application_problem=True,
+    )
+
+
 def context_for_site(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
     site = _site(state, identifier)
-    standing = state.snapshot.collected.standing if state.snapshot is not None else None
-    complete = (
-        site is not None
-        and site.application == "wordpress"
-        and not site.application_problem
-        and site.state == SiteState.MANAGED
-        and site.file.startswith("/etc/caddy/sites/")
-        and standing is not None
-        and standing.standing == Standing.TARGET_STACK
-    )
-    allowed = complete and state.can_prepare_changes and not services.read_changes(server).polling
+    password = decide_for_site(state, user, identifier, _requirements(secret=True))
+    core = decide_for_site(state, user, identifier, _requirements(secret=False))
     problem = ""
     if site is not None and site.application == "wordpress_partial":
         problem = site.application_problem or "The WordPress installation is incomplete."
@@ -65,10 +67,10 @@ def context_for_site(
         "wordpress_version": site.application_version if site is not None else "",
         "wordpress_problem": problem,
         "wordpress_password_form": WordPressPasswordForm(),
-        "wordpress_password_can_prepare": allowed
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES, MANAGE_SECRETS)),
-        "wordpress_core_can_prepare": allowed
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES)),
+        "wordpress_password_can_prepare": password.allowed,
+        "wordpress_password_reason": password.reason.sentence if password.reason else "",
+        "wordpress_core_can_prepare": core.allowed,
+        "wordpress_core_reason": core.reason.sentence if core.reason else "",
     }
 
 
@@ -79,7 +81,6 @@ def _prepare(
     *,
     slug: str,
     inputs: dict[str, object],
-    problem: str,
 ) -> HttpResponse:
     if not isinstance(request.user, User):
         raise Http404
@@ -91,7 +92,12 @@ def _prepare(
         else context["wordpress_core_can_prepare"]
     )
     if not allowed:
-        messages.error(request, problem)
+        reason = (
+            context["wordpress_password_reason"]
+            if slug == PASSWORD_SLUG
+            else context["wordpress_core_reason"]
+        )
+        messages.error(request, str(reason))
         return redirect("site_wordpress", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(server, request.user, slug, inputs=inputs)
@@ -126,7 +132,6 @@ def prepare_password(request: HttpRequest, pk: int, identifier: str) -> HttpResp
             "identifier": identifier,
             "admin_username": form.cleaned_data["admin_username"],
         },
-        problem="Reset a password only on a current, complete WordPress site.",
     )
 
 
@@ -142,5 +147,4 @@ def prepare_core(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
         identifier,
         slug=CORE_SLUG,
         inputs={"version": 1, "identifier": identifier},
-        problem="Verify core files only on a current, complete WordPress site.",
     )
