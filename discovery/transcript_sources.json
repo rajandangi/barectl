@@ -418,10 +418,11 @@
     "operations/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "operations/activity.py": "14181b47271fd105d04be9de3fa71ff176fbd87ed2d8b16aeca979bc735e247e",
     "operations/activity_testing.py": "1c1c6544c5e722165e3dea713d0b66e57719daf2d7c6b7b22a266de9009bebe1",
-    "operations/apps.py": "404ebd4ee608e1556ffe33e8e516dbc21cbe0b9c2665454fdb65faf81a7963fd",
+    "operations/apps.py": "9327d2ad25706d83e9e6fb6fea15dbaf6db989837ce3f979fe97e594459d7f44",
     "operations/apt.py": "24d3fbfabee47ca22f4c070e2174b44003d70a6f4db96eabf699509453e209c7",
     "operations/bodies/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "operations/bodies/clear_runs.sh": "2bf27015cb4fe1198b366b14d0f3a3a32547af636b3b22e5034ae155ad199277",
+    "operations/body_reasons.py": "ec49a3a231ad4554b3a96f7b5d8b365aae31f2f4f512f16603c99e1e8cba107b",
     "operations/cleanup.py": "35c7d3f5bc6eba3ad785a67591ee443910b33af240aed0d3d762b12c06403a8b",
     "operations/confidential.py": "9c9181ca6ed7698d86dae4aaa2bbea48574dbe8d172a13377210775cba7333f2",
     "operations/consent.py": "62b38a324de4ff32fca599e97cd34f5df89157181d743cc62e62a4f203c5d08d",
@@ -434,7 +435,7 @@
     "operations/native.py": "c896ee3988c42e97951ddec946fc95678cd6cf440a6b058e7838a0b668219eb0",
     "operations/plain_words.py": "3c1d888abc545dbaab20fc061a90b97cb8b0fe6d34978475be9c63e1b55cb6de",
     "operations/presentation.py": "4e35403b987e29c273e16472b96e91d3349bdd6fd143f9dd990292df6306a491",
-    "operations/reasons.py": "0fcd7c57b3679474ff7030a5221f884a2921f9c02e62e4a97fd631c8a0995c5c",
+    "operations/reasons.py": "77c35bc26416d89fb0ff1e224b108ef163711ccdb497076dd0be83daa0b1dc84",
     "operations/recovery.py": "65956fea460a3a66ca7117b9f72e2848010ab87279063f30cd30797c31acc222",
     "operations/recovery_testing.py": "af6165cabb47b9429308b278cadcb19a36c95a14975c5b99cfcf9ddb8df3e20b",
     "operations/revert.py": "7ddfcffbc5abaa4403cf8185199e28217aab16241155ce6dcad963e70f7c2de2",
@@ -522,7 +523,7 @@
     "sites/bodies/pool_boundary.py": "f80fd8abef7b49eda2a99274a81003f7e8be04ed3c16f58fe06ad9a67c05d2a2",
     "sites/bodies/pool_change.py": "2c70d06b253475a35faf6d4435ea8f91eb838f5008f356175aeae84b628bc01e",
     "sites/bodies/readiness.py": "50cac37dcb4153f2a93ae2fcb44f7c998c105800e78ba50b42a57b12d805c541",
-    "sites/bodies/reasons.py": "916c742ed35535c6cd4d659fec7ef41797088a518ecf8647391c5ec0b0c6c0da",
+    "sites/bodies/reasons.py": "c06e0d4e90bea7a2490a1323c9f3e6c6d9b925fd6773af17db03a42ceccb35ab",
     "sites/bodies/remove.py": "fe164adb8d5d661e16c7cedb5176b1fe9032573c73b46916505a4fc3d904e945",
     "sites/bodies/site_fpm.py": "8a2f81948d1d03232dfef39f439164f959f1da1d72b2769b0ce4313530932d53",
     "sites/change.py": "d40cbf773c9f5f5f94285d44257039ade80744ae873df41358e6073337c2decc",
@@ -717,5 +718,5 @@
     "unknown-runtime-26.04": "10755de18623ac81ff48796f263b65606d50f275367a55d9ef2fc2f99959a101",
     "valkey-installed-26.04": "3d58984fc4472cfa09ff300d718ddf6e4e43309060508a50daf823df9c79b69c"
   },
-  "audit_digest": "17716d31e8dc053338462b7b8eb4583f03d1c50ea6a79474862259c8f6f86736"
+  "audit_digest": "081115903c0b35a0032a1d51b7466b5720ada91595320160670939144c9b80f5"
 }

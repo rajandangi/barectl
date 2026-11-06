@@ -473,6 +473,7 @@ ADMISSION: Final[tuple[ResultReason, ...]] = (
 
 _INDEX: Final[dict[tuple[str, Result], str]] = {}
 _KIND_REASONS: Final[dict[str, tuple[ResultReason, ...]]] = {}
+_BODY_VOCABULARIES: Final[dict[str, tuple[tuple[ResultReason, ...], tuple[str, ...]]]] = {}
 _ACCEPTED: Final[set[str]] = set(LEGACY_REASONS) | {""}
 
 
@@ -571,58 +572,91 @@ def printed_pairs(text: str) -> dict[str, set[str]]:
     return pairs
 
 
-def manifest_errors() -> list[str]:  # noqa: C901 - one walk that reports every drift
-    """Every drift between a kind's declared vocabulary and its composed text.
+def _body_declared() -> dict[str, ResultReason]:
+    return {
+        reason.name: reason
+        for declared, _sources in _BODY_VOCABULARIES.values()
+        for reason in declared
+    }
+
+
+def register_body(
+    name: str,
+    declared: tuple[ResultReason, ...],
+    sources: tuple[str, ...] = (),
+) -> None:
+    """Register a non-kind composer's vocabulary, such as a scheduled integrity body."""
+    _BODY_VOCABULARIES[name] = (tuple(declared), tuple(sources))
+    for reason in declared:
+        _index(reason)
+    _ACCEPTED.update(reason.name for reason in declared)
+
+
+def _vocabulary_errors(
+    label: str,
+    declared: tuple[ResultReason, ...],
+    sources: tuple[str, ...],
+    shared: dict[str, ResultReason],
+) -> list[str]:
+    errors: list[str] = []
+    by_name = {**shared, **{reason.name: reason for reason in (*ADMISSION, *declared)}}
+    declared_names = set(by_name)
+    text_all = ""
+    for source in sources:
+        path = REPOSITORY / source
+        try:
+            text = path.read_text()
+        except OSError:
+            errors.append(f"{source}: body source could not be read.")
+            continue
+        text_all += text
+        for reason, classes in printed_pairs(text).items():
+            if reason not in by_name:
+                errors.append(
+                    f"{source}: prints result reason {reason!r}, which its composer "
+                    "does not declare."
+                )
+                continue
+            for result_class in classes:
+                try:
+                    outcome = Result(result_class)
+                except ValueError:
+                    continue
+                if reason in declared_names and outcome not in by_name[reason].outcomes:
+                    errors.append(
+                        f"{source}: reason {reason!r} is paired with {result_class!r}, "
+                        "which its declaration does not carry."
+                    )
+    for declared_reason in declared:
+        if declared_reason.name not in text_all and declared_reason.name not in RETIRED:
+            errors.append(
+                f"{label}: composer declares {declared_reason.name!r}, which its body text "
+                "cannot print."
+            )
+        errors.extend(
+            f"{declared_reason.name!r}: no sentence for outcome {outcome.value!r}."
+            for outcome in declared_reason.outcomes
+            if not declared_reason.sentence(outcome)
+        )
+    return errors
+
+
+def manifest_errors() -> list[str]:
+    """Every drift between a declared vocabulary and its composed text.
 
     Database-free and filesystem-only, so the fast gate can call it on every run. The
     message names the file, reason and outcome that drifted.
     """
+    shared = _body_declared()
     errors: list[str] = []
     for slug, declared in _KIND_REASONS.items():
         kind = _KIND_BY_SLUG.get(slug)
         sources = tuple(getattr(kind, "body_sources", ()) or ())
-        if kind is None or not sources:
-            continue
-        by_name = {reason.name: reason for reason in (*ADMISSION, *declared)}
-        declared_names = set(by_name)
-        text_all = ""
-        for source in sources:
-            path = REPOSITORY / source
-            try:
-                text = path.read_text()
-            except OSError:
-                errors.append(f"{source}: body source could not be read.")
-                continue
-            text_all += text
-            printed = printed_pairs(text)
-            for reason, classes in printed.items():
-                if reason not in by_name:
-                    errors.append(
-                        f"{source}: prints result reason {reason!r}, which its composer "
-                        "does not declare."
-                    )
-                    continue
-                for result_class in classes:
-                    try:
-                        outcome = Result(result_class)
-                    except ValueError:
-                        continue
-                    if reason in declared_names and outcome not in by_name[reason].outcomes:
-                        errors.append(
-                            f"{source}: reason {reason!r} is paired with "
-                            f"{result_class!r}, which its declaration does not carry."
-                        )
-        for declared_reason in declared:
-            if declared_reason.name not in text_all and declared_reason.name not in RETIRED:
-                errors.append(
-                    f"{declared_reason.name!r}: composer declares a reason its body text "
-                    "cannot print."
-                )
-            errors.extend(
-                f"{declared_reason.name!r}: no sentence for outcome {outcome.value!r}."
-                for outcome in declared_reason.outcomes
-                if not declared_reason.sentence(outcome)
-            )
+        if kind is not None and sources:
+            errors.extend(_vocabulary_errors(slug, declared, sources, shared))
+    for name, (declared, sources) in _BODY_VOCABULARIES.items():
+        if sources:
+            errors.extend(_vocabulary_errors(name, declared, sources, shared))
     return errors
 
 

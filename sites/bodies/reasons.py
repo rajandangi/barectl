@@ -15,26 +15,6 @@ from operations.reasons import ResultReason
 
 SITE_REASONS: Final = (
     ResultReason(
-        "precondition",
-        {
-            Result.REFUSED: (
-                "The site's reviewed native evidence changed on the server, so the run "
-                "stopped before changing anything. Run discovery again, then prepare a new "
-                "review."
-            ),
-        },
-    ),
-    ResultReason(
-        "runtime_cache",
-        {
-            Result.REFUSED: (
-                "The selected runtime's locked build is unavailable from the signed cache, "
-                "so the run stopped before changing the site. Check the server's network "
-                "access, then prepare a new review."
-            ),
-        },
-    ),
-    ResultReason(
         "automation_fence",
         {
             Result.REFUSED: (
