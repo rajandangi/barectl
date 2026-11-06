@@ -275,6 +275,10 @@ _Avoid_: Job, scan
 The timestamped observations from a discovery run, including warnings about anything that could not be inspected. A snapshot describes what was observed at collection time, not the server's live state.
 _Avoid_: Live monitoring, real-time status
 
+**Server read**:
+The one dashboard read of a server's stored observations and change activity for a single request, carrying its discovery state, its change rows and a site index. A page passes it to every section; a request that queues work builds a new one rather than reusing the old.
+_Avoid_: Cached server state, live server state, page context
+
 **Stale observation**:
 The last successful discovery snapshot while a later discovery attempt is queued or running, or after it failed. Pages keep showing it with its collection time and a notice, but it cannot authorize a change until a new attempt succeeds.
 _Avoid_: Cached state, current observation
@@ -343,6 +347,10 @@ _Avoid_: Feature-specific apply engine
 **Change preparation**:
 A remote operation that reads a server, with root or verified noninteractive sudo where the kind needs it, to build one review. It changes nothing and cannot authorize the change.
 _Avoid_: Plan, dry run
+
+**Preparation gate**:
+The dashboard's one decision whether a change preparation may be offered for a server or a site, with the one sentence naming why not. It reads stored observations, the caller's permissions and active change work; it never chooses consent, permission names, or whether a review can run.
+_Avoid_: Eligibility check, permission check, feature flag
 
 **Review**:
 The one local, immutable record of the evidence, declared effects, derived consent and versioned kind-specific document approved for a possible change, or the reasons it is refused. A run references the review it applies.
