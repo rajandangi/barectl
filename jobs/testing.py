@@ -19,7 +19,7 @@ from discovery.fakes import COLLECTED, HOST_KEY, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.recorded import Recorded, ReplayShell, Transcript
 from discovery.snapshot import Observation, ObservedCache, save_snapshot
-from operations import native
+from operations import engine, native
 from servers.models import Server
 
 from . import observation
@@ -38,6 +38,7 @@ def change(
     started_at: datetime | None = None,
     finished_at: datetime | None = None,
     running: bool = False,
+    result_evidence: engine.ResultEvidence | None = None,
 ) -> ObservedChange:
     return ObservedChange(
         unit=unit,
@@ -51,6 +52,11 @@ def change(
         running=running,
         active_state="active" if running else "inactive",
         sub_state="running" if running else "dead",
+        result_evidence=(
+            result_evidence
+            if result_evidence is not None
+            else (engine.ResultEvidence.PRESENT if result_class else engine.ResultEvidence.ABSENT)
+        ),
     )
 
 

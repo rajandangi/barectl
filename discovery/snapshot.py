@@ -14,7 +14,13 @@ from automation.observation import ObservedSchedule
 from automation.worker_observation import ObservedWorker
 from automation.workers import WorkerDefinition
 from bootstrap.standing import HostJudgment, Standing
-from jobs.observation import PROVIDER, JobReading, ObservedChange, ProviderCoverage
+from jobs.observation import (
+    PROVIDER,
+    JobReading,
+    ObservedChange,
+    ProviderCoverage,
+    stored_result_evidence,
+)
 from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
@@ -1142,6 +1148,7 @@ def _read_job(row: JobObservation) -> ObservedChange:
         active_state=row.active_state,
         sub_state=row.sub_state,
         exec_main_status=row.exec_main_status,
+        result_evidence=stored_result_evidence(row.result_class, row.finished_at),
     )
 
 
