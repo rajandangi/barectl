@@ -34,6 +34,7 @@ from sites.configuration import SiteSettings
 from . import change, convention, observation, restore
 from .bodies import export as export_body
 from .bodies import restore as restore_body
+from .bodies.reasons import EXPORT_REASONS
 
 SLUG: Final = "export_recovery_point"
 LABEL: Final = "Export"
@@ -399,4 +400,10 @@ EXPORT: Final = ChangeKind(
     body=body,
     verify=verify,
     input_shape=InputShape.SITE_BACKUP_POINT,
+    reasons=EXPORT_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/restore.py",
+        "backups/bodies/export.py",
+    ),
 )

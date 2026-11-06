@@ -32,6 +32,7 @@ from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of
 
 from . import change, convention, observation
+from .bodies.reasons import OFFSITE_COPY_REASONS, OFFSITE_SETUP_REASONS
 
 SETUP_SLUG: Final = "set_up_offsite_storage"
 SETUP_LABEL: Final = "Set up offsite storage"
@@ -817,6 +818,11 @@ SET_UP: Final = ChangeKind(
     refresh_discovery=True,
     input_shape=InputShape.OFFSITE_STORAGE,
     writes_secrets=True,
+    reasons=OFFSITE_SETUP_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/offsite.py",
+    ),
 )
 
 REMOVE: Final = ChangeKind(
@@ -829,6 +835,11 @@ REMOVE: Final = ChangeKind(
     refresh_discovery=True,
     input_shape=InputShape.SELECTION,
     writes_secrets=True,
+    reasons=OFFSITE_SETUP_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/offsite.py",
+    ),
 )
 
 COPY: Final = ChangeKind(
@@ -840,4 +851,9 @@ COPY: Final = ChangeKind(
     verify=verify_copy,
     refresh_discovery=True,
     input_shape=InputShape.SITE_BACKUP_POINT,
+    reasons=OFFSITE_COPY_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/copy.py",
+    ),
 )
