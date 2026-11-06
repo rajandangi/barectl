@@ -36,6 +36,7 @@ from sites import observation as site_observation
 
 from . import change, check, convention
 from .bodies import retention as retention_body
+from .bodies.reasons import RETENTION_BODY_REASONS, RETENTION_KIND_REASONS
 from .observation import OffsiteStorage
 
 SET_SLUG: Final = "set_backup_retention"
@@ -1041,6 +1042,12 @@ SET: Final = ChangeKind(
     verify=verify_set,
     refresh_discovery=True,
     input_shape=InputShape.BACKUP_RETENTION,
+    reasons=RETENTION_KIND_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/retention.py",
+        "sites/bodies/common.py",
+    ),
 )
 
 DISABLE: Final = ChangeKind(
@@ -1052,6 +1059,12 @@ DISABLE: Final = ChangeKind(
     verify=verify_disable,
     refresh_discovery=True,
     input_shape=InputShape.SITE,
+    reasons=RETENTION_KIND_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/retention.py",
+        "sites/bodies/common.py",
+    ),
 )
 
 KEEP: Final = ChangeKind(
@@ -1063,4 +1076,9 @@ KEEP: Final = ChangeKind(
     verify=verify_keep,
     refresh_discovery=True,
     input_shape=InputShape.SITE_BACKUP_POINT,
+    reasons=RETENTION_BODY_REASONS,
+    body_sources=(
+        "backups/bodies/native.py",
+        "backups/bodies/retention.py",
+    ),
 )

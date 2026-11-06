@@ -190,6 +190,11 @@ OFFSITE_COPY: Final = ResultReason(
 OFFSITE_KEY: Final = ResultReason(
     "offsite_key",
     {
+        Result.REFUSED: (
+            "The offsite access keys or recovery passphrase could not be read, so the storage "
+            "setting was not changed and nothing was copied. Prepare a new review and type the "
+            "values again."
+        ),
         Result.FAILED: (
             "The offsite access keys or recovery passphrase could not be used, so nothing "
             "was copied. Prepare a new review and type the values again."
@@ -199,12 +204,276 @@ OFFSITE_KEY: Final = ResultReason(
 OFFSITE_REPOSITORY: Final = ResultReason(
     "offsite_repository",
     {
+        Result.REFUSED: (
+            "The onsite repository or its server key is not the reviewed one, so the offsite "
+            "copy stopped before it started. The recovery point saved on this server is "
+            "unchanged; run discovery and prepare a new review."
+        ),
         Result.FAILED: (
             "An offsite repository could not be initialised or opened. The copies already in "
             "the bucket are unchanged. Check the bucket and keys, then prepare a new review."
         ),
     },
 )
+OFFSITE_BUCKET: Final = ResultReason(
+    "offsite_bucket",
+    {
+        Result.REFUSED: (
+            "The bucket did not answer a write and a listing with the reviewed keys, so the "
+            "offsite storage setting was not written and no site repository was initialised. "
+            "Check the bucket, its region and the access keys, then prepare a new review."
+        ),
+        Result.FAILED: (
+            "The bucket did not answer the final write-and-list check after the storage files "
+            "were written, so the offsite setting may be partly applied. The copies already in "
+            "the bucket are unchanged; check the bucket and keys, then prepare a new review."
+        ),
+    },
+)
+OFFSITE_REMOVE: Final = ResultReason(
+    "offsite_remove",
+    {
+        Result.REFUSED: (
+            "The confirmation did not name this server's bucket, or the storage keys could not "
+            "be read, so the offsite setting was not removed. Type the bucket name shown in "
+            "the review and prepare again."
+        ),
+        Result.FAILED: (
+            "The removal step stopped: Barectl could not delete every offsite setting file, "
+            "or the setting was not the reviewed one. The copies already in the bucket are "
+            "unchanged; read the run's journal on the server, then prepare a new review."
+        ),
+    },
+)
+
+CONNECT_REVIEW: Final = ResultReason(
+    "connect_review",
+    {
+        Result.FAILED: (
+            "The review did not carry a supported storage config, source-site list or file "
+            "path, so nothing was connected. Run discovery and prepare a new review."
+        ),
+    },
+)
+CONNECT_KEY: Final = ResultReason(
+    "connect_key",
+    {
+        Result.REFUSED: (
+            "The access keys or recovery passphrase could not be read or are not usable, so "
+            "the source repositories were not opened and nothing was connected. Prepare a new "
+            "review and type the values again."
+        ),
+        Result.FAILED: (
+            "The source repositories were read, but Barectl could not write this server's "
+            "root-only storage files, so the connection is not complete. Check the run's "
+            "journal, then prepare a new review."
+        ),
+    },
+)
+CONNECT_SETTINGS: Final = ResultReason(
+    "connect_settings",
+    {
+        Result.REFUSED: (
+            "This server already has different offsite settings, so Barectl did not overwrite "
+            "them and nothing was connected. Remove the connected storage first, then prepare "
+            "a new review."
+        ),
+    },
+)
+CONNECT_REPOSITORY: Final = ResultReason(
+    "connect_repository",
+    {
+        Result.REFUSED: (
+            "A source repository does not exist under the reviewed bucket and prefix, so "
+            "nothing was connected. Check the source site names and the recovery kit, then "
+            "prepare a new review."
+        ),
+        Result.FAILED: (
+            "A source repository could not be read or its listing was not in the reviewed "
+            "form, so this server's settings were left as they were. Check the bucket and "
+            "keys, then prepare a new review."
+        ),
+    },
+)
+CONNECT_PASSWORD: Final = ResultReason(
+    "connect_password",
+    {
+        Result.REFUSED: (
+            "The recovery passphrase did not open a source repository, so nothing was "
+            "connected. Prepare a new review and type the passphrase from the recovery kit."
+        ),
+    },
+)
+
+PASSPHRASE_REVIEW: Final = ResultReason(
+    "passphrase_review",
+    {
+        Result.FAILED: (
+            "The review did not carry a supported config, site list or file path, so no "
+            "repository was reopened and no passphrase was replaced. Run discovery and prepare "
+            "a new review."
+        ),
+    },
+)
+PASSPHRASE_VALUE: Final = ResultReason(
+    "passphrase_value",
+    {
+        Result.REFUSED: (
+            "The current or new recovery passphrase is missing, too short, or the same as the "
+            "other, so no repository was changed. Prepare a new review and type both "
+            "passphrases again."
+        ),
+    },
+)
+PASSPHRASE_KEY: Final = ResultReason(
+    "passphrase_key",
+    {
+        Result.REFUSED: (
+            "The server's backup key directory or key file is outside supported ownership or "
+            "permissions, so no passphrase was replaced. Repair it through ordinary "
+            "administration, then prepare a new review."
+        ),
+        Result.FAILED: (
+            "A repository's key list could not be read, or the new key could not be added and "
+            "proven, so the passphrase is only partly replaced. Read the run's journal on the "
+            "server, then prepare a new review."
+        ),
+    },
+)
+PASSPHRASE_REPOSITORY: Final = ResultReason(
+    "passphrase_repository",
+    {
+        Result.REFUSED: (
+            "A reviewed site repository or its server key could not be read, so no passphrase "
+            "was replaced. Run discovery and prepare a new review."
+        ),
+    },
+)
+PASSPHRASE_OLD: Final = ResultReason(
+    "passphrase_old",
+    {
+        Result.REFUSED: (
+            "The current passphrase did not open a repository, so no key was added and nothing "
+            "was changed. Prepare a new review and type the passphrase you stored."
+        ),
+        Result.FAILED: (
+            "The current passphrase still opened a repository after its key was removed, or an "
+            "old key could not be removed, so the passphrase may be partly replaced. Read the "
+            "run's journal on the server, then prepare a new review."
+        ),
+    },
+)
+PASSPHRASE_NEW: Final = ResultReason(
+    "passphrase_new",
+    {
+        Result.FAILED: (
+            "The new passphrase did not open every reviewed repository after the keys were "
+            "added, so the old passphrase was left in place. Prepare a new review and type both "
+            "passphrases again."
+        ),
+    },
+)
+PASSPHRASE_SERVER_KEY: Final = ResultReason(
+    "passphrase_server_key",
+    {
+        Result.FAILED: (
+            "A site's server key no longer opens its repository after the passphrase change, "
+            "so scheduled backups may not run. Read the run's journal on the server, then "
+            "prepare a new review to restore the key."
+        ),
+    },
+)
+
+EXPORT_STAGE: Final = ResultReason(
+    "export_stage",
+    {
+        Result.REFUSED: (
+            "Barectl could not create or admit the private staging directory for the export, "
+            "so nothing left the server. Check the server's filesystem and prepare a new "
+            "review."
+        ),
+    },
+)
+EXPORT_FILES: Final = ResultReason(
+    "export_files",
+    {
+        Result.REFUSED: (
+            "Barectl could not restore or read the point's files into the export stage, so "
+            "nothing was exported. Check the run's journal on the server, then prepare a new "
+            "review."
+        ),
+    },
+)
+EXPORT_SIZE: Final = ResultReason(
+    "export_size",
+    {
+        Result.REFUSED: (
+            "The export's files or database exceeded the reviewed size bound, so Barectl "
+            "discarded the stage and nothing left the server. Choose a smaller recovery point "
+            "or free space, then prepare a new review."
+        ),
+    },
+)
+EXPORT_DATABASE: Final = ResultReason(
+    "export_database",
+    {
+        Result.REFUSED: (
+            "Barectl could not dump the point's database or its version did not match the "
+            "site, so nothing was exported. Check the site's database and prepare a new "
+            "review."
+        ),
+    },
+)
+EXPORT_EVIDENCE: Final = ResultReason(
+    "export_evidence",
+    {
+        Result.REFUSED: (
+            "The export review's point, snapshots, engine or repository evidence was not the "
+            "reviewed one, so nothing left the server. Run discovery and prepare a new review."
+        ),
+    },
+)
+EXPORT_REPOSITORY: Final = ResultReason(
+    "export_repository",
+    {
+        Result.REFUSED: (
+            "The onsite repository, its server key or the pinned backup tool could not be "
+            "read, so nothing was exported. Check the run's journal on the server, then "
+            "prepare a new review."
+        ),
+    },
+)
+EXPORT_LOCK: Final = ResultReason(
+    "export_lock",
+    {
+        Result.REFUSED: (
+            "Another copy or cleanup held the site's repository lock, so the export stopped "
+            "before staging anything. Prepare a new review after it finishes."
+        ),
+    },
+)
+EXPORT_SECRET: Final = ResultReason(
+    "export_secret",
+    {
+        Result.REFUSED: (
+            "The archive contained the site's private configuration or its secret bytes, so "
+            "Barectl discarded it and nothing left the server. Check the run's journal on the "
+            "server, then prepare a new review."
+        ),
+    },
+)
+
+CLEANUP_CLOCK: Final = ResultReason(
+    "cleanup_clock",
+    {
+        Result.REFUSED: (
+            "The server's clock was not synchronized, so cleanup did not run and no recovery "
+            "point was deleted. Wait for the clock to synchronize; the next scheduled cleanup "
+            "will run."
+        ),
+    },
+)
+
 RESTIC_RUNTIME_CONFIG: Final = ResultReason(
     "runtime_config",
     {
@@ -496,8 +765,36 @@ FULL_REASONS: Final = (
     OFFSITE_KEY,
     OFFSITE_REPOSITORY,
 )
-RESTORE_REASONS: Final = (
-    *SITE_REASONS,
+OFFSITE_SETUP_REASONS: Final = (
+    BACKUP_LOCK,
+    OFFSITE_KEY,
+    OFFSITE_BUCKET,
+    OFFSITE_REPOSITORY,
+    OFFSITE_REMOVE,
+)
+OFFSITE_COPY_REASONS: Final = (
+    BACKUP_LOCK,
+    OFFSITE_KEY,
+    OFFSITE_REPOSITORY,
+    OFFSITE_COPY,
+)
+CONNECT_REASONS: Final = (
+    CONNECT_REVIEW,
+    CONNECT_KEY,
+    CONNECT_SETTINGS,
+    CONNECT_REPOSITORY,
+    CONNECT_PASSWORD,
+)
+PASSPHRASE_REASONS: Final = (
+    PASSPHRASE_REVIEW,
+    PASSPHRASE_VALUE,
+    PASSPHRASE_KEY,
+    PASSPHRASE_REPOSITORY,
+    PASSPHRASE_OLD,
+    PASSPHRASE_NEW,
+    PASSPHRASE_SERVER_KEY,
+)
+RESTORE_CORE_REASONS: Final = (
     RESTORE_SITE,
     RESTORE_REPOSITORY,
     RESTORE_EVIDENCE,
@@ -519,6 +816,28 @@ RESTORE_REASONS: Final = (
     RESTORE_OPEN,
     RESTORE_DONE,
 )
+RESTORE_REASONS: Final = (*SITE_REASONS, *RESTORE_CORE_REASONS)
+EXPORT_BODY_REASONS: Final = (
+    EXPORT_STAGE,
+    EXPORT_FILES,
+    EXPORT_SIZE,
+    EXPORT_DATABASE,
+    EXPORT_EVIDENCE,
+    EXPORT_REPOSITORY,
+    EXPORT_LOCK,
+    EXPORT_SECRET,
+)
+# Export stages the restore body's admission and restore helpers, so it carries those
+# reasons too. They are the declarations restore already owns, reused rather than repeated.
+EXPORT_REASONS: Final = (*EXPORT_BODY_REASONS, *RESTORE_CORE_REASONS)
+RETENTION_BODY_REASONS: Final = (
+    BACKUP_SITE,
+    BACKUP_VERIFY,
+    BACKUP_LOCK,
+    BACKUP_UNKNOWN,
+    CLEANUP_CLOCK,
+)
+RETENTION_KIND_REASONS: Final = (*SITE_REASONS, *RETENTION_BODY_REASONS)
 REOPEN_REASONS: Final = (*SITE_REASONS, SITE_REOPEN)
 
 # The scheduled integrity check is a native body, not a change kind: the units run it
@@ -527,4 +846,11 @@ register_body(
     "backup_integrity",
     INTEGRITY_REASONS,
     sources=("backups/bodies/integrity.py",),
+)
+# The scheduled retention cleanup is the same shape: its units run the retention body
+# directly, so its clock and failure reasons need the same registration.
+register_body(
+    "backup_retention_cleanup",
+    RETENTION_BODY_REASONS,
+    sources=("backups/bodies/retention.py",),
 )
