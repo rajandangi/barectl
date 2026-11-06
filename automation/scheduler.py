@@ -27,9 +27,11 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from sites import observation as site_observation
 from sites.bodies.common import SITE_GATED, SiteRecord
+from sites.bodies.reasons import SITE_REASONS
 from sites.configuration import PHP_RUNTIMES
 
 from . import convention, observation
+from .bodies.reasons import SCHEDULER_REASONS
 from .change import presence_command
 from .status import STATUS_SENTENCE, ScheduleStatus
 
@@ -531,4 +533,6 @@ SET_LARAVEL_SCHEDULER: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.AUTOMATION_SCHEDULE,
+    reasons=(*SITE_REASONS, *SCHEDULER_REASONS),
+    body_sources=("sites/bodies/common.py", "automation/bodies/scheduler.py"),
 )

@@ -1,14 +1,26 @@
-"""Reasons several native bodies print for the same server-wide precondition (#495).
+"""Reasons several native bodies print for the same precondition (#495).
 
 These are not the engine's admission prelude: a body prints them after the lock before its
 own steps. They read the same wherever they appear, so they are declared once rather than
 repeated per area, which also keeps one reason and outcome from acquiring two sentences.
+``settings_secret`` is the confidential value both the Laravel and WordPress settings
+bodies consume, so it is declared here once for the same reason.
 """
 
 from typing import Final
 
 from .models import Result
 from .reasons import ResultReason, register_body
+
+SETTINGS_SECRET: Final = ResultReason(
+    "settings_secret",
+    {
+        Result.REFUSED: (
+            "The confidential value could not be used, so nothing changed. Prepare a new "
+            "review and type the value again."
+        ),
+    },
+)
 
 SHARED_REASONS: Final = (
     ResultReason(
@@ -61,6 +73,7 @@ SHARED_REASONS: Final = (
             ),
         },
     ),
+    SETTINGS_SECRET,
 )
 
 register_body("shared", SHARED_REASONS)

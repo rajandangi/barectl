@@ -36,6 +36,7 @@ from sites import change as site_change
 from sites.configuration import PHP_RUNTIMES, SiteSettings, render_laravel_caddy, render_pool
 
 from . import observation
+from .bodies.reasons import CREATE_REASONS
 from .configuration import (
     APP_KEY_PLACEHOLDER,
     render_environment,
@@ -486,4 +487,10 @@ CREATE_LARAVEL: Final = ChangeKind(
     refresh_discovery=True,
     input_choices=PHP_RUNTIMES,
     input_shape=InputShape.LARAVEL_CREATE,
+    reasons=CREATE_REASONS,
+    body_sources=(
+        "sites/bodies/common.py",
+        "laravel/bodies/common.py",
+        "laravel/bodies/create.py",
+    ),
 )
