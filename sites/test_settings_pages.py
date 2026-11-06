@@ -93,6 +93,90 @@ class SettingsPageTests(ControllerConfigTestCase):
         self.assertContains(response, "MAIL_HOST")
         self.assertContains(response, "write-only")
 
+    def test_the_wordpress_settings_card_is_offered_with_manage_secrets(self) -> None:
+        self.grant("manage_secrets")
+        self.wordpress()
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/wordpress/")
+        self.assertContains(response, "Review adding the constant")
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/wordpress/settings/prepare/",
+        )
+
+    def test_the_wordpress_settings_withheld_card_shows_the_gate_sentence(self) -> None:
+        self.wordpress()
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/wordpress/")
+        self.assertContains(response, "Changing this needs the manage-secrets permission.")
+        self.assertNotContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/wordpress/settings/prepare/",
+        )
+
+    def test_a_withheld_wordpress_settings_form_uses_the_gate_sentence(self) -> None:
+        from discovery.models import SiteState
+        from discovery.snapshot import ObservedSetting
+        from operations.services import read_changes
+
+        self.grant("manage_secrets")
+        record_site_settings(
+            self.server,
+            application="wordpress",
+            state=SiteState.PARTLY_APPLIED,
+            settings=(ObservedSetting("alpha", "wordpress", "MAIL_HOST", "c" * 64),),
+        )
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/alpha/wordpress/settings/prepare/",
+            {"key": "MAIL_HOST", "action": "set"},
+            follow=True,
+        )
+        self.assertEqual(read_changes(self.server).rows, [])
+        self.assertContains(
+            response,
+            "This site is partly applied; finish the change that is already in progress first.",
+        )
+
+    def test_the_environment_card_is_offered_with_manage_secrets(self) -> None:
+        self.grant("manage_secrets")
+        self.laravel()
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/environment/")
+        self.assertContains(response, "Review adding the key")
+        self.assertContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/environment/prepare/",
+        )
+
+    def test_the_environment_withheld_card_shows_the_gate_sentence(self) -> None:
+        self.laravel()
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/environment/")
+        self.assertContains(response, "Changing this needs the manage-secrets permission.")
+        self.assertNotContains(
+            response,
+            f"/servers/{self.server.pk}/sites/alpha/environment/prepare/",
+        )
+
+    def test_a_withheld_environment_form_uses_the_gate_sentence(self) -> None:
+        from discovery.models import SiteState
+        from discovery.snapshot import ObservedSetting
+        from operations.services import read_changes
+
+        self.grant("manage_secrets")
+        record_site_settings(
+            self.server,
+            application="laravel",
+            state=SiteState.PARTLY_APPLIED,
+            settings=(ObservedSetting("alpha", "laravel", "APP_URL", DIGEST),),
+        )
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/alpha/environment/prepare/",
+            {"key": "APP_URL", "action": "set"},
+            follow=True,
+        )
+        self.assertEqual(read_changes(self.server).rows, [])
+        self.assertContains(
+            response,
+            "This site is partly applied; finish the change that is already in progress first.",
+        )
+
     def test_the_environment_review_needs_manage_secrets(self) -> None:
         self.laravel()
         response = self.client.post(
