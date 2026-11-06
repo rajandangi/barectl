@@ -1,11 +1,22 @@
+from dataclasses import replace
+from typing import override
 from unittest import mock
 
-from discovery.fakes import FakeServer, record_attempt, run_worker
+from django.utils import timezone
+
+from bootstrap.standing import HostJudgment, Standing
+from discovery.fakes import COLLECTED, FakeServer, record_attempt, run_worker
+from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
-from operations.models import RemoteOperation
+from discovery.snapshot import save_snapshot
+from operations import preparation
+from operations.activity_testing import record_change
+from operations.models import ChangePreparation, RemoteOperation
 from servers.views import SECTIONS
 
+from .discovery_state import server_state
 from .models import Server
+from .preparation import decide_for_server
 from .testing import ControllerConfigTestCase
 
 
@@ -146,3 +157,83 @@ class ServerSectionTests(ControllerConfigTestCase):
         sites = self.client.get(f"/servers/{server.pk}/")
         self.assertNotContains(sites, "Web stack and services")
         self.assertNotContains(sites, "Discovery history")
+
+
+class SetupCardTests(ControllerConfigTestCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.client.force_login(self.user)
+        self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+
+    def store(self, standing: Standing, foundation: tuple[tuple[str, str], ...] = ()) -> None:
+        attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
+        collected = replace(COLLECTED, standing=HostJudgment(standing, (), (), foundation))
+        save_snapshot(attempt, collected, timezone.now())
+
+    def test_a_fresh_server_offers_setup_in_the_banner(self) -> None:
+        self.grant("view_server", "view_changes", "change_site")
+        self.store(Standing.FRESH)
+        response = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(response, "Ready to set up")
+        self.assertContains(response, "Set up server")
+
+    def test_a_fresh_server_without_permission_shows_the_gate_sentence(self) -> None:
+        self.grant("view_server")
+        self.store(Standing.FRESH)
+        response = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(response, "Your account does not have permission to prepare changes.")
+        self.assertNotContains(response, "Set up server")
+
+    def test_needs_attention_offers_setup_and_names_the_gate_sentence(self) -> None:
+        self.grant("view_server", "view_changes", "change_site")
+        self.store(
+            Standing.INCOMPLETE_FOUNDATION,
+            (("Web server", "present"), ("PHP", "absent")),
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(response, "Needs attention")
+        self.assertContains(response, "Set up server")
+
+    def test_needs_attention_without_permission_shows_the_gate_sentence(self) -> None:
+        self.grant("view_server")
+        self.store(
+            Standing.INCOMPLETE_FOUNDATION,
+            (("Web server", "present"), ("PHP", "absent")),
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(response, "Needs attention")
+        self.assertContains(response, "Your account does not have permission to prepare changes.")
+        self.assertNotContains(response, "Set up server")
+
+    def test_a_server_with_no_observation_still_passes_the_setup_gate(self) -> None:
+        self.grant("view_server", "view_changes", "change_site")
+        decision = decide_for_server(server_state(self.server), self.user, preparation.SERVER)
+        self.assertTrue(decision.allowed)
+        response = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(response, "Check the connection")
+
+    def test_a_running_change_withholds_setup_and_refuses_the_post_with_the_sentence(
+        self,
+    ) -> None:
+        self.grant("view_server", "view_changes", "change_site")
+        self.store(Standing.FRESH)
+        record_change(self.server, status=RemoteOperation.Status.RUNNING)
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertNotContains(page, "Set up server")
+        self.assertContains(
+            page,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/changes/prepare/",
+            {"kind": "host_foundation"},
+            follow=True,
+        )
+        self.assertContains(
+            refused,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 1)

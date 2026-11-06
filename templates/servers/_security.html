@@ -6,6 +6,7 @@
   {% if snapshot %}
     {% include "servers/_snapshot_freshness.html" with snapshot=snapshot %}
   {% endif %}
+  {% if security_reason %}<p class="barectl-note">{{ security_reason }}</p>{% endif %}
   <div class="barectl-security-checks">
     {% for check in security_checks %}
       <section class="margin-top-3"

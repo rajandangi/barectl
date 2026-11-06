@@ -17,6 +17,8 @@
       <button type="submit"
               class="usa-button usa-button--outline margin-top-2">Change default PHP</button>
     </form>
+  {% elif default_php_reason %}
+    <p class="barectl-note">{{ default_php_reason }}</p>
   {% endif %}
 </section>
 <section class="margin-top-4" aria-labelledby="settings-default-node-heading">
@@ -37,5 +39,7 @@
       <button type="submit"
               class="usa-button usa-button--outline margin-top-2">Change default Node.js</button>
     </form>
+  {% elif default_node_reason %}
+    <p class="barectl-note">{{ default_node_reason }}</p>
   {% endif %}
 </section>

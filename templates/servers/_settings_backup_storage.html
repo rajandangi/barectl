@@ -84,6 +84,8 @@
                     class="usa-button usa-button--outline">Remove offsite storage</button>
             <span class="usa-hint">Copies already in the bucket stay there.</span>
           </form>
+        {% elif backup_storage_reason %}
+          <p class="barectl-note">{{ backup_storage_reason }}</p>
         {% endif %}
       {% else %}
         <p>{{ panel.note }}</p>
@@ -187,8 +189,7 @@
           </form>
         {% else %}
           <p class="barectl-note">
-            Setting up backup storage needs a ready server, permission to prepare changes and
-            permission to manage secrets.
+            {{ backup_storage_reason|default:"Setting up backup storage needs a ready server, permission to prepare changes and permission to manage secrets." }}
           </p>
         {% endif %}
       {% endif %}

@@ -30,6 +30,7 @@ from operations.models import RemoteOperation
 from servers.registration import RemovalBlocked, remove_server
 
 from . import activity, engine, native, reasons
+from .activity_testing import record_change
 from .consent import DeclaredEffect, Scope
 from .fakes import (
     APPLY_PERMISSIONS,
@@ -916,7 +917,7 @@ class EngineAccessTests(ChangeTestCase):
         self.systemd.units[EXITED] = finished_unit(1)
         self.sign_in_with("view_server", "view_changes")
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")
-        self.assertContains(page, "An operator who can prepare changes can clean up finished runs.")
+        self.assertContains(page, "Your account does not have permission to prepare changes.")
         self.assertNotIn("Clean up finished runs</button>", page.content.decode())
 
         response = self.client.post(
@@ -943,12 +944,31 @@ class EngineAccessTests(ChangeTestCase):
 
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotIn("Clean up finished runs</button>", page.content.decode())
+        self.assertContains(
+            page, "Barectl cannot manage this server, so it cannot prepare this change."
+        )
         response = self.client.post(
-            f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
+            f"/servers/{self.server.pk}/changes/prepare/",
+            {"kind": "cleanup_runs"},
+            follow=True,
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertContains(
+            response, "Barectl cannot manage this server, so it cannot prepare this change."
+        )
         self.assertFalse(ChangePreparation.objects.exists())
+
+    def test_prepare_again_names_the_gate_reason_when_a_change_is_active(self) -> None:
+        review = self.change()
+        record_change(self.server, status=Status.RUNNING)
+        self.sign_in_with(*PREPARE_PERMISSIONS)
+        refused = self.client.post(f"/changes/{review.preparation_id}/again/", follow=True)
+        self.assertContains(
+            refused,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 2)
 
     def test_a_site_operator_cannot_apply_a_shared_change(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
