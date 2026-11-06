@@ -26,6 +26,7 @@ from operations.models import ChangeReview
 from runtimes.catalog import Architecture
 
 from . import change, convention, observation
+from .bodies.reasons import REMOVED_REASONS
 
 SLUG: Final = "delete_removed_backups"
 LABEL: Final = "Delete removed-site backups"
@@ -276,4 +277,6 @@ DELETE: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_shape=InputShape.REMOVED_BACKUP,
+    reasons=REMOVED_REASONS,
+    body_sources=("backups/bodies/native.py", "backups/bodies/removed.py"),
 )

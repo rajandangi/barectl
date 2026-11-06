@@ -687,6 +687,47 @@ SITE_REOPEN: Final = ResultReason(
     },
 )
 
+
+SCHEDULE_TIMER: Final = ResultReason(
+    "schedule_timer",
+    {
+        Result.PARTIAL: (
+            "Systemd did not report the backup timer as active after the schedule was "
+            "installed, so the reviewed run time may not happen. Read the run's journal on "
+            "the server, then prepare a new review."
+        ),
+    },
+)
+SCHEDULE_UNITS: Final = ResultReason(
+    "schedule_units",
+    {
+        Result.PARTIAL: (
+            "The backup schedule's units are not in the reviewed state, so the schedule is "
+            "partly applied. Read the run's journal on the server, then prepare a new review "
+            "of what remains."
+        ),
+    },
+)
+SCHEDULE_INSTALL: Final = ResultReason(
+    "schedule_install",
+    {
+        Result.REFUSED: (
+            "The backup schedule could not be installed on the server, so no run time was "
+            "saved. Check the site's backups and prepare a new review."
+        ),
+    },
+)
+REMOVED_BACKUP: Final = ResultReason(
+    "removed_backup",
+    {
+        Result.FAILED: (
+            "Barectl could not delete every kept repository or key for the removed site, so "
+            "some backups stay where they are. Read the run's journal on the server, then "
+            "prepare a new review of what remains."
+        ),
+    },
+)
+
 INTEGRITY_PACK: Final = ResultReason(
     "integrity_pack",
     {
@@ -853,4 +894,20 @@ register_body(
     "backup_retention_cleanup",
     RETENTION_BODY_REASONS,
     sources=("backups/bodies/retention.py",),
+)
+
+SCHEDULE_REASONS: Final = (
+    *SITE_REASONS,
+    BACKUP_SITE,
+    BACKUP_REPOSITORY,
+    BACKUP_LOCK,
+    BACKUP_UNKNOWN,
+    SCHEDULE_TIMER,
+    SCHEDULE_UNITS,
+    SCHEDULE_INSTALL,
+)
+REMOVED_REASONS: Final = (
+    BACKUP_LOCK,
+    OFFSITE_KEY,
+    REMOVED_BACKUP,
 )

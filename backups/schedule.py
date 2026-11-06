@@ -46,6 +46,7 @@ from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
 
 from . import convention, observation
+from .bodies.reasons import SCHEDULE_REASONS
 from .change import ALL_SITES_READ
 from .models import BackupSchedule
 
@@ -1142,6 +1143,12 @@ SET_BACKUP_SCHEDULE: Final = ChangeKind(
     refresh_discovery=True,
     input_shape=InputShape.BACKUP_SCHEDULE,
     input_choices=(),
+    reasons=SCHEDULE_REASONS,
+    body_sources=(
+        "sites/bodies/common.py",
+        "backups/bodies/native.py",
+        "backups/bodies/schedule.py",
+    ),
 )
 
 
