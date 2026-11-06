@@ -206,10 +206,12 @@ class DiscoveryState:
 
     @property
     def can_prepare_changes(self) -> bool:
-        standing = self.snapshot.collected.standing if self.snapshot else None
-        return standing is None or (
-            standing.standing != Standing.NOT_MANAGEABLE and self.snapshot_notice is None
-        )
+        # The old predicate's one job: host standing and a later check's freshness.
+        from operations import preparation
+
+        from .preparation import stored_server_facts
+
+        return preparation.decide(stored_server_facts(self), None, preparation.EMPTY).allowed
 
     @property
     def hosting_guidance(self) -> Literal["refresh", "inspect", "setup", "sites"]:

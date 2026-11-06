@@ -442,6 +442,7 @@
     "operations/models.py": "215cd04ab77891d4cc1aec2a5333dbb3426df9f2e29e04b4ea81cfd2a33a764b",
     "operations/native.py": "c896ee3988c42e97951ddec946fc95678cd6cf440a6b058e7838a0b668219eb0",
     "operations/plain_words.py": "3c1d888abc545dbaab20fc061a90b97cb8b0fe6d34978475be9c63e1b55cb6de",
+    "operations/preparation.py": "173640503fd8412da2c486128a3910b4817d3860a30fa76910091710e346015c",
     "operations/presentation.py": "2a560c67178d9eb21dcc13531e49c5aa024c13716125e8954406a4cc9f61fdac",
     "operations/reason_testing.py": "4e765263ce363a12f07036c1f303fbe8530d1f68a3b4397717b39fd0b951ac01",
     "operations/reasons.py": "8596c853b01b567ce25dd90f722e6551fa4317c7485a7b75854260286f8861de",
@@ -508,10 +509,11 @@
     "servers/backup_storage_views.py": "41f48c58de7f45cabc7561902e8fea4ab70af30d3891a349f33679a4c6540833",
     "servers/connections.py": "a531c5434fe33402dae6acc7284b70ce420b9b0c71b60d8677416c2fdc7e9329",
     "servers/credentials.py": "ab68676caa789127f69768801b16c98d2d0011df8daebb396c5e20a254e271e5",
-    "servers/discovery_state.py": "e47c2db2becb83512693e628cea64608f3d4f19b1e2190fa30d596b55eed616a",
+    "servers/discovery_state.py": "c2a05ef78e336e95add4a7dfd634b7e386fc83dacf86afc2647cfd67b8721bcf",
     "servers/forms.py": "e2e84963e8dae557af97499f51cc529a5278ecff1f3a42c046031929bca0b721",
     "servers/models.py": "1b19f1d08de6b1856384ba7ec3b9e8c7a19046ac5292c4ccc6308eea651edc5f",
     "servers/page.py": "a3265db4c2d2de78c5c55e4a448fd229ff71b6f03405214ecf358cc93d081b2a",
+    "servers/preparation.py": "d6a7304bfb10ba6b75e7867d116104c46c3c233e57a706a1014a4b25e0f66d7e",
     "servers/registration.py": "a2fb5559caf591ab42a470fc9524d18f469e5eb60bc577d6c0cf1ce52cfde8ed",
     "servers/ssh_config.py": "ee50d222fde1c4e7cff87529a67ff391329edcf9f8819a1104dc8632eb8484e5",
     "servers/testing.py": "c56b297faa5a444bdf3f39312ae3f444e9417fe612a811e140308d54aeff7b9b",
@@ -557,6 +559,7 @@
     "sites/pool_change.py": "cd7f926ce5684c66ab8b949b5415db90fb37f0212fd56dab7bdaf2fc50f481f2",
     "sites/pool_forms.py": "8da022846ca574716569d611483f64a73dacf8b1933351a3e421d3db6295dfd9",
     "sites/pool_views.py": "e49d54795c88592d0a7499bb7042d8a4fdaf2e1f3a80bc37785fc699784acf83",
+    "sites/preparation.py": "4811c0353915deb3f710378dcf0aeaac3f27622e100ee3a339110922b64979ce",
     "sites/prerequisites.py": "3a3eb4d92728f22d38750648e4b978f48016f10c6066c33d4ad9c4129c0c2000",
     "sites/readiness_change.py": "4ad69baa325882694b7d322c26c0fd49b6b24d7fe5236579c46d99c233acbecc",
     "sites/readiness_views.py": "71782d9c7b9ac09360781126599b149c8c8d1ca3724110ea55d8b5dbd047d02c",
@@ -569,7 +572,7 @@
     "sites/ui_testing.py": "8dfb18cac6c703593a50a7dfa4ee08919e02a262c14c8ca13b991d14a7cb2007",
     "sites/views.py": "de9bf8a2a5dfcccf2e3c561e3a112ca8180710cb65f533418c77c518fd6718f3",
     "uv.lock": "7f890989066924198b8c251ebddcfb6e6636ba4b9e7dafb26143f552144f7e48",
-    "vulture_allowlist.py": "a42094d24d2834d9de65af81e22632dbd482ee6003df10b99b280be9120f20c0",
+    "vulture_allowlist.py": "db98ee6b33e636e11820f31dc28e3aaed8b572b926980c68d8dd45996877a245",
     "wordpress/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "wordpress/actions.py": "a82c8c0f8f3d6a3cebba674c6077d13b87928f708de9f678009c2c2743d2ebe2",
     "wordpress/apps.py": "9e18a4526c86967fcd68986a0e99a9f5b961c8dd5e3b0597adc7be3d58c6ad8d",
@@ -730,5 +733,5 @@
     "unknown-runtime-26.04": "10755de18623ac81ff48796f263b65606d50f275367a55d9ef2fc2f99959a101",
     "valkey-installed-26.04": "3d58984fc4472cfa09ff300d718ddf6e4e43309060508a50daf823df9c79b69c"
   },
-  "audit_digest": "ac9e76be702d9984c68aa5235e6ac1494fd31c54aeca72c7f04eb8c66b70e01a"
+  "audit_digest": "7e9de308528e2c53101ce1d7d0b6550dbac9ac9090162f02ef7b3aa3d2bbc85c"
 }
