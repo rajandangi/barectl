@@ -118,3 +118,93 @@ SITE_REASONS: Final = (
         },
     ),
 )
+
+# The removal body's own reasons (#500). Its shared preconditions are declared once in
+# :mod:`operations.body_reasons`; ``automation_fence`` comes from ``SITE_REASONS``.
+#
+# A partial step names what is already gone and what remains: the removal runs gate, Caddy,
+# services, configuration, database, certificate, files, accounts, verification in that
+# order, and never rolls back.
+REMOVAL_REASONS: Final = (
+    ResultReason(
+        "site_remove",
+        {
+            Result.REFUSED: (
+                "The removal stopped before changing anything: its request was not a valid site "
+                "removal, or a step before the first removal failed. Read the run's journal on "
+                "the server, then prepare a new review."
+            ),
+            Result.PARTIAL: (
+                "The removal stopped after changing the server at a step it did not name, so "
+                "some of the site's resources may be gone and others may remain. Read the run's "
+                "journal on the server, then prepare a new review of what remains."
+            ),
+        },
+    ),
+    ResultReason(
+        "site_remove_evidence",
+        {
+            Result.REFUSED: (
+                "Barectl could not read the site's native artifacts from the server, so the "
+                "removal stopped before changing anything. Run discovery again, then prepare a "
+                "new review."
+            ),
+        },
+    ),
+    ResultReason(
+        "site_remove_caddy",
+        {
+            Result.REFUSED: (
+                "Barectl could not make Caddy's disk and running configurations agree before "
+                "removing the site's route, so the removal stopped after removing its backup "
+                "units and before removing its Caddy configuration. The site's Caddy route "
+                "still serves. Read the run's journal on the server, then prepare a new review."
+            ),
+        },
+    ),
+    ResultReason(
+        "site_remove_database",
+        {
+            Result.PARTIAL: (
+                "The database step stopped: Barectl could not drop or prove the site's "
+                "database and principal. Its Caddy configuration, services, automation "
+                "configuration and backup units are already removed, and its database still "
+                "exists or could not be read. Read the run's journal on the server, then "
+                "prepare a new review."
+            ),
+        },
+    ),
+    ResultReason(
+        "site_remove_certificate",
+        {
+            Result.PARTIAL: (
+                "The certificate step stopped: Barectl could not remove every stored "
+                "certificate file for the site. Its Caddy configuration, services, "
+                "configuration, database and backup units are already removed, but its "
+                "certificate files, directory and accounts remain. Read the run's journal on "
+                "the server, then prepare a new review."
+            ),
+        },
+    ),
+    ResultReason(
+        "site_remove_accounts",
+        {
+            Result.PARTIAL: (
+                "The accounts step stopped: Barectl could not remove the site's Linux accounts "
+                "and groups. Its Caddy configuration, services, configuration, database, "
+                "certificate and directory are already removed, but its accounts and groups "
+                "remain. Read the run's journal on the server, then prepare a new review."
+            ),
+        },
+    ),
+    ResultReason(
+        "site_remove_verify",
+        {
+            Result.PARTIAL: (
+                "Final verification stopped: the reviewed resources were removed, but Barectl "
+                "could not prove that nothing of the site remains. Read the run's journal on "
+                "the server, then prepare a new review of what verification still sees."
+            ),
+        },
+    ),
+)
