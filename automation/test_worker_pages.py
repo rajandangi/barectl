@@ -65,6 +65,38 @@ class QueueWorkerPageTests(ControllerConfigTestCase):
         html = self.settings_page()
         self.assertIn("Queue workers", html)
         self.assertIn("permission to", html)
+        self.assertIn("Your account does not have permission to prepare changes.", html)
+        self.assertNotIn("site_queue_workers_prepare", html)
+
+    def test_a_withheld_queue_workers_form_is_refused_with_the_gate_sentence(self) -> None:
+        from discovery.models import SiteState
+        from operations.services import read_changes
+
+        record_worker(self.server, state=SiteState.PARTLY_APPLIED)
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/shop/settings/queue-workers/prepare/",
+            {"action": "stop"},
+            follow=True,
+        )
+        self.assertEqual(read_changes(self.server).rows, [])
+        self.assertContains(
+            response,
+            "This site is partly applied; finish the change that is already in progress first.",
+        )
+
+    def test_a_laravel_site_without_a_current_release_withholds_with_its_reason(self) -> None:
+        from discovery.snapshot import ObservedSetting
+        from sites.ui_testing import record_site_settings
+
+        record_site_settings(
+            self.server,
+            identifier="shop",
+            application="laravel",
+            settings=(ObservedSetting("shop", "laravel", "APP_ENV", "a" * 64, "production"),),
+        )
+        html = self.settings_page()
+        self.assertIn("Queue workers", html)
+        self.assertIn("This site has no current release to change.", html)
         self.assertNotIn("site_queue_workers_prepare", html)
 
     def test_preparing_needs_the_site_change_permission(self) -> None:
