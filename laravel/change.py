@@ -27,6 +27,7 @@ from sites.bodies.common import NativeState, SiteRecord
 from sites.configuration import SiteSettings, render_laravel_caddy
 
 from . import observation
+from .bodies.reasons import DEPLOY_REASONS
 from .configuration import GATE_TEMPLATE, RETAINED_RELEASES, repository_locator, repository_ref
 
 SLUG: Final = "deploy_laravel_site"
@@ -536,4 +537,10 @@ DEPLOY_SITE: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_shape=InputShape.LARAVEL_DEPLOY,
+    reasons=DEPLOY_REASONS,
+    body_sources=(
+        "sites/bodies/common.py",
+        "laravel/bodies/common.py",
+        "laravel/bodies/deploy.py",
+    ),
 )

@@ -30,6 +30,7 @@ from runtimes.catalog import Architecture, architecture_of
 from sites import change as site_change
 from sites import observation
 from sites.bodies.common import SITE_GATED, NativeState, SiteRecord
+from sites.bodies.reasons import SITE_REASONS
 from sites.configuration import (
     PHP_RUNTIMES,
     SiteSettings,
@@ -39,6 +40,7 @@ from sites.configuration import (
 )
 
 from . import convention
+from .bodies.reasons import CREATE_REASONS
 
 SLUG: Final = "create_wordpress_site"
 LABEL: Final = "Create WordPress site"
@@ -529,4 +531,6 @@ CREATE_WORDPRESS: Final = ChangeKind(
     writes_secrets=True,
     input_choices=PHP_RUNTIMES,
     input_shape=InputShape.WORDPRESS_CREATE,
+    reasons=(*SITE_REASONS, *CREATE_REASONS),
+    body_sources=("sites/bodies/common.py", "wordpress/bodies/install.py"),
 )

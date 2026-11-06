@@ -25,10 +25,12 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from sites import observation as site_observation
 from sites.bodies.common import NativeState, SiteRecord
+from sites.bodies.reasons import SITE_REASONS
 from sites.change import membership_command
 from sites.configuration import PHP_RUNTIMES
 
 from . import convention, observation
+from .bodies.reasons import SETTINGS_REASONS
 
 SLUG: Final = "edit_wordpress_settings"
 LABEL: Final = "Edit WordPress settings"
@@ -326,4 +328,6 @@ EDIT_SETTINGS: Final = ChangeKind(
     refresh_discovery=True,
     writes_secrets=True,
     input_shape=InputShape.WORDPRESS_SETTINGS,
+    reasons=(*SITE_REASONS, *SETTINGS_REASONS),
+    body_sources=("sites/bodies/common.py", "wordpress/bodies/settings.py"),
 )

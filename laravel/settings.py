@@ -30,6 +30,7 @@ from sites.configuration import PHP_RUNTIMES
 
 from . import observation
 from .bodies.common import ENVIRONMENT_KEY, NON_SECRET_KEYS
+from .bodies.reasons import EDIT_REASONS
 
 SLUG: Final = "edit_laravel_environment"
 LABEL: Final = "Edit Laravel environment"
@@ -406,4 +407,10 @@ EDIT_ENVIRONMENT: Final = ChangeKind(
     refresh_discovery=True,
     writes_secrets=True,
     input_shape=InputShape.LARAVEL_ENVIRONMENT,
+    reasons=EDIT_REASONS,
+    body_sources=(
+        "sites/bodies/common.py",
+        "laravel/bodies/common.py",
+        "laravel/bodies/settings.py",
+    ),
 )

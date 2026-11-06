@@ -24,10 +24,12 @@ from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from operations.models import ChangeReview
 from sites import observation
 from sites.bodies.common import NativeState, SiteRecord
+from sites.bodies.reasons import SITE_REASONS
 from sites.change import membership_command
 from sites.configuration import PHP_RUNTIMES
 
 from . import convention
+from .bodies.reasons import ACTION_REASONS
 
 PASSWORD_SLUG: Final = "reset_wordpress_password"  # noqa: S105 - a kind slug
 CORE_SLUG: Final = "verify_wordpress_core"
@@ -352,6 +354,8 @@ RESET_PASSWORD: Final = ChangeKind(
     verify,
     writes_secrets=True,
     input_shape=InputShape.WORDPRESS_PASSWORD,
+    reasons=(*SITE_REASONS, *ACTION_REASONS),
+    body_sources=("sites/bodies/common.py", "wordpress/bodies/actions.py"),
 )
 
 VERIFY_CORE: Final = ChangeKind(
@@ -362,4 +366,6 @@ VERIFY_CORE: Final = ChangeKind(
     core_body,
     verify,
     input_shape=InputShape.WORDPRESS_CORE,
+    reasons=(*SITE_REASONS, *ACTION_REASONS),
+    body_sources=("sites/bodies/common.py", "wordpress/bodies/actions.py"),
 )
