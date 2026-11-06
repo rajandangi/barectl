@@ -28,6 +28,8 @@
             <button class="usa-button usa-button--unstyled"
                     type="submit">Set up log rotation</button>
           </form>
+        {% elif logs_rotation_reason %}
+          <span class="barectl-note">{{ logs_rotation_reason }}</span>
         {% endif %}
       </p>
     {% endif %}

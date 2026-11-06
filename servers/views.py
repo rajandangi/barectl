@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from copy import copy
+from dataclasses import replace
 from typing import Literal
 from urllib.parse import urlencode
 
@@ -21,6 +22,7 @@ from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from operations import activity as activity_read
+from operations import preparation
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import CHANGE_SHARED, VIEW_CHANGES
@@ -28,6 +30,7 @@ from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog, shown_runtimes, shown_updates
 from sites import names as site_names
 from sites.forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
+from sites.preparation import site_facts
 from sites.recognition import site_files, site_pools
 
 from .attention import needs_attention
@@ -46,6 +49,7 @@ from .discovery_state import (
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
 from .page import QUEUE_HELP_AFTER, banner, status_line
+from .preparation import server_facts
 from .registration import (
     RemovalBlocked,
     SaveOutcome,
@@ -658,6 +662,11 @@ def _site_overview_context(
     site = page.site
     if site is None or not site.domains:
         return
+    user = request.user
+    if not isinstance(user, User):
+        return
+    facts = server_facts(state, user)
+    shape = site_facts(state.snapshot, identifier)
     scheme = "https" if site.https else "http"
     primary = site.domains[0]
     context["site_address"] = f"{scheme}://{primary}"
@@ -670,11 +679,25 @@ def _site_overview_context(
     from backups.views import context_for_site as backups_context_for_site
 
     backup_context = backups_context_for_site(server, identifier, request.user)
+    reopen = preparation.decide(
+        facts,
+        shape,
+        replace(preparation.SITE, state=None, allow_partly_applied=True, gated=True),
+    )
     context["site_reopen"] = bool(
         backup_context.get("backups") is not None
         and getattr(backup_context["backups"], "reopen", False)
     )
-    context["site_reopen_can_prepare"] = backup_context.get("backups_can_reopen", False)
+    context["site_reopen_can_prepare"] = bool(
+        context["site_reopen"]
+        and backup_context.get("backups_can_reopen", False)
+        and reopen.allowed
+    )
+    context["site_reopen_reason"] = (
+        reopen.reason.sentence
+        if context["site_reopen"] and not reopen.allowed and reopen.reason is not None
+        else ""
+    )
     context["site_reopen_restore"] = bool(
         backup_context.get("backups") is not None
         and getattr(backup_context["backups"], "restore", False)
@@ -704,6 +727,23 @@ def _site_overview_context(
     from sites.deploy_views import deploy_context
 
     context.update(deploy_context(server, identifier, request.user))
+    deploy = preparation.decide(
+        facts,
+        shape,
+        replace(
+            preparation.SITE,
+            application="laravel",
+            releases_observed=True,
+            current_release=True,
+            open_site=True,
+        ),
+    )
+    context["deploy_can_prepare"] = (
+        bool(context.get("deploy_can_prepare", False)) and deploy.allowed
+    )
+    context["deploy_reason"] = (
+        deploy.reason.sentence if not deploy.allowed and deploy.reason is not None else ""
+    )
     releases = (
         present_releases(state.snapshot.collected.releases, identifier)
         if state.snapshot is not None
@@ -713,7 +753,6 @@ def _site_overview_context(
     context["site_current_release"] = next(
         (release for release in releases if release.current), None
     )
-    context["blocking"] = blocking_operation(state.other_operation)
 
 
 def site_page_response(  # noqa: C901 - one dispatcher for the site sections
