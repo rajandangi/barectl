@@ -22,8 +22,7 @@
     </form>
   {% else %}
     <p class="barectl-note">
-      An operator who can prepare changes can clean up finished runs. Check the connection
-      and resolve any findings first.
+      {{ can_clean_up_reason|default:"An operator who can prepare changes can clean up finished runs. Check the connection and resolve any findings first." }}
     </p>
   {% endif %}
 </section>

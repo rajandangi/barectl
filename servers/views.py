@@ -21,9 +21,10 @@ from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from operations import activity as activity_read
+from operations import preparation
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from operations.models import CHANGE_SHARED, VIEW_CHANGES
+from operations.models import VIEW_CHANGES
 from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog, shown_runtimes, shown_updates
 from sites import names as site_names
@@ -46,6 +47,7 @@ from .discovery_state import (
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
 from .page import QUEUE_HELP_AFTER, banner, status_line
+from .preparation import SERVER_SHARED, decide_for_server
 from .registration import (
     RemovalBlocked,
     SaveOutcome,
@@ -174,18 +176,30 @@ def _discovery_section(request: HttpRequest) -> Section:
     return "advanced" if request.GET.get("section") == "advanced" else "sites"
 
 
+def _decision(
+    state: DiscoveryState,
+    user: User | AnonymousUser,
+    requirements: preparation.Requirements = preparation.SERVER,
+) -> preparation.Decision:
+    """The gate's decision for one server card; an anonymous caller gets no allowance."""
+    if not isinstance(user, User):
+        return preparation.Decision(False)
+    return decide_for_server(state, user, requirements)
+
+
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
+    can_set_up = _decision(state, request.user)
     attention = (
         needs_attention(
             state.server.pk,
             state.snapshot.collected,
-            can_set_up=state.can_prepare_changes and request.user.has_perms(PREPARE_PERMISSIONS),
+            can_set_up=can_set_up.allowed,
+            set_up_reason=can_set_up.reason.sentence if can_set_up.reason else "",
         )
         if state.snapshot
         else ()
     )
     challenge = pending_challenge(state.server)
-    can_set_up = state.can_prepare_changes and request.user.has_perms(PREPARE_PERMISSIONS)
     context: dict[str, object] = {
         "server": state.server,
         "state": state,
@@ -196,7 +210,8 @@ def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str,
         "banner": banner(
             state,
             host_challenge=challenge is not None,
-            can_set_up=can_set_up,
+            can_set_up=can_set_up.allowed,
+            set_up_reason=can_set_up.reason.sentence if can_set_up.reason else "",
             can_request_check=(
                 state.can_request
                 and state.alias_usable
@@ -335,14 +350,18 @@ def _advanced_section(
             if standing
             else ()
         )
+        runtime_decision = _decision(state, request.user)
         context["can_add_runtime"] = (
-            request.user.has_perms(PREPARE_PERMISSIONS)
-            and state.can_prepare_changes
+            runtime_decision.allowed
             and standing is not None
             and standing.standing == Standing.TARGET_STACK
         )
-        context["can_clean_up"] = (
-            request.user.has_perms(PREPARE_PERMISSIONS) and state.can_prepare_changes
+        context["can_add_runtime_reason"] = (
+            runtime_decision.reason.sentence if runtime_decision.reason else ""
+        )
+        context["can_clean_up"] = runtime_decision.allowed
+        context["can_clean_up_reason"] = (
+            runtime_decision.reason.sentence if runtime_decision.reason else ""
         )
         runtime_rows = shown_runtimes(snapshot.collected) if snapshot else ()
         runtime_updates = shown_updates(snapshot.collected, runtime_rows) if snapshot else ()
@@ -459,17 +478,17 @@ def server_page(
         context["database_panel"] = (
             panel(state.snapshot.collected) if state.snapshot is not None else None
         )
-        context["database_can_prepare"] = state.can_prepare_changes and request.user.has_perms(
-            PREPARE_PERMISSIONS
-        )
+        database = _decision(state, request.user)
+        context["database_can_prepare"] = database.allowed
+        context["database_reason"] = database.reason.sentence if database.reason else ""
         context["database_install_kind"] = database_engine.SLUG
         context["database_remove_kind"] = database_engine.REMOVE_SLUG
         context["object_cache_panel"] = (
             cache_panel(state.snapshot.collected) if state.snapshot is not None else None
         )
-        context["object_cache_can_prepare"] = state.can_prepare_changes and request.user.has_perms(
-            (*PREPARE_PERMISSIONS, CHANGE_SHARED)
-        )
+        object_cache = _decision(state, request.user, SERVER_SHARED)
+        context["object_cache_can_prepare"] = object_cache.allowed
+        context["object_cache_reason"] = object_cache.reason.sentence if object_cache.reason else ""
         context["object_cache_kind"] = cache_engine.SLUG
         from servers.backup_storage import context_for_server as backup_storage_context
 
@@ -496,9 +515,9 @@ def server_page(
         from security.presentation import firewall_panel
         from security.presentation import present as present_security
 
-        can_change_security = state.can_prepare_changes and request.user.has_perms(
-            (*PREPARE_PERMISSIONS, CHANGE_SHARED)
-        )
+        security = _decision(state, request.user, SERVER_SHARED)
+        can_change_security = security.allowed
+        context["security_reason"] = security.reason.sentence if security.reason else ""
         firewall_url = reverse("security_firewall_prepare", args=[server.pk])
         context["security_checks"] = (
             present_security(

@@ -23,10 +23,11 @@ from discovery.snapshot import (
     save_snapshot,
 )
 from operations import recovery
+from operations.activity_testing import record_change
 from operations.consent import Scope, consent_of
 from operations.engine import BodyContext, ReviewDraft
 from operations.inputs import PreparationInputs
-from operations.models import Consent
+from operations.models import ChangePreparation, Consent, RemoteOperation
 from operations.services import read_changes
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
@@ -349,12 +350,64 @@ class ObjectCacheSettingPageTests(ControllerConfigTestCase):
         target_snapshot(self.server)
         response = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertNotContains(response, "Install Valkey")
+        self.assertContains(response, "Changing this needs the shared-change permission.")
         refused = self.client.post(
             f"/servers/{self.server.pk}/settings/object-cache/prepare/",
             {"kind": engine.SLUG},
         )
         self.assertEqual(refused.status_code, 403)
         self.assertEqual(read_changes(self.server).rows, [])
+
+    def test_a_running_change_withholds_the_card_and_the_post_with_the_gate_sentence(self) -> None:
+        target_snapshot(self.server)
+        offered = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertContains(offered, "Install Valkey")
+        record_change(self.server, status=RemoteOperation.Status.RUNNING)
+        withheld = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(withheld, "Install Valkey")
+        self.assertContains(
+            withheld,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/settings/object-cache/prepare/",
+            {"kind": engine.SLUG},
+            follow=True,
+        )
+        self.assertContains(
+            refused,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 1)
+
+    def test_an_active_read_does_not_withhold_the_install_card(self) -> None:
+        target_snapshot(self.server)
+        operation = None
+        for kind in (
+            RemoteOperation.Kind.LOG_READ,
+            RemoteOperation.Kind.CACHE_READING,
+            RemoteOperation.Kind.BACKUP_CHECK,
+        ):
+            with self.subTest(kind=kind):
+                if operation is not None:
+                    operation.delete()
+                operation = RemoteOperation.objects.create(
+                    server=self.server,
+                    ssh_alias=self.server.ssh_alias,
+                    kind=kind,
+                    status=RemoteOperation.Status.RUNNING,
+                )
+                response = self.client.get(f"/servers/{self.server.pk}/settings/")
+                self.assertContains(response, "Install Valkey")
+                self.assertNotContains(
+                    response,
+                    "Another change is running for this server; wait for it to finish before "
+                    "preparing a change.",
+                )
+        if operation is not None:
+            operation.delete()
 
     def test_an_unknown_change_is_refused(self) -> None:
         target_snapshot(self.server)

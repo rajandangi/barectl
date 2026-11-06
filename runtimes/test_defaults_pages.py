@@ -7,7 +7,8 @@ from django.utils import timezone
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.snapshot import current_snapshot, save_snapshot
-from operations.models import ChangePreparation
+from operations.activity_testing import record_change
+from operations.models import ChangePreparation, RemoteOperation
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 from sites.ui_testing import record_http_sites
@@ -94,8 +95,36 @@ class DefaultCommandPageTests(ControllerConfigTestCase):
 
     def test_viewer_cannot_prepare_a_shared_default_review(self) -> None:
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(page, "Change default PHP")
+        self.assertContains(page, "Your account does not have permission to prepare changes.")
         response = self.client.post(
             f"/servers/{self.server.pk}/settings/defaults/php/prepare/", {"selection": "php85"}
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ChangePreparation.objects.exists())
+
+    def test_a_running_change_withholds_the_card_and_refuses_the_post_with_the_sentence(
+        self,
+    ) -> None:
+        offered = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertContains(offered, "Change default PHP")
+        record_change(self.server, status=RemoteOperation.Status.RUNNING)
+        withheld = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(withheld, "Change default PHP")
+        self.assertContains(
+            withheld,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/settings/defaults/php/prepare/",
+            {"selection": "php85"},
+            follow=True,
+        )
+        self.assertContains(
+            refused,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 1)

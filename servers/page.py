@@ -81,6 +81,7 @@ def banner(
     can_request_check: bool,
     can_edit: bool,
     attention: tuple[object, ...] = (),
+    set_up_reason: str = "",
 ) -> Banner | None:
     """The most urgent next step, or ``None`` when the page already offers it."""
     pending = _pending_banner(
@@ -94,6 +95,7 @@ def banner(
     return _result_banner(
         state,
         can_set_up=can_set_up,
+        set_up_reason=set_up_reason,
         can_request_check=can_request_check,
         attention=attention,
     )
@@ -161,6 +163,7 @@ def _result_banner(
     state: DiscoveryState,
     *,
     can_set_up: bool,
+    set_up_reason: str,
     can_request_check: bool,
     attention: tuple[object, ...],
 ) -> Banner | None:
@@ -209,7 +212,8 @@ def _result_banner(
         note = (
             "Barectl installs the web server and the tools it uses on this host."
             if can_set_up
-            else "An operator with permission to prepare changes can set up this server."
+            else set_up_reason
+            or "An operator with permission to prepare changes can set up this server."
         )
         return Banner("setup", "Ready to set up", note, actions=actions)
     for item in attention:

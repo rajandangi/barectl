@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -18,8 +18,9 @@ from django.views.decorators.http import require_GET, require_POST
 from dashboard.middleware import is_htmx_request
 from servers.discovery_state import server_state
 from servers.models import Server
+from servers.preparation import decide_for_server, refusal_sentence
 
-from . import engine, services
+from . import engine, preparation, services
 from .consent import PREPARE_PERMISSIONS, permissions_for
 from .forms import (
     AcknowledgeForm,
@@ -78,12 +79,12 @@ def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     )
     if not user.has_perm("servers.view_server") or not user.has_perms(permissions):
         raise PermissionDenied
-    if not server_state(server).can_prepare_changes:
-        messages.error(
-            request,
-            "This server has no current manageable host-standing observation. Run discovery "
-            "and resolve any Not manageable findings before preparing changes.",
-        )
+    requirements = preparation.SERVER
+    if kind is not None and kind.writes_secrets:
+        requirements = replace(requirements, needs=requirements.needs | {preparation.Need.SECRET})
+    decision = decide_for_server(server_state(server), user, requirements)
+    if not decision.allowed:
+        messages.error(request, refusal_sentence(decision))
         return redirect("server_changes", pk=pk)
     if kind is None:
         messages.error(request, "Choose one of the supported kinds of change.")
@@ -144,7 +145,7 @@ def _change_context(
 ) -> dict[str, object]:
     preparation = row.preparation
     review = view.review
-    can_apply = _can_apply(request, view) and _server_can_prepare(preparation.server)
+    can_apply = _can_apply(request, view) and _server_can_prepare(preparation.server, request.user)
     out_of_date = bool(
         review is not None
         and review.run_id is None
@@ -192,11 +193,20 @@ def _apply_reason(request: HttpRequest, view: ChangeView) -> str:
     if review.no_changes:
         return "Barectl found nothing to change."
     if not _server_can_prepare(
-        review.review.preparation.server if review.review.preparation else None
+        review.review.preparation.server if review.review.preparation else None,
+        request.user,
     ):
+        decision = _server_decision(
+            review.review.preparation.server if review.review.preparation else None,
+            request.user,
+        )
         return (
-            "Barectl has no current manageable observation of this server, so it will not "
-            "apply changes."
+            decision.reason.sentence
+            if decision.reason
+            else (
+                "Barectl has no current manageable observation of this server, so it will not "
+                "apply changes."
+            )
         )
     if not request.user.has_perms(review.permissions):
         return "Your role may view this change but not apply it."
@@ -213,7 +223,7 @@ def _can_prepare_again(request: HttpRequest, preparation: ChangePreparation) -> 
     return (
         request.user.has_perm("servers.view_server")
         and request.user.has_perms(permissions)
-        and _server_can_prepare(preparation.server)
+        and _server_can_prepare(preparation.server, request.user)
     )
 
 
@@ -235,13 +245,14 @@ def change_prepare_again(request: HttpRequest, operation_id: int) -> HttpRespons
         raise Http404
     user = _user(request)
     if not _can_prepare_again(request, preparation):
+        decision = _server_decision(server, user)
+        if not decision.allowed:
+            messages.error(request, refusal_sentence(decision))
+            return redirect("change_detail", operation_id=operation_id)
         raise PermissionDenied
-    if not server_state(server).can_prepare_changes:
-        messages.error(
-            request,
-            "This server has no current manageable observation. Run discovery and resolve "
-            "any findings before preparing this change again.",
-        )
+    decision = _server_decision(server, user)
+    if not decision.allowed:
+        messages.error(request, refusal_sentence(decision))
         return redirect("change_detail", operation_id=operation_id)
     try:
         queued = services.request_prepare(
@@ -296,8 +307,15 @@ def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
     )
 
 
-def _server_can_prepare(server: Server | None) -> bool:
-    return server is not None and server_state(server).can_prepare_changes
+def _server_decision(server: Server | None, user: User | AnonymousUser) -> preparation.Decision:
+    """The gate's host, freshness and active-change rules, without a card's permissions."""
+    if server is None or not isinstance(user, User):
+        return preparation.Decision(False)
+    return decide_for_server(server_state(server), user, preparation.EMPTY)
+
+
+def _server_can_prepare(server: Server | None, user: User | AnonymousUser) -> bool:
+    return _server_decision(server, user).allowed
 
 
 def _submitted_confirmation(request: HttpRequest, review: ChangeReview) -> str | None:
@@ -340,14 +358,11 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:  # no
     review = row.review
     if review is None:
         raise Http404
-    if not _server_can_prepare(row.preparation.server):
-        messages.error(
-            request,
-            "This server has no current manageable host-standing observation. Run discovery "
-            "and resolve any Not manageable findings before applying changes.",
-        )
-        return redirect("change_detail", operation_id=operation_id)
     user = _user(request)
+    decision = _server_decision(row.preparation.server, user)
+    if not decision.allowed:
+        messages.error(request, refusal_sentence(decision))
+        return redirect("change_detail", operation_id=operation_id)
     if not user.has_perms(
         permissions_for(Consent(review.consent), writes_secrets=review.writes_secrets)
     ):
