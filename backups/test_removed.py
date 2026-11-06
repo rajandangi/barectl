@@ -12,6 +12,7 @@ from typing import cast, override
 from unittest import mock
 
 from django.contrib.auth.models import Permission
+from django.contrib.messages import get_messages
 from django.test import Client, SimpleTestCase
 
 from bootstrap.standing import Standing
@@ -468,6 +469,10 @@ class RemovedDeleteRequestTests(ControllerConfigTestCase):
         response = self.client.post(self.url, {"source": SOURCE})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self._rows(), [])
+        self.assertIn(
+            "Changing this needs the destructive-change permission.",
+            [str(message) for message in get_messages(response.wsgi_request)],
+        )
 
     def test_deleting_a_removed_sites_backups_needs_csrf(self) -> None:
         client = Client(enforce_csrf_checks=True)

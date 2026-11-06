@@ -1,11 +1,14 @@
 {% if not backups_target %}
   <section class="barectl-card" aria-labelledby="backups-heading">
     <h2 id="backups-heading">Backups</h2>
-    <p>This site is not managed by Barectl, so it has no backup controls.</p>
+    <p>{{ backups_site_reason|default:"This site is not managed by Barectl, so it has no backup controls." }}</p>
   </section>
 {% else %}
   <section class="barectl-card" aria-labelledby="backups-heading">
     <h2 id="backups-heading">Backups</h2>
+    {% if backups_site_reason %}
+      <p class="barectl-note">{{ backups_site_reason }}</p>
+    {% endif %}
     {% if backups.reopen %}
       <div class="usa-alert usa-alert--warning">
         <div class="usa-alert__body">
@@ -23,8 +26,8 @@
               {% csrf_token %}
               <button type="submit" class="usa-button">Reopen site</button>
             </form>
-          {% else %}
-            <p class="barectl-note">Wait for the current operation before reopening the site.</p>
+          {% elif backups_reopen_reason and backups_reopen_reason != backups_site_reason %}
+            <p class="barectl-note">{{ backups_reopen_reason }}</p>
           {% endif %}
         </div>
       </div>
@@ -55,11 +58,8 @@
             <button type="submit" class="usa-button">Enable backups</button>
           </div>
         </form>
-      {% else %}
-        <p class="barectl-note">
-          Backups can be enabled after Barectl has a current observation of this server and
-          no other operation is running.
-        </p>
+      {% elif backups_enable_reason and backups_enable_reason != backups_site_reason %}
+        <p class="barectl-note">{{ backups_enable_reason }}</p>
       {% endif %}
     {% else %}
       {% if backups.last %}
@@ -138,6 +138,8 @@
             </select>
             <button type="submit" class="usa-button usa-button--outline">Set retention</button>
           </form>
+        {% elif backups_set_retention_reason and backups_set_retention_reason != backups_site_reason %}
+          <p class="barectl-note">{{ backups_set_retention_reason }}</p>
         {% endif %}
         {% if backups_can_disable_retention %}
           <form class="usa-form"
@@ -146,6 +148,8 @@
             {% csrf_token %}
             <button type="submit" class="usa-button usa-button--outline">Turn retention off</button>
           </form>
+        {% elif backups_retention_days and backups_disable_retention_reason and backups_disable_retention_reason != backups_site_reason %}
+          <p class="barectl-note">{{ backups_disable_retention_reason }}</p>
         {% endif %}
         <p class="usa-hint">
           Cleanup deletes older copies only after it checks the newest one still restores.
@@ -169,7 +173,9 @@
             <button type="submit" class="usa-button">Back up now</button>
           </form>
         {% else %}
-          <p class="barectl-note">Barectl cannot take a backup while another operation runs.</p>
+          {% if backups_back_up_full_reason and backups_back_up_full_reason != backups_site_reason %}
+            <p class="barectl-note">{{ backups_back_up_full_reason }}</p>
+          {% endif %}
         {% endif %}
         {% if not backups.database %}
           <p class="barectl-note">
@@ -261,6 +267,8 @@
               </div>
             </form>
           {% endif %}
+        {% elif backups_schedule_reason and backups_schedule_reason != backups_site_reason %}
+          <p class="barectl-note">{{ backups_schedule_reason }}</p>
         {% endif %}
       </section>
     {% endif %}
@@ -378,6 +386,18 @@
           </ul>
         </details>
       {% endif %}
+      {% if backups_copy_reason and backups_copy_reason != backups_site_reason %}
+        <p class="barectl-note">{{ backups_copy_reason }}</p>
+      {% endif %}
+      {% if backups_keep_reason and backups_keep_reason != backups_site_reason %}
+        <p class="barectl-note">{{ backups_keep_reason }}</p>
+      {% endif %}
+      {% if backups_restore_reason and backups_restore_reason != backups_site_reason %}
+        <p class="barectl-note">{{ backups_restore_reason }}</p>
+      {% endif %}
+      {% if backups_export_reason and backups_export_reason != backups_site_reason %}
+        <p class="barectl-note">{{ backups_export_reason }}</p>
+      {% endif %}
     </section>
     {% if backups_sources %}
       <section class="barectl-card" aria-labelledby="connected-sources-heading">
@@ -460,13 +480,16 @@
       </section>
     {% endif %}
   {% endif %}
-  {% if backups.removed and backups_can_restore %}
+  {% if backups.removed %}
     <section class="barectl-card" aria-labelledby="removed-backups-heading">
       <h2 id="removed-backups-heading">Backups of a removed site</h2>
       <p>
         These backup repositories belonged to sites that are no longer on this server.
         Barectl keeps them; restoring one into this site replaces this site's data.
       </p>
+      {% if backups_restore_reason and backups_restore_reason != backups_site_reason %}
+        <p class="barectl-note">{{ backups_restore_reason }}</p>
+      {% endif %}
       {% for repository in backups.removed %}
         <h3>{{ repository.identifier }}</h3>
         {% if repository.problem %}<p class="usa-alert usa-alert--warning">{{ repository.problem }}</p>{% endif %}
@@ -475,7 +498,7 @@
             {{ point.time_label }} · {{ point.scope }} · {{ point.status }}
             {% if point.live %}(captured while the site ran){% endif %}
           </p>
-          {% if point.restorable_elsewhere %}
+          {% if point.restorable_elsewhere and backups_can_restore %}
             <form class="usa-form"
                   method="post"
                   action="{% url 'site_backups_restore_prepare' server.pk identifier %}">
