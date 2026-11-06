@@ -15,6 +15,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 
 from . import observation
+from .bodies.reasons import ADD_REASONS
 from .catalog import Architecture, Build, architecture_of, load
 from .configuration import ENTRIES, PROBE, render
 
@@ -221,4 +222,6 @@ ADD_RUNTIME: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_choices=ENTRIES,
+    reasons=ADD_REASONS,
+    body_sources=("runtimes/bodies/add.sh",),
 )

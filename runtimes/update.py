@@ -31,6 +31,7 @@ from sites import php_change
 from sites.bodies.php_runtime import PHPState, missing_php_modules
 from sites.observation import SITE_IDENTIFIERS_COMMAND
 
+from .bodies.reasons import UPDATE_REASONS
 from .catalog import Architecture, Kind, architecture_of, load
 from .updates import CatalogUpdate, updates, usage_by_entry
 
@@ -533,4 +534,10 @@ UPDATE_CATALOG: Final = ChangeKind(
     body=body,
     verify=verify,
     refresh_discovery=True,
+    reasons=UPDATE_REASONS,
+    body_sources=(
+        "runtimes/bodies/update.py",
+        "sites/bodies/common.py",
+        "sites/bodies/php_runtime.py",
+    ),
 )

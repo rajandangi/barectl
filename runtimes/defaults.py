@@ -19,6 +19,7 @@ from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 
+from .bodies.reasons import DEFAULTS_REASONS
 from .catalog import Architecture, architecture_of, load
 
 PHP_CHOICES: Final = ("php84", "php85")
@@ -279,6 +280,8 @@ SET_DEFAULT_PHP: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_choices=PHP_CHOICES,
+    reasons=DEFAULTS_REASONS,
+    body_sources=("runtimes/bodies/defaults.py",),
 )
 SET_DEFAULT_NODE: Final = ChangeKind(
     "set_default_node",
@@ -289,6 +292,8 @@ SET_DEFAULT_NODE: Final = ChangeKind(
     verify,
     refresh_discovery=True,
     input_choices=NODE_CHOICES,
+    reasons=DEFAULTS_REASONS,
+    body_sources=("runtimes/bodies/defaults.py",),
 )
 
 

@@ -23,6 +23,7 @@ from sites.bodies.php_runtime import PHPState, missing_php_modules
 from sites.observation import SITE_IDENTIFIERS_COMMAND
 
 from . import update
+from .bodies.reasons import UPDATE_REASONS
 from .catalog import Architecture, Build, Kind, architecture_of, load
 from .updates import usage_by_entry
 
@@ -254,4 +255,10 @@ REVERT_RUNTIME: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_choices=PHP_ENTRIES,
+    reasons=UPDATE_REASONS,
+    body_sources=(
+        "runtimes/bodies/update.py",
+        "sites/bodies/common.py",
+        "sites/bodies/php_runtime.py",
+    ),
 )

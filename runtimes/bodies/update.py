@@ -312,10 +312,21 @@ def update_catalog(document: dict[str, object]) -> None:  # noqa: C901 - one rev
                     result("refused", "evidence")
                     return
         stage("realise")
-        realise([str(item["to"]) for item in entries if isinstance(item, dict)])
-        for item in entries:
-            if isinstance(item, dict) and item.get("kind") == "php":
-                check_php_build(str(item["to"]), str(item["entry"]))
+        try:
+            realise([str(item["to"]) for item in entries if isinstance(item, dict)])
+            for item in entries:
+                if isinstance(item, dict) and item.get("kind") == "php":
+                    check_php_build(str(item["to"]), str(item["entry"]))
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            sys.stderr.write(
+                "Catalog update realisation stopped ("
+                + type(error).__name__
+                + "): "
+                + str(error)[:500]
+                + "\n"
+            )
+            result("refused", "runtime_realise")
+            return
         changed = True
         stage("sites")
         for item in entries:

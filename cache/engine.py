@@ -36,6 +36,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 
 from . import observation
+from .bodies.reasons import VALKEY_REASONS
 
 SLUG: Final = "install_valkey"
 LABEL: Final = "Install Valkey"
@@ -453,4 +454,6 @@ INSTALL: Final = ChangeKind(
     body=body,
     verify=verify,
     refresh_discovery=True,
+    reasons=VALKEY_REASONS,
+    body_sources=("cache/bodies/install.sh",),
 )
