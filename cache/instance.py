@@ -32,8 +32,10 @@ from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from sites import observation as site_observation
+from sites.bodies.reasons import SITE_REASONS
 
 from . import convention, observation
+from .bodies.reasons import OBJECT_CACHE_REASONS
 from .laravel import laravel_managed_digests, laravel_wiring_digests
 
 SLUG: Final = "set_site_object_cache"
@@ -1393,4 +1395,10 @@ SET_SITE_OBJECT_CACHE: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_OBJECT_CACHE,
+    reasons=(*SITE_REASONS, *OBJECT_CACHE_REASONS),
+    body_sources=(
+        "cache/bodies/instance.py",
+        "sites/bodies/common.py",
+        "laravel/bodies/common.py",
+    ),
 )

@@ -38,9 +38,9 @@ SITE_REASONS: Final = (
         "runtime_config",
         {
             Result.PARTIAL: (
-                "The site's runtime configuration could not be changed or verified, so the "
-                "run stopped partway. Read the run's journal on the server, then prepare a "
-                "new review of what remains."
+                "The runtime configuration could not be changed or verified, so the run "
+                "stopped partway. Read the run's journal on the server, then prepare a new "
+                "review of what remains."
             ),
         },
     ),

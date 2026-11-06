@@ -27,6 +27,7 @@ from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of, load
 
 from . import binding, observation
+from .bodies.reasons import SITE_DATABASE_REASONS
 
 SLUG: Final = "add_site_database"
 LABEL: Final = "Add site database"
@@ -519,4 +520,6 @@ ADD_SITE_DATABASE: Final = ChangeKind(
     verify=verify,
     refresh_discovery=True,
     input_shape=InputShape.SITE_DATABASE,
+    reasons=SITE_DATABASE_REASONS,
+    body_sources=("databases/bodies/site.py",),
 )
