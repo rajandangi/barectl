@@ -7,7 +7,7 @@ signed-in account become its typed facts.
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 
 from discovery.presentation import VIEW_SITES
 from operations import preparation
@@ -17,6 +17,8 @@ from operations.services import read_changes
 
 if TYPE_CHECKING:
     from .discovery_state import DiscoveryState
+
+type Account = User | AnonymousUser
 
 
 def _freshness(state: DiscoveryState) -> preparation.Freshness:
@@ -44,7 +46,7 @@ def stored_server_facts(state: DiscoveryState) -> preparation.ServerFacts:
     )
 
 
-def granted_needs(user: User) -> frozenset[preparation.Need]:
+def granted_needs(user: Account) -> frozenset[preparation.Need]:
     """The needs this account satisfies, from the engine's one permission vocabulary."""
     granted: set[preparation.Need] = set()
     if user.has_perms(PREPARE_PERMISSIONS):
@@ -60,7 +62,7 @@ def granted_needs(user: User) -> frozenset[preparation.Need]:
     return frozenset(granted)
 
 
-def server_facts(state: DiscoveryState, user: User) -> preparation.ServerFacts:
+def server_facts(state: DiscoveryState, user: Account) -> preparation.ServerFacts:
     facts = stored_server_facts(state)
     return replace(
         facts,
@@ -71,7 +73,7 @@ def server_facts(state: DiscoveryState, user: User) -> preparation.ServerFacts:
 
 def decide_for_server(
     state: DiscoveryState,
-    user: User,
+    user: Account,
     requirements: preparation.Requirements,
 ) -> preparation.Decision:
     return preparation.decide(server_facts(state, user), None, requirements)

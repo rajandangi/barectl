@@ -417,8 +417,32 @@ class WordPressPagesTests(ControllerConfigTestCase):
         record_wordpress_sites(self.server, application="wordpress_partial")
         response = self.client.get(f"/servers/{self.server.pk}/sites/shop/wordpress/")
         self.assertContains(response, "The WordPress core version file is missing or unreadable.")
+        self.assertContains(response, "This change needs a WordPress site.")
         self.assertNotContains(response, "Review password reset")
         self.assertNotContains(response, "Review core verification")
+
+    def test_a_withheld_core_verification_form_uses_the_gate_sentence(self) -> None:
+        from operations.models import ChangePreparation
+
+        record_wordpress_sites(self.server, application="wordpress_partial")
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/shop/wordpress/core/prepare/",
+            follow=True,
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 0)
+        self.assertContains(response, "This change needs a WordPress site.")
+
+    def test_a_withheld_password_form_uses_the_gate_sentence(self) -> None:
+        from operations.models import ChangePreparation
+
+        record_wordpress_sites(self.server, application="wordpress_partial")
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/shop/wordpress/password/prepare/",
+            {"admin_username": "shopadmin"},
+            follow=True,
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 0)
+        self.assertContains(response, "This change needs a WordPress site.")
 
     def test_preparing_a_reset_queues_only_the_username(self) -> None:
         record_wordpress_sites(self.server)
@@ -451,6 +475,7 @@ class WordPressPagesTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         response = self.client.get(f"/servers/{self.server.pk}/sites/shop/wordpress/")
         self.assertNotContains(response, "Review password reset")
+        self.assertContains(response, "Changing this needs the manage-secrets permission.")
         self.assertContains(response, "Review core verification")
         self.client.post(
             f"/servers/{self.server.pk}/sites/shop/wordpress/password/prepare/",

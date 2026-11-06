@@ -21,6 +21,7 @@ from servers.models import Server
 from servers.preparation import decide_for_server, refusal_sentence
 
 from . import engine, preparation, services
+from . import preparation as gate
 from .consent import PREPARE_PERMISSIONS, permissions_for
 from .forms import (
     AcknowledgeForm,
@@ -156,6 +157,7 @@ def _change_context(
         if preparation.server is not None
         else None
     )
+    can_prepare_again, can_prepare_again_reason = _prepare_again_state(request, preparation)
     context: dict[str, object] = {
         "change": view,
         "server": preparation.server,
@@ -169,7 +171,8 @@ def _change_context(
             if can_apply or out_of_date
             else _apply_reason(request, view)
         ),
-        "can_prepare_again": _can_prepare_again(request, preparation),
+        "can_prepare_again": can_prepare_again,
+        "can_prepare_again_reason": can_prepare_again_reason,
         "shared_form": SharedApplyForm(),
         "kind_form": ChangeApplyForm(),
         "confirmation_form": ChangeConfirmationForm(),
@@ -213,18 +216,47 @@ def _apply_reason(request: HttpRequest, view: ChangeView) -> str:
     return ""
 
 
-def _can_prepare_again(request: HttpRequest, preparation: ChangePreparation) -> bool:
+def _prepare_again_decision(
+    request: HttpRequest, preparation: ChangePreparation
+) -> gate.Decision | None:
+    kind = engine.kind_of(preparation.kind_slug)
+    server = preparation.server
+    user = request.user
+    if kind is None or server is None or not isinstance(user, User):
+        return None
+    requirements = gate.SERVER
+    if kind.writes_secrets:
+        requirements = replace(requirements, needs=requirements.needs | {gate.Need.SECRET})
+    return decide_for_server(server_state(server), user, requirements)
+
+
+def _prepare_again_state(request: HttpRequest, preparation: ChangePreparation) -> tuple[bool, str]:
     kind = engine.kind_of(preparation.kind_slug)
     if kind is None or preparation.server is None:
-        return False
+        return False, ""
     permissions = (
         (*PREPARE_PERMISSIONS, MANAGE_SECRETS) if kind.writes_secrets else PREPARE_PERMISSIONS
     )
-    return (
+    decision = _prepare_again_decision(request, preparation)
+    allowed = (
         request.user.has_perm("servers.view_server")
         and request.user.has_perms(permissions)
-        and _server_can_prepare(preparation.server, request.user)
+        and decision is not None
+        and decision.allowed
     )
+    reason = (
+        decision.reason.sentence
+        if not allowed
+        and decision is not None
+        and decision.reason is not None
+        and request.user.has_perm("servers.view_server")
+        else ""
+    )
+    return allowed, reason
+
+
+def _can_prepare_again(request: HttpRequest, preparation: ChangePreparation) -> bool:
+    return _prepare_again_state(request, preparation)[0]
 
 
 @require_POST
@@ -426,9 +458,14 @@ def _run_context(
     run = view.run
     permissions = permissions_for(view.consent, writes_secrets=run.review.writes_secrets)
     preparation = run.review.preparation
-    can_prepare_again = preparation is not None and _can_prepare_again(request, preparation)
+    can_prepare_again, prepare_again_reason = (
+        _prepare_again_state(request, preparation) if preparation is not None else (False, "")
+    )
     plain = view.plain
+    next_reason = ""
     if plain.next is not None and not _may_take(request, plain.next, can_prepare_again):
+        if plain.next.kind == "again":
+            next_reason = prepare_again_reason
         plain = replace(plain, next=None)
     return {
         "run": view,
@@ -439,6 +476,7 @@ def _run_context(
         "can_acknowledge": view.reconciling and request.user.has_perms(permissions),
         "acknowledge_form": AcknowledgeForm(),
         "creation_banner": _creation_banner(request, preparation, view=view),
+        "next_reason": next_reason,
     }
 
 
