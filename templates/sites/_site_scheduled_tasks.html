@@ -48,13 +48,8 @@
           <button class="usa-button" name="state" value="on" type="submit">Turn on</button>
         {% endif %}
       </form>
-    {% elif blocking %}
-      {% include "operations/_blocking_operation.html" with after="Change the scheduled tasks after it finishes." %}
     {% else %}
-      <p class="barectl-note">
-        Changing scheduled tasks needs a current, complete WordPress site observation and
-        permission to change this site. Run discovery again or wait for the current change.
-      </p>
+      <p class="barectl-note">{{ scheduled_tasks_reason }}</p>
     {% endif %}
   </section>
 {% endif %}

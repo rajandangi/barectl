@@ -159,13 +159,10 @@
           <button class="usa-button" type="submit">Deploy</button>
         </form>
       {% else %}
+        <p class="barectl-note">{{ deploy_reason }}</p>
         <p class="barectl-note">
-          {% if deploy_reason %}
-            {{ deploy_reason }}
-          {% else %}
-            <a href="{% url 'site_deployments' server.pk identifier %}">Open Deployments</a>
-            to deploy or roll back once the site's current release is observed.
-          {% endif %}
+          <a href="{% url 'site_deployments' server.pk identifier %}">Open Deployments</a>
+          to review the site's releases.
         </p>
       {% endif %}
     {% elif not has_wordpress %}

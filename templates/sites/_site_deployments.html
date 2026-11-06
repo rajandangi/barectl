@@ -4,11 +4,6 @@
   <p>
     Deploy resolves the site's branch to an exact commit, builds a new release as the site user, runs pending migrations behind a maintenance page and switches the site only after its readiness check answers. Roll back reactivates a retained release with no fetch, build or migration.
   </p>
-  {% if not deploy_ready %}
-    <p class="barectl-note">
-      Deploy needs a current Laravel release and a fresh site observation. Run discovery and resolve any findings first.
-    </p>
-  {% endif %}
   {% if releases %}
     <table class="usa-table usa-table--borderless"
            aria-describedby="site-deployments-heading">
@@ -50,26 +45,26 @@
       <button type="submit" class="usa-button usa-button--outline">Save Deploy settings</button>
     </form>
   {% endif %}
-  {% if blocking %}
-    <p class="barectl-note">
-      Wait for the active operation on this server before preparing a Deploy or Roll back.
-    </p>
-  {% elif deploy_can_prepare %}
+  {% if deploy_can_prepare %}
     <form class="usa-form"
           method="post"
           action="{% url 'site_deploy_prepare' server.pk identifier %}">
       {% csrf_token %}
       <button type="submit" class="usa-button">Deploy</button>
     </form>
-    {% if rollback_can_prepare %}
-      <form class="usa-form"
-            method="post"
-            action="{% url 'site_rollback_prepare' server.pk identifier %}">
-        {% csrf_token %}
-        {{ rollback_form.release.label_tag }}
-        {{ rollback_form.release }}
-        <button type="submit" class="usa-button usa-button--outline">Roll back</button>
-      </form>
-    {% endif %}
+  {% else %}
+    <p class="barectl-note">{{ deploy_reason }}</p>
+  {% endif %}
+  {% if rollback_can_prepare %}
+    <form class="usa-form"
+          method="post"
+          action="{% url 'site_rollback_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      {{ rollback_form.release.label_tag }}
+      {{ rollback_form.release }}
+      <button type="submit" class="usa-button usa-button--outline">Roll back</button>
+    </form>
+  {% elif deploy_can_prepare or rollback_reason != deploy_reason %}
+    <p class="barectl-note">{{ rollback_reason }}</p>
   {% endif %}
 </section>

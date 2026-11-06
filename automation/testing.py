@@ -11,6 +11,7 @@ from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import (
     Observation,
+    ObservedRelease,
     ObservedSetting,
     ObservedSite,
     SiteAccount,
@@ -264,6 +265,9 @@ def record_schedule(
     disable: str = "",
     application: str = "wordpress",
     application_version: str = "7.1.3",
+    state: SiteState = SiteState.MANAGED,
+    missing: tuple[str, ...] = (),
+    application_problem: str = "",
     checked_at: datetime | None = None,
 ) -> None:
     """A site whose stored snapshot carries the projected scheduled work."""
@@ -272,12 +276,14 @@ def record_schedule(
         (f"{identifier}.example.com",),
         "php84",
         SiteAccount(1001, 1001, f"/var/www/{identifier}", "/usr/sbin/nologin"),
-        SiteState.MANAGED,
+        state,
         ObservationOutcome.OBSERVED,
         file=f"/etc/caddy/sites/{identifier}.caddy",
         https=True,
+        missing=missing,
         application=application,
         application_version=application_version,
+        application_problem=application_problem,
     )
     collected = replace(
         COLLECTED,
@@ -317,6 +323,8 @@ def record_laravel_schedule(
     *,
     identifier: str = IDENTIFIER,
     rows: tuple[ObservedSchedule, ...] | None = None,
+    state: SiteState = SiteState.MANAGED,
+    application_problem: str = "",
     checked_at: datetime | None = None,
 ) -> None:
     """A Laravel site whose stored snapshot carries the projected scheduler."""
@@ -328,6 +336,8 @@ def record_laravel_schedule(
         else (schedule(identifier=identifier, role=convention.ROLE_SCHEDULE),),
         application="laravel",
         application_version="",
+        state=state,
+        application_problem=application_problem,
         checked_at=checked_at,
     )
 
@@ -430,10 +440,16 @@ def record_worker(
     *,
     identifier: str = IDENTIFIER,
     row: ObservedWorker | None = None,
+    state: SiteState = SiteState.MANAGED,
+    application_problem: str = "",
     checked_at: datetime | None = None,
 ) -> None:
     """A Laravel site whose stored snapshot carries the projected queue workers."""
-    site = laravel_site(identifier)
+    site = replace(
+        laravel_site(identifier),
+        state=state,
+        application_problem=application_problem,
+    )
     collected = replace(
         COLLECTED,
         components=(),
@@ -444,6 +460,21 @@ def record_worker(
             ("/var/www",),
             "",
             (ObservedSetting(identifier, "laravel", "APP_ENV", DIGEST, "production"),),
+        ),
+        releases=Observation(
+            ObservationOutcome.OBSERVED,
+            ("/var/www",),
+            "",
+            (
+                ObservedRelease(
+                    identifier,
+                    f"{0:040x}-{'a' * 16}",
+                    f"{0:040x}",
+                    1_700_000_000,
+                    SiteState.MANAGED,
+                    True,
+                ),
+            ),
         ),
         workers=Observation(
             ObservationOutcome.OBSERVED,

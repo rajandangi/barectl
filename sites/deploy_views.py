@@ -1,5 +1,7 @@
 """Prepare the Laravel Deploy and Roll back reviews from the site's Deployments section."""
 
+from dataclasses import replace
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -7,16 +9,15 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome, SiteState
+from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
-from discovery.snapshot import ObservedSite
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.inputs import PreparationInputs
 from operations.lifecycle import OperationRefused
-from servers.discovery_state import DiscoveryState, server_state
+from servers.discovery_state import server_state
 from servers.models import Server
+from sites.preparation import decide_for_site
 
 from .deploy_forms import DeploySettingsForm, RollbackForm
 from .models import SiteDeploySetting
@@ -25,6 +26,10 @@ from .names import valid_identifier
 DEPLOY_SLUG = "deploy_laravel_site"
 ROLLBACK_SLUG = "rollback_laravel_site"
 
+CHANGED = "The saved connection changed. Refresh and prepare a new review."
+BUSY = "Wait for the current operation before preparing this review."
+INVALID = "Choose a retained release from a fresh site observation."
+
 
 def deploy_settings(server: Server, identifier: str) -> SiteDeploySetting:
     """This controller's saved Deploy switches for the site, defaulting to on."""
@@ -32,15 +37,6 @@ def deploy_settings(server: Server, identifier: str) -> SiteDeploySetting:
     if setting is None:
         return SiteDeploySetting(server=server, identifier=identifier, run_migrations=True)
     return setting
-
-
-def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
-    snapshot = state.snapshot
-    if snapshot is None:
-        return None
-    return next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier), None
-    )
 
 
 def release_names(server: Server, identifier: str) -> tuple[str, ...]:
@@ -58,22 +54,33 @@ def release_names(server: Server, identifier: str) -> tuple[str, ...]:
     )
 
 
+def _deploy_requirements() -> preparation.Requirements:
+    return replace(
+        preparation.SITE,
+        application="laravel",
+        releases_observed=True,
+        current_release=True,
+        open_site=True,
+    )
+
+
+def _rollback_requirements() -> preparation.Requirements:
+    return replace(
+        preparation.SITE,
+        application="laravel",
+        releases_observed=True,
+        retained_release=True,
+        open_site=True,
+    )
+
+
 def deploy_context(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
     snapshot = state.snapshot
-    site = _site(state, identifier)
-    naming = f"/etc/caddy/sites/{identifier}.caddy"
-    ready = (
-        snapshot is not None
-        and site is not None
-        and getattr(site, "file", "") == naming
-        and site.state == SiteState.MANAGED
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and snapshot.collected.releases.outcome == ObservationOutcome.OBSERVED
-    )
+    deploy = decide_for_site(state, user, identifier, _deploy_requirements())
+    rollback = decide_for_site(state, user, identifier, _rollback_requirements())
     releases = snapshot.collected.releases.value if snapshot is not None else ()
     present = tuple(
         release for release in releases if release.identifier == identifier and release.current
@@ -82,12 +89,12 @@ def deploy_context(
     setting = deploy_settings(server, identifier)
     polling = services.read_changes(server).polling
     permitted = user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-    allowed = ready and bool(present) and state.can_prepare_changes and permitted and not polling
     return {
-        "deploy_ready": bool(ready and present),
-        "deploy_can_prepare": bool(allowed),
+        "deploy_can_prepare": deploy.allowed,
+        "deploy_reason": deploy.reason.sentence if deploy.reason else "",
         "deploy_settings_can_save": bool(permitted and not polling and present),
-        "rollback_can_prepare": bool(allowed and choices),
+        "rollback_can_prepare": rollback.allowed,
+        "rollback_reason": rollback.reason.sentence if rollback.reason else "",
         "rollback_form": RollbackForm(choices=choices),
         "deploy_settings_form": DeploySettingsForm(run_migrations=setting.run_migrations),
     }
@@ -102,10 +109,7 @@ def prepare_deploy(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
     server = get_object_or_404(Server, pk=pk)
     context = deploy_context(server, identifier, request.user)
     if not context["deploy_can_prepare"]:
-        messages.error(
-            request,
-            "Deploy needs a current Laravel release and a fresh site observation.",
-        )
+        messages.error(request, str(context["deploy_reason"]))
         return redirect("site_deployments", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
@@ -117,12 +121,12 @@ def prepare_deploy(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
             ).document(),
         )
     except OperationRefused, ValueError:
-        messages.error(request, "The saved connection changed. Refresh and prepare a new review.")
+        messages.error(request, CHANGED)
         return redirect("site_deployments", pk=pk, identifier=identifier)
     except Server.DoesNotExist:
         raise Http404 from None
     if queued is None:
-        messages.error(request, "Wait for the current operation before preparing this review.")
+        messages.error(request, BUSY)
         return redirect("site_deployments", pk=pk, identifier=identifier)
     return redirect("change_detail", operation_id=queued.pk)
 
@@ -156,9 +160,12 @@ def prepare_rollback(request: HttpRequest, pk: int, identifier: str) -> HttpResp
         raise Http404
     server = get_object_or_404(Server, pk=pk)
     context = deploy_context(server, identifier, request.user)
+    if not context["rollback_can_prepare"]:
+        messages.error(request, str(context["rollback_reason"]))
+        return redirect("site_deployments", pk=pk, identifier=identifier)
     form = RollbackForm(request.POST, choices=release_names(server, identifier))
-    if not context["rollback_can_prepare"] or not form.is_valid():
-        messages.error(request, "Choose a retained release from a fresh site observation.")
+    if not form.is_valid():
+        messages.error(request, INVALID)
         return redirect("site_deployments", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
@@ -172,11 +179,11 @@ def prepare_rollback(request: HttpRequest, pk: int, identifier: str) -> HttpResp
             },
         )
     except OperationRefused, ValueError:
-        messages.error(request, "The saved connection changed. Refresh and prepare a new review.")
+        messages.error(request, CHANGED)
         return redirect("site_deployments", pk=pk, identifier=identifier)
     except Server.DoesNotExist:
         raise Http404 from None
     if queued is None:
-        messages.error(request, "Wait for the current operation before preparing this review.")
+        messages.error(request, BUSY)
         return redirect("site_deployments", pk=pk, identifier=identifier)
     return redirect("change_detail", operation_id=queued.pk)

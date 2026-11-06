@@ -5,6 +5,8 @@ and the definition read from the site's own units. Preparing a change queues one
 review; the confirm screen and run progress are the shared change screens.
 """
 
+from dataclasses import replace
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -12,16 +14,14 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
-from discovery.snapshot import ObservedSite
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from servers.discovery_state import DiscoveryState, server_state
+from servers.discovery_state import server_state
 from servers.models import Server
 from sites.names import valid_identifier
+from sites.preparation import decide_for_site, site_facts
 
 from . import worker_presentation, workers
 from .worker_change import SLUG
@@ -29,60 +29,37 @@ from .worker_forms import WorkerForm
 
 CHANGED = "The saved connection changed. Refresh and prepare a new review."
 BUSY = "Wait for the current operation before preparing this review."
-
-
-def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
-    snapshot = state.snapshot
-    if snapshot is None:
-        return None
-    return next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-        None,
-    )
+INVALID = "Choose an action on a current Laravel site with no other change in progress."
 
 
 def context_for_site(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
-    site = _site(state, identifier)
     snapshot = state.snapshot
-    standing = snapshot.collected.standing if snapshot is not None else None
-    laravel = bool(
-        snapshot is not None
-        and site is not None
-        and site.file.startswith("/etc/caddy/sites/")
-        and (
-            any(
-                setting.identifier == identifier and setting.application == "laravel"
-                for setting in snapshot.collected.settings.value
-            )
-            or any(
-                release.identifier == identifier for release in snapshot.collected.releases.value
-            )
-        )
-    )
-    complete = (
-        laravel
-        and site is not None
-        and site.state in (SiteState.MANAGED, SiteState.PARTLY_APPLIED)
-        and standing is not None
-        and standing.standing == Standing.TARGET_STACK
-    )
+    facts = site_facts(snapshot, identifier)
+    laravel = facts.laravel
     row = (
         worker_presentation.row_for(snapshot.collected, identifier)
-        if snapshot is not None and laravel
+        if snapshot and laravel
         else None
     )
     view = worker_presentation.worker_view(
         identifier, row, snapshot.collected_at if snapshot else None
     )
-    allowed = (
-        complete
-        and state.can_prepare_changes
-        and not services.read_changes(server).polling
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
+    decision = decide_for_site(
+        state,
+        user,
+        identifier,
+        replace(
+            preparation.SITE,
+            state=None,
+            application="laravel",
+            current_release=True,
+            open_site=True,
+        ),
     )
+    allowed = decision.allowed
     definition = row.definition if row is not None else None
     installed = bool(row and row.installed)
     enabled = bool(row and row.enabled)
@@ -97,7 +74,8 @@ def context_for_site(
         "queue_workers_problem": row.problem if row is not None else "",
         "queue_workers_form": WorkerForm(definition=definition),
         "queue_workers_definition": definition,
-        "queue_workers_ready": complete,
+        "queue_workers_reason": decision.reason.sentence if decision.reason else "",
+        "queue_workers_ready": allowed,
     }
 
 
@@ -109,16 +87,16 @@ def prepare_workers(request: HttpRequest, pk: int, identifier: str) -> HttpRespo
         raise Http404
     server = get_object_or_404(Server, pk=pk)
     context = context_for_site(server, identifier, request.user)
+    if not context["queue_workers_can_prepare"]:
+        messages.error(request, str(context["queue_workers_reason"]))
+        return redirect("site_settings", pk=pk, identifier=identifier)
     definition = context["queue_workers_definition"]
     form = WorkerForm(
         request.POST,
         definition=definition if isinstance(definition, workers.WorkerDefinition) else None,
     )
-    if not context["queue_workers_can_prepare"] or not form.is_valid():
-        messages.error(
-            request,
-            "Choose an action on a current Laravel site with no other change in progress.",
-        )
+    if not form.is_valid():
+        messages.error(request, INVALID)
         return redirect("site_settings", pk=pk, identifier=identifier)
     action = str(form.cleaned_data["action"])
     inputs: dict[str, object] = {
