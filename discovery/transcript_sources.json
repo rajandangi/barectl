@@ -549,7 +549,7 @@
     "sites/names.py": "a6883494b86bd1852064ac7866bf3cba32e56e256eccff2396d3c89db48c0ca9",
     "sites/node_change.py": "bbc7c3943fcef88f3a1c5ede0a89aefd4e1bef416ee955132619eca16b6446de",
     "sites/node_views.py": "fb8546a90de922721614850b7b114b218c6b4924a1b2b90b6e838fdf3752d033",
-    "sites/observation.py": "ccd6b6690b075d6cedaa3edb3694af3e53b75dbb9ea6026a0aab068a75ff4bf6",
+    "sites/observation.py": "95471c066e61548dcc61cd18ad9097f645fa4363d362579f87f64680f512af9e",
     "sites/php_change.py": "44d7039f50b490944bb6592a07dd1e50162b83a4aee38c2ab3195d4c9760244c",
     "sites/php_forms.py": "2c03869484959bb574409c6e71428e389c95433cd8a6788506f6949662d087f1",
     "sites/php_views.py": "0bf62b03edf757f97d80183b438cf6f78643429300b1ecb1b4dd8e15a577de30",
@@ -729,5 +729,5 @@
     "unknown-runtime-26.04": "10755de18623ac81ff48796f263b65606d50f275367a55d9ef2fc2f99959a101",
     "valkey-installed-26.04": "3d58984fc4472cfa09ff300d718ddf6e4e43309060508a50daf823df9c79b69c"
   },
-  "audit_digest": "715339c6cb4e42a7af95591fb435807e407559faa528d7e1d75352fe473333fe"
+  "audit_digest": "ffa7ba9134561a634e187ac8baa8d4913cff9d03f52d44080ed9e668c936a3e1"
 }
