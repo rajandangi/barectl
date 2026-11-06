@@ -109,4 +109,12 @@ class AdmissionVocabularyTests(SimpleTestCase):
 
         for reason in reasons.ADMISSION:
             self.assertTrue(reasons.accepted(reason.name))
-            self.assertTrue(engine.reason_text("refused", reason.name))
+            self.assertEqual(
+                engine.reason_text("refused", reason.name), reason.sentence(Result.REFUSED)
+            )
+
+    def test_a_running_backup_refusal_shows_its_own_sentence(self) -> None:
+        sentence = engine.reason_text("refused", "active_backup")
+
+        self.assertIn("scheduled backup still had processes", sentence)
+        self.assertNotIn("without reporting how far it got", sentence)

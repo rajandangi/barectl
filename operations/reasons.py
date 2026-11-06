@@ -456,6 +456,19 @@ ADMISSION: Final[tuple[ResultReason, ...]] = (
     _admission("apt_active", Result.REFUSED, Result.PARTIAL),
     _admission("apt_unreadable", Result.REFUSED, Result.PARTIAL),
     _admission("evidence", Result.REFUSED, Result.PARTIAL),
+    ResultReason(
+        "active_backup",
+        {
+            Result.REFUSED: (
+                "This site's scheduled backup still had processes on the server, so this run "
+                "stopped before changing anything. Prepare a new review after it finishes."
+            ),
+            Result.PARTIAL: (
+                "This site's scheduled backup still had processes on the server, so this run "
+                "stopped before changing anything. Prepare a new review after it finishes."
+            ),
+        },
+    ),
 )
 
 _INDEX: Final[dict[tuple[str, Result], str]] = {}
