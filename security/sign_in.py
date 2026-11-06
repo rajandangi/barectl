@@ -17,6 +17,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 
 from . import observation
+from .bodies.reasons import SIGN_IN_REASONS
 
 SLUG: Final = "require_key_sign_in"
 LABEL: Final = "Require key sign-in"
@@ -295,4 +296,6 @@ REQUIRE_KEY_SIGN_IN: Final = ChangeKind(
     refresh_discovery=True,
     input_choices=("on",),
     access_changing=True,
+    reasons=SIGN_IN_REASONS,
+    body_sources=("security/bodies/sign_in.sh", "operations/revert.py"),
 )

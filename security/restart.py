@@ -31,6 +31,7 @@ from operations.models import ChangeReview
 from sites.names import canonical_name, readiness_ok, readiness_path
 
 from . import observation
+from .bodies.reasons import RESTART_REASONS
 
 SLUG: Final = "restart_server"
 LABEL: Final = "Restart server"
@@ -445,6 +446,8 @@ RESTART_SERVER: Final = ChangeKind(
     refresh_discovery=True,
     input_choices=("on",),
     restarts_host=True,
+    reasons=RESTART_REASONS,
+    body_sources=("security/bodies/restart.sh",),
 )
 
 

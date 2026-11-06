@@ -21,6 +21,7 @@ from runtimes.catalog import Architecture, architecture_of, load
 from sites.observation import PROXY_INVENTORY_COMMAND
 from sites.serving import service_units
 
+from .bodies.reasons import FOUNDATION_REASONS
 from .standing import HostJudgment, Standing
 
 SLUG: Final = "host_foundation"
@@ -564,4 +565,6 @@ HOST_FOUNDATION: Final = ChangeKind(
     body=body,
     verify=verify,
     refresh_discovery=True,
+    reasons=FOUNDATION_REASONS,
+    body_sources=("bootstrap/bodies/foundation.sh",),
 )

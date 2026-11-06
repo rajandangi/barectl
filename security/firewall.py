@@ -36,6 +36,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 
 from . import observation
+from .bodies.reasons import FIREWALL_REASONS
 
 SLUG: Final = "manage_firewall"
 LABEL: Final = "Manage the firewall"
@@ -907,4 +908,6 @@ MANAGE_FIREWALL: Final = ChangeKind(
     input_choices=ACTIONS,
     input_shape=InputShape.FIREWALL,
     access_changing=True,
+    reasons=FIREWALL_REASONS,
+    body_sources=("security/bodies/firewall.sh", "operations/revert.py"),
 )

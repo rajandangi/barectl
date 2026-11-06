@@ -41,6 +41,7 @@ from operations.models import ChangeReview
 from sites.names import readiness_ok, readiness_path
 
 from . import observation
+from .bodies.reasons import CHECK_UPDATES_REASONS, INSTALL_UPDATES_REASONS
 from .change import SITES_READ
 from .presentation import UPDATES_DISCLOSURE
 
@@ -958,6 +959,8 @@ CHECK_FOR_UPDATES: Final = ChangeKind(
     check_body,
     verify_check,
     refresh_discovery=True,
+    reasons=CHECK_UPDATES_REASONS,
+    body_sources=("security/bodies/check_updates.sh",),
 )
 INSTALL_UPDATES: Final = ChangeKind(
     INSTALL_SLUG,
@@ -968,6 +971,8 @@ INSTALL_UPDATES: Final = ChangeKind(
     verify_install,
     refresh_discovery=True,
     input_choices=SELECTIONS,
+    reasons=INSTALL_UPDATES_REASONS,
+    body_sources=("security/bodies/install_updates.sh",),
 )
 
 
