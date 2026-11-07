@@ -11,11 +11,12 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from operations import services
+from operations import change_requirements, preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
+from servers.preparation import decide_for_server
 
 from .certificate_email import ABSENT, OUTSIDE, SET, SLUG, UNREADABLE, valid_email
 
@@ -58,6 +59,7 @@ class CertificateEmailPanel:
     email: str
     saved: str
     can_prepare: bool
+    reason: str = ""
 
 
 def context_for_server(
@@ -72,19 +74,19 @@ def context_for_server(
     email = snapshot.collected.certificate_email if snapshot else ""
     saved = server.certificate_email
     initial = saved if not observed else email if setting == SET else ""
-    can_prepare = (
-        observed
-        and setting in FILTERED_STATES
-        and state.can_prepare_changes
-        and user.has_perms(PREPARE_PERMISSIONS)
-        and not state.polling
+    decision = (
+        decide_for_server(state, user, change_requirements.CERTIFICATE_EMAIL)
+        if isinstance(user, User)
+        else preparation.Decision(False)
     )
+    can_prepare = observed and setting in FILTERED_STATES and decision.allowed
     panel = CertificateEmailPanel(
         observed=observed,
         state=setting,
         email=email if setting == SET else "",
         saved=saved,
         can_prepare=can_prepare,
+        reason=decision.sentence,
     )
     return {
         "certificate_email_panel": panel,
@@ -108,7 +110,8 @@ def prepare_certificate_email(request: HttpRequest, pk: int) -> HttpResponse:
     if not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_server(server, request.user)
+    state = server_state(server)
+    context = context_for_server(server, request.user, state)
     panel = cast(CertificateEmailPanel, context["certificate_email_panel"])
     form = CertificateEmailForm(request.POST)
     if not form.is_valid():
@@ -122,11 +125,15 @@ def prepare_certificate_email(request: HttpRequest, pk: int) -> HttpResponse:
             "observation. Run discovery and resolve the server's findings first.",
         )
         return redirect("server_settings", pk=pk)
-    if not panel.can_prepare:
+    decision = decide_for_server(state, request.user, change_requirements.CERTIFICATE_EMAIL)
+    if not decision.allowed:
+        messages.error(request, decision.sentence)
+        return redirect("server_settings", pk=pk)
+    if panel.state not in FILTERED_STATES:
         messages.error(
             request,
-            "The certificate contact email cannot change while another operation runs or "
-            "the server's setting is outside supported settings.",
+            "The certificate contact email cannot change while the server's setting is "
+            "outside supported settings.",
         )
         return redirect("server_settings", pk=pk)
     email = str(form.cleaned_data["email"])

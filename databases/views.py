@@ -12,10 +12,12 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
+from operations import change_requirements
 from operations.consent import PREPARE_PERMISSIONS
 from operations.services import request_prepare
 from servers.discovery_state import server_state
 from servers.models import Server
+from servers.preparation import decide_for_server
 
 from . import engine
 
@@ -36,12 +38,9 @@ def database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     if selection not in engine.ENGINE_CHOICES:
         messages.error(request, "Choose MariaDB or PostgreSQL.")
         return redirect("server_settings", pk=pk)
-    if not server_state(server).can_prepare_changes:
-        messages.error(
-            request,
-            "This server has no current manageable host-standing observation. Run discovery "
-            "and resolve any Not manageable findings before preparing changes.",
-        )
+    decision = decide_for_server(server_state(server), request.user, change_requirements.DATABASE)
+    if not decision.allowed:
+        messages.error(request, decision.sentence)
         return redirect("server_settings", pk=pk)
     try:
         queued = request_prepare(

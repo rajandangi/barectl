@@ -12,11 +12,10 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome, SiteState
+from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from runtimes.change import SLUG as ADD_RUNTIME_SLUG
@@ -28,6 +27,7 @@ from .names import valid_identifier
 from .observation import PHP_TRANSITION_INCOMPLETE
 from .php_change import CHOICES, SLUG
 from .php_forms import SitePhpForm
+from .preparation import decide_for_site
 
 
 def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
@@ -59,7 +59,6 @@ def context_for_site(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
-    snapshot = state.snapshot
     site = _site(state, identifier)
     current = site.php_version if site else ""
     incomplete = (
@@ -68,15 +67,11 @@ def context_for_site(
         and site.missing == (PHP_TRANSITION_INCOMPLETE,)
     )
     choices = switch_choices(state, current=current, incomplete=incomplete)
-    allowed = (
-        site is not None
-        and snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and snapshot.collected.sites.outcome == ObservationOutcome.OBSERVED
-        and site.outcome == ObservationOutcome.OBSERVED
-        and site.file == f"/etc/caddy/sites/{identifier}.caddy"
-        and (site.state == SiteState.MANAGED or incomplete)
+    decision = decide_for_site(
+        state,
+        user,
+        identifier,
+        change_requirements.SITE_PHP,
     )
     others = tuple(choice for choice in choices if choice.entry != current)
     back = next((choice for choice in others if choice.installed), others[0] if others else None)
@@ -101,11 +96,8 @@ def context_for_site(
             }
             for choice in choices
         ),
-        "site_php_can_prepare": bool(choices)
-        and allowed
-        and state.can_prepare_changes
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-        and not services.read_changes(server).polling,
+        "site_php_can_prepare": bool(choices) and decision.allowed,
+        "site_php_reason": decision.sentence,
     }
 
 
@@ -152,7 +144,11 @@ def prepare_php(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     choices = switch_choices(state, current=current, incomplete=incomplete)
     form = SitePhpForm(request.POST, choices=tuple(choice.entry for choice in choices))
     if not context["site_php_can_prepare"] or not form.is_valid():
-        messages.error(request, "Choose another PHP version from a fresh check of this site.")
+        messages.error(
+            request,
+            str(context["site_php_reason"])
+            or "Choose another PHP version from a fresh check of this site.",
+        )
         return redirect("site_settings", pk=pk, identifier=identifier)
     selection = str(form.cleaned_data["selection"])
     try:

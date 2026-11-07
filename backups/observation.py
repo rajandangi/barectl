@@ -49,6 +49,22 @@ ISO: Final = re.compile(
 )
 
 
+# The full or files capture reasons that leave a site paused. The preparation gate and the
+# Backups section read this one set, so a paused card and its reopening note cannot drift.
+PAUSE_REASONS: Final = frozenset(
+    {
+        "backup_paused",
+        "backup_dump",
+        "backup_files",
+        "backup_idle",
+        "backup_gate",
+        "backup_verify",
+        "backup_partial",
+        "automation_restore",
+    }
+)
+
+
 @dataclass(frozen=True)
 class BackupResult:
     """One safe result line the unit printed, as discovery read it."""
@@ -74,6 +90,15 @@ class BackupResult:
     @property
     def succeeded(self) -> bool:
         return self.result_class == "succeeded" or self.result_class == "partial"
+
+
+def stopped_by_pause(result: BackupResult | None) -> bool:
+    """Whether the last backup or restore interrupted a site by pausing it."""
+    if result is None:
+        return False
+    return result.reason.startswith("restore_") or (
+        result.scope in ("full", "files") and result.reason in PAUSE_REASONS
+    )
 
 
 @dataclass(frozen=True)

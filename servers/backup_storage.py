@@ -11,13 +11,13 @@ from django.contrib.auth.models import AnonymousUser, User
 
 from backups import convention
 from backups.observation import OffsiteStorage
-from discovery.presentation import VIEW_SITES
-from operations import services
-from operations.consent import PREPARE_PERMISSIONS
-from operations.models import MANAGE_SECRETS
+from operations import change_requirements, preparation
+from servers.preparation import decide_for_server
 
 from .discovery_state import DiscoveryState
 from .models import Server
+
+BACKUP_STORAGE = change_requirements.BACKUP_STORAGE
 
 SETUP_KIND: Final = "set_up_offsite_storage"
 REMOVE_KIND: Final = "remove_offsite_storage"
@@ -106,13 +106,12 @@ def context_for_server(
     snapshot = state.snapshot
     observed = snapshot is not None and snapshot.collected.offsite.observed
     value = snapshot.collected.offsite.value if snapshot is not None else None
-    polling = services.read_changes(server).polling
-    can_prepare = bool(
-        observed
-        and state.can_prepare_changes
-        and not polling
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES, MANAGE_SECRETS))
+    decision = (
+        decide_for_server(state, user, BACKUP_STORAGE)
+        if isinstance(user, User)
+        else preparation.Decision(False)
     )
+    can_prepare = observed and decision.allowed
     enabled = (
         any(row.enabled for row in snapshot.collected.backups.value)
         if snapshot is not None
@@ -123,6 +122,7 @@ def context_for_server(
             value if isinstance(value, OffsiteStorage) else None, observed
         ),
         "backup_storage_can_prepare": can_prepare,
+        "backup_storage_reason": decision.sentence,
         "backup_storage_can_replace": can_prepare and enabled,
         "backup_storage_setup_kind": SETUP_KIND,
         "backup_storage_remove_kind": REMOVE_KIND,

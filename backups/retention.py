@@ -999,6 +999,18 @@ def context_for_site(server: Server, identifier: str, context: dict[str, object]
     context["backups_can_disable_retention"] = bool(
         context.get("backups_can_back_up_full") and installed and not problem
     )
+    if context["backups_can_disable_retention"]:
+        context["backups_disable_retention_reason"] = ""
+    elif not installed:
+        context["backups_disable_retention_reason"] = (
+            "This site has no retention policy to turn off."
+        )
+    elif problem:
+        context["backups_disable_retention_reason"] = problem
+    else:
+        context["backups_disable_retention_reason"] = str(
+            context.get("backups_back_up_full_reason", "")
+        )
 
 
 def verify_set(shell: RemoteShell, review: ChangeReview) -> bool | None:

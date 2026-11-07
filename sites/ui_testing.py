@@ -124,6 +124,31 @@ def attach_current_connection(server: Server, attempt: DiscoveryAttempt) -> None
     attempt.save(update_fields=["connection"])
 
 
+def record_site_state(
+    server: Server,
+    *,
+    identifier: str = "alpha",
+    state: SiteState,
+    missing: tuple[str, ...] = (),
+) -> None:
+    """Replace one observed site's convention shape in the current snapshot."""
+    snapshot = current_snapshot(server)
+    if snapshot is None:
+        raise AssertionError("No snapshot.")
+    observed = snapshot.collected.sites
+    sites = tuple(
+        replace(row, state=state, missing=missing) if row.identifier == identifier else row
+        for row in observed.value
+    )
+    attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+    attach_current_connection(server, attempt)
+    save_snapshot(
+        attempt,
+        replace(snapshot.collected, sites=replace(observed, value=sites)),
+        timezone.now(),
+    )
+
+
 def record_php85_installed(server: Server) -> None:
     """A host where PHP 8.5 was installed and discovery verified its service."""
     record_http_sites(server)
@@ -181,9 +206,15 @@ def record_shaped_sites(server: Server, standing: Standing = Standing.TARGET_STA
     save_snapshot(attempt, collected, timezone.now())
 
 
-def record_laravel_releases(server: Server, *, identifier: str = "alpha", count: int = 7) -> None:
+def record_laravel_releases(
+    server: Server,
+    *,
+    identifier: str = "alpha",
+    count: int = 7,
+    releases_outcome: ObservationOutcome = ObservationOutcome.OBSERVED,
+    releases: tuple[ObservedRelease, ...] | None = None,
+) -> None:
     """A target host whose site ``identifier`` has ``count`` retained releases."""
-
     sites = (
         ObservedSite(
             identifier,
@@ -195,16 +226,20 @@ def record_laravel_releases(server: Server, *, identifier: str = "alpha", count:
             file=f"/etc/caddy/sites/{identifier}.caddy",
         ),
     )
-    releases = tuple(
-        ObservedRelease(
-            identifier,
-            f"{index:040x}-{'a' * 16}",
-            f"{index:040x}",
-            1_700_000_000 - index,
-            SiteState.MANAGED,
-            index == 0,
+    rows = (
+        releases
+        if releases is not None
+        else tuple(
+            ObservedRelease(
+                identifier,
+                f"{index:040x}-{'a' * 16}",
+                f"{index:040x}",
+                1_700_000_000 - index,
+                SiteState.MANAGED,
+                index == 0,
+            )
+            for index in range(count)
         )
-        for index in range(count)
     )
     runtimes = (
         RuntimeObservation(
@@ -217,7 +252,7 @@ def record_laravel_releases(server: Server, *, identifier: str = "alpha", count:
         sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
         runtimes=runtimes,
-        releases=Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", releases),
+        releases=Observation(releases_outcome, ("/var/www",), "", rows),
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
     save_snapshot(attempt, collected, timezone.now())
@@ -253,10 +288,14 @@ def record_site_settings(
     settings: tuple[ObservedSetting, ...] = (),
     certificate: SiteCertificate | None = None,
     releases: tuple[ObservedRelease, ...] = (),
+    releases_outcome: ObservationOutcome = ObservationOutcome.OBSERVED,
     https: bool | None = None,
     cache: tuple[ObservedCache, ...] = (),
     installed_valkey: bool = False,
     client: str = "",
+    state: SiteState = SiteState.MANAGED,
+    missing: tuple[str, ...] = (),
+    application_problem: str = "",
 ) -> None:
     """A target host with one site whose private settings the dashboard may show."""
     sites = (
@@ -265,13 +304,15 @@ def record_site_settings(
             (f"{identifier}.example.com",),
             "php84",
             SiteAccount(1001, 1001, f"/var/www/{identifier}", "/usr/sbin/nologin"),
-            SiteState.MANAGED,
+            state,
             ObservationOutcome.OBSERVED,
             file=f"/etc/caddy/sites/{identifier}.caddy",
             https=(certificate is not None) if https is None else https,
             certificate=certificate,
+            missing=missing,
             application=application,
             application_version="7.1.3" if application == "wordpress" else "",
+            application_problem=application_problem,
             client=client,
         ),
     )
@@ -296,7 +337,7 @@ def record_site_settings(
         settings=Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", settings),
         cache=Observation(ObservationOutcome.OBSERVED, ("/etc/valkey",), "", cache),
         releases=Observation(
-            ObservationOutcome.OBSERVED,
+            releases_outcome,
             ("/var/www",),
             "",
             releases,

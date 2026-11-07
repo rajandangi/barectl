@@ -23,9 +23,11 @@ from discovery.snapshot import (
     save_snapshot,
 )
 from operations import recovery
+from operations.activity_testing import record_change
 from operations.consent import Scope
 from operations.engine import BodyContext, ReviewDraft
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
+from operations.models import ChangePreparation, RemoteOperation
 from operations.services import read_changes
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
@@ -457,6 +459,26 @@ class DatabaseSettingPageTests(ControllerConfigTestCase):
         self.assertRedirects(queued, f"/changes/{rows[0].preparation.pk}/")
         self.assertEqual(rows[0].preparation.inputs, {"version": 1, "selection": "mariadb"})
 
+    def test_a_host_not_on_the_target_stack_withholds_the_database_card(self) -> None:
+        collected = replace(
+            COLLECTED,
+            sites=Observation(ObservationOutcome.OBSERVED, ("/etc/caddy/sites",), "", ()),
+            standing=HostJudgment(Standing.FRESH, (), (), ()),
+        )
+        attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
+        save_snapshot(attempt, collected, timezone.now())
+        sentence = "Set up this server before preparing this change."
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(page, "Install MariaDB")
+        self.assertContains(page, sentence)
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/settings/database/prepare/",
+            {"kind": engine.SLUG, "selection": "mariadb"},
+            follow=True,
+        )
+        self.assertIn(sentence, [str(message) for message in refused.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
+
     def test_the_panel_names_the_installed_engine_and_its_version(self) -> None:
         target_snapshot(self.server, component("mariadb", MARIADB_VERSION))
         response = self.client.get(f"/servers/{self.server.pk}/settings/")
@@ -475,6 +497,40 @@ class DatabaseSettingPageTests(ControllerConfigTestCase):
         )
         response = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(response, "Outside supported settings")
+
+    def test_a_running_change_withholds_the_card_and_the_post_with_the_gate_sentence(self) -> None:
+        target_snapshot(self.server)
+        offered = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertContains(offered, "Install MariaDB")
+        record_change(self.server, status=RemoteOperation.Status.RUNNING)
+        withheld = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(withheld, "Install MariaDB")
+        self.assertContains(
+            withheld,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/settings/database/prepare/",
+            {"kind": engine.SLUG, "selection": "mariadb"},
+            follow=True,
+        )
+        self.assertContains(
+            refused,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 1)
+
+    def test_a_failed_connection_check_withholds_with_the_freshness_sentence(self) -> None:
+        target_snapshot(self.server)
+        record_attempt(self.server, DiscoveryAttempt.Status.FAILED)
+        response = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(response, "Install MariaDB")
+        self.assertContains(
+            response,
+            "The latest connection check failed; run it again before preparing a change.",
+        )
 
     def test_an_unknown_engine_is_refused(self) -> None:
         target_snapshot(self.server)

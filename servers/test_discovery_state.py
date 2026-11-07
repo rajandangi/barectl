@@ -11,7 +11,6 @@ from typing import ClassVar, override
 from django.test import SimpleTestCase
 from django.utils import timezone
 
-from bootstrap.standing import HostJudgment, Standing
 from discovery.fakes import COLLECTED, COLLECTED_AT, STALE, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.services import INTERRUPTED_FAILURE
@@ -86,34 +85,6 @@ def state(
         history=[] if attempt is None else [attempt],
         alias_usable=alias_usable,
     )
-
-
-class HostingGuidanceTests(SimpleTestCase):
-    def test_guidance_follows_the_host_standing(self) -> None:
-        for standing, expected in (
-            (Standing.FRESH, "setup"),
-            (Standing.INCOMPLETE_FOUNDATION, "setup"),
-            (Standing.TARGET_STACK, "sites"),
-            (Standing.NOT_MANAGEABLE, "inspect"),
-        ):
-            with self.subTest(standing=standing):
-                judged = HostJudgment(standing, (), (), ())
-                snapshot = replace(SNAPSHOT, collected=replace(COLLECTED, standing=judged))
-                self.assertEqual(
-                    state(AttemptStatus.SUCCEEDED, snapshot=snapshot).hosting_guidance, expected
-                )
-                self.assertEqual(
-                    state(AttemptStatus.FAILED, snapshot=snapshot).hosting_guidance, "refresh"
-                )
-
-    def test_missing_standing_requires_inspection_and_no_snapshot_requires_connection(
-        self,
-    ) -> None:
-        snapshot = replace(SNAPSHOT, collected=replace(COLLECTED, standing=None))
-        self.assertEqual(
-            state(AttemptStatus.SUCCEEDED, snapshot=snapshot).hosting_guidance, "inspect"
-        )
-        self.assertEqual(state(None, snapshot=None).hosting_guidance, "refresh")
 
 
 class SiteResolutionTests(SimpleTestCase):

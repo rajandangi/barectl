@@ -54,10 +54,10 @@
     {% endif %}
   {% elif blocking %}
     {% include "operations/_blocking_operation.html" with after="Change the PHP version after it finishes." %}
+    {% if site_php_reason %}<p class="barectl-note">{{ site_php_reason }}</p>{% endif %}
   {% else %}
     <p class="barectl-note">
-      Changing the PHP version is unavailable until a fresh check confirms this site is
-      managed.
+      {{ site_php_reason|default:"Changing the PHP version is unavailable until a fresh check confirms this site is managed." }}
     </p>
   {% endif %}
 </section>

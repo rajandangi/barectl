@@ -5,10 +5,12 @@ from typing import override
 from django.test import Client
 from django.utils import timezone
 
+from bootstrap.standing import HostJudgment, Standing
 from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.snapshot import Observation, save_snapshot
-from operations.models import ChangePreparation
+from operations.activity_testing import record_change
+from operations.models import ChangePreparation, RemoteOperation
 from security.observation import (
     DEFAULT_ALLOWED_ORIGINS,
     AutoUpdatesState,
@@ -42,6 +44,7 @@ class SecuritySectionTests(ControllerConfigTestCase):
         )
         collected = replace(
             COLLECTED,
+            standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
             security=Observation(ObservationOutcome.OBSERVED, ("a read",), "", state),
         )
         save_snapshot(attempt, collected, timezone.now() - timedelta(minutes=5))
@@ -343,6 +346,7 @@ class SecuritySectionTests(ControllerConfigTestCase):
         response = self.client.get(f"/servers/{self.server.pk}/security/")
         self.assertNotContains(response, "Turn on firewall")
         self.assertNotContains(response, 'name="selection"')
+        self.assertContains(response, "Your account does not have permission to prepare changes.")
         forged = self.client.post(
             f"/servers/{self.server.pk}/security/firewall/prepare/", {"selection": "on"}
         )
@@ -351,10 +355,38 @@ class SecuritySectionTests(ControllerConfigTestCase):
         site_operator = self.client.get(f"/servers/{self.server.pk}/security/")
         self.assertNotContains(site_operator, "Turn on firewall")
         self.assertNotContains(site_operator, 'name="selection"')
+        self.assertContains(site_operator, "Changing this needs the shared-change permission.")
         refused = self.client.post(
             f"/servers/{self.server.pk}/security/firewall/prepare/", {"selection": "on"}
         )
         self.assertEqual(refused.status_code, 403)
+
+    def test_a_running_change_withholds_the_controls_and_refuses_the_post_with_the_sentence(
+        self,
+    ) -> None:
+        self.grant("view_changes", "change_site", "change_shared")
+        self._store_disabled_updates()
+        offered = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertContains(offered, "Turn on")
+        record_change(self.server, status=RemoteOperation.Status.RUNNING)
+        withheld = self.client.get(f"/servers/{self.server.pk}/security/")
+        self.assertNotContains(withheld, 'name="state"')
+        self.assertContains(
+            withheld,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/security/automatic-updates/prepare/",
+            {"state": "on"},
+            follow=True,
+        )
+        self.assertContains(
+            refused,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 1)
 
     def test_a_shared_operator_prepares_the_reviewed_change(self) -> None:
         self.grant("view_changes", "change_site", "change_shared")

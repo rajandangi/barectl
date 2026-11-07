@@ -21,13 +21,14 @@ from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from operations import activity as activity_read
-from operations.consent import PREPARE_PERMISSIONS
+from operations import change_requirements, preparation
 from operations.lifecycle import OperationRefused
-from operations.models import CHANGE_SHARED, VIEW_CHANGES
+from operations.models import VIEW_CHANGES
 from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog, shown_runtimes, shown_updates
 from sites import names as site_names
 from sites.forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
+from sites.preparation import site_facts
 from sites.recognition import site_files, site_pools
 
 from .attention import needs_attention
@@ -46,6 +47,7 @@ from .discovery_state import (
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
 from .page import QUEUE_HELP_AFTER, banner, status_line
+from .preparation import decide_for_server
 from .registration import (
     RemovalBlocked,
     SaveOutcome,
@@ -174,18 +176,30 @@ def _discovery_section(request: HttpRequest) -> Section:
     return "advanced" if request.GET.get("section") == "advanced" else "sites"
 
 
+def _decision(
+    state: DiscoveryState,
+    user: User | AnonymousUser,
+    requirements: preparation.Requirements = preparation.SERVER,
+) -> preparation.Decision:
+    """The gate's decision for one server card; an anonymous caller gets no allowance."""
+    if not isinstance(user, User):
+        return preparation.Decision(False)
+    return decide_for_server(state, user, requirements)
+
+
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
+    can_set_up = _decision(state, request.user)
     attention = (
         needs_attention(
             state.server.pk,
             state.snapshot.collected,
-            can_set_up=state.can_prepare_changes and request.user.has_perms(PREPARE_PERMISSIONS),
+            can_set_up=can_set_up.allowed,
+            set_up_reason=can_set_up.sentence,
         )
         if state.snapshot
         else ()
     )
     challenge = pending_challenge(state.server)
-    can_set_up = state.can_prepare_changes and request.user.has_perms(PREPARE_PERMISSIONS)
     context: dict[str, object] = {
         "server": state.server,
         "state": state,
@@ -196,7 +210,8 @@ def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str,
         "banner": banner(
             state,
             host_challenge=challenge is not None,
-            can_set_up=can_set_up,
+            can_set_up=can_set_up.allowed,
+            set_up_reason=can_set_up.sentence,
             can_request_check=(
                 state.can_request
                 and state.alias_usable
@@ -335,15 +350,12 @@ def _advanced_section(
             if standing
             else ()
         )
-        context["can_add_runtime"] = (
-            request.user.has_perms(PREPARE_PERMISSIONS)
-            and state.can_prepare_changes
-            and standing is not None
-            and standing.standing == Standing.TARGET_STACK
-        )
-        context["can_clean_up"] = (
-            request.user.has_perms(PREPARE_PERMISSIONS) and state.can_prepare_changes
-        )
+        runtime_add = _decision(state, request.user, change_requirements.ADD_RUNTIME)
+        context["can_add_runtime"] = runtime_add.allowed
+        context["can_add_runtime_reason"] = runtime_add.sentence
+        runtime_cleanup = _decision(state, request.user, change_requirements.SERVER_CHANGE)
+        context["can_clean_up"] = runtime_cleanup.allowed
+        context["can_clean_up_reason"] = runtime_cleanup.sentence
         runtime_rows = shown_runtimes(snapshot.collected) if snapshot else ()
         runtime_updates = shown_updates(snapshot.collected, runtime_rows) if snapshot else ()
         context["runtime_profiles"] = runtime_rows
@@ -459,17 +471,17 @@ def server_page(
         context["database_panel"] = (
             panel(state.snapshot.collected) if state.snapshot is not None else None
         )
-        context["database_can_prepare"] = state.can_prepare_changes and request.user.has_perms(
-            PREPARE_PERMISSIONS
-        )
+        database = _decision(state, request.user, change_requirements.DATABASE)
+        context["database_can_prepare"] = database.allowed
+        context["database_reason"] = database.sentence
         context["database_install_kind"] = database_engine.SLUG
         context["database_remove_kind"] = database_engine.REMOVE_SLUG
         context["object_cache_panel"] = (
             cache_panel(state.snapshot.collected) if state.snapshot is not None else None
         )
-        context["object_cache_can_prepare"] = state.can_prepare_changes and request.user.has_perms(
-            (*PREPARE_PERMISSIONS, CHANGE_SHARED)
-        )
+        object_cache = _decision(state, request.user, change_requirements.OBJECT_CACHE)
+        context["object_cache_can_prepare"] = object_cache.allowed
+        context["object_cache_reason"] = object_cache.sentence
         context["object_cache_kind"] = cache_engine.SLUG
         from servers.backup_storage import context_for_server as backup_storage_context
 
@@ -496,9 +508,9 @@ def server_page(
         from security.presentation import firewall_panel
         from security.presentation import present as present_security
 
-        can_change_security = state.can_prepare_changes and request.user.has_perms(
-            (*PREPARE_PERMISSIONS, CHANGE_SHARED)
-        )
+        security = _decision(state, request.user, change_requirements.SECURITY)
+        can_change_security = security.allowed
+        context["security_reason"] = security.sentence
         firewall_url = reverse("security_firewall_prepare", args=[server.pk])
         context["security_checks"] = (
             present_security(
@@ -530,13 +542,19 @@ def server_page(
     context["target_host"] = target_host
     if section == "sites" and target_host:
         from sites import continuation
-        from sites.views import http_site_context, laravel_site_context, wordpress_site_context
+        from sites.views import (
+            http_site_context,
+            laravel_site_context,
+            wordpress_site_context,
+        )
 
         step = continuation.requested_step(request, server.pk)
-        context.update(http_site_context(server, http_site_form, step))
-        context.update(laravel_site_context(server, laravel_site_form, step))
-        context.update(wordpress_site_context(server, wordpress_site_form, step))
-        context["http_site_permission"] = request.user.has_perms(PREPARE_PERMISSIONS)
+        context.update(http_site_context(server, request.user, http_site_form, step))
+        context.update(laravel_site_context(server, request.user, laravel_site_form, step))
+        context.update(wordpress_site_context(server, request.user, wordpress_site_form, step))
+        context["site_creation_can_prepare"] = _decision(
+            state, request.user, change_requirements.CREATE_SITE
+        ).allowed
     return render(request, "servers/detail.html", context, status=status)
 
 
@@ -582,15 +600,7 @@ def _target_site_context(
         "wordpress",
         "wordpress_partial",
     )
-    settings = snapshot.collected.settings if snapshot.collected.settings.observed else None
-    laravel = (
-        observed is not None
-        and settings is not None
-        and any(
-            item.identifier == site.identifier and item.application == "laravel"
-            for item in settings.value
-        )
-    )
+    laravel = site_facts(snapshot, site.identifier).laravel
     if section == "wordpress" and not wordpress:
         raise Http404
     if section == "environment" and not laravel:
@@ -674,7 +684,14 @@ def _site_overview_context(
         backup_context.get("backups") is not None
         and getattr(backup_context["backups"], "reopen", False)
     )
-    context["site_reopen_can_prepare"] = backup_context.get("backups_can_reopen", False)
+    context["site_reopen_can_prepare"] = bool(
+        context["site_reopen"] and backup_context.get("backups_can_reopen", False)
+    )
+    context["site_reopen_reason"] = (
+        str(backup_context.get("backups_reopen_reason", ""))
+        if context["site_reopen"] and not context["site_reopen_can_prepare"]
+        else ""
+    )
     context["site_reopen_restore"] = bool(
         backup_context.get("backups") is not None
         and getattr(backup_context["backups"], "restore", False)
@@ -713,7 +730,6 @@ def _site_overview_context(
     context["site_current_release"] = next(
         (release for release in releases if release.current), None
     )
-    context["blocking"] = blocking_operation(state.other_operation)
 
 
 def site_page_response(  # noqa: C901 - one dispatcher for the site sections

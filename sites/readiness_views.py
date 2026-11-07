@@ -7,11 +7,9 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
@@ -19,6 +17,7 @@ from servers.models import Server
 
 from .forms import SiteReadinessForm
 from .names import valid_identifier
+from .preparation import decide_for_site
 from .readiness_change import SLUG
 
 
@@ -41,14 +40,11 @@ def context_for_site(
 ) -> dict[str, object]:
     state = server_state(server)
     site = _site(state, identifier)
-    allowed = (
-        site is not None
-        and not has_releases
-        and state.snapshot is not None
-        and state.snapshot.collected.standing is not None
-        and state.snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and site.file.startswith("/etc/caddy/sites/")
-        and site.state == SiteState.MANAGED
+    decision = decide_for_site(
+        state,
+        user,
+        identifier,
+        change_requirements.SITE_READINESS,
     )
     return {
         "site_readiness": site.readiness if site is not None else "/",
@@ -56,10 +52,8 @@ def context_for_site(
             initial={"readiness": site.readiness if site is not None else "/"}
         ),
         "site_readiness_laravel": has_releases,
-        "site_readiness_can_prepare": allowed
-        and state.can_prepare_changes
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-        and not services.read_changes(server).polling,
+        "site_readiness_can_prepare": decision.allowed,
+        "site_readiness_reason": decision.sentence,
     }
 
 
@@ -79,7 +73,9 @@ def prepare_readiness(request: HttpRequest, pk: int, identifier: str) -> HttpRes
     form = SiteReadinessForm(request.POST)
     if not context["site_readiness_can_prepare"] or not form.is_valid():
         messages.error(
-            request, "Choose a readiness path from a current, complete site observation."
+            request,
+            str(context["site_readiness_reason"])
+            or "Choose a readiness path from a current, complete site observation.",
         )
         return redirect("site_settings", pk=pk, identifier=identifier)
     try:

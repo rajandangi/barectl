@@ -442,6 +442,25 @@ class ConfirmScreenTests(ScreenTestCase):
         self.assertIn("Check again", content)
         self.assertNotIn(f'action="/changes/{review.preparation_id}/apply/"', content)
 
+    def test_apply_is_not_refused_by_the_gates_active_change_rule(self) -> None:
+        review = self.change("fixture_site")
+        self.sign_in_with(*PREPARE_PERMISSIONS)
+        self.client.post(f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"})
+        self.sign_in_with(*APPLY_PERMISSIONS)
+        response = self.client.post(f"/changes/{review.preparation_id}/apply/", {}, follow=True)
+        messages = [str(message) for message in response.context["messages"]]
+        self.assertNotIn(
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+            messages,
+        )
+        self.assertIn(
+            "Barectl is running another remote operation for this server. Apply the change "
+            "after it finishes, if its admission deadline has not passed.",
+            messages,
+        )
+        self.assertFalse(ChangeRun.objects.filter(review=review).exists())
+
     def test_the_old_review_url_resolves_to_the_confirm_screen(self) -> None:
         review = self.change("fixture_site")
         self.sign_in_with("view_changes", "change_site")

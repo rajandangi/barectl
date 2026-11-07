@@ -2,9 +2,12 @@
 
 The dashboard organizes work around servers and the sites they host. This document
 describes the current operator workflows: the four top-level places, the server and site
-pages, creating a site, reviewing a change, following a run, and recovery. It describes
-the interface over the change engine; eligibility, consent, the native lock, admission
-and verification are unchanged ([changes and jobs](architecture.md#changes-and-jobs),
+pages, creating a site, reviewing a change, following a run, and recovery. One
+preparation gate (`operations/preparation.py`) decides which change cards are offered and
+which POSTs are admitted, and names the single reason a card or POST is refused. The gate
+never replaces authorization: the review, the native mutation lock and fresh revalidation
+still decide whether a change runs, and consent, admission and verification are unchanged
+([changes and jobs](architecture.md#changes-and-jobs),
 [ADR 0035](adr/0035-one-change-engine-with-effect-derived-consent.md)).
 
 ## Places

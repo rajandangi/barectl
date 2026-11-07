@@ -73,12 +73,15 @@
       </form>
     {% elif blocking %}
       {% include "operations/_blocking_operation.html" with after="Prepare the PHP settings after it finishes." %}
+      {% if site_pool_reason %}<p class="barectl-note">{{ site_pool_reason }}</p>{% endif %}
     {% else %}
       <p class="barectl-note">
-        PHP settings are unavailable until a fresh observation confirms this site is managed.
+        {{ site_pool_reason|default:"PHP settings are unavailable until a fresh observation confirms this site is managed." }}
       </p>
     {% endif %}
   {% else %}
-    <p class="barectl-note">The site's PHP settings were not observed.</p>
+    <p class="barectl-note">
+      {{ site_pool_reason|default:"The site's PHP settings were not observed." }}
+    </p>
   {% endif %}
 </section>

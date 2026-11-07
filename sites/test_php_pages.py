@@ -8,6 +8,7 @@ from unittest import mock
 from django.test import Client
 from django.utils import timezone
 
+from bootstrap.standing import Standing
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import current_snapshot, save_snapshot
@@ -21,7 +22,13 @@ from servers.testing import ControllerConfigTestCase
 
 from .observation import PHP_TRANSITION_INCOMPLETE
 from .php_change import SLUG
-from .ui_testing import record_http_sites, record_php85_installed, record_step_run
+from .ui_testing import (
+    record_http_sites,
+    record_php85_installed,
+    record_shaped_sites,
+    record_site_state,
+    record_step_run,
+)
 
 BANNED = (
     "master",
@@ -106,6 +113,16 @@ class SitePhpSettingsTests(ControllerConfigTestCase):
                 RemoteOperation.objects.filter(pk=rows[0].preparation.pk).update(
                     status=RemoteOperation.Status.SUCCEEDED
                 )
+
+    def test_a_host_not_on_the_target_stack_withholds_the_php_change_and_its_post(self) -> None:
+        record_shaped_sites(self.server, standing=Standing.FRESH)
+        sentence = "Set up this server before preparing this change."
+        response = self.client.get(self.settings_url)
+        self.assertNotContains(response, "Change PHP version")
+        self.assertContains(response, sentence)
+        refused = self.client.post(self.url, {"selection": "php84"}, follow=True)
+        self.assertIn(sentence, [str(message) for message in refused.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
 
     def test_settings_shows_the_current_version_and_the_change_action_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
@@ -260,6 +277,29 @@ class SitePhpSettingsTests(ControllerConfigTestCase):
         self.assertRedirects(response, self.settings_url)
         self.assertEqual(read_changes(self.server).rows, [])
 
+    def test_a_not_following_site_withholds_the_php_version_card_with_the_gate_sentence(
+        self,
+    ) -> None:
+        record_site_state(self.server, state=SiteState.NOT_FOLLOWING)
+        sentence = "This site does not follow the supported convention; Barectl can only remove it."
+        response = self.client.get(self.settings_url)
+        self.assertNotContains(response, "?change=php#change-php")
+        self.assertContains(response, sentence)
+        refusal = self.client.post(self.url, {"selection": "php85"}, follow=True)
+        self.assertEqual(refusal.redirect_chain[0][0], self.settings_url)
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
+
+    def test_an_incomplete_php_switch_offers_php_version_and_withholds_php_settings(self) -> None:
+        self.record_incomplete_switch()
+        sentence = (
+            "This site is partly applied; finish the change that is already in progress first."
+        )
+        response = self.client.get(self.settings_url)
+        self.assertContains(response, "Finish or reverse the PHP change")
+        self.assertNotContains(response, 'name="max_children"')
+        self.assertContains(response, sentence)
+
     def record_transition(
         self, *, problem: str = "The PHP runtime transition is incomplete."
     ) -> None:
@@ -343,17 +383,32 @@ class SitePhpSettingsTests(ControllerConfigTestCase):
             self.fail("No setup snapshot.")
         observed = snapshot.collected.sites
         site = observed.value[0]
-        for changed in (
-            replace(site, outcome=ObservationOutcome.INACCESSIBLE),
-            replace(site, missing=(*site.missing, "The deploy lock is unsafe.")),
-            replace(site, file="/etc/caddy/sites/foreign.caddy"),
-        ):
-            with self.subTest(changed=changed):
+        cases = (
+            (
+                "unreadable inventory",
+                replace(observed, outcome=ObservationOutcome.INACCESSIBLE),
+                site,
+            ),
+            (
+                "extra problem",
+                observed,
+                replace(site, missing=(*site.missing, "The deploy lock is unsafe.")),
+            ),
+            (
+                "foreign path",
+                observed,
+                replace(site, file="/etc/caddy/sites/foreign.caddy"),
+            ),
+        )
+        for label, sites, changed in cases:
+            with self.subTest(case=label):
                 save_snapshot(
                     record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED),
-                    replace(snapshot.collected, sites=replace(observed, value=(changed,))),
+                    replace(snapshot.collected, sites=replace(sites, value=(changed,))),
                     timezone.now(),
                 )
                 response = self.client.post(self.url, {"selection": "php84"})
-                self.assertRedirects(response, self.settings_url)
+                # The settings page itself 404s for an unreadable or foreign inventory, so
+                # assert the refusal target without fetching it.
+                self.assertRedirects(response, self.settings_url, fetch_redirect_response=False)
                 self.assertEqual(read_changes(self.server).rows, [])

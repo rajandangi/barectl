@@ -39,6 +39,8 @@
               {% csrf_token %}
               <button type="submit" class="usa-button">Check again</button>
             </form>
+          {% elif can_prepare_again_reason %}
+            <p class="barectl-note">{{ can_prepare_again_reason }}</p>
           {% endif %}
           <a class="usa-button usa-button--outline"
              href="{{ change.plain.home_url }}">Cancel</a>
@@ -260,6 +262,9 @@
                  href="{{ change.plain.home_url }}">Cancel</a>
             </div>
           {% else %}
+            {% if can_prepare_again_reason %}
+              <p class="barectl-note">{{ can_prepare_again_reason }}</p>
+            {% endif %}
             <p>
               <a class="usa-button usa-button--outline"
                  href="{{ change.plain.home_url }}">Cancel</a>
@@ -289,6 +294,8 @@
             {% csrf_token %}
             <button type="submit" class="usa-button">Try again</button>
           </form>
+        {% elif can_prepare_again_reason %}
+          <p class="barectl-note">{{ can_prepare_again_reason }}</p>
         {% endif %}
         <a class="usa-button usa-button--outline"
            href="{{ change.plain.home_url }}">Cancel</a>

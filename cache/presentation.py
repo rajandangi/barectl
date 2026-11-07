@@ -5,22 +5,20 @@ decide native state themselves. Nothing here opens a connection: the stored snap
 carries the cache's state, and the numbers come from a reading an operator asked for.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from django.contrib.auth.models import AnonymousUser, User
 from django.urls import reverse
 from django.utils import timezone
 
-from bootstrap.standing import Standing
-from discovery.models import SiteState
-from discovery.presentation import VIEW_SITES
 from discovery.snapshot import CollectedSnapshot, ObservedCache, ObservedSite
-from operations import services
-from operations.consent import PREPARE_PERMISSIONS
+from operations import change_requirements, preparation
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
+from servers.preparation import stored_server_facts
 from sites.names import valid_identifier
+from sites.preparation import decide_for_site, site_facts
 
 from . import convention, observation, reading
 from .plugin import PLUGIN_NAME, PLUGIN_VERSION
@@ -171,28 +169,17 @@ def _cache_row(state: DiscoveryState, identifier: str) -> ObservedCache | None:
 
 
 def _laravel_site(state: DiscoveryState, identifier: str) -> bool:
-    """A Laravel site reads as plain in its passive site record; its settings name it."""
-    snapshot = state.snapshot
-    if snapshot is None:
-        return False
-    settings = snapshot.collected.settings
-    if not settings.observed:
-        return False
-    return any(
-        row.identifier == identifier and row.application == "laravel" for row in settings.value
-    )
+    """The gate's one Laravel identity: a settings row or a release row."""
+    return site_facts(state.snapshot, identifier).laravel
 
 
-def _allowed(server: Server, state: DiscoveryState, site: ObservedSite | None) -> bool:
-    snapshot = state.snapshot
-    return (
-        site is not None
-        and state.can_prepare_changes
-        and not services.read_changes(server).polling
-        and snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-    )
+def _reading_allowed(state: DiscoveryState) -> bool:
+    """A cache reading is read-only: host facts and the target stack, never change work."""
+    return preparation.decide(
+        stored_server_facts(state),
+        None,
+        replace(preparation.EMPTY, target_stack=True),
+    ).allowed
 
 
 def site_context(server: Server, identifier: str, user: User | AnonymousUser) -> dict[str, object]:
@@ -212,17 +199,11 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
         convention.DEFAULT_MAXMEMORY_MIB
     )
     client = site.client if site is not None else ""
-    allowed = applicable and _allowed(server, state, site)
-    can_prepare = (
-        allowed
-        and site is not None
-        and site.state == SiteState.MANAGED
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-    )
-    can_turn_off = allowed and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-    can_read = (
-        applicable and _allowed(server, state, site) and user.has_perms(reading.READ_PERMISSIONS)
-    )
+    on_decision = decide_for_site(state, user, identifier, change_requirements.SITE_CACHE_ON)
+    off_decision = decide_for_site(state, user, identifier, change_requirements.SITE_CACHE_OFF)
+    can_prepare = applicable and on_decision.allowed
+    can_turn_off = applicable and off_decision.allowed
+    can_read = applicable and _reading_allowed(state) and user.has_perms(reading.READ_PERMISSIONS)
     checked = snapshot.collected_at if snapshot is not None else None
     return {
         "object_cache_applicable": applicable,
@@ -248,6 +229,8 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
         "object_cache_can_prepare": can_prepare,
         "object_cache_can_turn_off": can_turn_off,
         "object_cache_can_read": can_read,
+        "object_cache_reason": on_decision.sentence,
+        "object_cache_turn_off_reason": off_decision.sentence,
         "object_cache_reading": view,
         "object_cache_checked_at": checked,
         "object_cache_line": line_for(applicable, current, problem, view, checked),
@@ -309,14 +292,7 @@ def overview_context(
     snapshot = state.snapshot
     if checked is None and snapshot is not None:
         checked = snapshot.collected_at
-    can_read = (
-        snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and state.can_prepare_changes
-        and not services.read_changes(server).polling
-        and user.has_perms(reading.READ_PERMISSIONS)
-    )
+    can_read = _reading_allowed(state) and user.has_perms(reading.READ_PERMISSIONS)
     return {
         "site_cache_line": line_for(True, current, problem, view, checked),
         "site_cache_can_read": can_read,

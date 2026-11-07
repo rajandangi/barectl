@@ -12,18 +12,16 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
 from cache.laravel import laravel_managed_digests
-from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
-from discovery.snapshot import ObservedSite
-from operations import services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import MANAGE_SECRETS
-from servers.discovery_state import DiscoveryState, server_state
+from servers.discovery_state import server_state
 from servers.models import Server
 from sites.names import valid_identifier
+from sites.preparation import decide_for_site
 from sites.settings_forms import SettingsChangeForm
 
 from .bodies.common import NON_SECRET_KEYS
@@ -31,25 +29,14 @@ from .settings import SLUG
 
 CHANGED = "The saved connection changed. Refresh and prepare a new review."
 BUSY = "Wait for the current operation before preparing this review."
-
-
-def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
-    snapshot = state.snapshot
-    if snapshot is None:
-        return None
-    return next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-        None,
-    )
+INVALID = "Choose a key and whether to set or remove it on a current Laravel site."
 
 
 def context_for_site(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
-    site = _site(state, identifier)
     snapshot = state.snapshot
-    standing = snapshot.collected.standing if snapshot is not None else None
     settings = snapshot.collected.settings if snapshot is not None else None
     items = [
         item
@@ -67,34 +54,19 @@ def context_for_site(
         for item in items
     ]
     rows.sort(key=lambda row: str(row["key"]))
-    complete = (
-        site is not None
-        and bool(rows)
-        and site.state == SiteState.MANAGED
-        and site.file.startswith("/etc/caddy/sites/")
-        and standing is not None
-        and standing.standing == Standing.TARGET_STACK
-    )
-    allowed = (
-        complete
-        and state.can_prepare_changes
-        and not services.read_changes(server).polling
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES, MANAGE_SECRETS))
+    decision = decide_for_site(
+        state,
+        user,
+        identifier,
+        change_requirements.LARAVEL_ENVIRONMENT,
     )
     return {
         "environment_rows": rows,
         "environment_observed": settings is not None and settings.observed,
         "environment_form": SettingsChangeForm(),
-        "environment_can_prepare": allowed,
-        "environment_problem": (
-            settings.warning
-            if settings is not None and settings.warning
-            else (
-                ""
-                if complete
-                else "Changing the environment needs a current, complete Laravel site observation."
-            )
-        ),
+        "environment_can_prepare": decision.allowed,
+        "environment_reason": decision.sentence,
+        "environment_problem": settings.warning if settings is not None else "",
     }
 
 
@@ -106,11 +78,12 @@ def prepare_environment(request: HttpRequest, pk: int, identifier: str) -> HttpR
         raise Http404
     server = get_object_or_404(Server, pk=pk)
     context = context_for_site(server, identifier, request.user)
+    if not context["environment_can_prepare"]:
+        messages.error(request, str(context["environment_reason"]))
+        return redirect("site_environment", pk=pk, identifier=identifier)
     form = SettingsChangeForm(request.POST)
-    if not context["environment_can_prepare"] or not form.is_valid():
-        messages.error(
-            request, "Choose a key and whether to set or remove it on a current Laravel site."
-        )
+    if not form.is_valid():
+        messages.error(request, INVALID)
         return redirect("site_environment", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
