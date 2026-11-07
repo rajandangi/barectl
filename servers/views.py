@@ -435,10 +435,11 @@ def server_page(
     laravel_site_form: LaravelSiteForm | None = None,
     wordpress_site_form: WordPressSiteForm | None = None,
     status: int = 200,
+    state: DiscoveryState | None = None,
 ) -> HttpResponse:
     """A server section's full page; the site forms keep a refused submission's input."""
     server = get_object_or_404(Server, pk=pk)
-    state = server_state(server)
+    state = state or server_state(server)
     context = _discovery_context(request, state)
     context.update(
         history=state.history,
@@ -492,7 +493,7 @@ def server_page(
                 request,
                 server,
                 "",
-                attempts=state.history,
+                state=state,
                 show_servers=False,
             )
         )
@@ -549,9 +550,9 @@ def server_page(
         )
 
         step = continuation.requested_step(request, server.pk)
-        context.update(http_site_context(server, request.user, http_site_form, step))
-        context.update(laravel_site_context(server, request.user, laravel_site_form, step))
-        context.update(wordpress_site_context(server, request.user, wordpress_site_form, step))
+        context.update(http_site_context(state, request.user, http_site_form, step))
+        context.update(laravel_site_context(state, request.user, laravel_site_form, step))
+        context.update(wordpress_site_context(state, request.user, wordpress_site_form, step))
         context["site_creation_can_prepare"] = _decision(
             state, request.user, change_requirements.CREATE_SITE
         ).allowed
@@ -627,7 +628,9 @@ def _site_activity_context(
     if section != "activity" or not target_site:
         return
     context["target_activity_allowed"] = request.user.has_perm(VIEW_CHANGES)
-    context.update(_activity_context(request, state.server, identifier, show_servers=False))
+    context.update(
+        _activity_context(request, state.server, identifier, state=state, show_servers=False)
+    )
 
 
 def _site_backups_context(
@@ -857,6 +860,7 @@ def _activity_context(
     server: Server | None,
     site: str,
     *,
+    state: DiscoveryState | None = None,
     attempts: Iterable[AttemptView] | None = None,
     show_servers: bool,
     shown: str | None = None,
@@ -866,7 +870,9 @@ def _activity_context(
         # A check belongs to its whole server, never to a site.
         attempts = ()
     elif attempts is None:
-        attempts = recorded_activity() if server is None else server_state(server).history
+        if state is None and server is not None:
+            state = server_state(server)
+        attempts = state.history if state is not None else recorded_activity()
     rows = activity_read.check_rows(attempts)
     if request.user.has_perm(VIEW_CHANGES):
         rows += activity_read.change_rows(server)
@@ -899,7 +905,9 @@ def _activity_scope(request: HttpRequest) -> tuple[Server | None, str]:
 @permission_required("servers.view_server", raise_exception=True)
 def activity(request: HttpRequest) -> HttpResponse:
     server, site = _activity_scope(request)
-    context = _activity_context(request, server, site, show_servers=server is None)
+    # A site's Activity lists its changes only; a server's also lists its checks.
+    state = server_state(server) if server is not None and not site else None
+    context = _activity_context(request, server, site, state=state, show_servers=server is None)
     context.update(
         servers=list(Server.objects.order_by("name")),
         selected_server=server,
@@ -919,10 +927,12 @@ def activity_rows(request: HttpRequest) -> HttpResponse:
         url = reverse("activity")
         return redirect(f"{url}?{query.urlencode()}" if query else url)
     server, site = _activity_scope(request)
+    state = server_state(server) if server is not None and not site else None
     context = _activity_context(
         request,
         server,
         site,
+        state=state,
         show_servers=server is None,
         shown=request.GET.get("shown", ""),
     )
