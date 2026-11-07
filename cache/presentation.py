@@ -12,11 +12,11 @@ from django.contrib.auth.models import AnonymousUser, User
 from django.urls import reverse
 from django.utils import timezone
 
-from bootstrap.standing import Standing
 from discovery.snapshot import CollectedSnapshot, ObservedCache, ObservedSite
-from operations import preparation, services
+from operations import preparation
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
+from servers.preparation import stored_server_facts
 from sites.names import valid_identifier
 from sites.preparation import decide_for_site
 
@@ -181,17 +181,13 @@ def _laravel_site(state: DiscoveryState, identifier: str) -> bool:
     )
 
 
-def _reading_allowed(server: Server, state: DiscoveryState, site: ObservedSite | None) -> bool:
-    """A cache reading is read-only, so it does not ask the change gate."""
-    snapshot = state.snapshot
-    return (
-        site is not None
-        and state.can_prepare_changes
-        and not services.read_changes(server).polling
-        and snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-    )
+def _reading_allowed(state: DiscoveryState) -> bool:
+    """A cache reading is read-only: host facts and the target stack, never change work."""
+    return preparation.decide(
+        stored_server_facts(state),
+        None,
+        replace(preparation.EMPTY, target_stack=True),
+    ).allowed
 
 
 def site_context(server: Server, identifier: str, user: User | AnonymousUser) -> dict[str, object]:
@@ -225,11 +221,7 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
     )
     can_prepare = applicable and on_decision.allowed
     can_turn_off = applicable and off_decision.allowed
-    can_read = (
-        applicable
-        and _reading_allowed(server, state, site)
-        and user.has_perms(reading.READ_PERMISSIONS)
-    )
+    can_read = applicable and _reading_allowed(state) and user.has_perms(reading.READ_PERMISSIONS)
     checked = snapshot.collected_at if snapshot is not None else None
     return {
         "object_cache_applicable": applicable,
@@ -320,14 +312,7 @@ def overview_context(
     snapshot = state.snapshot
     if checked is None and snapshot is not None:
         checked = snapshot.collected_at
-    can_read = (
-        snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and state.can_prepare_changes
-        and not services.read_changes(server).polling
-        and user.has_perms(reading.READ_PERMISSIONS)
-    )
+    can_read = _reading_allowed(state) and user.has_perms(reading.READ_PERMISSIONS)
     return {
         "site_cache_line": line_for(True, current, problem, view, checked),
         "site_cache_can_read": can_read,

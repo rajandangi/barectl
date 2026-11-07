@@ -9,7 +9,8 @@ from django.utils import timezone
 
 from discovery.models import SiteState
 from discovery.snapshot import ObservedCache, ObservedSetting
-from operations.models import ChangePreparation
+from operations.activity_testing import record_change
+from operations.models import ChangePreparation, RemoteOperation
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 from sites.ui_testing import record_site_settings, record_site_state
@@ -262,6 +263,14 @@ class ObjectCacheCardTests(ControllerConfigTestCase):
         response = self.client.get(self.settings_url)
         self.assertContains(response, "Check the cache")
         self.assertNotContains(response, "Not readable")
+
+    def test_an_active_change_does_not_withhold_a_cache_reading(self) -> None:
+        self.record(state="on", memory=64)
+        record_change(self.server, status=RemoteOperation.Status.RUNNING)
+        settings = self.client.get(self.settings_url)
+        self.assertContains(settings, "Check the cache")
+        overview = self.client.get(self.overview_url)
+        self.assertContains(overview, "Check the cache")
 
     def test_a_reading_is_queued_only_on_the_post(self) -> None:
         self.record(state="on", memory=64)

@@ -14,9 +14,9 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
-from bootstrap.standing import Standing
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
+from operations import preparation
 from operations import services as change_services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
@@ -33,6 +33,7 @@ from servers.page import (
     READY,
     status_line,
 )
+from servers.preparation import decide_for_server
 
 from . import continuation, prerequisites
 from .forms import (
@@ -48,6 +49,13 @@ BUSY = (
     "it finishes."
 )
 CREATE_PLATFORM_VALUES = frozenset(value for value, _label in CREATE_PLATFORMS)
+# A Create site card needs a read, target-stack server and both site permissions. The form's
+# own readiness (PHP choices, database step) stays outside the gate.
+CREATE_REQUIREMENTS = preparation.Requirements(
+    needs=frozenset({preparation.Need.CHANGE, preparation.Need.SITE}),
+    target_stack=True,
+)
+CREATION_REFUSED = "Run discovery and resolve the server's findings before creating a site."
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
@@ -77,21 +85,43 @@ def _create_options(
     return versions, installable, initial
 
 
-def _can_prepare(state: DiscoveryState, *, has_choices: bool, reason: str) -> bool:
-    snapshot = state.snapshot
-    standing = snapshot.collected.standing if snapshot is not None else None
-    return (
-        standing is not None
-        and standing.standing == Standing.TARGET_STACK
-        and state.can_prepare_changes
-        and not change_services.read_changes(state.server).polling
-        and has_choices
-        and not reason
-    )
+def _prepare_decision(state: DiscoveryState, user: User | AnonymousUser) -> preparation.Decision:
+    return decide_for_server(state, user, CREATE_REQUIREMENTS)
+
+
+def _can_prepare(
+    state: DiscoveryState,
+    user: User | AnonymousUser,
+    *,
+    has_choices: bool,
+    reason: str,
+) -> bool:
+    return _prepare_decision(state, user).allowed and has_choices and not reason
+
+
+def _gate_reason(state: DiscoveryState, user: User | AnonymousUser) -> str:
+    decision = _prepare_decision(state, user)
+    return decision.reason.sentence if decision.reason else ""
+
+
+def _creation_refusal(
+    state: DiscoveryState,
+    user: User | AnonymousUser,
+    *,
+    has_choices: bool,
+    reason: str = "",
+) -> str:
+    gate_reason = _gate_reason(state, user)
+    if gate_reason:
+        return gate_reason
+    if not has_choices or reason:
+        return CREATION_REFUSED
+    return ""
 
 
 def http_site_context(
     server: Server,
+    user: User | AnonymousUser,
     form: HttpSiteForm | None = None,
     step: continuation.CreationStep | None = None,
 ) -> dict[str, object]:
@@ -106,14 +136,16 @@ def http_site_context(
         "http_site_installable": bool(installable),
         "http_site_observed_at": snapshot.collected_at if snapshot is not None else None,
         "http_site_can_prepare": _can_prepare(
-            state, has_choices=bool(versions) or bool(installable), reason=""
+            state, user, has_choices=bool(versions) or bool(installable), reason=""
         ),
+        "http_site_gate_reason": _gate_reason(state, user),
         "http_site_continuation": step if step is not None and step.platform == "http" else None,
     }
 
 
 def create_site_context(
     server: Server,
+    user: User | AnonymousUser,
     form: CreateSiteForm | None = None,
     step: continuation.CreationStep | None = None,
     *,
@@ -153,7 +185,8 @@ def create_site_context(
             for choice in tiles
         ),
         "create_site_has_choices": bool(tiles),
-        "create_site_can_prepare": _can_prepare(state, has_choices=bool(tiles), reason=""),
+        "create_site_can_prepare": _can_prepare(state, user, has_choices=bool(tiles), reason=""),
+        "create_site_gate_reason": _gate_reason(state, user),
         "create_site_observed_at": snapshot.collected_at if snapshot is not None else None,
         "create_site_domains": domains or [""],
         "create_site_identifier": str(form["identifier"].value() or ""),
@@ -222,7 +255,14 @@ def _create_page(
         "server": server,
         "state": state,
         "create_site_retained": form is not None,
-        **create_site_context(server, form, step, problem=problem, domain_values=domain_values),
+        **create_site_context(
+            server,
+            request.user,
+            form,
+            step,
+            problem=problem,
+            domain_values=domain_values,
+        ),
     }
     line = status_line(state)
     if line != READY:
@@ -265,6 +305,7 @@ def site_create(request: HttpRequest, pk: int | None = None) -> HttpResponse:
 
 def laravel_site_context(
     server: Server,
+    user: User | AnonymousUser,
     form: LaravelSiteForm | None = None,
     step: continuation.CreationStep | None = None,
 ) -> dict[str, object]:
@@ -282,8 +323,9 @@ def laravel_site_context(
         "laravel_site_reason": engine.reason,
         "laravel_site_step": engine if engine.needed else None,
         "laravel_site_can_prepare": _can_prepare(
-            state, has_choices=bool(versions) or bool(installable), reason=engine.reason
+            state, user, has_choices=bool(versions) or bool(installable), reason=engine.reason
         ),
+        "laravel_site_gate_reason": _gate_reason(state, user),
         "laravel_site_continuation": (
             step if step is not None and step.platform == "laravel" else None
         ),
@@ -292,6 +334,7 @@ def laravel_site_context(
 
 def wordpress_site_context(
     server: Server,
+    user: User | AnonymousUser,
     form: WordPressSiteForm | None = None,
     step: continuation.CreationStep | None = None,
 ) -> dict[str, object]:
@@ -309,8 +352,9 @@ def wordpress_site_context(
         "wordpress_site_reason": engine.reason,
         "wordpress_site_step": engine if engine.needed else None,
         "wordpress_site_can_prepare": _can_prepare(
-            state, has_choices=bool(versions) or bool(installable), reason=engine.reason
+            state, user, has_choices=bool(versions) or bool(installable), reason=engine.reason
         ),
+        "wordpress_site_gate_reason": _gate_reason(state, user),
         "wordpress_site_continuation": (
             step if step is not None and step.platform == "wordpress" else None
         ),
@@ -472,7 +516,7 @@ def _stale_wordpress_site(request: HttpRequest, pk: int, form: WordPressSiteForm
             "sites/_wordpress_create.html",
             {
                 "server": fresh,
-                **wordpress_site_context(fresh, retained),
+                **wordpress_site_context(fresh, request.user, retained),
                 "wordpress_site_focus": True,
                 "wordpress_site_problem": problem,
             },
@@ -508,7 +552,7 @@ def _stale_laravel_site(request: HttpRequest, pk: int, form: LaravelSiteForm) ->
             "sites/_laravel_create.html",
             {
                 "server": fresh,
-                **laravel_site_context(fresh, retained),
+                **laravel_site_context(fresh, request.user, retained),
                 "laravel_site_focus": True,
                 "laravel_site_problem": problem,
             },
@@ -617,20 +661,15 @@ def site_create_platform_form(
         "platform": platform,
         "blocking": blocking_operation(state.other_operation),
     }
-    can_prepare = request.user.has_perms(PREPARE_PERMISSIONS)
     if platform == "wordpress":
         if not isinstance(form, WordPressSiteForm):
             raise Http404
-        context.update(wordpress_site_context(server, form))
-        context["wordpress_site_can_prepare"] = (
-            can_prepare and context["wordpress_site_can_prepare"]
-        )
+        context.update(wordpress_site_context(server, request.user, form))
         context["wordpress_site_focus"] = True
     else:
         if not isinstance(form, LaravelSiteForm):
             raise Http404
-        context.update(laravel_site_context(server, form))
-        context["laravel_site_can_prepare"] = can_prepare and context["laravel_site_can_prepare"]
+        context.update(laravel_site_context(server, request.user, form))
         context["laravel_site_focus"] = True
     return render(request, "sites/create_platform.html", context, status=409)
 
@@ -652,15 +691,10 @@ def site_create_platform(request: HttpRequest, pk: int, platform: str) -> HttpRe
         "blocking": blocking_operation(state.other_operation),
     }
     step = continuation.requested_step(request, server.pk)
-    can_prepare = request.user.has_perms(PREPARE_PERMISSIONS)
     if platform == "wordpress":
-        context.update(wordpress_site_context(server, step=step))
-        context["wordpress_site_can_prepare"] = (
-            can_prepare and context["wordpress_site_can_prepare"]
-        )
+        context.update(wordpress_site_context(server, request.user, step=step))
     else:
-        context.update(laravel_site_context(server, step=step))
-        context["laravel_site_can_prepare"] = can_prepare and context["laravel_site_can_prepare"]
+        context.update(laravel_site_context(server, request.user, step=step))
     return render(request, "sites/create_platform.html", context)
 
 
@@ -692,10 +726,9 @@ def site_create_continue(request: HttpRequest, pk: int) -> HttpResponse:
     )
     if not form.is_valid():
         return _create_page(request, server, form, status=409)
-    if not _can_prepare(state, has_choices=bool(choices), reason=""):
-        messages.warning(
-            request, "Run discovery and resolve the server's findings before creating a site."
-        )
+    refusal = _creation_refusal(state, user, has_choices=bool(choices))
+    if refusal:
+        messages.warning(request, refusal)
         return redirect("server_sites", pk=pk)
     return _finish_creation(
         request,
@@ -745,10 +778,9 @@ def server_http_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     form = CreateSiteForm(request.POST, php_versions=versions, installable=installable)
     if not form.is_valid():
         return _create_page(request, server, form, domain_values=domains, status=422)
-    if not _can_prepare(state, has_choices=bool(choices), reason=""):
-        messages.warning(
-            request, "Run discovery and resolve the server's findings before creating a site."
-        )
+    refusal = _creation_refusal(state, user, has_choices=bool(choices))
+    if refusal:
+        messages.warning(request, refusal)
         return redirect("server_sites", pk=pk)
     return _finish_creation(
         request,
@@ -781,7 +813,7 @@ def server_laravel_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     if not isinstance(user, User):
         raise PermissionDenied
     state = server_state(server)
-    context = laravel_site_context(server, step=continuation.requested_step(request, pk))
+    context = laravel_site_context(server, user, step=continuation.requested_step(request, pk))
     versions, installable, _initial = _create_options(state, "laravel", None)
     form = LaravelSiteForm(request.POST, php_versions=versions, installable=installable)
     if not form.is_valid():
@@ -793,7 +825,7 @@ def server_laravel_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
                 "sites/_laravel_create.html",
                 {
                     "server": server,
-                    **laravel_site_context(server, form),
+                    **laravel_site_context(server, user, form),
                     "laravel_site_focus": True,
                 },
                 status=422,
@@ -804,8 +836,9 @@ def server_laravel_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     if not context["laravel_site_can_prepare"]:
         messages.warning(
             request,
-            str(context["laravel_site_reason"])
-            or "Run discovery and resolve the server's findings before creating a site.",
+            str(context["laravel_site_gate_reason"])
+            or str(context["laravel_site_reason"])
+            or CREATION_REFUSED,
         )
         return redirect("server_sites", pk=pk)
     return _finish_creation(
@@ -844,7 +877,7 @@ def server_wordpress_site_prepare(request: HttpRequest, pk: int) -> HttpResponse
     if not isinstance(user, User):
         raise PermissionDenied
     state = server_state(server)
-    context = wordpress_site_context(server, step=continuation.requested_step(request, pk))
+    context = wordpress_site_context(server, user, step=continuation.requested_step(request, pk))
     versions, installable, _initial = _create_options(state, "wordpress", None)
     form = WordPressSiteForm(request.POST, php_versions=versions, installable=installable)
     if not form.is_valid():
@@ -856,7 +889,7 @@ def server_wordpress_site_prepare(request: HttpRequest, pk: int) -> HttpResponse
                 "sites/_wordpress_create.html",
                 {
                     "server": server,
-                    **wordpress_site_context(server, form),
+                    **wordpress_site_context(server, user, form),
                     "wordpress_site_focus": True,
                 },
                 status=422,
@@ -867,8 +900,9 @@ def server_wordpress_site_prepare(request: HttpRequest, pk: int) -> HttpResponse
     if not context["wordpress_site_can_prepare"]:
         messages.warning(
             request,
-            str(context["wordpress_site_reason"])
-            or "Run discovery and resolve the server's findings before creating a site.",
+            str(context["wordpress_site_gate_reason"])
+            or str(context["wordpress_site_reason"])
+            or CREATION_REFUSED,
         )
         return redirect("server_sites", pk=pk)
     return _finish_creation(

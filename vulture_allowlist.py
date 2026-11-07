@@ -405,7 +405,6 @@ if TYPE_CHECKING:
     # The native site record carries its serving form for the domains change.
     _presentation = (
         DiscoveryState.presentation,
-        DiscoveryState.hosting_guidance,
         _site.domains,
         _site.php_version,
         _site.state,

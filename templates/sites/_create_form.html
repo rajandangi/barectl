@@ -15,6 +15,13 @@
       </p>
     </div>
   </div>
+{% elif create_site_gate_reason %}
+  <div class="usa-alert usa-alert--info usa-alert--slim"
+       id="create-site-gate-reason">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">{{ create_site_gate_reason }}</p>
+    </div>
+  </div>
 {% elif not create_site_can_prepare %}
   <div class="usa-alert usa-alert--info usa-alert--slim">
     <div class="usa-alert__body">

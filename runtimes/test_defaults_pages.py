@@ -4,6 +4,7 @@ from unittest import mock
 
 from django.utils import timezone
 
+from bootstrap.standing import Standing
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.snapshot import current_snapshot, save_snapshot
@@ -11,7 +12,7 @@ from operations.activity_testing import record_change
 from operations.models import ChangePreparation, RemoteOperation
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
-from sites.ui_testing import record_http_sites
+from sites.ui_testing import record_http_sites, record_shaped_sites
 
 from .defaults import DefaultsObservation
 
@@ -54,6 +55,23 @@ class DefaultCommandPageTests(ControllerConfigTestCase):
         self.assertEqual(preparation.kind_slug, "set_default_php")
         self.assertEqual(preparation.inputs, {"version": 1, "selection": "php85"})
         self.assertRedirects(response, f"/changes/{preparation.pk}/")
+
+    def test_a_host_not_on_the_target_stack_withholds_defaults_and_add_runtime(self) -> None:
+        record_shaped_sites(self.server, standing=Standing.FRESH)
+        self.record_defaults(
+            DefaultsObservation("php84", php_choices=("php84",), node_choices=("nodejs_24",))
+        )
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
+        sentence = "Set up this server before preparing this change."
+        self.assertContains(page, sentence)
+        self.assertNotContains(page, "Change default PHP")
+        response = self.client.post(
+            f"/servers/{self.server.pk}/settings/defaults/php/prepare/",
+            {"selection": "php84"},
+            follow=True,
+        )
+        self.assertIn(sentence, [str(message) for message in response.context["messages"]])
+        self.assertFalse(ChangePreparation.objects.exists())
 
     def test_the_old_prepare_path_redirects_to_settings(self) -> None:
         response = self.client.get(f"/servers/{self.server.pk}/stack/defaults/php/prepare/")
