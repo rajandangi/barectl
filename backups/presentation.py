@@ -16,6 +16,7 @@ from .observation import (
     IntegrityFinding,
     ObservedBackup,
     OffsiteCopy,
+    stopped_by_pause,
 )
 
 SCOPE_LABELS = {
@@ -592,29 +593,9 @@ def view(
 
     backup = backup_of(collected, identifier) if collected is not None else None
     enabled = backup is not None and backup.enabled
-    restore = bool(
-        gated
-        and backup is not None
-        and backup.last is not None
-        and backup.last.reason.startswith("restore_")
-    )
-    interrupted = restore or bool(
-        gated
-        and backup is not None
-        and backup.last is not None
-        and backup.last.scope in ("full", "files")
-        and backup.last.reason
-        in {
-            "backup_paused",
-            "backup_dump",
-            "backup_files",
-            "backup_idle",
-            "backup_gate",
-            "backup_verify",
-            "backup_partial",
-            "automation_restore",
-        }
-    )
+    last_result = backup.last if backup is not None else None
+    restore = bool(gated and last_result is not None and last_result.reason.startswith("restore_"))
+    interrupted = bool(gated and stopped_by_pause(last_result))
     points: tuple[RecoveryPointView, ...] = ()
     checked_at: datetime | None = None
     stale = False

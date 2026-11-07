@@ -14,7 +14,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import server_state
@@ -33,7 +33,7 @@ def context_for_site(
 ) -> dict[str, object]:
     state = server_state(server)
     snapshot = state.snapshot
-    decision = decide_for_site(state, user, identifier, preparation.SITE)
+    decision = decide_for_site(state, user, identifier, change_requirements.SITE_DATABASE)
     return {
         "site_database_panel": (
             presentation.site_panel(snapshot.collected, identifier)
@@ -41,7 +41,7 @@ def context_for_site(
             else None
         ),
         "site_database_can_prepare": decision.allowed,
-        "site_database_reason": decision.reason.sentence if decision.reason else "",
+        "site_database_reason": decision.sentence,
     }
 
 

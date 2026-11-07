@@ -5,8 +5,6 @@ does not have yet is offered as Step 1 through Add runtime, keeping the choice f
 switch that follows.
 """
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -17,7 +15,7 @@ from django.views.decorators.http import require_POST
 from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from runtimes.change import SLUG as ADD_RUNTIME_SLUG
@@ -80,7 +78,7 @@ def context_for_site(
         state,
         user,
         identifier,
-        replace(preparation.SITE, state=None, completes=NODE_INTERRUPTED),
+        change_requirements.SITE_NODE,
     )
     return {
         "site_node_incomplete": incomplete,
@@ -99,7 +97,7 @@ def context_for_site(
             for choice in choices
         ),
         "site_node_can_prepare": bool(choices) and decision.allowed,
-        "site_node_reason": decision.reason.sentence if decision.reason else "",
+        "site_node_reason": decision.sentence,
     }
 
 

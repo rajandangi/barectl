@@ -5,8 +5,6 @@ observation recorded. Preparing a change queues a review; the new values are typ
 review's confirm screen and reach the server only over ADR 0032's confidential channel.
 """
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -15,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import MANAGE_SECRETS
@@ -53,19 +51,14 @@ def context_for_site(
         state,
         user,
         identifier,
-        replace(
-            preparation.SITE,
-            needs=preparation.SITE.needs | {preparation.Need.SECRET},
-            application="wordpress",
-            no_application_problem=True,
-        ),
+        change_requirements.WORDPRESS_SETTINGS,
     )
     return {
         "wordpress_settings_rows": rows,
         "wordpress_settings_observed": settings is not None and settings.observed,
         "wordpress_settings_form": SettingsChangeForm(),
         "wordpress_settings_can_prepare": decision.allowed,
-        "wordpress_settings_reason": decision.reason.sentence if decision.reason else "",
+        "wordpress_settings_reason": decision.sentence,
         "wordpress_settings_reserved": sorted(convention.RESERVED_CONSTANTS),
         "wordpress_settings_problem": settings.warning if settings is not None else "",
     }

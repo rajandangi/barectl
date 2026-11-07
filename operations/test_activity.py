@@ -10,14 +10,14 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from discovery.fakes import record_attempt
-from discovery.models import DiscoveryAttempt
+from discovery.models import DiscoveryAttempt, SiteState
 from operations.activity_testing import record_change, record_run
 from operations.engine import ReviewDraft, save_review
 from operations.fakes import BOOT_ID, PREPARE_PERMISSIONS
 from operations.models import ChangePreparation, ChangeRun, RemoteOperation, Result
 from servers.models import Server
 from servers.testing import HTMX_FRAGMENT, ControllerConfigTestCase
-from sites.ui_testing import record_http_sites
+from sites.ui_testing import record_http_sites, record_site_state
 
 
 class ActivityPageTests(ControllerConfigTestCase):
@@ -302,3 +302,65 @@ class ActivityRowTests(ControllerConfigTestCase):
             execution=Result.OUTCOME_UNKNOWN,
         )
         self.assertIn("Result unknown", self.row_text())
+
+
+class PrepareAgainGateTests(ControllerConfigTestCase):
+    """Try again asks the failed kind's own card requirement set (spec #507, #514)."""
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+        )
+        self.client.force_login(self.user)
+        self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        record_http_sites(self.server)
+
+    def failed_change(self) -> tuple[ChangePreparation, ChangeRun]:
+        preparation = ChangePreparation.objects.create(
+            server=self.server,
+            ssh_alias=self.server.ssh_alias,
+            kind_slug="set_site_php",
+            inputs={"version": 1, "identifier": "alpha", "selection": "php84"},
+            status=RemoteOperation.Status.SUCCEEDED,
+        )
+        run = record_run(
+            preparation,
+            status=RemoteOperation.Status.FAILED,
+            execution=Result.FAILED,
+        )
+        return preparation, run
+
+    def test_a_partly_applied_site_withholds_try_again_with_the_card_sentence(self) -> None:
+        record_site_state(
+            self.server,
+            state=SiteState.PARTLY_APPLIED,
+            missing=("The site's readiness route is absent.",),
+        )
+        preparation, run = self.failed_change()
+        sentence = (
+            "This site is partly applied; finish the change that is already in progress first."
+        )
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertNotContains(page, "Try again")
+        self.assertContains(page, sentence)
+        refused = self.client.post(
+            f"/changes/{preparation.pk}/again/",
+            follow=True,
+        )
+        self.assertIn(sentence, [str(message) for message in refused.context["messages"]])
+        self.assertEqual(ChangePreparation.objects.count(), 1)
+
+    def test_a_managed_site_still_prepares_again(self) -> None:
+        preparation, run = self.failed_change()
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, "Try again")
+        response = self.client.post(f"/changes/{preparation.pk}/again/")
+        fresh = ChangePreparation.objects.exclude(pk=preparation.pk).get()
+        self.assertRedirects(response, f"/changes/{fresh.pk}/")
+        self.assertEqual(fresh.kind_slug, preparation.kind_slug)
+        self.assertEqual(fresh.inputs, preparation.inputs)

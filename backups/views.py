@@ -53,14 +53,10 @@ def _target(snapshot: Snapshot | None, site: ObservedSite | None) -> bool:
     return site is not None and site.file == f"/etc/caddy/sites/{site.identifier}.caddy"
 
 
-def _sentence(decision: preparation.Decision) -> str:
-    return decision.reason.sentence if decision.reason is not None else ""
-
-
 def _offered(decision: preparation.Decision, data: bool, data_reason: str) -> tuple[bool, str]:
     """Whether a card is offered, and the one sentence that explains its absence."""
     if not decision.allowed:
-        return False, _sentence(decision)
+        return False, decision.sentence
     if not data:
         return False, data_reason
     return True, ""
@@ -96,10 +92,10 @@ def context_for_site(
         schedule=schedule.stored(server, identifier),
     )
     downloads.expire(server, identifier)
-    target = _target(snapshot, site)
-    managed = target and site is not None and site.state == "managed"
     facts = server_facts(state, user)
     observed = site_facts(snapshot, identifier)
+    target = observed.convention
+    managed = target and observed.shape is preparation.SiteShape.MANAGED
 
     def decide(requirements: preparation.Requirements) -> preparation.Decision:
         return preparation.decide(facts, observed, requirements)
@@ -131,7 +127,7 @@ def context_for_site(
             .order_by("-created_at", "-pk")[:5]
         ),
         "backups_target": target,
-        "backups_site_reason": _sentence(base),
+        "backups_site_reason": base.sentence,
         "backups_can_download": user.has_perms(
             ("servers.view_server", VIEW_SITES, "operations.change_shared")
         ),

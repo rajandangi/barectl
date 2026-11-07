@@ -11,12 +11,12 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from operations import preparation, services
+from operations import change_requirements, preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
-from servers.preparation import decide_for_server, refusal_sentence
+from servers.preparation import decide_for_server
 
 from .certificate_email import ABSENT, OUTSIDE, SET, SLUG, UNREADABLE, valid_email
 
@@ -75,7 +75,7 @@ def context_for_server(
     saved = server.certificate_email
     initial = saved if not observed else email if setting == SET else ""
     decision = (
-        decide_for_server(state, user, preparation.SERVER)
+        decide_for_server(state, user, change_requirements.CERTIFICATE_EMAIL)
         if isinstance(user, User)
         else preparation.Decision(False)
     )
@@ -86,7 +86,7 @@ def context_for_server(
         email=email if setting == SET else "",
         saved=saved,
         can_prepare=can_prepare,
-        reason=decision.reason.sentence if decision.reason else "",
+        reason=decision.sentence,
     )
     return {
         "certificate_email_panel": panel,
@@ -125,9 +125,9 @@ def prepare_certificate_email(request: HttpRequest, pk: int) -> HttpResponse:
             "observation. Run discovery and resolve the server's findings first.",
         )
         return redirect("server_settings", pk=pk)
-    decision = decide_for_server(state, request.user, preparation.SERVER)
+    decision = decide_for_server(state, request.user, change_requirements.CERTIFICATE_EMAIL)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_settings", pk=pk)
     if panel.state not in FILTERED_STATES:
         messages.error(

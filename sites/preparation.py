@@ -4,10 +4,12 @@ Laravel identity comes from the settings and release rows, never from
 ``ObservedSite.application``, which the producer never sets to ``"laravel"``.
 """
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from django.contrib.auth.models import AnonymousUser, User
 
+from backups.observation import stopped_by_pause
 from discovery.models import ObservationOutcome, SiteState
 from discovery.snapshot import CollectedSnapshot, Snapshot
 from operations import preparation
@@ -18,20 +20,6 @@ if TYPE_CHECKING:
     from servers.discovery_state import DiscoveryState
 
 type Account = User | AnonymousUser
-
-# The same interruption evidence the Backups section uses (backups/presentation.py).
-_INTERRUPTED_BY_PAUSE = frozenset(
-    {
-        "backup_paused",
-        "backup_dump",
-        "backup_files",
-        "backup_idle",
-        "backup_gate",
-        "backup_verify",
-        "backup_partial",
-        "automation_restore",
-    }
-)
 
 
 def _absent() -> preparation.SiteFacts:
@@ -59,15 +47,20 @@ def _paused(collected: CollectedSnapshot, identifier: str, gated: bool) -> bool:
     if not gated:
         return False
     backup = next((row for row in collected.backups.value if row.identifier == identifier), None)
-    last = backup.last if backup is not None else None
-    if last is None:
-        return False
-    return last.reason.startswith("restore_") or (
-        last.scope in ("full", "files") and last.reason in _INTERRUPTED_BY_PAUSE
-    )
+    return stopped_by_pause(backup.last if backup is not None else None)
 
 
-def site_facts(snapshot: Snapshot | None, identifier: str) -> preparation.SiteFacts:
+def site_facts(
+    snapshot: Snapshot | None,
+    identifier: str,
+    *,
+    rotation: str | None = None,
+) -> preparation.SiteFacts:
+    """One site's facts from one observation.
+
+    ``rotation`` replaces the snapshot's log-rotation value when a section renders read
+    evidence newer than the snapshot, so its card and note read the same evidence.
+    """
     if snapshot is None:
         return _absent()
     collected = snapshot.collected
@@ -81,7 +74,7 @@ def site_facts(snapshot: Snapshot | None, identifier: str) -> preparation.SiteFa
     settings = collected.settings.value
     cache = collected.cache.value
     gated = SITE_GATED in observed.missing
-    return preparation.SiteFacts(
+    facts = preparation.SiteFacts(
         present=True,
         convention=observed.file == f"/etc/caddy/sites/{identifier}.caddy",
         shape=preparation.SiteShape(observed.state.value),
@@ -105,6 +98,7 @@ def site_facts(snapshot: Snapshot | None, identifier: str) -> preparation.SiteFa
         has_cache=any(row.identifier == identifier for row in cache),
         log_rotation=observed.log_rotation,
     )
+    return replace(facts, log_rotation=rotation) if rotation is not None else facts
 
 
 def decide_for_site(
@@ -112,9 +106,11 @@ def decide_for_site(
     user: Account,
     identifier: str,
     requirements: preparation.Requirements,
+    *,
+    rotation: str | None = None,
 ) -> preparation.Decision:
     return preparation.decide(
         server_facts(state, user),
-        site_facts(state.snapshot, identifier),
+        site_facts(state.snapshot, identifier, rotation=rotation),
         requirements,
     )

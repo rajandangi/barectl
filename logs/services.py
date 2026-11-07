@@ -7,7 +7,7 @@ pages; they never connect.
 """
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.contrib.auth.models import AnonymousUser, User
@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import CollectedSnapshot, ObservedSite
-from operations import lifecycle, preparation
+from operations import change_requirements, lifecycle, preparation
 from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import VIEW_CHANGES, VIEW_EVIDENCE, RemoteOperation
 from servers.discovery_state import DiscoveryState, server_state
@@ -100,7 +100,7 @@ def context_for_site(
     active = any(view.active for view in views)
     rotation, rotation_files = _rotation_evidence(server, identifier, chosen, site)
     decision = (
-        rotation_decision(state, identifier, user)
+        rotation_decision(state, identifier, user, rotation=rotation)
         if isinstance(user, User)
         else preparation.Decision(False)
     )
@@ -128,7 +128,7 @@ def context_for_site(
         "logs_rotation_note": _rotation_note(rotation),
         "logs_rotation_files": rotation_files,
         "logs_rotation_can_prepare": decision.allowed,
-        "logs_rotation_reason": decision.reason.sentence if decision.reason is not None else "",
+        "logs_rotation_reason": decision.sentence,
         "logs_filter": LogFilterForm(
             initial={
                 "term": chosen.read.term if chosen is not None and chosen.read else "",
@@ -209,20 +209,21 @@ def _rotation_evidence(
     chosen: SourceView | None,
     site: ObservedSite | None,
 ) -> tuple[str, tuple[str, ...]]:
-    """Discovery's rotation state, or the newest read's evidence when discovery has none.
+    """The rotation state the Logs section shows: the newest read page, then discovery.
 
-    A transcript recorded before the typed field has no state; the page then supplies it.
+    A transcript recorded before the typed field has no state, so a stored read page's
+    non-empty state is newer evidence; the snapshot supplies it otherwise.
     """
     files: tuple[str, ...] = ()
     for view in (chosen,):
         page = view.page if view is not None else None
         if page is not None:
             files = page.rotation_files
-    if site is not None and site.log_rotation:
-        return site.log_rotation, files
+    # A read page carries rotation evidence newer than the snapshot, so a non-empty page
+    # state is what the section shows and what its card must decide from.
     if chosen is not None:
         page = chosen.page
-        if page is not None:
+        if page is not None and page.rotation:
             return page.rotation, page.rotation_files
     newest = (
         LogRead.objects.filter(server=server, identifier=identifier)
@@ -231,9 +232,11 @@ def _rotation_evidence(
         .first()
     )
     page = log_read.LogPage.from_document(newest.page) if newest is not None else None
-    if page is None:
-        return "", ()
-    return page.rotation, page.rotation_files
+    if page is not None and page.rotation:
+        return page.rotation, page.rotation_files
+    if site is not None and site.log_rotation:
+        return site.log_rotation, files
+    return "", ()
 
 
 def _rotation_note(state: str) -> str:
@@ -250,13 +253,31 @@ def _rotation_note(state: str) -> str:
     return "This site's log rotation file was edited outside the supported settings."
 
 
-def rotation_decision(state: DiscoveryState, identifier: str, user: User) -> preparation.Decision:
-    """Whether the reviewed Log rotation action is offered for an existing site."""
+def rotation_evidence(server: Server, identifier: str) -> str:
+    """The rotation state the Logs section itself would render, for its POST."""
+    site = _observed_site(server, identifier)
+    rotation, _files = _rotation_evidence(server, identifier, None, site)
+    return rotation
+
+
+def rotation_decision(
+    state: DiscoveryState,
+    identifier: str,
+    user: User,
+    *,
+    rotation: str | None = None,
+) -> preparation.Decision:
+    """Whether the reviewed Log rotation action is offered for an existing site.
+
+    ``rotation`` is the same evidence the Logs section renders; callers that have not read
+    it keep the snapshot's value.
+    """
     return decide_for_site(
         state,
         user,
         identifier,
-        replace(preparation.SITE, rotation_unsupported=True),
+        change_requirements.LOG_ROTATION,
+        rotation=rotation,
     )
 
 

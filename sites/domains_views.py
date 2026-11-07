@@ -9,7 +9,7 @@ from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
@@ -38,13 +38,13 @@ def context_for_site(
     site = _site(state, identifier)
     names = tuple(site.server_names) if site is not None else ()
     https = bool(site.https) if site is not None else True
-    decision = decide_for_site(state, user, identifier, preparation.SITE)
+    decision = decide_for_site(state, user, identifier, change_requirements.SITE_DOMAINS)
     return {
         "site_domains": names,
         "site_https": https,
         "site_domains_form": SiteDomainsForm(initial={"names": "\n".join(names), "https": https}),
         "site_domains_can_prepare": decision.allowed,
-        "site_domains_reason": decision.reason.sentence if decision.reason else "",
+        "site_domains_reason": decision.sentence,
     }
 
 

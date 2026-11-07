@@ -26,6 +26,7 @@ class LaravelReleaseIdentityTests(ControllerConfigTestCase):
     def test_a_release_row_alone_is_the_one_laravel_identity_every_card_reads(self) -> None:
         from automation.views import context_for_site as automation_context
         from automation.worker_views import context_for_site as worker_context
+        from cache.presentation import site_context as cache_context
         from laravel.settings_views import context_for_site as environment_context
         from sites.deploy_views import deploy_context
 
@@ -36,11 +37,16 @@ class LaravelReleaseIdentityTests(ControllerConfigTestCase):
 
         workers = worker_context(self.server, "alpha", self.user)
         scheduler = automation_context(self.server, "alpha", self.user)
+        cache = cache_context(self.server, "alpha", self.user)
         environment = environment_context(self.server, "alpha", self.user)
         deploy = deploy_context(self.server, "alpha", self.user)
 
         self.assertTrue(workers["queue_workers_can_prepare"])
         self.assertTrue(scheduler["scheduled_tasks_can_prepare"])
         self.assertEqual(scheduler["scheduled_tasks_kind"], "laravel")
+        self.assertTrue(cache["object_cache_applicable"])
+        self.assertEqual(cache["object_cache_application"], "laravel")
         self.assertTrue(environment["environment_can_prepare"])
         self.assertTrue(deploy["deploy_can_prepare"])
+        environment_page = self.client.get(f"/servers/{self.server.pk}/sites/alpha/environment/")
+        self.assertEqual(environment_page.status_code, 200)

@@ -195,7 +195,6 @@ if TYPE_CHECKING:
         SiteReadinessForm,
         WordPressSiteForm,
     )
-    from sites.preparation import decide_for_site
     from sites.settings_forms import SettingsChangeForm
     from sites.test_target_discovery import RecordedHttpSiteTests
     from wordpress.apps import WordPressConfig
@@ -417,8 +416,6 @@ if TYPE_CHECKING:
         _site.unread,
         _site.recent_backup,
     )
-    # #510-#514 cards call this; ticket #509 provides the seam before the first caller.
-    _preparation = (decide_for_site,)
     # Django's template engine reads this to compare with Status members instead of calling it.
     _template_enum = Status.do_not_call_in_templates
     # Django's migration loader reads this metadata on each Migration subclass.

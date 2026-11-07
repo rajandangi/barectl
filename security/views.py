@@ -11,13 +11,14 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
+from operations import change_requirements
 from operations import services as change_services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import CHANGE_SHARED
 from servers.discovery_state import server_state
 from servers.models import Server
-from servers.preparation import SERVER_SHARED, decide_for_server, refusal_sentence
+from servers.preparation import decide_for_server
 
 from .change import SLUG, STATES
 from .firewall import ACTIONS as FIREWALL_ACTIONS
@@ -112,9 +113,9 @@ def _prepare(
     if not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    decision = decide_for_server(server_state(server), request.user, SERVER_SHARED)
+    decision = decide_for_server(server_state(server), request.user, change_requirements.SECURITY)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_security", pk=pk)
     try:
         queued = change_services.request_prepare(server, request.user, slug, inputs=inputs)

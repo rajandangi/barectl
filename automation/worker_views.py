@@ -5,8 +5,6 @@ and the definition read from the site's own units. Preparing a change queues one
 review; the confirm screen and run progress are the shared change screens.
 """
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -15,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import server_state
@@ -51,13 +49,7 @@ def context_for_site(
         state,
         user,
         identifier,
-        replace(
-            preparation.SITE,
-            state=None,
-            application="laravel",
-            current_release=True,
-            open_site=True,
-        ),
+        change_requirements.LARAVEL_WORKERS,
     )
     allowed = decision.allowed
     definition = row.definition if row is not None else None
@@ -74,7 +66,7 @@ def context_for_site(
         "queue_workers_problem": row.problem if row is not None else "",
         "queue_workers_form": WorkerForm(definition=definition),
         "queue_workers_definition": definition,
-        "queue_workers_reason": decision.reason.sentence if decision.reason else "",
+        "queue_workers_reason": decision.sentence,
         "queue_workers_ready": allowed,
     }
 

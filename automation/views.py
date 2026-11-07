@@ -5,8 +5,6 @@ screens; only the action set and the wording differ. Opening the section makes n
 connection: it renders the latest observation's projection.
 """
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -15,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
-from operations import preparation, services
+from operations import change_requirements, preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import server_state
@@ -63,10 +61,10 @@ def context_for_site(
         else ()
     )
     line = lines[0] if lines else None
-    requirements = replace(
-        preparation.SITE,
-        application="laravel" if application == "laravel" else "wordpress",
-        no_application_problem=True,
+    requirements = (
+        change_requirements.LARAVEL_TASKS
+        if application == "laravel"
+        else change_requirements.WORDPRESS_TASKS
     )
     decision = decide_for_site(state, user, identifier, requirements)
     allowed = decision.allowed
@@ -77,7 +75,7 @@ def context_for_site(
         "scheduled_tasks_can_stop": allowed,
         "scheduled_tasks_can_run": allowed and bool(line and line.on and not line.running),
         "scheduled_tasks_form": ScheduleForm(choices=_choices(application)),
-        "scheduled_tasks_reason": decision.reason.sentence if decision.reason else "",
+        "scheduled_tasks_reason": decision.sentence,
         "scheduled_tasks_ready": allowed,
     }
 

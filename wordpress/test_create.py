@@ -134,6 +134,32 @@ class WordPressSiteTileTests(ControllerConfigTestCase):
             },
         )
 
+    def test_a_missing_manage_secrets_withholds_the_wordpress_tile_and_refuses_its_post(
+        self,
+    ) -> None:
+        record_wordpress_sites(self.server)
+        self.user.user_permissions.remove(self.user.user_permissions.get(codename="manage_secrets"))
+        sentence = "Changing this needs the manage-secrets permission."
+        page = self.client.get(f"/servers/{self.server.pk}/sites/create/wordpress/")
+        self.assertContains(page, sentence)
+        self.assertRegex(
+            page.content.decode(),
+            r"<button[^>]*disabled[^>]*>Prepare WordPress site review",
+        )
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/sites/wordpress/prepare/",
+            {
+                "names": "shop.example.com",
+                "title": "Shop",
+                "admin_username": "shopadmin",
+                "admin_email": "admin@example.com",
+                "php_version": "php84",
+            },
+            follow=True,
+        )
+        self.assertIn(sentence, [str(message) for message in refused.context["messages"]])
+        self.assertEqual(services.read_changes(self.server).rows, [])
+
     def test_a_viewer_without_prepare_permission_cannot_prepare_the_review(self) -> None:
         record_wordpress_sites(self.server)
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))

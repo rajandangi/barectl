@@ -11,10 +11,11 @@ from automation import fence, observation
 from automation.testing import automation, show
 from discovery.fakes import FakeServer
 from discovery.ssh import CommandResult
-from operations import engine
+from operations import engine, services
 from operations.consent import DeclaredEffect, Scope
-from operations.fakes import BOOT_ID, ChangeTestCase
+from operations.fakes import BOOT_ID, PREPARE_PERMISSIONS, ChangeTestCase
 from operations.inputs import PreparationInputs
+from operations.models import ChangePreparation
 
 SHOP = "shop"
 SITES_READ = "printf 'shop\\n' | LC_ALL=C sort"
@@ -90,6 +91,18 @@ class FencedReviewCase(ChangeTestCase):
         super().setUp()
         self.replace("set_site_php", kind("set_site_php", fenced_review))
         self.answer(automation(identifier=SHOP, timer=show(active="active")))
+
+    @override
+    def prepare(
+        self, kind: str = "set_site_php", *, perms: tuple[str, ...] = PREPARE_PERMISSIONS
+    ) -> ChangePreparation:
+        """Queue directly: these tests exercise fencing, not the site card's admission."""
+        self.sign_in_with(*perms)
+        preparation = services.request_prepare(self.server, self.user, kind)
+        if preparation is None:
+            self.fail("The fake server was busy.")
+        self.run_worker()
+        return preparation
 
     def replace(self, slug: str, replacement: engine.ChangeKind) -> None:
         """Register ``replacement`` for this test and put the installation's kind back."""

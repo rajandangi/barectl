@@ -196,6 +196,40 @@ class LogsPageTests(ControllerConfigTestCase):
         self.assertEqual(preparation.kind_slug, "set_up_log_rotation")
         self.assertEqual(preparation.inputs, {"version": 1, "identifier": "alpha"})
 
+    def test_a_supported_read_page_withholds_rotation_when_the_snapshot_is_empty(self) -> None:
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "view_evidence",
+        )
+        record_log_site(
+            self.server,
+            log_rotation="",
+            page=LogPage("observed", rotation="supported"),
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertContains(response, "Log rotation is set up.")
+        self.assertNotContains(response, "Set up log rotation")
+
+    def test_a_missing_read_page_offers_rotation_when_the_snapshot_says_supported(self) -> None:
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "view_evidence",
+        )
+        record_log_site(
+            self.server,
+            log_rotation="supported",
+            page=LogPage("observed", rotation="missing"),
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertContains(response, "Log rotation is not set up for this site yet.")
+        self.assertContains(response, "Set up log rotation")
+
     def test_a_missing_rotation_is_offered_and_a_supported_one_is_withheld(self) -> None:
         self.grant(
             "view_server",

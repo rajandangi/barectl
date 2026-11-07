@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -18,10 +18,10 @@ from django.views.decorators.http import require_GET, require_POST
 from dashboard.middleware import is_htmx_request
 from servers.discovery_state import server_state
 from servers.models import Server
-from servers.preparation import decide_for_server, refusal_sentence
+from servers.preparation import decide_for_server, stored_server_facts
+from sites.preparation import decide_for_site
 
-from . import engine, preparation, services
-from . import preparation as gate
+from . import change_requirements, engine, preparation, services
 from .consent import PREPARE_PERMISSIONS, permissions_for
 from .forms import (
     AcknowledgeForm,
@@ -80,12 +80,10 @@ def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     )
     if not user.has_perm("servers.view_server") or not user.has_perms(permissions):
         raise PermissionDenied
-    requirements = preparation.SERVER
-    if kind is not None and kind.writes_secrets:
-        requirements = replace(requirements, needs=requirements.needs | {preparation.Need.SECRET})
+    requirements = change_requirements.requirements_for(kind_slug)
     decision = decide_for_server(server_state(server), user, requirements)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_changes", pk=pk)
     if kind is None:
         messages.error(request, "Choose one of the supported kinds of change.")
@@ -146,7 +144,7 @@ def _change_context(
 ) -> dict[str, object]:
     preparation = row.preparation
     review = view.review
-    can_apply = _can_apply(request, view) and _server_can_prepare(preparation.server, request.user)
+    can_apply = _can_apply(request, view) and _apply_decision(preparation.server).allowed
     out_of_date = bool(
         review is not None
         and review.run_id is None
@@ -195,21 +193,13 @@ def _apply_reason(request: HttpRequest, view: ChangeView) -> str:
         return "Barectl refused this change. Its reasons are under Show details."
     if review.no_changes:
         return "Barectl found nothing to change."
-    if not _server_can_prepare(
-        review.review.preparation.server if review.review.preparation else None,
-        request.user,
-    ):
-        decision = _server_decision(
-            review.review.preparation.server if review.review.preparation else None,
-            request.user,
-        )
-        return (
-            decision.reason.sentence
-            if decision.reason
-            else (
-                "Barectl has no current manageable observation of this server, so it will not "
-                "apply changes."
-            )
+    decision = _apply_decision(
+        review.review.preparation.server if review.review.preparation else None
+    )
+    if not decision.allowed:
+        return decision.sentence or (
+            "Barectl has no current manageable observation of this server, so it will not "
+            "apply changes."
         )
     if not request.user.has_perms(review.permissions):
         return "Your role may view this change but not apply it."
@@ -218,45 +208,40 @@ def _apply_reason(request: HttpRequest, view: ChangeView) -> str:
 
 def _prepare_again_decision(
     request: HttpRequest, preparation: ChangePreparation
-) -> gate.Decision | None:
+) -> preparation.Decision | None:
+    """The same card requirement set the kind's offered change used.
+
+    A site change is decided against the site's current facts, so a partly applied,
+    not-following or unreadable site withholds Try again just as it withholds the card.
+    """
     kind = engine.kind_of(preparation.kind_slug)
     server = preparation.server
     user = request.user
     if kind is None or server is None or not isinstance(user, User):
         return None
-    requirements = gate.SERVER
-    if kind.writes_secrets:
-        requirements = replace(requirements, needs=requirements.needs | {gate.Need.SECRET})
-    return decide_for_server(server_state(server), user, requirements)
+    requirements = change_requirements.requirements_for(preparation.kind_slug, preparation.inputs)
+    state = server_state(server)
+    if not requirements.site:
+        return decide_for_server(state, user, requirements)
+    identifier = preparation.inputs.get("identifier")
+    if not isinstance(identifier, str):
+        return None
+    return decide_for_site(state, user, identifier, requirements)
 
 
 def _prepare_again_state(request: HttpRequest, preparation: ChangePreparation) -> tuple[bool, str]:
-    kind = engine.kind_of(preparation.kind_slug)
-    if kind is None or preparation.server is None:
+    if preparation.server is None:
         return False, ""
-    permissions = (
-        (*PREPARE_PERMISSIONS, MANAGE_SECRETS) if kind.writes_secrets else PREPARE_PERMISSIONS
-    )
     decision = _prepare_again_decision(request, preparation)
     allowed = (
-        request.user.has_perm("servers.view_server")
-        and request.user.has_perms(permissions)
-        and decision is not None
-        and decision.allowed
+        request.user.has_perm("servers.view_server") and decision is not None and decision.allowed
     )
     reason = (
-        decision.reason.sentence
-        if not allowed
-        and decision is not None
-        and decision.reason is not None
-        and request.user.has_perm("servers.view_server")
+        decision.sentence
+        if not allowed and decision is not None and request.user.has_perm("servers.view_server")
         else ""
     )
     return allowed, reason
-
-
-def _can_prepare_again(request: HttpRequest, preparation: ChangePreparation) -> bool:
-    return _prepare_again_state(request, preparation)[0]
 
 
 @require_POST
@@ -276,15 +261,11 @@ def change_prepare_again(request: HttpRequest, operation_id: int) -> HttpRespons
     if server is None:
         raise Http404
     user = _user(request)
-    if not _can_prepare_again(request, preparation):
-        decision = _server_decision(server, user)
-        if not decision.allowed:
-            messages.error(request, refusal_sentence(decision))
-            return redirect("change_detail", operation_id=operation_id)
+    decision = _prepare_again_decision(request, preparation)
+    if decision is None or not request.user.has_perm("servers.view_server"):
         raise PermissionDenied
-    decision = _server_decision(server, user)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("change_detail", operation_id=operation_id)
     try:
         queued = services.request_prepare(
@@ -339,15 +320,16 @@ def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
     )
 
 
-def _server_decision(server: Server | None, user: User | AnonymousUser) -> preparation.Decision:
-    """The gate's host, freshness and active-change rules, without a card's permissions."""
-    if server is None or not isinstance(user, User):
+def _apply_decision(server: Server | None) -> preparation.Decision:
+    """The run admission rule: host standing and freshness only.
+
+    The gate must not decide whether a reviewed change runs. Another active change is
+    not a reason to refuse an apply; the native mutation lock decides that when the run
+    starts (spec #507, US20).
+    """
+    if server is None:
         return preparation.Decision(False)
-    return decide_for_server(server_state(server), user, preparation.EMPTY)
-
-
-def _server_can_prepare(server: Server | None, user: User | AnonymousUser) -> bool:
-    return _server_decision(server, user).allowed
+    return preparation.decide(stored_server_facts(server_state(server)), None, preparation.EMPTY)
 
 
 def _submitted_confirmation(request: HttpRequest, review: ChangeReview) -> str | None:
@@ -391,9 +373,9 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:  # no
     if review is None:
         raise Http404
     user = _user(request)
-    decision = _server_decision(row.preparation.server, user)
+    decision = _apply_decision(row.preparation.server)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("change_detail", operation_id=operation_id)
     if not user.has_perms(
         permissions_for(Consent(review.consent), writes_secrets=review.writes_secrets)

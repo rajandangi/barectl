@@ -16,7 +16,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
-from operations import preparation
+from operations import change_requirements, preparation
 from operations import services as change_services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
@@ -51,10 +51,7 @@ BUSY = (
 CREATE_PLATFORM_VALUES = frozenset(value for value, _label in CREATE_PLATFORMS)
 # A Create site card needs a read, target-stack server and both site permissions. The form's
 # own readiness (PHP choices, database step) stays outside the gate.
-CREATE_REQUIREMENTS = preparation.Requirements(
-    needs=frozenset({preparation.Need.CHANGE, preparation.Need.SITE}),
-    target_stack=True,
-)
+CREATE_REQUIREMENTS = change_requirements.CREATE_SITE
 CREATION_REFUSED = "Run discovery and resolve the server's findings before creating a site."
 
 
@@ -85,8 +82,12 @@ def _create_options(
     return versions, installable, initial
 
 
-def _prepare_decision(state: DiscoveryState, user: User | AnonymousUser) -> preparation.Decision:
-    return decide_for_server(state, user, CREATE_REQUIREMENTS)
+def _prepare_decision(
+    state: DiscoveryState,
+    user: User | AnonymousUser,
+    requirements: preparation.Requirements = CREATE_REQUIREMENTS,
+) -> preparation.Decision:
+    return decide_for_server(state, user, requirements)
 
 
 def _can_prepare(
@@ -95,13 +96,17 @@ def _can_prepare(
     *,
     has_choices: bool,
     reason: str,
+    requirements: preparation.Requirements = CREATE_REQUIREMENTS,
 ) -> bool:
-    return _prepare_decision(state, user).allowed and has_choices and not reason
+    return _prepare_decision(state, user, requirements).allowed and has_choices and not reason
 
 
-def _gate_reason(state: DiscoveryState, user: User | AnonymousUser) -> str:
-    decision = _prepare_decision(state, user)
-    return decision.reason.sentence if decision.reason else ""
+def _gate_reason(
+    state: DiscoveryState,
+    user: User | AnonymousUser,
+    requirements: preparation.Requirements = CREATE_REQUIREMENTS,
+) -> str:
+    return _prepare_decision(state, user, requirements).sentence
 
 
 def _creation_refusal(
@@ -110,8 +115,9 @@ def _creation_refusal(
     *,
     has_choices: bool,
     reason: str = "",
+    requirements: preparation.Requirements = CREATE_REQUIREMENTS,
 ) -> str:
-    gate_reason = _gate_reason(state, user)
+    gate_reason = _gate_reason(state, user, requirements)
     if gate_reason:
         return gate_reason
     if not has_choices or reason:
@@ -352,9 +358,15 @@ def wordpress_site_context(
         "wordpress_site_reason": engine.reason,
         "wordpress_site_step": engine if engine.needed else None,
         "wordpress_site_can_prepare": _can_prepare(
-            state, user, has_choices=bool(versions) or bool(installable), reason=engine.reason
+            state,
+            user,
+            has_choices=bool(versions) or bool(installable),
+            reason=engine.reason,
+            requirements=change_requirements.CREATE_WORDPRESS_SITE,
         ),
-        "wordpress_site_gate_reason": _gate_reason(state, user),
+        "wordpress_site_gate_reason": _gate_reason(
+            state, user, change_requirements.CREATE_WORDPRESS_SITE
+        ),
         "wordpress_site_continuation": (
             step if step is not None and step.platform == "wordpress" else None
         ),
@@ -868,10 +880,9 @@ WORDPRESS_CREATE_SLUG = "create_wordpress_site"
 @never_cache
 @require_POST
 @login_required
-@permission_required(
-    (*PREPARE_PERMISSIONS, VIEW_SITES, "operations.manage_secrets"), raise_exception=True
-)
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
 def server_wordpress_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
+    """The WordPress gate names the manage-secrets need, so a missing grant is a sentence."""
     server = get_object_or_404(Server, pk=pk)
     user = request.user
     if not isinstance(user, User):

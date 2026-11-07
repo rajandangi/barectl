@@ -1,7 +1,5 @@
 """Prepare the Laravel Deploy and Roll back reviews from the site's Deployments section."""
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -11,7 +9,7 @@ from django.views.decorators.http import require_POST
 
 from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.inputs import PreparationInputs
 from operations.lifecycle import OperationRefused
@@ -54,33 +52,13 @@ def release_names(server: Server, identifier: str) -> tuple[str, ...]:
     )
 
 
-def _deploy_requirements() -> preparation.Requirements:
-    return replace(
-        preparation.SITE,
-        application="laravel",
-        releases_observed=True,
-        current_release=True,
-        open_site=True,
-    )
-
-
-def _rollback_requirements() -> preparation.Requirements:
-    return replace(
-        preparation.SITE,
-        application="laravel",
-        releases_observed=True,
-        retained_release=True,
-        open_site=True,
-    )
-
-
 def deploy_context(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
     snapshot = state.snapshot
-    deploy = decide_for_site(state, user, identifier, _deploy_requirements())
-    rollback = decide_for_site(state, user, identifier, _rollback_requirements())
+    deploy = decide_for_site(state, user, identifier, change_requirements.LARAVEL_DEPLOY)
+    rollback = decide_for_site(state, user, identifier, change_requirements.LARAVEL_ROLLBACK)
     releases = snapshot.collected.releases.value if snapshot is not None else ()
     present = tuple(
         release for release in releases if release.identifier == identifier and release.current
@@ -91,10 +69,10 @@ def deploy_context(
     permitted = user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
     return {
         "deploy_can_prepare": deploy.allowed,
-        "deploy_reason": deploy.reason.sentence if deploy.reason else "",
+        "deploy_reason": deploy.sentence,
         "deploy_settings_can_save": bool(permitted and not polling and present),
         "rollback_can_prepare": rollback.allowed,
-        "rollback_reason": rollback.reason.sentence if rollback.reason else "",
+        "rollback_reason": rollback.sentence,
         "rollback_form": RollbackForm(choices=choices),
         "deploy_settings_form": DeploySettingsForm(run_migrations=setting.run_migrations),
     }

@@ -4,29 +4,20 @@ Opening the section makes no SSH connection. The panel shows the non-secret offs
 passive discovery read; the access keys never appear here.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Final
 
 from django.contrib.auth.models import AnonymousUser, User
 
 from backups import convention
 from backups.observation import OffsiteStorage
-from operations import preparation
+from operations import change_requirements, preparation
 from servers.preparation import decide_for_server
 
 from .discovery_state import DiscoveryState
 from .models import Server
 
-BACKUP_STORAGE = replace(
-    preparation.SERVER,
-    needs=frozenset(
-        {
-            preparation.Need.CHANGE,
-            preparation.Need.SITE,
-            preparation.Need.SECRET,
-        }
-    ),
-)
+BACKUP_STORAGE = change_requirements.BACKUP_STORAGE
 
 SETUP_KIND: Final = "set_up_offsite_storage"
 REMOVE_KIND: Final = "remove_offsite_storage"
@@ -131,7 +122,7 @@ def context_for_server(
             value if isinstance(value, OffsiteStorage) else None, observed
         ),
         "backup_storage_can_prepare": can_prepare,
-        "backup_storage_reason": decision.reason.sentence if decision.reason else "",
+        "backup_storage_reason": decision.sentence,
         "backup_storage_can_replace": can_prepare and enabled,
         "backup_storage_setup_kind": SETUP_KIND,
         "backup_storage_remove_kind": REMOVE_KIND,

@@ -19,7 +19,7 @@ from operations.lifecycle import OperationRefused
 from operations.models import MANAGE_SECRETS
 from servers.discovery_state import server_state
 from servers.models import Server
-from servers.preparation import decide_for_server, refusal_sentence
+from servers.preparation import decide_for_server
 
 from .backup_storage import BACKUP_STORAGE, CONNECT_KIND, REMOVE_KIND, REPLACE_KIND, SETUP_KIND
 
@@ -49,7 +49,7 @@ def prepare_storage(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("server_settings", pk=pk)
     decision = decide_for_server(server_state(server), request.user, BACKUP_STORAGE)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_settings", pk=pk)
     try:
         queued = services.request_prepare(server, request.user, SETUP_KIND, inputs=inputs)
@@ -82,7 +82,7 @@ def prepare_remove_storage(request: HttpRequest, pk: int) -> HttpResponse:
         raise Http404
     decision = decide_for_server(server_state(server), request.user, BACKUP_STORAGE)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_settings", pk=pk)
     try:
         queued = services.request_prepare(server, request.user, REMOVE_KIND, inputs={"version": 1})
@@ -136,7 +136,7 @@ def prepare_connect(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("server_settings", pk=pk)
     decision = decide_for_server(server_state(server), request.user, BACKUP_STORAGE)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_settings", pk=pk)
     try:
         queued = services.request_prepare(server, request.user, CONNECT_KIND, inputs=inputs)
@@ -174,7 +174,7 @@ def prepare_replace_passphrase(request: HttpRequest, pk: int) -> HttpResponse:
         raise Http404
     decision = decide_for_server(server_state(server), request.user, BACKUP_STORAGE)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_settings", pk=pk)
     try:
         queued = services.request_prepare(server, request.user, REPLACE_KIND, inputs={"version": 1})

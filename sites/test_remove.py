@@ -211,21 +211,30 @@ class RemovalPageTests(ControllerConfigTestCase):
         )
         self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
 
-    def test_a_partial_site_without_a_domain_can_still_prepare_a_removal(self) -> None:
+    def test_a_partly_applied_site_withholds_removal_until_it_is_finished(self) -> None:
         from operations.services import read_changes
 
         record_shaped_sites(self.server)
-        response = self.client.get(f"/servers/{self.server.pk}/sites/omega/settings/")
+        sentence = (
+            "This site is partly applied; finish the change that is already in progress first."
+        )
+        url = f"/servers/{self.server.pk}/sites/omega/settings/"
+        response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'name="primary"')
-        response = self.client.post(
+        self.assertNotContains(response, 'name="primary"')
+        self.assertNotContains(
+            response,
+            f'action="/servers/{self.server.pk}/sites/omega/settings/remove/prepare/"',
+        )
+        self.assertContains(response, sentence)
+        refusal = self.client.post(
             f"/servers/{self.server.pk}/sites/omega/settings/remove/prepare/",
             {"primary": "omega.example.com"},
+            follow=True,
         )
-        rows = read_changes(self.server).rows
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0].preparation.inputs["primary"], "omega.example.com")
-        self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
+        self.assertRedirects(refusal, url)
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
 
     def test_a_not_following_site_offers_removal_and_withholds_the_convention_cards(
         self,

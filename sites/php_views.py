@@ -5,8 +5,6 @@ is gone; its selection form lives in Settings, and a version this server does no
 is offered as Step 1 through Add runtime, keeping the choice for the switch that follows.
 """
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -17,7 +15,7 @@ from django.views.decorators.http import require_POST
 from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from runtimes.change import SLUG as ADD_RUNTIME_SLUG
@@ -73,7 +71,7 @@ def context_for_site(
         state,
         user,
         identifier,
-        replace(preparation.SITE, state=None, completes=PHP_TRANSITION_INCOMPLETE),
+        change_requirements.SITE_PHP,
     )
     others = tuple(choice for choice in choices if choice.entry != current)
     back = next((choice for choice in others if choice.installed), others[0] if others else None)
@@ -99,7 +97,7 @@ def context_for_site(
             for choice in choices
         ),
         "site_php_can_prepare": bool(choices) and decision.allowed,
-        "site_php_reason": decision.reason.sentence if decision.reason else "",
+        "site_php_reason": decision.sentence,
     }
 
 
