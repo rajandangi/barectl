@@ -98,7 +98,9 @@ def context_for_site(
     )
     chosen = next((view for view in views if view.source.slug == selected), None)
     active = any(view.active for view in views)
-    rotation, rotation_files = _rotation_evidence(server, identifier, chosen, site)
+    # The rotation note and card describe the site, not the selected source: the POST
+    # derives the same site-wide evidence, so the two cannot disagree.
+    rotation, rotation_files = _rotation_evidence(server, identifier, site)
     decision = (
         rotation_decision(state, identifier, user, rotation=rotation)
         if isinstance(user, User)
@@ -206,25 +208,15 @@ def available_source(server: Server, identifier: str, slug: str) -> LogSource | 
 def _rotation_evidence(
     server: Server,
     identifier: str,
-    chosen: SourceView | None,
     site: ObservedSite | None,
 ) -> tuple[str, tuple[str, ...]]:
-    """The rotation state the Logs section shows: the newest read page, then discovery.
+    """The site-wide rotation state the Logs section shows: newest page, then discovery.
 
-    A transcript recorded before the typed field has no state, so a stored read page's
-    non-empty state is newer evidence; the snapshot supplies it otherwise.
+    The section shows one state for the site, not the selected source's, so its note and
+    its card decide from the same evidence as the POST. A transcript recorded before the
+    typed field has no state, so a stored read page's non-empty state is newer evidence;
+    the snapshot supplies it otherwise.
     """
-    files: tuple[str, ...] = ()
-    for view in (chosen,):
-        page = view.page if view is not None else None
-        if page is not None:
-            files = page.rotation_files
-    # A read page carries rotation evidence newer than the snapshot, so a non-empty page
-    # state is what the section shows and what its card must decide from.
-    if chosen is not None:
-        page = chosen.page
-        if page is not None and page.rotation:
-            return page.rotation, page.rotation_files
     newest = (
         LogRead.objects.filter(server=server, identifier=identifier)
         .exclude(page={})
@@ -235,7 +227,7 @@ def _rotation_evidence(
     if page is not None and page.rotation:
         return page.rotation, page.rotation_files
     if site is not None and site.log_rotation:
-        return site.log_rotation, files
+        return site.log_rotation, ()
     return "", ()
 
 
@@ -256,7 +248,7 @@ def _rotation_note(state: str) -> str:
 def rotation_evidence(server: Server, identifier: str) -> str:
     """The rotation state the Logs section itself would render, for its POST."""
     site = _observed_site(server, identifier)
-    rotation, _files = _rotation_evidence(server, identifier, None, site)
+    rotation, _files = _rotation_evidence(server, identifier, site)
     return rotation
 
 

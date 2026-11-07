@@ -230,6 +230,45 @@ class LogsPageTests(ControllerConfigTestCase):
         self.assertContains(response, "Log rotation is not set up for this site yet.")
         self.assertContains(response, "Set up log rotation")
 
+    def test_the_rotation_card_and_its_post_use_the_site_wide_rotation_evidence(self) -> None:
+        from django.contrib.messages import get_messages
+
+        from operations.models import ChangePreparation
+
+        self.grant(
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "view_evidence",
+        )
+        # The selected older source says rotation is missing; the newest read says it is
+        # supported. The card and the POST must both follow the newest, site-wide evidence.
+        record_log_site(
+            self.server,
+            log_rotation="",
+            page=LogPage("observed", rotation="missing"),
+            source="php_errors",
+        )
+        record_log_site(
+            self.server,
+            log_rotation="",
+            page=LogPage("observed", rotation="supported"),
+            source="application",
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/?log=php_errors")
+        self.assertContains(response, "Log rotation is set up.")
+        self.assertNotContains(response, "Log rotation is not set up for this site yet.")
+        self.assertNotContains(response, "Set up log rotation")
+        self.assertContains(response, "Log rotation is already set up for this site.")
+        response = self.client.post(f"/servers/{self.server.pk}/sites/alpha/logs/rotation/prepare/")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertEqual(ChangePreparation.objects.count(), 0)
+        self.assertEqual(
+            [str(message) for message in get_messages(response.wsgi_request)],
+            ["Log rotation is already set up for this site."],
+        )
+
     def test_a_missing_rotation_is_offered_and_a_supported_one_is_withheld(self) -> None:
         self.grant(
             "view_server",
