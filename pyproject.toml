@@ -49,6 +49,8 @@ max-complexity = 10
 [tool.ruff.lint.per-file-ignores]
 # Django generates class-level migration lists; preserve that framework format.
 "**/migrations/*.py" = ["RUF012"]
+# The eval runner is a command-line entry point; its output is the operator's report.
+"evals/runner.py" = ["T201"]
 
 [tool.mypy]
 python_version = "3.14"

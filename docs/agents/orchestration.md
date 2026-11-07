@@ -59,6 +59,8 @@ Test observable behavior, real native effects, failure recovery, authorization, 
 
 Complete the run only when every sub-issue's acceptance criteria are met and the parent's integration criterion holds: audit the implementation against every requirement in the parent specification, resolve remaining gaps, then close the parent last with the merged pull requests, literal verification results and material limitations. Keep audit failures visible; the existing dependency exception does not authorize bypassing later gates.
 
+A run that changes the harness (skills, steering docs or checks) follows [harness evals](evals.md): prepare a baseline and a candidate arm on the same pinned case, grade both, and merge only when the target metric improves and the regression cases hold. Record a negative result instead of deleting it.
+
 ## Long-running commands
 
 Run long commands in one persistent tool execution. Use the foreground runner, return the tool's live session handle promptly, and resume that session until the runner exits:
