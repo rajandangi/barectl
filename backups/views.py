@@ -297,11 +297,12 @@ def prepare_disable_retention(request: HttpRequest, pk: int, identifier: str) ->
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server_state(server), identifier, request.user)
+    state = server_state(server)
+    context = context_for_site(state, identifier, request.user)
     if not context["backups_can_disable_retention"]:
         messages.error(request, str(context["backups_disable_retention_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
-    return _prepare(request, pk, identifier, retention.DISABLE_SLUG, "site_backups")
+    return _prepare(request, pk, identifier, retention.DISABLE_SLUG, "site_backups", state=state)
 
 
 @require_POST
