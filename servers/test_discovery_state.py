@@ -7,14 +7,16 @@ worker or page. ``ReadTests`` read states through ``server_state``, ``inventory`
 
 from dataclasses import replace
 from typing import ClassVar, override
+from unittest import mock
 
 from django.test import SimpleTestCase
 from django.utils import timezone
 
+from discovery import snapshot as snapshot_module
 from discovery.fakes import COLLECTED, COLLECTED_AT, STALE, record_attempt
-from discovery.models import DiscoveryAttempt, ObservationOutcome
-from discovery.services import INTERRUPTED_FAILURE
-from discovery.snapshot import Observation, Snapshot
+from discovery.models import DiscoveryAttempt, DiscoverySnapshot, ObservationOutcome
+from discovery.services import INTERRUPTED_FAILURE, history, read_discovery
+from discovery.snapshot import Observation, Snapshot, SnapshotFacts, save_snapshot
 from operations.models import RemoteOperation
 from operations.services import ServerChanges
 
@@ -27,7 +29,7 @@ from .discovery_state import (
     server_state,
     site_page,
 )
-from .models import Server
+from .models import ConnectionDefinition, Server
 from .testing import SSH_CONFIG, ControllerConfigTestCase
 
 AttemptStatus = RemoteOperation.Status
@@ -293,3 +295,144 @@ class ReadTests(ControllerConfigTestCase):
                     [(row.server, row.status) for row in activity_rows()],
                     [(other, Status.VERIFIED), (self.server, wording)],
                 )
+
+
+class AttemptSummaryTests(ControllerConfigTestCase):
+    """A history row carries its attempt's facts, and holds a full snapshot only once."""
+
+    server: ClassVar[Server]
+
+    @classmethod
+    @override
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        cls.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+
+    def record_older_snapshot(self, revision: int) -> DiscoveryAttempt:
+        """A succeeded attempt for a past connection revision, holding a real snapshot."""
+        definition = ConnectionDefinition.objects.create(
+            server=self.server,
+            revision=revision,
+            mode="agent",
+            alias="web.example.com",
+            address="web.example.com",
+            username="root",
+            port=22,
+        )
+        attempt = record_attempt(self.server, AttemptStatus.SUCCEEDED)
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(connection=definition)
+        attempt.refresh_from_db()
+        save_snapshot(attempt, COLLECTED, COLLECTED_AT)
+        return attempt
+
+    def test_a_summary_carries_the_facts_of_the_snapshot_it_holds(self) -> None:
+        attempt = record_attempt(self.server, AttemptStatus.SUCCEEDED)
+        save_snapshot(attempt, COLLECTED, COLLECTED_AT)
+
+        (summary,) = read_discovery(self.server).history
+        self.assertEqual(summary.attempt, attempt)
+        facts = summary.snapshot
+        assert facts is not None  # noqa: S101 - the attempt holds a snapshot
+        self.assertIsInstance(facts, SnapshotFacts)
+        self.assertEqual(facts.collected_at, COLLECTED_AT)
+        self.assertEqual(facts.os_pretty_name, "Ubuntu 26.04.1 LTS")
+        self.assertEqual(facts.architecture.value, "x86_64")
+        self.assertEqual(facts.cpu_count.outcome, ObservationOutcome.UNSUPPORTED)
+        self.assertEqual(facts.memory_bytes.value, 4_121_137_152)
+        self.assertEqual(facts.filesystem.value, COLLECTED.filesystem.value)
+        self.assertEqual(
+            [(component.component, component.package.outcome) for component in facts.components],
+            [
+                (component.component, component.package.outcome)
+                for component in COLLECTED.components
+            ],
+        )
+
+        (view,) = server_state(self.server).history
+        self.assertEqual(view.collected_at, COLLECTED_AT)
+        self.assertEqual(view.os_pretty_name, "Ubuntu 26.04.1 LTS")
+        self.assertEqual(
+            [(warning.label, warning.outcome) for warning in view.warnings],
+            [("CPUs", ObservationOutcome.UNSUPPORTED)],
+        )
+
+    def test_a_summary_row_carries_the_attempt_fields_the_tables_show(self) -> None:
+        older = self.record_older_snapshot(1)
+        DiscoveryAttempt.objects.filter(pk=older.pk).update(host_key="ssh-ed25519 key")
+        older.refresh_from_db()
+
+        view = next(
+            row for row in server_state(self.server).history if row.operation_id == older.pk
+        )
+        self.assertEqual(view.status, Status.VERIFIED)
+        self.assertEqual(view.queued_at, older.queued_at)
+        self.assertEqual(view.started_at, older.started_at)
+        self.assertEqual(view.finished_at, older.finished_at)
+        self.assertEqual(view.failure, older.failure)
+        self.assertEqual(view.ssh_alias, "web.example.com")
+        self.assertEqual(view.host_key, "ssh-ed25519 key")
+        self.assertEqual(view.connection_revision, 1)
+        self.assertEqual(view.original_target, "root@web.example.com:22")
+        self.assertTrue(view.older_connection)
+        self.assertEqual(view.collected_at, COLLECTED_AT)
+        self.assertEqual(view.os_pretty_name, "Ubuntu 26.04.1 LTS")
+
+    def test_a_summary_says_when_an_attempt_holds_no_snapshot(self) -> None:
+        failed = record_attempt(self.server, AttemptStatus.FAILED, failure="Refused.")
+
+        (summary,) = read_discovery(self.server).history
+        self.assertEqual(summary.attempt, failed)
+        self.assertIsNone(summary.snapshot)
+
+        (view,) = server_state(self.server).history
+        self.assertIsNone(view.snapshot)
+        self.assertIsNone(view.collected_at)
+        self.assertEqual(view.os_pretty_name, "")
+        self.assertEqual(view.warnings, ())
+
+    def test_reading_history_rebuilds_no_stored_snapshot(self) -> None:
+        self.record_older_snapshot(1)
+        self.record_older_snapshot(2)
+        current = record_attempt(self.server, AttemptStatus.SUCCEEDED)
+        save_snapshot(current, COLLECTED, COLLECTED_AT)
+
+        with mock.patch.object(
+            snapshot_module,
+            "_read",
+            side_effect=AssertionError("a history row rebuilt a full snapshot"),
+        ):
+            listed = history()
+            rows = activity_rows()
+
+        self.assertEqual(len(listed), 3)
+        self.assertEqual([item.snapshot is not None for item in listed], [True, True, True])
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(row.snapshot is not None for row in rows))
+
+    def test_only_the_current_attempt_gets_its_full_snapshot(self) -> None:
+        historical = self.record_older_snapshot(1)
+        current = record_attempt(self.server, AttemptStatus.SUCCEEDED)
+        save_snapshot(current, COLLECTED, COLLECTED_AT)
+
+        real_read = snapshot_module._read
+
+        def guard(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
+            if row.attempt_id != current.pk:
+                raise AssertionError("rebuilt a historical attempt's snapshot")
+            return real_read(row, ssh_alias)
+
+        with mock.patch.object(snapshot_module, "_read", guard):
+            discovery = read_discovery(self.server)
+
+        self.assertEqual(discovery.attempt, current)
+        self.assertIn(historical, [item.attempt for item in discovery.history])
+        self.assertIsNotNone(discovery.snapshot)
+        assert discovery.snapshot is not None  # noqa: S101 - the current attempt holds one
+        observed = discovery.snapshot.collected
+        self.assertEqual(discovery.snapshot.collected_at, COLLECTED_AT)
+        self.assertEqual(
+            [site.identifier for site in observed.sites.value],
+            [site.identifier for site in COLLECTED.sites.value],
+        )
+        self.assertEqual(observed.components, COLLECTED.components)
+        self.assertEqual(observed.os.value, COLLECTED.os.value)
