@@ -257,10 +257,10 @@
     "discovery/root_read.py": "19eedbe42e4d8dc2c3fb92070ac0d2f8f634af46f3a31e0d8f93ce6f8b2d7f47",
     "discovery/services.py": "e32b9c44650a06b2f17fedfbf6ec134818bd0bd26d55af374742f42fb8858e11",
     "discovery/snapshot.py": "7d6574341c0ef4710a9f8ffac0f27a7053664d7c0143a82d7c5debea77c01924",
-    "discovery/source_manifest.py": "b69084ef7f0a3847901f14aa7ed2b2c225304778c097d06cf4006c0a4943ba19",
+    "discovery/source_manifest.py": "1c7428ef068a8d268a2df6f5bbc2a5f7d7741f16c55adc5a3741a520efa9d0f1",
     "discovery/ssh.py": "7c98822276fdad55c608f2400c649a2d6970443f6180c244d6d77b8cc9dde8e8",
     "discovery/ssh_testing.py": "47f04b161192226a41513ad0d5092f677d544ccafc35ef1c3da098d8dbf292dd",
-    "discovery/transcript_provenance.py": "6522bf311fd91c13a239cb37c341774954a619dd8cbf388cf32315a0511372a9",
+    "discovery/transcript_provenance.py": "fc26e5ca30add92e4497ba50a3f90901ff042e942e0e092cac19b5d51a35e84b",
     "disposable/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "disposable/change_testing.py": "7ef0708d25943de0a3376c82c034a4e8710d12a59f2f6319e4ff7a1e1c0afad7",
     "disposable/docker.py": "4484c1c4a9c5d9f7254b00892a48be29b15c0e066d2e6e31b3732ea7fcda3250",
@@ -734,6 +734,5 @@
     "ubuntu-24.04": "795224b8478eaf9219a635a1599d82eb8e77274011f7fde1b927724802cd56eb",
     "unknown-runtime-26.04": "10755de18623ac81ff48796f263b65606d50f275367a55d9ef2fc2f99959a101",
     "valkey-installed-26.04": "3d58984fc4472cfa09ff300d718ddf6e4e43309060508a50daf823df9c79b69c"
-  },
-  "audit_digest": "32b77973c1fea163d86ada1c690ea741e2e4a8f62fe3d2bce7b444abec32bcee"
+  }
 }

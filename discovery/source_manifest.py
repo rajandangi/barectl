@@ -163,7 +163,6 @@ def baseline_document(
     command_inputs: Mapping[str, str],
     capture_pins: Mapping[str, str],
     capture_states: Mapping[str, str],
-    audit_digest: str,
     command_neutral: bool = False,
 ) -> dict[str, object]:
     """The manifest for additions that no recorded command embeds.
@@ -193,7 +192,6 @@ def baseline_document(
         "capture_command_inputs": dict(sorted(command_inputs.items())),
         "capture_pins": dict(capture_pins),
         "capture_states": dict(capture_states),
-        "audit_digest": audit_digest,
     }
 
 
@@ -228,7 +226,6 @@ def refresh_baseline(*, command_neutral: bool = False) -> tuple[str, ...]:
         command_inputs=provenance.command_inputs(),
         capture_pins=transcripts.current_pins(),
         capture_states=states,
-        audit_digest=provenance.audit_digest(inputs),
         command_neutral=command_neutral,
     )
     temporary = MANIFEST.with_suffix(".tmp")

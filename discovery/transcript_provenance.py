@@ -111,11 +111,18 @@ def _resource_consumers_proven() -> bool:
 
 
 def recorded_audit_digest() -> str:
+    """The audit digest the manifest's recorded inputs imply.
+
+    The manifest keeps the per-file input digests, not their aggregate. A parallel worktree
+    can then merge independent per-file edits without an always-conflicting summary line.
+    """
     document = json.loads(source_manifest.MANIFEST.read_text(encoding="utf-8"))
-    value = document.get("audit_digest")
-    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
-        raise ValueError("The manifest has no audit digest.")
-    return value
+    value = document.get("capture_inputs")
+    if not isinstance(value, dict) or not all(
+        isinstance(name, str) and isinstance(digest, str) for name, digest in value.items()
+    ):
+        raise ValueError("The manifest has no capture inputs to audit.")
+    return audit_digest(value)
 
 
 def audit_digest(values: dict[str, str]) -> str:

@@ -88,7 +88,6 @@ class BaselineTests(SimpleTestCase):
             command_inputs={"a.py": "1"},
             capture_pins={"ubuntu": "pin"},
             capture_states={"state": "hash"},
-            audit_digest="a" * 64,
         )
 
     def test_an_added_harness_source_refreshes_inputs_and_sources(self) -> None:
@@ -96,7 +95,7 @@ class BaselineTests(SimpleTestCase):
         self.assertEqual(document["sources"], {"a.py": "1", "b.py": "2"})
         self.assertEqual(document["capture_inputs"], {"new.py": "input"})
         self.assertEqual(document["capture_command_inputs"], {"a.py": "1"})
-        self.assertEqual(document["audit_digest"], "a" * 64)
+        self.assertNotIn("audit_digest", document)
 
     def test_a_changed_or_removed_shared_source_still_needs_the_recording_pass(self) -> None:
         with self.assertRaisesMessage(source_manifest.BaselineRefused, "text changed"):
@@ -112,7 +111,6 @@ class BaselineTests(SimpleTestCase):
             command_inputs={"a.py": "1"},
             capture_pins={"ubuntu": "pin"},
             capture_states={"state": "hash"},
-            audit_digest="a" * 64,
             command_neutral=True,
         )
         self.assertEqual(document["sources"], {"a.py": "2"})
@@ -126,7 +124,6 @@ class BaselineTests(SimpleTestCase):
                 command_inputs={"a.py": "1"},
                 capture_pins={"ubuntu": "pin"},
                 capture_states={"state": "hash"},
-                audit_digest="a" * 64,
                 command_neutral=True,
             )
 
@@ -138,7 +135,6 @@ class BaselineTests(SimpleTestCase):
             command_inputs={"a.py": "1"},
             capture_pins={"ubuntu": "pin"},
             capture_states={"state": "hash"},
-            audit_digest="a" * 64,
         )
         self.assertEqual(document["sources"], {"a.py": "1"})
         self.assertEqual(document["capture_command_inputs"], {"a.py": "1"})
