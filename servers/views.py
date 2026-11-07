@@ -763,8 +763,8 @@ def site_page_response(  # noqa: C901 - one dispatcher for the site sections
         from cache.presentation import overview_context as cache_overview_context
         from sites.php_views import context_for_site as php_overview_context
 
-        context.update(php_overview_context(server, identifier, request.user))
-        context.update(cache_overview_context(server, identifier, request.user))
+        context.update(php_overview_context(state, identifier, request.user))
+        context.update(cache_overview_context(state, identifier, request.user))
     if target_site and section == "settings":
         from automation.views import context_for_site as automation_context_for_site
         from automation.worker_views import context_for_site as worker_context_for_site
@@ -775,24 +775,24 @@ def site_page_response(  # noqa: C901 - one dispatcher for the site sections
         from sites.readiness_views import context_for_site as readiness_context_for_site
         from sites.remove_views import context_for_site as remove_context_for_site
 
-        context.update(context_for_site(server, identifier, request.user))
-        context.update(php_context_for_site(server, identifier, request.user))
-        context.update(pool_context_for_site(server, identifier, request.user))
+        context.update(context_for_site(state, identifier, request.user))
+        context.update(php_context_for_site(state, identifier, request.user))
+        context.update(pool_context_for_site(state, identifier, request.user))
         context.update(
             readiness_context_for_site(
-                server,
+                state,
                 identifier,
                 request.user,
                 has_releases=bool(context.get("has_releases")),
             )
         )
-        context.update(domains_context_for_site(server, identifier, request.user))
+        context.update(domains_context_for_site(state, identifier, request.user))
         from cache.presentation import site_context as cache_context_for_site
 
-        context.update(cache_context_for_site(server, identifier, request.user))
-        context.update(remove_context_for_site(server, identifier, request.user))
-        context.update(automation_context_for_site(server, identifier, request.user))
-        context.update(worker_context_for_site(server, identifier, request.user))
+        context.update(cache_context_for_site(state, identifier, request.user))
+        context.update(remove_context_for_site(state, identifier, request.user))
+        context.update(automation_context_for_site(state, identifier, request.user))
+        context.update(worker_context_for_site(state, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
     if target_site and section == "database":

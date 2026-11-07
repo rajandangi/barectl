@@ -12,7 +12,7 @@ from discovery.presentation import VIEW_SITES
 from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from servers.discovery_state import server_state
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites.names import canonical_name, valid_identifier
 
@@ -23,19 +23,11 @@ SLUG = remove_kind.SLUG
 
 
 def context_for_site(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    state = server_state(server)
     snapshot = state.snapshot
-    site = (
-        next(
-            (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-            None,
-        )
-        if snapshot is not None
-        else None
-    )
-    names = tuple(site.server_names) if site is not None else ()
+    site = state.site(identifier)
+    names = tuple(site.domains) if site is not None else ()
     backup = (
         backup_presentation.backup_of(snapshot.collected, identifier)
         if snapshot is not None
@@ -63,7 +55,7 @@ def prepare_remove(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["site_remove_can_prepare"]:
         messages.error(
             request,
