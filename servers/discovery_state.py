@@ -21,7 +21,7 @@ from discovery.presentation import (
     summary_warnings,
 )
 from discovery.services import STALE_AFTER, history, latest_attempt_statuses, read_discovery
-from discovery.snapshot import AttemptSummary, Observation, Snapshot, SnapshotFacts
+from discovery.snapshot import AttemptSummary, Observation, ObservedSite, Snapshot, SnapshotFacts
 from operations.models import RemoteOperation
 from operations.services import ServerChanges, read_changes
 
@@ -130,7 +130,7 @@ def site_page(state: DiscoveryState, identifier: str) -> SitePage:
         return SitePage(identifier, None, "unknown", stale)
     if snapshot.collected.sites.outcome != ObservationOutcome.OBSERVED:
         return SitePage(identifier, None, "unknown", stale)
-    site = state.site(identifier)
+    site = state.shown_site(identifier)
     if site is not None:
         return SitePage(identifier, site, "", stale)
     return SitePage(identifier, None, "missing", stale)
@@ -222,11 +222,22 @@ class DiscoveryState:
         return present_sites(collected)
 
     @cached_property
+    def observed_sites(self) -> dict[str, ObservedSite]:
+        """The snapshot's site rows keyed by identifier, for a section's own lookups."""
+        if self.snapshot is None:
+            return {}
+        return {site.identifier: site for site in self.snapshot.collected.sites.value}
+
+    def site(self, identifier: str) -> ObservedSite | None:
+        """One site's observed row, without scanning the snapshot's site list."""
+        return self.observed_sites.get(identifier)
+
+    @cached_property
     def site_index(self) -> dict[str, ShownSite]:
-        """The sites keyed by identifier, so a section looks one up without a scan."""
+        """The presented sites keyed by identifier, for the page's one site view."""
         return {site.identifier: site for site in self.sites.sites}
 
-    def site(self, identifier: str) -> ShownSite | None:
+    def shown_site(self, identifier: str) -> ShownSite | None:
         return self.site_index.get(identifier)
 
     @cached_property

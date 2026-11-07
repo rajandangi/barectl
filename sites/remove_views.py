@@ -27,7 +27,7 @@ def context_for_site(
 ) -> dict[str, object]:
     snapshot = state.snapshot
     site = state.site(identifier)
-    names = tuple(site.domains) if site is not None else ()
+    names = tuple(site.server_names) if site is not None else ()
     backup = (
         backup_presentation.backup_of(snapshot.collected, identifier)
         if snapshot is not None

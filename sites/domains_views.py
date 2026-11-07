@@ -24,7 +24,7 @@ def context_for_site(
     state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     site = state.site(identifier)
-    names = tuple(site.domains) if site is not None else ()
+    names = tuple(site.server_names) if site is not None else ()
     https = bool(site.https) if site is not None else True
     decision = decide_for_site(state, user, identifier, change_requirements.SITE_DOMAINS)
     return {

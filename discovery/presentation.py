@@ -11,7 +11,6 @@ from typing import NamedTuple
 from django.template.defaultfilters import filesizeformat
 
 from bootstrap.standing import HostJudgment
-from sites.bodies.pool import SitePool
 
 from .models import (
     ObservationOutcome,
@@ -238,11 +237,6 @@ class ShownSite:
     https: bool = False
     readiness: str = "/"
     application: str = "plain"
-    # The Node.js runtime and the pool's operator-tunable settings, for Settings.
-    node_runtime: str = ""
-    pool: SitePool | None = None
-    # The PHP object-cache client enabled for this site's own master (Phase C #390).
-    client: str = ""
     # Whether the site has a complete recovery point in the fixed 48-hour window (#402).
     recent_backup: bool = True
 
@@ -284,9 +278,6 @@ def _site(site: ObservedSite, recent_missing: Collection[str] | None = None) -> 
         https=site.https,
         readiness=site.readiness,
         application=site.application,
-        node_runtime=site.node_runtime,
-        pool=site.pool,
-        client=site.client,
         recent_backup=recent_missing is None or site.identifier not in recent_missing,
     )
 
