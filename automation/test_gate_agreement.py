@@ -41,8 +41,8 @@ class LaravelReleaseIdentityTests(ControllerConfigTestCase):
         workers = worker_context(state, "alpha", self.user)
         scheduler = automation_context(state, "alpha", self.user)
         cache = cache_context(state, "alpha", self.user)
-        environment = environment_context(self.server, "alpha", self.user)
-        deploy = deploy_context(self.server, "alpha", self.user)
+        environment = environment_context(state, "alpha", self.user)
+        deploy = deploy_context(state, "alpha", self.user)
 
         self.assertTrue(workers["queue_workers_can_prepare"])
         self.assertTrue(scheduler["scheduled_tasks_can_prepare"])

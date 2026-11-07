@@ -27,10 +27,10 @@ from operations.fakes import APPLY_PERMISSIONS, ChangeTestCase
 from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview, ChangeRun
 from servers.models import Server
-from servers.testing import ControllerConfigTestCase
+from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 from sites.bodies.common import NativeState
 from sites.change import membership_command
-from sites.ui_testing import record_http_sites, record_wordpress_sites
+from sites.ui_testing import record_http_sites, record_older_snapshots, record_wordpress_sites
 from wordpress import actions
 from wordpress.bodies import actions as body_actions
 from wordpress.forms import WordPressPasswordForm
@@ -407,6 +407,14 @@ class WordPressPagesTests(ControllerConfigTestCase):
         self.assertContains(response, "Review password reset")
         self.assertContains(response, "Review core verification")
         self.assertContains(response, ">WordPress</a>")
+
+    def test_the_wordpress_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        record_wordpress_sites(self.server)
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/servers/{self.server.pk}/sites/shop/wordpress/",
+            lambda: record_older_snapshots(self.server, 3),
+        )
 
     def test_a_plain_php_site_has_no_wordpress_section(self) -> None:
         record_http_sites(self.server)
