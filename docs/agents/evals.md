@@ -49,6 +49,11 @@ set `BARECTL_EVAL_HOME` to choose another directory. A case is not committed bec
 a past ticket, a pinned commit and a local budget. A result is not committed because it is a
 record of one machine's trial.
 
+The workflow wrappers are tracked too: `.opencode/skills/barectl-implement-spec`,
+`barectl-code-review` and `barectl-retro`. They call the global `implement-spec`, `code-review`
+and `retro` skills and add the shared-seam, triage and eval rules for this repository. They
+never edit the global skill files.
+
 A case file is one JSON object:
 
 ```json

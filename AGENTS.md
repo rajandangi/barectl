@@ -38,6 +38,8 @@ Use a single root `GLOSSARY.md` and `docs/adr/`, created as terms and decisions 
 
 Delivering a specification and its sub-issues end to end as an autonomous orchestrator: read `docs/agents/orchestration.md`.
 
+Use the repo-local wrappers `barectl-implement-spec`, `barectl-code-review` and `barectl-retro` for spec delivery, review and retro. They call the global skills and add this repository's shared-seam, triage and [eval](docs/agents/evals.md) rules; never edit a global skill.
+
 A single ticket run (`/implement`, `/implement-spec`) meets the same completion bar: its pull request merged with the required checks green on the head commit, then the issue closed ([execution](docs/agents/orchestration.md#execution)). A commit is mid-run. A run that changes the harness (skills, steering docs or checks) records its [eval case](docs/agents/evals.md) and compares the baseline and candidate arms before merging.
 
 ## Development checks
