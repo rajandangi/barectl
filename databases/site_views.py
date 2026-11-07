@@ -17,7 +17,7 @@ from discovery.presentation import VIEW_SITES
 from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from servers.discovery_state import server_state
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites.names import valid_identifier
 from sites.preparation import decide_for_site
@@ -29,9 +29,8 @@ SLUG = site_kind.SLUG
 
 
 def context_for_site(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    state = server_state(server)
     snapshot = state.snapshot
     decision = decide_for_site(state, user, identifier, change_requirements.SITE_DATABASE)
     return {
@@ -53,7 +52,7 @@ def prepare_site_database(request: HttpRequest, pk: int, identifier: str) -> Htt
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["site_database_can_prepare"]:
         messages.error(
             request,

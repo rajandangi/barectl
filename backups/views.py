@@ -16,7 +16,7 @@ from discovery.snapshot import Snapshot
 from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from servers.discovery_state import server_state
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from servers.preparation import server_facts
 from sites.bodies.common import SITE_GATED
@@ -38,15 +38,11 @@ if TYPE_CHECKING:
     from discovery.snapshot import ObservedSite
 
 
-def _site(server: Server, identifier: str) -> tuple[Snapshot | None, ObservedSite | None]:
-    snapshot = server_state(server).snapshot
+def _site(state: DiscoveryState, identifier: str) -> tuple[Snapshot | None, ObservedSite | None]:
+    snapshot = state.snapshot
     if snapshot is None:
         return None, None
-    site = next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-        None,
-    )
-    return snapshot, site
+    return snapshot, state.site(identifier)
 
 
 def _target(snapshot: Snapshot | None, site: ObservedSite | None) -> bool:
@@ -63,19 +59,12 @@ def _offered(decision: preparation.Decision, data: bool, data_reason: str) -> tu
 
 
 def context_for_site(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     """Everything the Backups section shows, from stored rows only; no SSH."""
-    state = server_state(server)
+    server = state.server
     snapshot = state.snapshot
-    site = (
-        next(
-            (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-            None,
-        )
-        if snapshot is not None
-        else None
-    )
+    site = state.site(identifier)
     collected = snapshot.collected if snapshot is not None else None
     latest = check.latest_check(server, identifier)
     active = check.active(server, identifier)
@@ -184,7 +173,7 @@ def recovery_kit(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
     if not valid_identifier(identifier):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    snapshot, site = _site(server, identifier)
+    snapshot, site = _site(server_state(server), identifier)
     if not _target(snapshot, site):
         raise Http404
     collected = snapshot.collected if snapshot is not None else None
@@ -245,7 +234,7 @@ def prepare_copy(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
     if convention.POINT.fullmatch(point) is None:
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["backups_can_copy"]:
         messages.error(request, str(context["backups_copy_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
@@ -278,7 +267,7 @@ def prepare_retention(request: HttpRequest, pk: int, identifier: str) -> HttpRes
     if not days.isdigit() or int(days) not in convention.RETENTION_DAYS:
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["backups_can_set_retention"]:
         messages.error(request, str(context["backups_set_retention_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
@@ -308,7 +297,7 @@ def prepare_disable_retention(request: HttpRequest, pk: int, identifier: str) ->
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["backups_can_disable_retention"]:
         messages.error(request, str(context["backups_disable_retention_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
@@ -326,7 +315,7 @@ def prepare_keep(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
     if convention.POINT.fullmatch(point) is None:
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["backups_can_keep"]:
         messages.error(request, str(context["backups_keep_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
@@ -357,6 +346,7 @@ def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpRespo
     source = request.POST.get("source", "")
     if convention.POINT.fullmatch(point) is None or scope not in SCOPES:
         raise Http404
+    state: DiscoveryState | None = None
     if source:
         # A source is either a connected offsite source or a repository the last explicit
         # read listed as removed (#407, #408). The site is never its own removed source.
@@ -364,7 +354,8 @@ def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpRespo
             raise Http404
         server = get_object_or_404(Server, pk=pk)
         listed = {str(row.get("identifier")) for row in check.latest_removed(server)}
-        snapshot = server_state(server).snapshot
+        state = server_state(server)
+        snapshot = state.snapshot
         offsite = snapshot.collected.offsite.value if snapshot is not None else None
         connected = {row.identifier for row in offsite.sources} if offsite is not None else set()
         if source not in listed and source not in connected:
@@ -380,6 +371,7 @@ def prepare_restore(request: HttpRequest, pk: int, identifier: str) -> HttpRespo
         point=point,
         scope=scope,
         source=source,
+        state=state,
     )
 
 
@@ -397,7 +389,7 @@ def prepare_delete_removed(request: HttpRequest, pk: int, identifier: str) -> Ht
     listed = {str(row.get("identifier")) for row in check.latest_removed(server)}
     if source not in listed:
         raise Http404
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["backups_can_delete_removed"]:
         messages.error(request, str(context["backups_delete_removed_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
@@ -441,11 +433,12 @@ def _prepare(  # noqa: C901 - one guarded preparation
     scope: str = "database",
     source: str = "",
     before_deploy: bool = False,
+    state: DiscoveryState | None = None,
 ) -> HttpResponse:
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(state or server_state(server), identifier, request.user)
     if slug == ENABLE_SLUG and not context["backups_can_enable"]:
         messages.error(request, str(context["backups_enable_reason"]))
         return redirect(target, pk=pk, identifier=identifier)
@@ -499,7 +492,7 @@ def check_now(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["backups_can_check"]:
         messages.error(
             request,

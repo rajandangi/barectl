@@ -9,11 +9,12 @@ from django.views.decorators.http import require_POST
 
 from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
+from discovery.snapshot import Snapshot
 from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.inputs import PreparationInputs
 from operations.lifecycle import OperationRefused
-from servers.discovery_state import server_state
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites.preparation import decide_for_site
 
@@ -37,10 +38,8 @@ def deploy_settings(server: Server, identifier: str) -> SiteDeploySetting:
     return setting
 
 
-def release_names(server: Server, identifier: str) -> tuple[str, ...]:
+def release_names(snapshot: Snapshot | None, identifier: str) -> tuple[str, ...]:
     """The site's retained releases that a Roll back may reactivate."""
-    state = server_state(server)
-    snapshot = state.snapshot
     if snapshot is None:
         return ()
     return tuple(
@@ -53,9 +52,9 @@ def release_names(server: Server, identifier: str) -> tuple[str, ...]:
 
 
 def deploy_context(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    state = server_state(server)
+    server = state.server
     snapshot = state.snapshot
     deploy = decide_for_site(state, user, identifier, change_requirements.LARAVEL_DEPLOY)
     rollback = decide_for_site(state, user, identifier, change_requirements.LARAVEL_ROLLBACK)
@@ -63,9 +62,9 @@ def deploy_context(
     present = tuple(
         release for release in releases if release.identifier == identifier and release.current
     )
-    choices = release_names(server, identifier)
+    choices = release_names(snapshot, identifier)
     setting = deploy_settings(server, identifier)
-    polling = services.read_changes(server).polling
+    polling = state.changes.polling
     permitted = user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
     return {
         "deploy_can_prepare": deploy.allowed,
@@ -85,7 +84,7 @@ def prepare_deploy(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = deploy_context(server, identifier, request.user)
+    context = deploy_context(server_state(server), identifier, request.user)
     if not context["deploy_can_prepare"]:
         messages.error(request, str(context["deploy_reason"]))
         return redirect("site_deployments", pk=pk, identifier=identifier)
@@ -137,11 +136,12 @@ def prepare_rollback(request: HttpRequest, pk: int, identifier: str) -> HttpResp
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = deploy_context(server, identifier, request.user)
+    state = server_state(server)
+    context = deploy_context(state, identifier, request.user)
     if not context["rollback_can_prepare"]:
         messages.error(request, str(context["rollback_reason"]))
         return redirect("site_deployments", pk=pk, identifier=identifier)
-    form = RollbackForm(request.POST, choices=release_names(server, identifier))
+    form = RollbackForm(request.POST, choices=release_names(state.snapshot, identifier))
     if not form.is_valid():
         messages.error(request, INVALID)
         return redirect("site_deployments", pk=pk, identifier=identifier)

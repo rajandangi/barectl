@@ -17,7 +17,7 @@ from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import MANAGE_SECRETS
-from servers.discovery_state import server_state
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites.names import valid_identifier
 from sites.preparation import decide_for_site
@@ -32,9 +32,8 @@ INVALID = "Choose a key and whether to set or remove it on a current complete Wo
 
 
 def context_for_site(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    state = server_state(server)
     snapshot = state.snapshot
     settings = snapshot.collected.settings if snapshot is not None else None
     rows = (
@@ -71,7 +70,7 @@ def prepare_settings(request: HttpRequest, pk: int, identifier: str) -> HttpResp
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["wordpress_settings_can_prepare"]:
         messages.error(request, str(context["wordpress_settings_reason"]))
         return redirect("site_wordpress", pk=pk, identifier=identifier)

@@ -269,6 +269,13 @@ class SettingsPageTests(ControllerConfigTestCase):
             self.client, url, lambda: self.record_older_snapshots(3)
         )
 
+    def test_the_environment_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.laravel()
+        url = f"/servers/{self.server.pk}/sites/alpha/environment/"
+        assert_query_count_flat_as_history_grows(
+            self.client, url, lambda: self.record_older_snapshots(3)
+        )
+
     def record_older_snapshots(self, count: int) -> None:
         """Record attempts for past connection revisions, each holding a real snapshot."""
         snapshot = current_snapshot(self.server)
@@ -380,7 +387,9 @@ class ReadinessPageTests(ControllerConfigTestCase):
         assert reason is not None  # noqa: S101 - narrows the optional for mypy
         self.assertIs(reason.name, ReasonName.RELEASES_NOT_OBSERVED)
         self.assertEqual(reason.sentence, sentence)
-        self.assertFalse(deploy_context(self.server, "alpha", self.user)["deploy_can_prepare"])
+        self.assertFalse(
+            deploy_context(server_state(self.server), "alpha", self.user)["deploy_can_prepare"]
+        )
 
     def test_a_partly_applied_laravel_site_withholds_the_automation_cards(self) -> None:
         release = ObservedRelease("alpha", "release", "commit", 1, SiteState.MANAGED, True)

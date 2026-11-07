@@ -27,7 +27,8 @@ from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from operations.services import read_changes
 from runtimes.catalog import Architecture
 from servers.models import Server
-from servers.testing import ControllerConfigTestCase
+from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
+from sites.ui_testing import record_older_snapshots
 
 from . import binding, observation, site
 
@@ -252,6 +253,14 @@ class SiteBindingPageTests(ControllerConfigTestCase):
         self.snapshot()
         response = self.client.get(f"/servers/{self.server.pk}/sites/{IDENTIFIER}/database/")
         self.assertContains(response, "Install one database engine")
+
+    def test_the_database_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.snapshot(_component(binding.MARIADB, "1:11.8.6-5ubuntu0.1"))
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/servers/{self.server.pk}/sites/{IDENTIFIER}/database/",
+            lambda: record_older_snapshots(self.server, 3),
+        )
 
     def test_a_viewer_cannot_queue_a_site_database(self) -> None:
         self.snapshot(_component(binding.MARIADB, "1:11.8.6-5ubuntu0.1"))
