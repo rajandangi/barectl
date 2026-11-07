@@ -16,8 +16,17 @@ from discovery.snapshot import current_snapshot, save_snapshot
 from operations.models import ChangePreparation, RemoteOperation
 from operations.services import read_changes
 from servers.models import Server
-from servers.testing import HTMX_FRAGMENT, ControllerConfigTestCase
-from sites.ui_testing import record_http_sites, record_shaped_sites, record_step_run
+from servers.testing import (
+    HTMX_FRAGMENT,
+    ControllerConfigTestCase,
+    assert_query_count_flat_as_history_grows,
+)
+from sites.ui_testing import (
+    record_http_sites,
+    record_older_snapshots,
+    record_shaped_sites,
+    record_step_run,
+)
 
 BANNED = (
     "master",
@@ -99,6 +108,13 @@ class CreateSitePageTests(ControllerConfigTestCase):
         for word in BANNED:
             with self.subTest(word=word):
                 self.assertNotRegex(text, rf"\b{re.escape(word)}\b")
+
+    def test_the_create_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/servers/{self.server.pk}/sites/create/",
+            lambda: record_older_snapshots(self.server, 3),
+        )
 
     def test_opening_the_page_makes_no_ssh_connection(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):

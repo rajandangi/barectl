@@ -68,6 +68,7 @@ changes nothing on the server.
 The old `stack/`, `setup/` and `changes/` URLs redirect to Advanced, the server page and
 Activity.
 
+<a id="site-pages"></a>
 ## Sites
 
 A site page opens on **Overview**: its address with an http or https link, its platform,
@@ -95,6 +96,13 @@ A site page shows a stale notice while a later check is queued, running or faile
 keeps the last successful snapshot. When the last complete observation confirms the site
 is gone, the page says **Site not found in the latest observation** and offers no change
 controls.
+
+A site page, like every dashboard page, builds one [Server read](../GLOSSARY.md) for the
+request: the server's discovery state, its change activity and a site index. It passes
+that read to every section, so two sections cannot describe different moments. The read is
+per request and never served from an earlier request's cache; a later connection check is
+reflected the next time the page loads. A request that queues work, such as a change or a
+check, builds a new read after queueing so the redrawn page reflects what it just queued.
 
 The old `runtime/` and `advanced/` URLs redirect to Settings and Logs.
 
