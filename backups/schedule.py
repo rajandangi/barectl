@@ -1110,6 +1110,11 @@ def context_for_site(server: Server, identifier: str, context: dict[str, object]
     context["backup_schedule_problem"] = row.problem if row is not None else ""
     context["backup_schedule_offsite"] = bool(row.offsite) if row is not None else False
     context["backups_can_schedule"] = bool(context.get("backups_can_back_up_full"))
+    context["backups_schedule_reason"] = (
+        ""
+        if context["backups_can_schedule"]
+        else str(context.get("backups_back_up_full_reason", ""))
+    )
 
 
 def recent_missing(collected: object, now: datetime | None = None) -> set[str] | None:
@@ -1181,6 +1186,12 @@ def prepare_schedule(request: HttpRequest, pk: int, identifier: str) -> HttpResp
             scope=scope,
             offsite=offsite,
         )
+    from .views import context_for_site
+
+    context = context_for_site(server, identifier, request.user)
+    if not context["backups_can_schedule"]:
+        messages.error(request, str(context["backups_schedule_reason"]))
+        return redirect("site_backups", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(server, request.user, SLUG, inputs=inputs)
     except OperationRefused, ValueError:

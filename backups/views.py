@@ -11,24 +11,24 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import Snapshot
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from operations.models import MANAGE_SECRETS
 from servers.discovery_state import server_state
 from servers.models import Server
+from servers.preparation import server_facts
 from sites.bodies.common import SITE_GATED
 from sites.names import valid_identifier
+from sites.preparation import site_facts
 
 from . import check, convention, downloads, integrity, presentation, retention, schedule
 from .change import BACKUP_SLUG, ENABLE_SLUG, FULL_SLUG
 from .export import SLUG as EXPORT_SLUG
 from .models import BackupExport
 from .offsite import COPY_SLUG
+from .preparation import BASE, DESTRUCTIVE, ENABLE, EXPORT, REOPEN
 from .removed import SLUG as DELETE_REMOVED_SLUG
 from .reopen import SLUG as REOPEN_SLUG
 from .restore import SCOPES
@@ -51,6 +51,19 @@ def _site(server: Server, identifier: str) -> tuple[Snapshot | None, ObservedSit
 
 def _target(snapshot: Snapshot | None, site: ObservedSite | None) -> bool:
     return site is not None and site.file == f"/etc/caddy/sites/{site.identifier}.caddy"
+
+
+def _sentence(decision: preparation.Decision) -> str:
+    return decision.reason.sentence if decision.reason is not None else ""
+
+
+def _offered(decision: preparation.Decision, data: bool, data_reason: str) -> tuple[bool, str]:
+    """Whether a card is offered, and the one sentence that explains its absence."""
+    if not decision.allowed:
+        return False, _sentence(decision)
+    if not data:
+        return False, data_reason
+    return True, ""
 
 
 def context_for_site(
@@ -84,23 +97,19 @@ def context_for_site(
     )
     downloads.expire(server, identifier)
     target = _target(snapshot, site)
-    ready = (
-        target
-        and snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and site is not None
-        and site.outcome == ObservationOutcome.OBSERVED
-        and (site.state == "managed" or gated)
-    )
-    managed = ready and site is not None and site.state == "managed"
-    polling = services.read_changes(server).polling
-    can_prepare = bool(
-        ready
-        and state.can_prepare_changes
-        and not polling
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-    )
+    managed = target and site is not None and site.state == "managed"
+    facts = server_facts(state, user)
+    observed = site_facts(snapshot, identifier)
+
+    def decide(requirements: preparation.Requirements) -> preparation.Decision:
+        return preparation.decide(facts, observed, requirements)
+
+    base = decide(BASE)
+    enable = decide(ENABLE)
+    reopen = decide(REOPEN)
+    destructive = decide(DESTRUCTIVE)
+    export = decide(EXPORT)
+    enabled = view.enabled
     offsite = collected.offsite.value if collected is not None else None
     sources = []
     if offsite is not None and offsite.configured:
@@ -113,7 +122,7 @@ def context_for_site(
                     "problem": source.problem,
                 }
             )
-    context = {
+    context: dict[str, object] = {
         "backups": view,
         "backups_sources": sources,
         "backups_exports": tuple(
@@ -122,23 +131,7 @@ def context_for_site(
             .order_by("-created_at", "-pk")[:5]
         ),
         "backups_target": target,
-        "backups_can_enable": can_prepare and managed and user.has_perm(MANAGE_SECRETS),
-        "backups_can_back_up": can_prepare and managed and view.enabled and view.database,
-        "backups_can_back_up_full": can_prepare and managed and view.enabled,
-        "backups_can_copy": can_prepare and managed and view.enabled and view.offsite is not None,
-        "backups_can_reopen": can_prepare and view.reopen,
-        "backups_can_restore": (
-            can_prepare
-            and managed
-            and view.enabled
-            and user.has_perm("operations.change_destructive")
-        ),
-        "backups_can_delete_removed": bool(
-            can_prepare and user.has_perm("operations.change_destructive")
-        ),
-        "backups_can_export": (
-            can_prepare and managed and view.enabled and user.has_perm("operations.change_shared")
-        ),
+        "backups_site_reason": _sentence(base),
         "backups_can_download": user.has_perms(
             ("servers.view_server", VIEW_SITES, "operations.change_shared")
         ),
@@ -146,14 +139,44 @@ def context_for_site(
             managed and user.has_perms((*check.READ_PERMISSIONS, VIEW_SITES))
         ),
         "backups_database_reason": ("" if view.database else view.database_reason),
-        "backups_polling": polling or active is not None,
         "backups_kit_lines": presentation.kit_lines(server.name, identifier, collected),
     }
-    retention.context_for_site(server, identifier, context)
-    context["backups_can_set_retention"] = bool(
-        can_prepare and managed and view.enabled and user.has_perm("operations.change_destructive")
+    context["backups_can_enable"], context["backups_enable_reason"] = _offered(enable, True, "")
+    context["backups_can_back_up"], context["backups_back_up_reason"] = _offered(
+        base,
+        enabled and view.database,
+        view.database_reason or "Enable backups before taking a backup.",
     )
-    context["backups_can_keep"] = bool(can_prepare and managed and view.enabled)
+    context["backups_can_back_up_full"], context["backups_back_up_full_reason"] = _offered(
+        base, enabled, "Enable backups before taking a backup."
+    )
+    context["backups_can_copy"], context["backups_copy_reason"] = _offered(
+        base,
+        enabled and view.offsite is not None,
+        "Enable backups and set up offsite storage before copying a point offsite.",
+    )
+    context["backups_can_reopen"], context["backups_reopen_reason"] = _offered(
+        reopen,
+        view.reopen,
+        "This site is not paused by a full backup, so there is nothing to reopen.",
+    )
+    context["backups_can_restore"], context["backups_restore_reason"] = _offered(
+        destructive, enabled, "Enable backups before restoring a recovery point."
+    )
+    context["backups_can_delete_removed"], context["backups_delete_removed_reason"] = _offered(
+        destructive, True, ""
+    )
+    context["backups_can_export"], context["backups_export_reason"] = _offered(
+        export, enabled, "Enable backups before exporting a recovery point."
+    )
+    context["backups_can_set_retention"], context["backups_set_retention_reason"] = _offered(
+        destructive, enabled, "Enable backups before setting retention."
+    )
+    context["backups_can_keep"], context["backups_keep_reason"] = _offered(
+        base, enabled, "Enable backups before keeping a recovery point."
+    )
+    retention.context_for_site(server, identifier, context)
+    schedule.context_for_site(server, identifier, context)
     return context
 
 
@@ -179,7 +202,7 @@ def recovery_kit(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
 
 @require_POST
 @login_required
-@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES, MANAGE_SECRETS), raise_exception=True)
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
 def prepare_enable(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     return _prepare(request, pk, identifier, ENABLE_SLUG, "site_backups")
 
@@ -228,11 +251,7 @@ def prepare_copy(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
     server = get_object_or_404(Server, pk=pk)
     context = context_for_site(server, identifier, request.user)
     if not context["backups_can_copy"]:
-        messages.error(
-            request,
-            "Barectl cannot copy this recovery point yet. Set up offsite storage and wait "
-            "for the current operation.",
-        )
+        messages.error(request, str(context["backups_copy_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
@@ -265,11 +284,7 @@ def prepare_retention(request: HttpRequest, pk: int, identifier: str) -> HttpRes
     server = get_object_or_404(Server, pk=pk)
     context = context_for_site(server, identifier, request.user)
     if not context["backups_can_set_retention"]:
-        messages.error(
-            request,
-            "Barectl cannot change this site's retention yet. Wait for the current "
-            "operation or ask an administrator.",
-        )
+        messages.error(request, str(context["backups_set_retention_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
@@ -299,7 +314,7 @@ def prepare_disable_retention(request: HttpRequest, pk: int, identifier: str) ->
     server = get_object_or_404(Server, pk=pk)
     context = context_for_site(server, identifier, request.user)
     if not context["backups_can_disable_retention"]:
-        messages.error(request, "This site has no retention policy to turn off.")
+        messages.error(request, str(context["backups_disable_retention_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
     return _prepare(request, pk, identifier, retention.DISABLE_SLUG, "site_backups")
 
@@ -317,10 +332,7 @@ def prepare_keep(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
     server = get_object_or_404(Server, pk=pk)
     context = context_for_site(server, identifier, request.user)
     if not context["backups_can_keep"]:
-        messages.error(
-            request,
-            "Barectl cannot keep this recovery point yet. Wait for the current operation.",
-        )
+        messages.error(request, str(context["backups_keep_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
@@ -391,11 +403,7 @@ def prepare_delete_removed(request: HttpRequest, pk: int, identifier: str) -> Ht
         raise Http404
     context = context_for_site(server, identifier, request.user)
     if not context["backups_can_delete_removed"]:
-        messages.error(
-            request,
-            "Barectl cannot delete this removed site's backups. Wait for the current "
-            "operation or ask an administrator.",
-        )
+        messages.error(request, str(context["backups_delete_removed_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
@@ -443,45 +451,22 @@ def _prepare(  # noqa: C901 - one guarded preparation
     server = get_object_or_404(Server, pk=pk)
     context = context_for_site(server, identifier, request.user)
     if slug == ENABLE_SLUG and not context["backups_can_enable"]:
-        messages.error(
-            request,
-            "Barectl cannot enable backups here yet. Run discovery and resolve the "
-            "server's findings, or wait for the current operation.",
-        )
+        messages.error(request, str(context["backups_enable_reason"]))
         return redirect(target, pk=pk, identifier=identifier)
     if slug == BACKUP_SLUG and not context["backups_can_back_up"]:
-        messages.error(
-            request,
-            "Barectl cannot take this backup yet. Enable backups and add the site's "
-            "database first, or wait for the current operation.",
-        )
+        messages.error(request, str(context["backups_back_up_reason"]))
         return redirect(target, pk=pk, identifier=identifier)
     if slug == FULL_SLUG and not context["backups_can_back_up_full"]:
-        messages.error(
-            request,
-            "Barectl cannot take a full backup yet. Enable backups and wait for the current "
-            "operation.",
-        )
+        messages.error(request, str(context["backups_back_up_full_reason"]))
         return redirect(target, pk=pk, identifier=identifier)
     if slug == REOPEN_SLUG and not context["backups_can_reopen"]:
-        messages.error(
-            request,
-            "This site is not paused by a full backup, so there is nothing to reopen.",
-        )
+        messages.error(request, str(context["backups_reopen_reason"]))
         return redirect(target, pk=pk, identifier=identifier)
     if slug == RESTORE_SLUG and not context["backups_can_restore"]:
-        messages.error(
-            request,
-            "Barectl cannot restore this site yet. Check backups and wait for the current "
-            "operation.",
-        )
+        messages.error(request, str(context["backups_restore_reason"]))
         return redirect(target, pk=pk, identifier=identifier)
     if slug == EXPORT_SLUG and not context["backups_can_export"]:
-        messages.error(
-            request,
-            "Barectl cannot export this recovery point yet. Wait for the current operation "
-            "or ask an administrator.",
-        )
+        messages.error(request, str(context["backups_export_reason"]))
         return redirect(target, pk=pk, identifier=identifier)
     inputs: dict[str, object] = {"version": 1, "identifier": identifier}
     if slug in (RESTORE_SLUG, EXPORT_SLUG):

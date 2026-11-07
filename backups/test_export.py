@@ -13,6 +13,7 @@ import time
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast, override
 
+from django.contrib.messages import get_messages
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
@@ -603,6 +604,10 @@ class ExportRequestTests(ChangeTestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertFalse(ChangePreparation.objects.exists())
+        self.assertIn(
+            "Changing this needs the shared-change permission.",
+            [str(message) for message in get_messages(response.wsgi_request)],
+        )
 
     def test_cancel_export_needs_csrf_and_removes_the_copy(self) -> None:
         directory = downloads.local_root(TOKEN)
