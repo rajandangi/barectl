@@ -103,7 +103,7 @@ def prepare_site_cache(request: HttpRequest, pk: int, identifier: str) -> HttpRe
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = site_context(server, identifier, request.user)
+    context = site_context(server_state(server), identifier, request.user)
     if not context["object_cache_applicable"]:
         messages.error(request, "This site is not a verified WordPress or Laravel site.")
         return redirect("site_settings", pk=pk, identifier=identifier)

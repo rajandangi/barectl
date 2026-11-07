@@ -5,23 +5,26 @@ from dataclasses import replace
 from typing import override
 from unittest import mock
 
+from django.contrib.auth.models import AnonymousUser
+from django.test import SimpleTestCase
 from django.utils import timezone
 
-from discovery.fakes import record_attempt
+from discovery.fakes import COLLECTED, COLLECTED_AT, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import (
     ObservedCache,
     ObservedRelease,
     ObservedSetting,
+    Snapshot,
     current_snapshot,
     save_snapshot,
 )
 from operations import preparation
 from operations.preparation import ReasonName
-from operations.services import read_changes
-from servers.discovery_state import server_state
-from servers.models import Server
-from servers.testing import ControllerConfigTestCase
+from operations.services import ServerChanges, read_changes
+from servers.discovery_state import DiscoveryState, server_state
+from servers.models import ConnectionDefinition, Server
+from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 from sites.bodies.common import SITE_GATED
 from sites.deploy_views import deploy_context
 from sites.preparation import decide_for_site
@@ -258,6 +261,55 @@ class SettingsPageTests(ControllerConfigTestCase):
         record_laravel_releases(self.server)
         deployments = self.client.get(f"/servers/{self.server.pk}/sites/alpha/deployments/")
         self.assertContains(deployments, f"{0:040x}")
+
+    def test_the_settings_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.laravel()
+        url = f"/servers/{self.server.pk}/sites/alpha/settings/"
+        assert_query_count_flat_as_history_grows(
+            self.client, url, lambda: self.record_older_snapshots(3)
+        )
+
+    def record_older_snapshots(self, count: int) -> None:
+        """Record attempts for past connection revisions, each holding a real snapshot."""
+        snapshot = current_snapshot(self.server)
+        if snapshot is None:
+            self.fail("No setup snapshot.")
+        for index in range(count):
+            definition = ConnectionDefinition.objects.create(
+                server=self.server,
+                revision=index + 1,
+                mode="agent",
+                alias="web.example.com",
+                address="web.example.com",
+                username="root",
+                port=22,
+            )
+            attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
+            DiscoveryAttempt.objects.filter(pk=attempt.pk).update(connection=definition)
+            attempt.refresh_from_db()
+            save_snapshot(attempt, snapshot.collected, snapshot.collected_at)
+
+
+class SettingsBuilderTests(SimpleTestCase):
+    """A section renders from a literal read, with no server, worker or page."""
+
+    def test_a_section_builder_renders_from_a_literal_read(self) -> None:
+        from sites.domains_views import context_for_site as domains_context
+        from sites.php_views import context_for_site as php_context
+
+        state = DiscoveryState(
+            server=Server(name="Web", ssh_alias="web.example.com"),
+            attempt=None,
+            snapshot=Snapshot(COLLECTED, COLLECTED_AT, "web"),
+            history=[],
+            alias_usable=True,
+            changes=ServerChanges([], None),
+        )
+        user = AnonymousUser()
+        php = php_context(state, "alpha", user)
+        domains = domains_context(state, "alpha", user)
+        self.assertEqual(php["site_php_current"], "php85")
+        self.assertEqual(domains["site_domains"], ("alpha.test", "www.alpha.test"))
 
 
 class ReadinessPageTests(ControllerConfigTestCase):

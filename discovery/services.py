@@ -25,11 +25,12 @@ from . import ssh
 from .models import DiscoveryAttempt
 from .observations import collect
 from .snapshot import (
-    AttemptSnapshot,
+    AttemptSummary,
     Snapshot,
-    attempt_snapshots,
+    attempt_summaries,
     has_snapshot,
     save_snapshot,
+    snapshot_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,47 +60,28 @@ class ServerDiscovery(NamedTuple):
     attempt: DiscoveryAttempt | None
     # The snapshot the latest successful attempt published, whatever became of later ones.
     snapshot: Snapshot | None
-    # Every recorded attempt, newest recorded first, with the snapshot it published.
-    history: list[AttemptSnapshot]
+    # Every recorded attempt, newest recorded first, with a summary of its snapshot.
+    history: list[AttemptSummary]
     # The server's active remote operation of any kind, which blocks a new attempt.
     active: RemoteOperation | None
 
 
 @recovers_first
 def read_discovery(server: Server) -> ServerDiscovery:
-    recorded = _attempt_snapshots(server)
-    # Only the latest successful attempt keeps its snapshot, so it is the current one.
-    snapshot = next(
-        (
-            published
-            for attempt, published in recorded
-            if published
-            and (
-                (attempt.connection is None and server.connection_revision == 0)
-                or (
-                    attempt.connection is not None
-                    and attempt.connection.revision == server.connection_revision
-                )
-            )
-        ),
-        None,
-    )
+    recorded = _attempt_summaries(server)
+
+    def current(item: AttemptSummary) -> bool:
+        connection = item.attempt.connection
+        return (connection is None and server.connection_revision == 0) or (
+            connection is not None and connection.revision == server.connection_revision
+        )
+
+    attempt = next((item.attempt for item in recorded if current(item)), None)
+    # The latest successful attempt matching the connection still holds the snapshot.
+    published = next((item.attempt for item in recorded if item.snapshot and current(item)), None)
     return ServerDiscovery(
-        next(
-            (
-                item.attempt
-                for item in recorded
-                if (
-                    (item.attempt.connection is None and server.connection_revision == 0)
-                    or (
-                        item.attempt.connection is not None
-                        and item.attempt.connection.revision == server.connection_revision
-                    )
-                )
-            ),
-            None,
-        ),
-        snapshot,
+        attempt,
+        snapshot_of(published) if published is not None else None,
         recorded,
         lifecycle.active_operation(server),
     )
@@ -123,14 +105,14 @@ def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str
 
 
 @recovers_first
-def history() -> list[AttemptSnapshot]:
+def history() -> list[AttemptSummary]:
     """Every server's recorded attempts, newest recorded first."""
-    return _attempt_snapshots(None)
+    return _attempt_summaries(None)
 
 
-def _attempt_snapshots(server: Server | None) -> list[AttemptSnapshot]:
+def _attempt_summaries(server: Server | None) -> list[AttemptSummary]:
     attempts = DiscoveryAttempt.objects.select_related("server", "connection")
-    return attempt_snapshots(attempts if server is None else attempts.filter(server=server))
+    return attempt_summaries(attempts if server is None else attempts.filter(server=server))
 
 
 @recovers_first

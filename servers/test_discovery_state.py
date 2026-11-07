@@ -16,6 +16,7 @@ from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.services import INTERRUPTED_FAILURE
 from discovery.snapshot import Observation, Snapshot
 from operations.models import RemoteOperation
+from operations.services import ServerChanges
 
 from .discovery_state import (
     AttemptView,
@@ -84,6 +85,7 @@ def state(
         snapshot=snapshot,
         history=[] if attempt is None else [attempt],
         alias_usable=alias_usable,
+        changes=ServerChanges([], None),
     )
 
 
@@ -122,6 +124,14 @@ class SiteResolutionTests(SimpleTestCase):
         self.assertIsNone(page.stale)
         self.assertTrue(page.current)
         self.assertEqual(page.site.identifier if page.site else None, "alpha")
+
+    def test_the_read_indexes_sites_by_identifier(self) -> None:
+        current = state(AttemptStatus.SUCCEEDED)
+        self.assertEqual(set(current.site_index), {"alpha", "beta"})
+        alpha = current.site("alpha")
+        assert alpha is not None  # noqa: S101 - narrows the optional for mypy
+        self.assertEqual(alpha.identifier, "alpha")
+        self.assertIsNone(current.site("absent1"))
 
     def test_an_inaccessible_or_unsupported_collection_is_unknown_not_removal(self) -> None:
         for outcome in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED):

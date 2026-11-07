@@ -8,7 +8,6 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
-from discovery.snapshot import ObservedSite
 from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
@@ -22,22 +21,11 @@ from .pool_forms import SitePoolForm
 from .preparation import decide_for_site
 
 
-def _site(state: DiscoveryState, identifier: str) -> tuple[ObservedSite | None, SitePool | None]:
-    snapshot = state.snapshot
-    if snapshot is None:
-        return None, None
-    site = next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-        None,
-    )
-    return site, site.pool if site is not None else None
-
-
 def context_for_site(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    state = server_state(server)
-    _, pool = _site(state, identifier)
+    site = state.site(identifier)
+    pool: SitePool | None = site.pool if site is not None else None
     decision = decide_for_site(state, user, identifier, change_requirements.SITE_POOL)
     return {
         "site_pool": pool,
@@ -54,8 +42,10 @@ def prepare_pool(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    _, pool = _site(server_state(server), identifier)
-    context = context_for_site(server, identifier, request.user)
+    state = server_state(server)
+    site = state.site(identifier)
+    pool = site.pool if site is not None else None
+    context = context_for_site(state, identifier, request.user)
     form = SitePoolForm(request.POST, pool=pool)
     if not context["site_pool_can_prepare"] or not form.is_valid():
         messages.error(

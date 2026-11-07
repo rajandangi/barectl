@@ -25,6 +25,7 @@ from .snapshot import (
     OsRelease,
     ServiceUnit,
     SiteCertificate,
+    SnapshotFacts,
     WebStackComponentObservation,
 )
 
@@ -111,6 +112,23 @@ def present(collected: CollectedSnapshot) -> SnapshotPresentation:
         components=tuple(_component(component) for component in collected.components),
         standing=collected.standing,
     )
+
+
+def summary_warnings(facts: SnapshotFacts | None) -> tuple[ShownObservation, ...]:
+    """The warnings Activity lists for an attempt's snapshot, without the full snapshot."""
+    if facts is None:
+        return ()
+    shown = [
+        _scalar("Operating system", facts.os, _display_name),
+        _scalar("Architecture", facts.architecture, str),
+        _scalar("CPUs", facts.cpu_count, lambda count: f"{count} available"),
+        _scalar("Memory", facts.memory_bytes, _size),
+        _scalar("Root filesystem", facts.filesystem, _filesystem),
+    ]
+    for component in facts.components:
+        observed = _component(component)
+        shown += [observed.package, observed.service]
+    return tuple(item for item in shown if item.outcome in UNINSPECTED and item.warning)
 
 
 def _display_name(release: OsRelease) -> str:
