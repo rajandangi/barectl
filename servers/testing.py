@@ -1,10 +1,13 @@
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, override
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
-from django.test import TestCase, override_settings
+from django.db import connection
+from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 
 from dashboard.testing import TEST_MANIFEST
 
@@ -68,3 +71,27 @@ class ControllerConfigTestCase(TestCase):
     def history_of(self, page: _MonkeyPatchedWSGIResponse) -> str:
         content = page.content.decode()
         return content[content.index('id="discovery-history"') :]
+
+
+def assert_query_count_flat_as_history_grows(
+    client: Client, url: str, add_history: Callable[[], None]
+) -> None:
+    """Assert a page's query count is the same after ``add_history`` records more rows.
+
+    The caller adds real attempts (with snapshots, not only failed rows) so a page that
+    rebuilds each historical snapshot would be caught.
+    """
+    with CaptureQueriesContext(connection) as few:
+        response = client.get(url)
+    if response.status_code != 200:
+        raise AssertionError(f"{url} answered {response.status_code} with a small history.")
+    add_history()
+    with CaptureQueriesContext(connection) as many:
+        response = client.get(url)
+    if response.status_code != 200:
+        raise AssertionError(f"{url} answered {response.status_code} after more history.")
+    if len(few) != len(many):
+        raise AssertionError(
+            f"{url} issued {len(few)} queries with a small history and {len(many)} after "
+            "more were recorded."
+        )
