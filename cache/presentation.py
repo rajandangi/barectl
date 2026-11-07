@@ -13,12 +13,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from discovery.snapshot import CollectedSnapshot, ObservedCache, ObservedSite
-from operations import preparation
+from operations import change_requirements, preparation
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from servers.preparation import stored_server_facts
 from sites.names import valid_identifier
-from sites.preparation import decide_for_site
+from sites.preparation import decide_for_site, site_facts
 
 from . import convention, observation, reading
 from .plugin import PLUGIN_NAME, PLUGIN_VERSION
@@ -169,16 +169,8 @@ def _cache_row(state: DiscoveryState, identifier: str) -> ObservedCache | None:
 
 
 def _laravel_site(state: DiscoveryState, identifier: str) -> bool:
-    """A Laravel site reads as plain in its passive site record; its settings name it."""
-    snapshot = state.snapshot
-    if snapshot is None:
-        return False
-    settings = snapshot.collected.settings
-    if not settings.observed:
-        return False
-    return any(
-        row.identifier == identifier and row.application == "laravel" for row in settings.value
-    )
+    """The gate's one Laravel identity: a settings row or a release row."""
+    return site_facts(state.snapshot, identifier).laravel
 
 
 def _reading_allowed(state: DiscoveryState) -> bool:
@@ -207,18 +199,8 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
         convention.DEFAULT_MAXMEMORY_MIB
     )
     client = site.client if site is not None else ""
-    on_decision = decide_for_site(state, user, identifier, replace(preparation.SITE, cache=True))
-    off_decision = decide_for_site(
-        state,
-        user,
-        identifier,
-        replace(
-            preparation.SITE,
-            state=None,
-            allow_partly_applied=True,
-            cache=True,
-        ),
-    )
+    on_decision = decide_for_site(state, user, identifier, change_requirements.SITE_CACHE_ON)
+    off_decision = decide_for_site(state, user, identifier, change_requirements.SITE_CACHE_OFF)
     can_prepare = applicable and on_decision.allowed
     can_turn_off = applicable and off_decision.allowed
     can_read = applicable and _reading_allowed(state) and user.has_perms(reading.READ_PERMISSIONS)
@@ -247,10 +229,8 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
         "object_cache_can_prepare": can_prepare,
         "object_cache_can_turn_off": can_turn_off,
         "object_cache_can_read": can_read,
-        "object_cache_reason": on_decision.reason.sentence if on_decision.reason else "",
-        "object_cache_turn_off_reason": (
-            off_decision.reason.sentence if off_decision.reason else ""
-        ),
+        "object_cache_reason": on_decision.sentence,
+        "object_cache_turn_off_reason": off_decision.sentence,
         "object_cache_reading": view,
         "object_cache_checked_at": checked,
         "object_cache_line": line_for(applicable, current, problem, view, checked),

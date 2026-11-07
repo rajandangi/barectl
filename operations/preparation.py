@@ -155,6 +155,11 @@ class Decision:
     allowed: bool
     reason: Reason | None = None
 
+    @property
+    def sentence(self) -> str:
+        """The reason sentence, or an empty string when the change is allowed."""
+        return self.reason.sentence if self.reason is not None else ""
+
 
 REASONS: Mapping[ReasonName, str] = {
     ReasonName.HOST_NOT_MANAGEABLE: (
@@ -468,6 +473,7 @@ PRECEDENCE: tuple[ReasonName, ...] = tuple(_FAILURES)
 
 SERVER = Requirements(needs=frozenset({Need.CHANGE}))
 SITE = Requirements(
+    target_stack=True,
     site=True,
     convention=True,
     state=SiteShape.MANAGED,

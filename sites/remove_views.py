@@ -9,7 +9,7 @@ from django.views.decorators.http import require_POST
 
 from backups import presentation as backup_presentation
 from discovery.presentation import VIEW_SITES
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import server_state
@@ -45,21 +45,14 @@ def context_for_site(
         state,
         user,
         identifier,
-        preparation.Requirements(
-            site=True,
-            convention=False,
-            allow_not_following=True,
-            # Removal is the way out of a partly applied or not-following site.
-            allow_partly_applied=True,
-            needs=frozenset({preparation.Need.CHANGE, preparation.Need.SITE}),
-        ),
+        change_requirements.SITE_REMOVE,
     )
     return {
         "site_remove_has_backups": backup is not None and backup.enabled,
         "site_remove_domains": names,
         "site_remove_primary": names[0] if names else "",
         "site_remove_can_prepare": decision.allowed,
-        "site_remove_reason": decision.reason.sentence if decision.reason else "",
+        "site_remove_reason": decision.sentence,
     }
 
 

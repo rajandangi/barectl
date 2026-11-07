@@ -1,7 +1,5 @@
 """The site's readiness form queues a reviewed native Caddy change through the worker."""
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -11,7 +9,7 @@ from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
@@ -46,7 +44,7 @@ def context_for_site(
         state,
         user,
         identifier,
-        replace(preparation.SITE, releases_observed=True, no_releases=True),
+        change_requirements.SITE_READINESS,
     )
     return {
         "site_readiness": site.readiness if site is not None else "/",
@@ -55,7 +53,7 @@ def context_for_site(
         ),
         "site_readiness_laravel": has_releases,
         "site_readiness_can_prepare": decision.allowed,
-        "site_readiness_reason": decision.reason.sentence if decision.reason else "",
+        "site_readiness_reason": decision.sentence,
     }
 
 

@@ -5,6 +5,7 @@ from typing import override
 from django.test import Client
 from django.utils import timezone
 
+from bootstrap.standing import HostJudgment, Standing
 from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.snapshot import Observation, save_snapshot
@@ -43,6 +44,7 @@ class SecuritySectionTests(ControllerConfigTestCase):
         )
         collected = replace(
             COLLECTED,
+            standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
             security=Observation(ObservationOutcome.OBSERVED, ("a read",), "", state),
         )
         save_snapshot(attempt, collected, timezone.now() - timedelta(minutes=5))

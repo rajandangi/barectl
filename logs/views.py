@@ -114,10 +114,14 @@ def prepare_rotation(request: HttpRequest, pk: int, identifier: str) -> HttpResp
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    decision = services.rotation_decision(server_state(server), identifier, request.user)
+    decision = services.rotation_decision(
+        server_state(server),
+        identifier,
+        request.user,
+        rotation=services.rotation_evidence(server, identifier),
+    )
     if not decision.allowed:
-        if decision.reason is not None:
-            messages.error(request, decision.reason.sentence)
+        messages.error(request, decision.sentence)
         return redirect(_logs_url(pk, identifier))
     try:
         queued = change_services.request_prepare(

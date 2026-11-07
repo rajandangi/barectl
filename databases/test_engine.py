@@ -459,6 +459,26 @@ class DatabaseSettingPageTests(ControllerConfigTestCase):
         self.assertRedirects(queued, f"/changes/{rows[0].preparation.pk}/")
         self.assertEqual(rows[0].preparation.inputs, {"version": 1, "selection": "mariadb"})
 
+    def test_a_host_not_on_the_target_stack_withholds_the_database_card(self) -> None:
+        collected = replace(
+            COLLECTED,
+            sites=Observation(ObservationOutcome.OBSERVED, ("/etc/caddy/sites",), "", ()),
+            standing=HostJudgment(Standing.FRESH, (), (), ()),
+        )
+        attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
+        save_snapshot(attempt, collected, timezone.now())
+        sentence = "Set up this server before preparing this change."
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(page, "Install MariaDB")
+        self.assertContains(page, sentence)
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/settings/database/prepare/",
+            {"kind": engine.SLUG, "selection": "mariadb"},
+            follow=True,
+        )
+        self.assertIn(sentence, [str(message) for message in refused.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
+
     def test_the_panel_names_the_installed_engine_and_its_version(self) -> None:
         target_snapshot(self.server, component("mariadb", MARIADB_VERSION))
         response = self.client.get(f"/servers/{self.server.pk}/settings/")

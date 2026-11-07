@@ -5,8 +5,6 @@ server-computed digests and non-secret values. Preparing a change queues a revie
 worker; the new values are typed on the review's confirm screen.
 """
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -16,7 +14,7 @@ from django.views.decorators.http import require_POST
 
 from cache.laravel import laravel_managed_digests
 from discovery.presentation import VIEW_SITES
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import MANAGE_SECRETS
@@ -60,19 +58,14 @@ def context_for_site(
         state,
         user,
         identifier,
-        replace(
-            preparation.SITE,
-            needs=preparation.SITE.needs | {preparation.Need.SECRET},
-            application="laravel",
-            no_application_problem=True,
-        ),
+        change_requirements.LARAVEL_ENVIRONMENT,
     )
     return {
         "environment_rows": rows,
         "environment_observed": settings is not None and settings.observed,
         "environment_form": SettingsChangeForm(),
         "environment_can_prepare": decision.allowed,
-        "environment_reason": decision.reason.sentence if decision.reason else "",
+        "environment_reason": decision.sentence,
         "environment_problem": settings.warning if settings is not None else "",
     }
 

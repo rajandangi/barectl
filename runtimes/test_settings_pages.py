@@ -5,12 +5,13 @@ from unittest import mock
 from django.test import Client
 from django.utils.html import strip_tags
 
+from bootstrap.standing import Standing
 from dashboard.browser_testing import NATIVE_TERMS
 from operations.activity_testing import record_change
 from operations.models import ChangePreparation, RemoteOperation
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
-from sites.ui_testing import record_http_sites
+from sites.ui_testing import record_http_sites, record_shaped_sites
 
 
 class ServerSettingsPageTests(ControllerConfigTestCase):
@@ -61,6 +62,20 @@ class ServerSettingsPageTests(ControllerConfigTestCase):
             "preparing a change.",
         )
         self.assertEqual(ChangePreparation.objects.count(), 1)
+
+    def test_add_runtime_on_a_host_not_on_the_target_stack_is_refused_with_no_row(self) -> None:
+        record_shaped_sites(self.server, standing=Standing.FRESH)
+        sentence = "Set up this server before preparing this change."
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(page, "Add PHP 8.5")
+        self.assertContains(page, sentence)
+        response = self.client.post(
+            f"/servers/{self.server.pk}/changes/prepare/",
+            {"kind": "add_runtime", "selection": "php85"},
+            follow=True,
+        )
+        self.assertIn(sentence, [str(message) for message in response.context["messages"]])
+        self.assertFalse(ChangePreparation.objects.exists())
 
     def test_a_forged_version_outside_the_catalog_is_refused(self) -> None:
         response = self.client.post(

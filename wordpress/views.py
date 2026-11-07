@@ -4,8 +4,6 @@ Opening the section makes no SSH connection: it reads the latest observation. Pr
 action queues a review in the worker, which reads the site's native evidence once.
 """
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -15,7 +13,7 @@ from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import preparation, services
+from operations import change_requirements, preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import MANAGE_SECRETS
@@ -42,13 +40,7 @@ def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
 
 
 def _requirements(*, secret: bool) -> preparation.Requirements:
-    needs = preparation.SITE.needs | {preparation.Need.SECRET} if secret else preparation.SITE.needs
-    return replace(
-        preparation.SITE,
-        needs=needs,
-        application="wordpress",
-        no_application_problem=True,
-    )
+    return change_requirements.WORDPRESS_PASSWORD if secret else change_requirements.WORDPRESS_CORE
 
 
 def context_for_site(
@@ -68,9 +60,9 @@ def context_for_site(
         "wordpress_problem": problem,
         "wordpress_password_form": WordPressPasswordForm(),
         "wordpress_password_can_prepare": password.allowed,
-        "wordpress_password_reason": password.reason.sentence if password.reason else "",
+        "wordpress_password_reason": password.sentence,
         "wordpress_core_can_prepare": core.allowed,
-        "wordpress_core_reason": core.reason.sentence if core.reason else "",
+        "wordpress_core_reason": core.sentence,
     }
 
 

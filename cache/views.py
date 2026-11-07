@@ -14,6 +14,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
+from operations import change_requirements
 from operations.consent import PREPARE_PERMISSIONS
 from operations.inputs import INVALID_INPUTS
 from operations.lifecycle import OperationBusy, OperationRefused
@@ -21,7 +22,7 @@ from operations.models import CHANGE_SHARED
 from operations.services import request_prepare
 from servers.discovery_state import server_state
 from servers.models import Server
-from servers.preparation import SERVER_SHARED, decide_for_server, refusal_sentence
+from servers.preparation import decide_for_server
 
 from . import engine
 from .forms import ObjectCacheForm
@@ -58,9 +59,11 @@ def object_cache_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     if request.POST.get("kind", engine.SLUG) != engine.SLUG:
         messages.error(request, "Choose a supported object cache change.")
         return redirect("server_settings", pk=pk)
-    decision = decide_for_server(server_state(server), request.user, SERVER_SHARED)
+    decision = decide_for_server(
+        server_state(server), request.user, change_requirements.OBJECT_CACHE
+    )
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_settings", pk=pk)
     try:
         queued = request_prepare(

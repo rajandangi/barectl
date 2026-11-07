@@ -76,15 +76,3 @@ def decide_for_server(
     requirements: preparation.Requirements,
 ) -> preparation.Decision:
     return preparation.decide(server_facts(state, user), None, requirements)
-
-
-# A server-wide card that also needs the shared-change permission, such as object cache
-# or security.
-SERVER_SHARED = replace(
-    preparation.SERVER, needs=preparation.SERVER.needs | {preparation.Need.SHARED}
-)
-
-
-def refusal_sentence(decision: preparation.Decision) -> str:
-    """The gate's sentence for a refused change; an allowance has none."""
-    return decision.reason.sentence if decision.reason is not None else ""

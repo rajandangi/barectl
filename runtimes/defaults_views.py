@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -8,12 +6,12 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from operations import preparation, services
+from operations import change_requirements, preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
-from servers.preparation import decide_for_server, refusal_sentence
+from servers.preparation import decide_for_server
 
 from .defaults import DefaultsObservation
 from .defaults_forms import DefaultRuntimeForm
@@ -24,7 +22,7 @@ from .presentation import (
 )
 
 # The defaults and Add runtime cards assume the target stack; setup is a different card.
-REQUIREMENTS = replace(preparation.SERVER, target_stack=True)
+REQUIREMENTS = change_requirements.RUNTIME_DEFAULTS
 
 
 def context_for_server(state: DiscoveryState, user: User | AnonymousUser) -> dict[str, object]:
@@ -43,7 +41,7 @@ def context_for_server(state: DiscoveryState, user: User | AnonymousUser) -> dic
         else preparation.Decision(False)
     )
     can_prepare = decision.allowed
-    reason = decision.reason.sentence if decision.reason else ""
+    reason = decision.sentence
     return {
         "default_php_form": DefaultRuntimeForm(
             choices=defaults.php_choices if fresh else (), selected=defaults.php, family="php"
@@ -87,7 +85,7 @@ def prepare_default(request: HttpRequest, pk: int, family: str) -> HttpResponse:
     state = server_state(server)
     decision = decide_for_server(state, request.user, REQUIREMENTS)
     if not decision.allowed:
-        messages.error(request, refusal_sentence(decision))
+        messages.error(request, decision.sentence)
         return redirect("server_settings", pk=pk)
     context = context_for_server(state, request.user)
     if not context["default_" + family + "_can_prepare"]:

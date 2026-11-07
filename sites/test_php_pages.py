@@ -8,6 +8,7 @@ from unittest import mock
 from django.test import Client
 from django.utils import timezone
 
+from bootstrap.standing import Standing
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import current_snapshot, save_snapshot
@@ -24,6 +25,7 @@ from .php_change import SLUG
 from .ui_testing import (
     record_http_sites,
     record_php85_installed,
+    record_shaped_sites,
     record_site_state,
     record_step_run,
 )
@@ -111,6 +113,16 @@ class SitePhpSettingsTests(ControllerConfigTestCase):
                 RemoteOperation.objects.filter(pk=rows[0].preparation.pk).update(
                     status=RemoteOperation.Status.SUCCEEDED
                 )
+
+    def test_a_host_not_on_the_target_stack_withholds_the_php_change_and_its_post(self) -> None:
+        record_shaped_sites(self.server, standing=Standing.FRESH)
+        sentence = "Set up this server before preparing this change."
+        response = self.client.get(self.settings_url)
+        self.assertNotContains(response, "Change PHP version")
+        self.assertContains(response, sentence)
+        refused = self.client.post(self.url, {"selection": "php84"}, follow=True)
+        self.assertIn(sentence, [str(message) for message in refused.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
 
     def test_settings_shows_the_current_version_and_the_change_action_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
@@ -396,5 +408,7 @@ class SitePhpSettingsTests(ControllerConfigTestCase):
                     timezone.now(),
                 )
                 response = self.client.post(self.url, {"selection": "php84"})
-                self.assertEqual(response.status_code, 302)
+                # The settings page itself 404s for an unreadable or foreign inventory, so
+                # assert the refusal target without fetching it.
+                self.assertRedirects(response, self.settings_url, fetch_redirect_response=False)
                 self.assertEqual(read_changes(self.server).rows, [])

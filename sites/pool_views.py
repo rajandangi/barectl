@@ -1,7 +1,5 @@
 """A site's PHP settings form queues a reviewed native pool change through the worker."""
 
-from dataclasses import replace
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -11,7 +9,7 @@ from django.views.decorators.http import require_POST
 
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import preparation, services
+from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
@@ -40,12 +38,12 @@ def context_for_site(
 ) -> dict[str, object]:
     state = server_state(server)
     _, pool = _site(state, identifier)
-    decision = decide_for_site(state, user, identifier, replace(preparation.SITE, pool=True))
+    decision = decide_for_site(state, user, identifier, change_requirements.SITE_POOL)
     return {
         "site_pool": pool,
         "site_pool_form": SitePoolForm(pool=pool),
         "site_pool_can_prepare": decision.allowed,
-        "site_pool_reason": decision.reason.sentence if decision.reason else "",
+        "site_pool_reason": decision.sentence,
     }
 
 
