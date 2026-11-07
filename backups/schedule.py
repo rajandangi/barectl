@@ -40,6 +40,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.lifecycle import OperationRefused
 from operations.models import ChangeReview
 from runtimes.catalog import architecture_of
+from servers.discovery_state import server_state
 from servers.models import Server
 from sites import observation as site_observation
 from sites.bodies.common import SITE_GATED
@@ -1188,7 +1189,7 @@ def prepare_schedule(request: HttpRequest, pk: int, identifier: str) -> HttpResp
         )
     from .views import context_for_site
 
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["backups_can_schedule"]:
         messages.error(request, str(context["backups_schedule_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)

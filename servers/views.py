@@ -592,10 +592,7 @@ def _target_site_context(
     snapshot = state.snapshot
     if snapshot is None or site is None:
         return
-    observed = next(
-        (row for row in snapshot.collected.sites.value if row.identifier == site.identifier),
-        None,
-    )
+    observed = state.site(site.identifier)
     wordpress = observed is not None and observed.application in (
         "wordpress",
         "wordpress_partial",
@@ -621,7 +618,7 @@ def _target_site_context(
 
 def _site_activity_context(
     request: HttpRequest,
-    server: Server,
+    state: DiscoveryState,
     identifier: str,
     section: SiteSection,
     target_site: bool,
@@ -630,11 +627,11 @@ def _site_activity_context(
     if section != "activity" or not target_site:
         return
     context["target_activity_allowed"] = request.user.has_perm(VIEW_CHANGES)
-    context.update(_activity_context(request, server, identifier, show_servers=False))
+    context.update(_activity_context(request, state.server, identifier, show_servers=False))
 
 
 def _site_backups_context(
-    server: Server,
+    state: DiscoveryState,
     identifier: str,
     user: User | AnonymousUser,
     context: dict[str, object],
@@ -644,10 +641,10 @@ def _site_backups_context(
     from backups.presentation import BackupsView
     from backups.views import context_for_site as backups_context_for_site
 
-    context.update(backups_context_for_site(server, identifier, user))
+    context.update(backups_context_for_site(state, identifier, user))
     from backups import schedule as backup_schedule
 
-    backup_schedule.context_for_site(server, identifier, context)
+    backup_schedule.context_for_site(state.server, identifier, context)
     backups = context.get("backups")
     context["backups_repository"] = (
         backup_convention.repository(identifier)
@@ -658,7 +655,6 @@ def _site_backups_context(
 
 def _site_overview_context(
     request: HttpRequest,
-    server: Server,
     state: DiscoveryState,
     page: SitePage,
     identifier: str,
@@ -679,7 +675,7 @@ def _site_overview_context(
     context["site_checked_at"] = state.snapshot.collected_at if state.snapshot else None
     from backups.views import context_for_site as backups_context_for_site
 
-    backup_context = backups_context_for_site(server, identifier, request.user)
+    backup_context = backups_context_for_site(state, identifier, request.user)
     context["site_reopen"] = bool(
         backup_context.get("backups") is not None
         and getattr(backup_context["backups"], "reopen", False)
@@ -705,7 +701,7 @@ def _site_overview_context(
             state.snapshot.collected,
             site.identifier,
             state.snapshot.collected_at,
-            presentation.paused_change(server, site.identifier),
+            presentation.paused_change(state.server, site.identifier),
         )
     if context.get("has_wordpress"):
         context["site_wordpress_admin"] = f"{scheme}://{primary}/wp-admin/"
@@ -720,7 +716,7 @@ def _site_overview_context(
     from discovery.presentation import present_releases
     from sites.deploy_views import deploy_context
 
-    context.update(deploy_context(server, identifier, request.user))
+    context.update(deploy_context(state, identifier, request.user))
     releases = (
         present_releases(state.snapshot.collected.releases, identifier)
         if state.snapshot is not None
@@ -794,20 +790,20 @@ def site_page_response(  # noqa: C901 - one dispatcher for the site sections
         context.update(automation_context_for_site(state, identifier, request.user))
         context.update(worker_context_for_site(state, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
-    _site_activity_context(request, server, identifier, section, target_site, context)
+    _site_activity_context(request, state, identifier, section, target_site, context)
     if target_site and section == "database":
         from databases.site_views import context_for_site as database_context_for_site
 
-        context.update(database_context_for_site(server, identifier, request.user))
+        context.update(database_context_for_site(state, identifier, request.user))
     if target_site and section == "backups":
-        _site_backups_context(server, identifier, request.user, context)
+        _site_backups_context(state, identifier, request.user, context)
     if target_site and section == "overview":
-        _site_overview_context(request, server, state, page, identifier, context)
+        _site_overview_context(request, state, page, identifier, context)
     if target_site and section == "deployments":
         from discovery.presentation import present_releases
         from sites.deploy_views import deploy_context
 
-        context.update(deploy_context(server, identifier, request.user))
+        context.update(deploy_context(state, identifier, request.user))
         context["releases"] = (
             present_releases(state.snapshot.collected.releases, identifier)
             if state.snapshot is not None
@@ -818,20 +814,20 @@ def site_page_response(  # noqa: C901 - one dispatcher for the site sections
         from wordpress.settings_views import context_for_site as wordpress_settings_context
         from wordpress.views import context_for_site as wordpress_context_for_site
 
-        context.update(wordpress_context_for_site(server, identifier, request.user))
-        context.update(wordpress_settings_context(server, identifier, request.user))
+        context.update(wordpress_context_for_site(state, identifier, request.user))
+        context.update(wordpress_settings_context(state, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     if target_site and section == "environment":
         from laravel.settings_views import context_for_site as environment_context_for_site
 
-        context.update(environment_context_for_site(server, identifier, request.user))
+        context.update(environment_context_for_site(state, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     if section == "logs":
         from logs.services import context_for_site as logs_context_for_site
 
         context.update(
             logs_context_for_site(
-                server,
+                state,
                 identifier,
                 request.user,
                 selected=request.GET.get("log", ""),

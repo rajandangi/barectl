@@ -41,7 +41,7 @@ def read_log(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
         raise Http404
     slug = request.POST.get("source", "")
     server = get_object_or_404(Server, pk=pk)
-    if services.available_source(server, identifier, slug) is None:
+    if services.available_source(server_state(server), identifier, slug) is None:
         raise Http404
     form = LogFilterForm(request.POST)
     if not form.is_valid():
@@ -69,12 +69,13 @@ def live_log(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
         raise Http404
     slug = request.POST.get("source", "")
     server = get_object_or_404(Server, pk=pk)
-    entry = services.available_source(server, identifier, slug)
+    state = server_state(server)
+    entry = services.available_source(state, identifier, slug)
     if entry is None or not entry.journal:
         raise Http404
     if not _is_fragment_request(request):
         return redirect(f"{_logs_url(pk, identifier, slug)}&live=1")
-    context = services.context_for_site(server, identifier, request.user, selected=slug, live=True)
+    context = services.context_for_site(state, identifier, request.user, selected=slug, live=True)
     queued = services.follow_read(server, request.user, identifier, slug)
     selected = context.get("logs_selected")
     page = selected.page if isinstance(selected, services.SourceView) else None
@@ -100,7 +101,9 @@ def log_page(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     if source(slug) is None or not _is_fragment_request(request):
         return redirect(_logs_url(pk, identifier, slug))
     server = get_object_or_404(Server, pk=pk)
-    context = services.context_for_site(server, identifier, request.user, selected=slug)
+    context = services.context_for_site(
+        server_state(server), identifier, request.user, selected=slug
+    )
     response = render(request, "logs/_viewer.html", context)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
@@ -114,11 +117,12 @@ def prepare_rotation(request: HttpRequest, pk: int, identifier: str) -> HttpResp
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
+    state = server_state(server)
     decision = services.rotation_decision(
-        server_state(server),
+        state,
         identifier,
         request.user,
-        rotation=services.rotation_evidence(server, identifier),
+        rotation=services.rotation_evidence(state, identifier),
     )
     if not decision.allowed:
         messages.error(request, decision.sentence)
