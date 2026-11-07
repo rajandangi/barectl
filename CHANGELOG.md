@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Dashboard
+
+- One preparation gate decides whether every change card is offered and whether its POST may queue, from the same stored facts: host standing and freshness, active change work, the caller's permissions, the site's shape and the card's own requirement. A withheld card names the single most actionable reason, and the POST refuses with the same sentence. A log read, cache reading or backup check no longer withholds an unrelated change; a running or failed connection check withholds with the freshness reason; partly applied, not-following, gated or paused and unreadable-evidence states now behave the same on every card, including log rotation, the backup schedule and the cache client. The gate is an admission hint only: the review, the native mutation lock, fresh revalidation and the worker's permission check still decide whether a change runs ([#507](https://github.com/rajandangi/barectl/issues/507)).
+
 ### Security (Phase E)
 
 - **Check for updates** refreshes Ubuntu's own package lists as one change under the shared mutation lock, so the Security section's list age and waiting updates are current without installing anything. **Install updates** installs security updates only, or all installable updates, by extending the exact APT transaction of ADR 0024: the confirm screen names every package at its candidate version and every new dependency, discloses the services Ubuntu may restart and the sites they serve, and refuses removals, downgrades, holds, phased candidates, unfinished package states and modified conffiles with a reason. The run verifies installed versions, the package database, the foundation's units and each site's readiness, then discovery shows the versions and any restart needed. The native scenario installs the snapshot's release-pocket OpenSSL and upgrades it, and proves a stale review, an unreviewed dependency, a hold placed after review and a modified conffile refuse before dpkg changes anything ([security](docs/security.md#ubuntu-updates), [#304](https://github.com/rajandangi/barectl/issues/304)).
