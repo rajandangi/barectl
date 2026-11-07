@@ -53,7 +53,6 @@ class CaptureSelectionTests(SimpleTestCase):
             "capture_inputs": capture_inputs,
             "capture_command_inputs": command_inputs,
             "capture_pins": recorded.current_pins(),
-            "audit_digest": provenance.audit_digest(current),
             "capture_states": {
                 state: provenance.digest(recorded.TRANSCRIPTS / f"{state}.json") for state in states
             },
