@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -6,7 +8,6 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
 from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
@@ -22,6 +23,9 @@ from .presentation import (
     settings_php_versions,
 )
 
+# The defaults and Add runtime cards assume the target stack; setup is a different card.
+REQUIREMENTS = replace(preparation.SERVER, target_stack=True)
+
 
 def context_for_server(state: DiscoveryState, user: User | AnonymousUser) -> dict[str, object]:
     """Server Settings' PHP versions, additions and command defaults.
@@ -33,15 +37,12 @@ def context_for_server(state: DiscoveryState, user: User | AnonymousUser) -> dic
     observation = snapshot.collected.runtime_defaults if snapshot is not None else None
     defaults = observation or DefaultsObservation()
     fresh = snapshot is not None and state.snapshot_notice is None
-    standing = snapshot.collected.standing if snapshot is not None else None
     decision = (
-        decide_for_server(state, user, preparation.SERVER)
+        decide_for_server(state, user, REQUIREMENTS)
         if isinstance(user, User)
         else preparation.Decision(False)
     )
-    can_prepare = (
-        decision.allowed and standing is not None and standing.standing == Standing.TARGET_STACK
-    )
+    can_prepare = decision.allowed
     reason = decision.reason.sentence if decision.reason else ""
     return {
         "default_php_form": DefaultRuntimeForm(
@@ -84,7 +85,7 @@ def prepare_default(request: HttpRequest, pk: int, family: str) -> HttpResponse:
         raise PermissionDenied
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
-    decision = decide_for_server(state, request.user, preparation.SERVER)
+    decision = decide_for_server(state, request.user, REQUIREMENTS)
     if not decision.allowed:
         messages.error(request, refusal_sentence(decision))
         return redirect("server_settings", pk=pk)

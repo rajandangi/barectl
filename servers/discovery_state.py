@@ -10,7 +10,6 @@ from django.conf import settings
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome
 from discovery.presentation import (
     ShownObservation,
@@ -203,26 +202,6 @@ class DiscoveryState:
     @cached_property
     def presentation(self) -> SnapshotPresentation | None:
         return present(self.snapshot.collected) if self.snapshot else None
-
-    @property
-    def can_prepare_changes(self) -> bool:
-        # The old predicate's one job: host standing and a later check's freshness.
-        from operations import preparation
-
-        from .preparation import stored_server_facts
-
-        return preparation.decide(stored_server_facts(self), None, preparation.EMPTY).allowed
-
-    @property
-    def hosting_guidance(self) -> Literal["refresh", "inspect", "setup", "sites"]:
-        if not self.alias_usable or self.snapshot is None or self.snapshot_notice is not None:
-            return "refresh"
-        standing = self.snapshot.collected.standing
-        if standing is None or standing.standing == Standing.NOT_MANAGEABLE:
-            return "inspect"
-        if standing.standing == Standing.TARGET_STACK:
-            return "sites"
-        return "setup"
 
     @property
     def status(self) -> Status:

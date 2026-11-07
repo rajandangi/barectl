@@ -14,7 +14,9 @@
   {% if wordpress_site_observed_at %}
     <p class="usa-hint">Installed runtimes recorded <time datetime="{{ wordpress_site_observed_at|date:'c' }}">{{ wordpress_site_observed_at|date:'M j, Y, H:i:s T' }}</time>.</p>
   {% endif %}
-  {% if wordpress_site_reason %}
+  {% if wordpress_site_gate_reason %}
+    <p id="wordpress-site-gate-reason">{{ wordpress_site_gate_reason }}</p>
+  {% elif wordpress_site_reason %}
     <p id="wordpress-site-reason">{{ wordpress_site_reason }}</p>
   {% endif %}
   {% include "sites/_creation_continuation.html" with continuation=wordpress_site_continuation prefix="wordpress" %}
@@ -31,7 +33,7 @@
   {% endif %}
   {% if not wordpress_site_has_choices %}
     <p>No PHP runtime is installed or offered in the current observation. Run discovery before creating a site.</p>
-  {% elif not wordpress_site_can_prepare and not wordpress_site_reason %}
+  {% elif not wordpress_site_can_prepare and not wordpress_site_reason and not wordpress_site_gate_reason %}
     <p>Resolve the server's findings or wait for its active operation to finish before preparing this review.</p>
   {% endif %}
   <form class="usa-form"

@@ -9,9 +9,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-# bootstrap.standing's value, repeated here so this module stays free of Django and every
-# other app. A `Standing` member compares equal to this string.
+# bootstrap.standing's values, repeated here so this module stays free of Django and every
+# other app. A `Standing` member compares equal to these strings.
 NOT_MANAGEABLE = "Not manageable"
+TARGET_STACK = "Target stack"
 
 
 class Freshness(StrEnum):
@@ -81,6 +82,8 @@ class SiteFacts:
 @dataclass(frozen=True)
 class Requirements:
     needs: frozenset[Need] = frozenset()
+    # The card assumes a host that has been read and is on the target stack. Setup does not.
+    target_stack: bool = False
     site: bool = False
     # Only read when site=True.
     convention: bool = True
@@ -112,6 +115,8 @@ class ReasonName(StrEnum):
     HOST_NOT_MANAGEABLE = "host_not_manageable"
     CHECK_RUNNING = "check_running"
     CHECK_FAILED = "check_failed"
+    HOST_NOT_OBSERVED = "host_not_observed"
+    HOST_NOT_READY = "host_not_ready"
     CHANGE_IN_PROGRESS = "change_in_progress"
     MISSING_CHANGE_PERMISSION = "missing_change_permission"
     MISSING_SITE_PERMISSION = "missing_site_permission"
@@ -161,6 +166,10 @@ REASONS: Mapping[ReasonName, str] = {
     ReasonName.CHECK_FAILED: (
         "The latest connection check failed; run it again before preparing a change."
     ),
+    ReasonName.HOST_NOT_OBSERVED: (
+        "Barectl has not read this server yet; check the connection first."
+    ),
+    ReasonName.HOST_NOT_READY: "Set up this server before preparing this change.",
     ReasonName.CHANGE_IN_PROGRESS: (
         "Another change is running for this server; wait for it to finish before preparing a "
         "change."
@@ -233,6 +242,22 @@ def _check_running(server: ServerFacts, site: SiteFacts | None, requirements: Re
 
 def _check_failed(server: ServerFacts, site: SiteFacts | None, requirements: Requirements) -> bool:
     return server.freshness is Freshness.FAILED
+
+
+def _host_not_observed(
+    server: ServerFacts, site: SiteFacts | None, requirements: Requirements
+) -> bool:
+    return requirements.target_stack and server.standing is None
+
+
+def _host_not_ready(
+    server: ServerFacts, site: SiteFacts | None, requirements: Requirements
+) -> bool:
+    return (
+        requirements.target_stack
+        and server.standing is not None
+        and server.standing != TARGET_STACK
+    )
 
 
 def _change_in_progress(
@@ -409,6 +434,8 @@ _FAILURES: dict[ReasonName, _Failure] = {
     ReasonName.HOST_NOT_MANAGEABLE: _host_not_manageable,
     ReasonName.CHECK_RUNNING: _check_running,
     ReasonName.CHECK_FAILED: _check_failed,
+    ReasonName.HOST_NOT_OBSERVED: _host_not_observed,
+    ReasonName.HOST_NOT_READY: _host_not_ready,
     ReasonName.CHANGE_IN_PROGRESS: _change_in_progress,
     ReasonName.MISSING_CHANGE_PERMISSION: _missing(Need.CHANGE),
     ReasonName.MISSING_SITE_PERMISSION: _missing(Need.SITE),

@@ -83,7 +83,7 @@ class StoredServerFactsTests(SimpleTestCase):
                 self.assertIsNone(facts.standing)
                 self.assertFalse(facts.change_active)
                 self.assertEqual(facts.granted, frozenset())
-                self.assertTrue(current.can_prepare_changes)
+                self.assertTrue(decide(facts, None, EMPTY).allowed)
 
     def test_a_later_check_withholds_changes_while_a_snapshot_exists(self) -> None:
         for attempt_status, freshness in (
@@ -98,7 +98,7 @@ class StoredServerFactsTests(SimpleTestCase):
                 self.assertIs(facts.freshness, freshness)
                 self.assertEqual(facts.standing, Standing.TARGET_STACK.value)
                 self.assertIs(
-                    current.can_prepare_changes,
+                    decide(facts, None, EMPTY).allowed,
                     attempt_status is AttemptStatus.SUCCEEDED,
                 )
 
@@ -106,7 +106,6 @@ class StoredServerFactsTests(SimpleTestCase):
         current = state(AttemptStatus.SUCCEEDED, snapshot=judged(Standing.NOT_MANAGEABLE))
         facts = stored_server_facts(current)
         self.assertEqual(facts.standing, Standing.NOT_MANAGEABLE.value)
-        self.assertFalse(current.can_prepare_changes)
         decision = decide(facts, None, EMPTY)
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason and decision.reason.name, ReasonName.HOST_NOT_MANAGEABLE)
@@ -115,8 +114,9 @@ class StoredServerFactsTests(SimpleTestCase):
         for standing in (Standing.FRESH, Standing.INCOMPLETE_FOUNDATION):
             with self.subTest(standing=standing):
                 current = state(AttemptStatus.SUCCEEDED, snapshot=judged(standing))
-                self.assertIs(stored_server_facts(current).freshness, Freshness.CURRENT)
-                self.assertTrue(current.can_prepare_changes)
+                facts = stored_server_facts(current)
+                self.assertIs(facts.freshness, Freshness.CURRENT)
+                self.assertTrue(decide(facts, None, EMPTY).allowed)
 
 
 class GrantedNeedsTests(TestCase):

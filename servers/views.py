@@ -23,7 +23,6 @@ from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from operations import activity as activity_read
 from operations import preparation
-from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.models import VIEW_CHANGES
 from operations.presentation import blocking_operation
@@ -352,18 +351,15 @@ def _advanced_section(
             if standing
             else ()
         )
-        runtime_decision = _decision(state, request.user)
-        context["can_add_runtime"] = (
-            runtime_decision.allowed
-            and standing is not None
-            and standing.standing == Standing.TARGET_STACK
-        )
+        runtime_add = _decision(state, request.user, replace(preparation.SERVER, target_stack=True))
+        context["can_add_runtime"] = runtime_add.allowed
         context["can_add_runtime_reason"] = (
-            runtime_decision.reason.sentence if runtime_decision.reason else ""
+            runtime_add.reason.sentence if runtime_add.reason else ""
         )
-        context["can_clean_up"] = runtime_decision.allowed
+        runtime_cleanup = _decision(state, request.user)
+        context["can_clean_up"] = runtime_cleanup.allowed
         context["can_clean_up_reason"] = (
-            runtime_decision.reason.sentence if runtime_decision.reason else ""
+            runtime_cleanup.reason.sentence if runtime_cleanup.reason else ""
         )
         runtime_rows = shown_runtimes(snapshot.collected) if snapshot else ()
         runtime_updates = shown_updates(snapshot.collected, runtime_rows) if snapshot else ()
@@ -551,13 +547,20 @@ def server_page(
     context["target_host"] = target_host
     if section == "sites" and target_host:
         from sites import continuation
-        from sites.views import http_site_context, laravel_site_context, wordpress_site_context
+        from sites.views import (
+            CREATE_REQUIREMENTS,
+            http_site_context,
+            laravel_site_context,
+            wordpress_site_context,
+        )
 
         step = continuation.requested_step(request, server.pk)
-        context.update(http_site_context(server, http_site_form, step))
-        context.update(laravel_site_context(server, laravel_site_form, step))
-        context.update(wordpress_site_context(server, wordpress_site_form, step))
-        context["http_site_permission"] = request.user.has_perms(PREPARE_PERMISSIONS)
+        context.update(http_site_context(server, request.user, http_site_form, step))
+        context.update(laravel_site_context(server, request.user, laravel_site_form, step))
+        context.update(wordpress_site_context(server, request.user, wordpress_site_form, step))
+        context["site_creation_can_prepare"] = _decision(
+            state, request.user, CREATE_REQUIREMENTS
+        ).allowed
     return render(request, "servers/detail.html", context, status=status)
 
 

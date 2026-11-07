@@ -14,7 +14,9 @@
   {% if laravel_site_observed_at %}
     <p class="usa-hint">Installed runtimes recorded <time datetime="{{ laravel_site_observed_at|date:'c' }}">{{ laravel_site_observed_at|date:'M j, Y, H:i:s T' }}</time>.</p>
   {% endif %}
-  {% if laravel_site_reason %}
+  {% if laravel_site_gate_reason %}
+    <p id="laravel-site-gate-reason">{{ laravel_site_gate_reason }}</p>
+  {% elif laravel_site_reason %}
     <p id="laravel-site-reason">{{ laravel_site_reason }}</p>
   {% endif %}
   {% include "sites/_creation_continuation.html" with continuation=laravel_site_continuation prefix="laravel" %}
@@ -31,7 +33,7 @@
   {% endif %}
   {% if not laravel_site_has_choices %}
     <p>No PHP runtime is installed or offered in the current observation. Run discovery before creating a site.</p>
-  {% elif not laravel_site_can_prepare and not laravel_site_reason %}
+  {% elif not laravel_site_can_prepare and not laravel_site_reason and not laravel_site_gate_reason %}
     <p>Resolve the server's findings or wait for its active operation to finish before preparing this review.</p>
   {% endif %}
   <form class="usa-form"

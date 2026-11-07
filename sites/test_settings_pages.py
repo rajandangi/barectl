@@ -368,7 +368,6 @@ class ReadinessPageTests(ControllerConfigTestCase):
             replace(
                 preparation.SITE,
                 state=None,
-                allow_partly_applied=True,
                 application="laravel",
                 current_release=True,
                 open_site=True,
@@ -380,4 +379,5 @@ class ReadinessPageTests(ControllerConfigTestCase):
         self.assertIs(php_settings.reason.name, ReasonName.SITE_PARTLY_APPLIED)
         self.assertIs(scheduled.reason.name, ReasonName.SITE_PARTLY_APPLIED)
         self.assertFalse(workers.allowed)
-        self.assertIs(workers.reason.name, ReasonName.SITE_GATED)
+        self.assertIs(workers.reason.name, ReasonName.SITE_PARTLY_APPLIED)
+        self.assertEqual(workers.reason.sentence, scheduled.reason.sentence)

@@ -41,6 +41,10 @@ SENTENCES: dict[ReasonName, str] = {
     ReasonName.CHECK_FAILED: (
         "The latest connection check failed; run it again before preparing a change."
     ),
+    ReasonName.HOST_NOT_OBSERVED: (
+        "Barectl has not read this server yet; check the connection first."
+    ),
+    ReasonName.HOST_NOT_READY: "Set up this server before preparing this change.",
     ReasonName.CHANGE_IN_PROGRESS: (
         "Another change is running for this server; wait for it to finish before preparing a "
         "change."
@@ -177,6 +181,18 @@ class ReasonTableTests(SimpleTestCase):
             server(freshness=Freshness.FAILED),
             MANAGED_SITE,
             SERVER,
+        ),
+        (
+            ReasonName.HOST_NOT_OBSERVED,
+            server(standing=None, freshness=Freshness.UNOBSERVED),
+            MANAGED_SITE,
+            replace(SERVER, target_stack=True),
+        ),
+        (
+            ReasonName.HOST_NOT_READY,
+            server(standing="Fresh"),
+            MANAGED_SITE,
+            replace(SERVER, target_stack=True),
         ),
         (
             ReasonName.CHANGE_IN_PROGRESS,
@@ -359,6 +375,15 @@ class AllowanceTests(SimpleTestCase):
         fresh = server(standing=None, freshness=Freshness.UNOBSERVED)
         self.assertEqual(decide(fresh, None, SERVER), Decision(True))
 
+    def test_a_card_that_assumes_the_target_stack_withholds_until_it_is_read(self) -> None:
+        target = replace(SERVER, target_stack=True)
+        unobserved = server(standing=None, freshness=Freshness.UNOBSERVED)
+        self.assertFalse(decide(unobserved, None, target).allowed)
+        fresh = server(standing="Fresh", freshness=Freshness.CURRENT)
+        decision = decide(fresh, None, target)
+        self.assertFalse(decision.allowed)
+        self.assertIs(decision.reason and decision.reason.name, ReasonName.HOST_NOT_READY)
+
     def test_a_partly_applied_site_completes_only_the_named_change(self) -> None:
         partly = site(shape=SiteShape.PARTLY_APPLIED, missing=(PHP_TRANSITION_INCOMPLETE,))
         completing = replace(SITE, state=None, completes=PHP_TRANSITION_INCOMPLETE)
@@ -412,6 +437,7 @@ class PrecedenceTests(SimpleTestCase):
     )
     WORST_REQUIREMENTS = Requirements(
         needs=frozenset({Need.CHANGE, Need.SITE, Need.SECRET, Need.SHARED, Need.DESTRUCTIVE}),
+        target_stack=True,
         site=True,
         convention=True,
         state=SiteShape.MANAGED,
@@ -454,6 +480,30 @@ class PrecedenceTests(SimpleTestCase):
         failed = replace(self.WORST_SERVER, standing=MANAGED, freshness=Freshness.FAILED)
         self.assert_reason(
             ReasonName.CHECK_FAILED, failed, self.WORST_SITE, self.WORST_REQUIREMENTS
+        )
+
+    def test_target_stack_follows_freshness_and_precedes_an_active_change(self) -> None:
+        unobserved = replace(
+            self.WORST_SERVER,
+            standing=None,
+            freshness=Freshness.UNOBSERVED,
+            change_active=True,
+        )
+        self.assert_reason(
+            ReasonName.HOST_NOT_OBSERVED, unobserved, self.WORST_SITE, self.WORST_REQUIREMENTS
+        )
+        fresh = replace(
+            self.WORST_SERVER,
+            standing="Fresh",
+            freshness=Freshness.CURRENT,
+            change_active=True,
+        )
+        self.assert_reason(
+            ReasonName.HOST_NOT_READY, fresh, self.WORST_SITE, self.WORST_REQUIREMENTS
+        )
+        checking = replace(fresh, freshness=Freshness.CHECKING)
+        self.assert_reason(
+            ReasonName.CHECK_RUNNING, checking, self.WORST_SITE, self.WORST_REQUIREMENTS
         )
 
     def test_an_active_change_outranks_permission_and_site_shape(self) -> None:

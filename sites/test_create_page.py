@@ -9,6 +9,7 @@ from unittest import mock
 from django.test import Client
 from django.utils import timezone
 
+from bootstrap.standing import Standing
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.snapshot import current_snapshot, save_snapshot
@@ -16,7 +17,7 @@ from operations.models import ChangePreparation, RemoteOperation
 from operations.services import read_changes
 from servers.models import Server
 from servers.testing import HTMX_FRAGMENT, ControllerConfigTestCase
-from sites.ui_testing import record_http_sites, record_step_run
+from sites.ui_testing import record_http_sites, record_shaped_sites, record_step_run
 
 BANNED = (
     "master",
@@ -128,6 +129,21 @@ class CreateSitePageTests(ControllerConfigTestCase):
                 "https": True,
             },
         )
+
+    def test_a_server_that_is_not_on_the_target_stack_withholds_create_site(self) -> None:
+        record_shaped_sites(self.server, standing=Standing.FRESH)
+        sentence = "Set up this server before preparing this change."
+        response = self.client.get(f"/servers/{self.server.pk}/sites/")
+        self.assertNotContains(response, ">Create site</a>")
+        page = self.client.get(f"/servers/{self.server.pk}/sites/create/")
+        self.assertContains(page, "This server is not set up yet. Set it up first")
+        refusal = self.client.post(
+            f"/servers/{self.server.pk}/sites/http/prepare/",
+            {"platform": "php", "names": "shop.example.com", "php_version": "php84"},
+            follow=True,
+        )
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
 
     def test_a_missing_php_version_is_step_one_and_keeps_the_answers(self) -> None:
         response = self.client.post(
