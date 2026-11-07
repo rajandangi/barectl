@@ -2,6 +2,7 @@ from dataclasses import replace
 from typing import override
 from unittest import mock
 
+from django.urls import reverse
 from django.utils import timezone
 
 from bootstrap.standing import HostJudgment, Standing
@@ -13,11 +14,16 @@ from operations import preparation
 from operations.activity_testing import record_change
 from operations.models import ChangePreparation, RemoteOperation
 from servers.views import SECTIONS
+from sites.ui_testing import record_http_sites, record_older_snapshots
 
 from .discovery_state import server_state
 from .models import Server
 from .preparation import decide_for_server
-from .testing import ControllerConfigTestCase
+from .testing import (
+    HTMX_FRAGMENT,
+    ControllerConfigTestCase,
+    assert_query_count_flat_as_history_grows,
+)
 
 
 class ServerSectionTests(ControllerConfigTestCase):
@@ -157,6 +163,64 @@ class ServerSectionTests(ControllerConfigTestCase):
         sites = self.client.get(f"/servers/{server.pk}/")
         self.assertNotContains(sites, "Web stack and services")
         self.assertNotContains(sites, "Discovery history")
+
+
+class ServerPageReadCostTests(ControllerConfigTestCase):
+    """Every server page and the site Activity page costs the same as history grows."""
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.grant("view_server", "view_siteobservation", "view_changes", "change_site")
+        self.client.force_login(self.user)
+        self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        record_http_sites(self.server)
+
+    def assert_flat(self, url: str) -> None:
+        assert_query_count_flat_as_history_grows(
+            self.client, url, lambda: record_older_snapshots(self.server, 3)
+        )
+
+    def test_the_server_overview_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.assert_flat(f"/servers/{self.server.pk}/")
+
+    def test_the_server_settings_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.assert_flat(f"/servers/{self.server.pk}/settings/")
+
+    def test_the_server_security_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.assert_flat(f"/servers/{self.server.pk}/security/")
+
+    def test_the_server_advanced_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.assert_flat(f"/servers/{self.server.pk}/advanced/")
+
+    def test_the_server_jobs_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.assert_flat(f"/servers/{self.server.pk}/jobs/")
+
+    def test_the_server_activity_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.assert_flat(f"/servers/{self.server.pk}/activity/")
+
+    def test_the_site_activity_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.assert_flat(f"/servers/{self.server.pk}/sites/alpha/activity/")
+
+
+class ServerVerifyFragmentTests(ControllerConfigTestCase):
+    def test_the_fragment_after_queueing_shows_the_queued_check(self) -> None:
+        self.grant("view_server", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        response = self.client.post(
+            reverse("server_verify", args=[server.pk]), headers=HTMX_FRAGMENT
+        )
+        self.assertEqual(response.status_code, 200)
+        # The fragment is rendered from a read built after the queue, not the one the
+        # request started with.
+        self.assertContains(response, "Checking the connection")
+        self.assertContains(response, "Connection check queued.")
+        self.assertTrue(
+            DiscoveryAttempt.objects.filter(
+                server=server, status=DiscoveryAttempt.Status.QUEUED
+            ).exists()
+        )
 
 
 class SetupCardTests(ControllerConfigTestCase):
