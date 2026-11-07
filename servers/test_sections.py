@@ -223,6 +223,20 @@ class ServerVerifyFragmentTests(ControllerConfigTestCase):
         )
 
 
+class ReadIsolationTests(ControllerConfigTestCase):
+    def test_a_check_queued_between_two_requests_appears_in_the_second(self) -> None:
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        url = f"/servers/{server.pk}/"
+        first = self.client.get(url)
+        self.assertContains(first, "Not checked yet")
+        record_attempt(server, DiscoveryAttempt.Status.QUEUED)
+        second = self.client.get(url)
+        # Every request builds its own read; nothing is cached across requests.
+        self.assertContains(second, "Checking…")
+
+
 class SetupCardTests(ControllerConfigTestCase):
     @override
     def setUp(self) -> None:
