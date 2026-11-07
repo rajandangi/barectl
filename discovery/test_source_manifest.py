@@ -1,8 +1,13 @@
 """The shared-source manifest covers every resource embedded in a native command."""
 
 import ast
+import json
+import os
+import subprocess
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from typing import override
 
 from django.test import SimpleTestCase
 
@@ -138,6 +143,80 @@ class BaselineTests(SimpleTestCase):
         )
         self.assertEqual(document["sources"], {"a.py": "1"})
         self.assertEqual(document["capture_command_inputs"], {"a.py": "1"})
+
+
+class ManifestMergeTests(SimpleTestCase):
+    """Independent source edits merge without an aggregate digest line (spec #507, retro)."""
+
+    @override
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())) / "repo"
+        self.root.mkdir()
+        environment = {
+            key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+        }
+        environment["GIT_CONFIG_NOSYSTEM"] = "1"
+        environment["HOME"] = str(self.root.parent)
+        self.environment = environment
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.name", "Manifest Test")
+        self.git("config", "user.email", "manifest@example.invalid")
+        self.write(self.manifest(first="1", last="1"))
+        self.git("add", "manifest.json")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-q", "-b", "left")
+
+    def git(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 - the test owns the fixed argv
+            ["git", *arguments],  # noqa: S607 - PATH resolution is the test's own git
+            cwd=self.root,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=self.environment,
+        )
+
+    def write(self, document: dict[str, object]) -> None:
+        (self.root / "manifest.json").write_text(
+            json.dumps(document, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def commit(self, message: str) -> None:
+        self.git("add", "manifest.json")
+        self.git("commit", "-qm", message)
+
+    def manifest(self, *, first: str, last: str) -> dict[str, object]:
+        fillers = {f"m{index}.py": "1" for index in range(10)}
+        return {
+            "version": 1,
+            "sources": {"a.py": first, **fillers, "z.py": last},
+            "capture_inputs": {"a.py": "a", **fillers, "z.py": "z"},
+            "capture_pins": {"base": "pin"},
+            "capture_states": {"state": "hash"},
+        }
+
+    def test_independent_source_edits_merge_without_a_summary_conflict(self) -> None:
+        self.write(self.manifest(first="left", last="1"))
+        self.commit("left")
+
+        self.git("checkout", "-q", "main")
+        self.git("checkout", "-q", "-b", "right")
+        self.write(self.manifest(first="1", last="right"))
+        self.commit("right")
+
+        self.git("checkout", "-q", "left")
+        result = self.git("merge", "--no-edit", "right")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        merged = json.loads((self.root / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(merged["sources"]["a.py"], "left")
+        self.assertEqual(merged["sources"]["z.py"], "right")
+        self.assertNotIn("audit_digest", merged)
+
+    def test_the_recorded_manifest_has_no_aggregate_digest(self) -> None:
+        document = json.loads(source_manifest.MANIFEST.read_text(encoding="utf-8"))
+        self.assertIn("capture_inputs", document)
+        self.assertNotIn("audit_digest", document)
 
 
 class SourceManifestTests(SimpleTestCase):
