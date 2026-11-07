@@ -16,7 +16,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
 from dashboard.middleware import is_htmx_request
-from servers.discovery_state import server_state
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from servers.preparation import decide_for_server, stored_server_facts
 from sites.preparation import decide_for_site
@@ -144,18 +144,15 @@ def _change_context(
 ) -> dict[str, object]:
     preparation = row.preparation
     review = view.review
-    can_apply = _can_apply(request, view) and _apply_decision(preparation.server).allowed
+    state = server_state(preparation.server) if preparation.server is not None else None
+    can_apply = _can_apply(request, view) and _apply_decision(preparation.server, state).allowed
     out_of_date = bool(
         review is not None
         and review.run_id is None
         and (review.expired or review.connection_changed)
     )
-    other = (
-        blocking_operation(server_state(preparation.server).other_operation)
-        if preparation.server is not None
-        else None
-    )
-    can_prepare_again, can_prepare_again_reason = _prepare_again_state(request, preparation)
+    other = blocking_operation(state.other_operation) if state is not None else None
+    can_prepare_again, can_prepare_again_reason = _prepare_again_state(request, preparation, state)
     context: dict[str, object] = {
         "change": view,
         "server": preparation.server,
@@ -167,7 +164,7 @@ def _change_context(
             if other is not None
             else ""
             if can_apply or out_of_date
-            else _apply_reason(request, view)
+            else _apply_reason(request, view, state)
         ),
         "can_prepare_again": can_prepare_again,
         "can_prepare_again_reason": can_prepare_again_reason,
@@ -182,7 +179,7 @@ def _change_context(
     return context
 
 
-def _apply_reason(request: HttpRequest, view: ChangeView) -> str:
+def _apply_reason(request: HttpRequest, view: ChangeView, state: DiscoveryState | None) -> str:
     """Why the confirm screen shows no apply control, in one plain sentence."""
     review = view.review
     if review is None:
@@ -194,7 +191,8 @@ def _apply_reason(request: HttpRequest, view: ChangeView) -> str:
     if review.no_changes:
         return "Barectl found nothing to change."
     decision = _apply_decision(
-        review.review.preparation.server if review.review.preparation else None
+        review.review.preparation.server if review.review.preparation else None,
+        state,
     )
     if not decision.allowed:
         return decision.sentence or (
@@ -207,7 +205,7 @@ def _apply_reason(request: HttpRequest, view: ChangeView) -> str:
 
 
 def _prepare_again_decision(
-    request: HttpRequest, preparation: ChangePreparation
+    request: HttpRequest, preparation: ChangePreparation, state: DiscoveryState | None
 ) -> preparation.Decision | None:
     """The same card requirement set the kind's offered change used.
 
@@ -217,10 +215,9 @@ def _prepare_again_decision(
     kind = engine.kind_of(preparation.kind_slug)
     server = preparation.server
     user = request.user
-    if kind is None or server is None or not isinstance(user, User):
+    if kind is None or server is None or state is None or not isinstance(user, User):
         return None
     requirements = change_requirements.requirements_for(preparation.kind_slug, preparation.inputs)
-    state = server_state(server)
     if not requirements.site:
         return decide_for_server(state, user, requirements)
     identifier = preparation.inputs.get("identifier")
@@ -229,10 +226,12 @@ def _prepare_again_decision(
     return decide_for_site(state, user, identifier, requirements)
 
 
-def _prepare_again_state(request: HttpRequest, preparation: ChangePreparation) -> tuple[bool, str]:
+def _prepare_again_state(
+    request: HttpRequest, preparation: ChangePreparation, state: DiscoveryState | None
+) -> tuple[bool, str]:
     if preparation.server is None:
         return False, ""
-    decision = _prepare_again_decision(request, preparation)
+    decision = _prepare_again_decision(request, preparation, state)
     allowed = (
         request.user.has_perm("servers.view_server") and decision is not None and decision.allowed
     )
@@ -261,7 +260,8 @@ def change_prepare_again(request: HttpRequest, operation_id: int) -> HttpRespons
     if server is None:
         raise Http404
     user = _user(request)
-    decision = _prepare_again_decision(request, preparation)
+    state = server_state(server)
+    decision = _prepare_again_decision(request, preparation, state)
     if decision is None or not request.user.has_perm("servers.view_server"):
         raise PermissionDenied
     if not decision.allowed:
@@ -320,16 +320,16 @@ def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
     )
 
 
-def _apply_decision(server: Server | None) -> preparation.Decision:
+def _apply_decision(server: Server | None, state: DiscoveryState | None) -> preparation.Decision:
     """The run admission rule: host standing and freshness only.
 
     The gate must not decide whether a reviewed change runs. Another active change is
     not a reason to refuse an apply; the native mutation lock decides that when the run
     starts (spec #507, US20).
     """
-    if server is None:
+    if server is None or state is None:
         return preparation.Decision(False)
-    return preparation.decide(stored_server_facts(server_state(server)), None, preparation.EMPTY)
+    return preparation.decide(stored_server_facts(state), None, preparation.EMPTY)
 
 
 def _submitted_confirmation(request: HttpRequest, review: ChangeReview) -> str | None:
@@ -373,7 +373,8 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:  # no
     if review is None:
         raise Http404
     user = _user(request)
-    decision = _apply_decision(row.preparation.server)
+    state = server_state(row.preparation.server) if row.preparation.server is not None else None
+    decision = _apply_decision(row.preparation.server, state)
     if not decision.allowed:
         messages.error(request, decision.sentence)
         return redirect("change_detail", operation_id=operation_id)
@@ -440,8 +441,15 @@ def _run_context(
     run = view.run
     permissions = permissions_for(view.consent, writes_secrets=run.review.writes_secrets)
     preparation = run.review.preparation
+    state = (
+        server_state(preparation.server)
+        if preparation is not None and preparation.server is not None
+        else None
+    )
     can_prepare_again, prepare_again_reason = (
-        _prepare_again_state(request, preparation) if preparation is not None else (False, "")
+        _prepare_again_state(request, preparation, state)
+        if preparation is not None
+        else (False, "")
     )
     plain = view.plain
     next_reason = ""
