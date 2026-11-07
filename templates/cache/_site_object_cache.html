@@ -32,6 +32,11 @@
           <input type="hidden" name="action" value="client">
           <button type="submit" class="usa-button">Load the cache client</button>
         </form>
+      {% elif blocking %}
+        {% include "operations/_blocking_operation.html" with after="Load the cache client after it finishes." %}
+        {% if object_cache_reason %}<p class="barectl-note">{{ object_cache_reason }}</p>{% endif %}
+      {% else %}
+        <p class="barectl-note">{{ object_cache_reason }}</p>
       {% endif %}
       {% if object_cache_state != "off" and object_cache_can_turn_off %}
         <form method="post"
@@ -66,10 +71,10 @@
         </form>
       {% elif blocking %}
         {% include "operations/_blocking_operation.html" with after="Turn the cache on after it finishes." %}
+        {% if object_cache_reason %}<p class="barectl-note">{{ object_cache_reason }}</p>{% endif %}
       {% else %}
         <p class="barectl-note">
-          Turning the cache on needs a current, complete site and permission to change this
-          site.
+          {{ object_cache_reason|default:"Turning the cache on needs a current, complete site and permission to change this site." }}
         </p>
       {% endif %}
     {% else %}
@@ -130,6 +135,9 @@
           </form>
         {% endif %}
       </div>
+      {% if not object_cache_can_turn_off %}
+        <p class="barectl-note">{{ object_cache_reason }}</p>
+      {% endif %}
     {% endif %}
   </section>
 {% endif %}

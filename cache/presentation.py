@@ -5,7 +5,7 @@ decide native state themselves. Nothing here opens a connection: the stored snap
 carries the cache's state, and the numbers come from a reading an operator asked for.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from django.contrib.auth.models import AnonymousUser, User
@@ -13,14 +13,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from bootstrap.standing import Standing
-from discovery.models import SiteState
-from discovery.presentation import VIEW_SITES
 from discovery.snapshot import CollectedSnapshot, ObservedCache, ObservedSite
-from operations import services
-from operations.consent import PREPARE_PERMISSIONS
+from operations import preparation, services
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites.names import valid_identifier
+from sites.preparation import decide_for_site
 
 from . import convention, observation, reading
 from .plugin import PLUGIN_NAME, PLUGIN_VERSION
@@ -183,7 +181,8 @@ def _laravel_site(state: DiscoveryState, identifier: str) -> bool:
     )
 
 
-def _allowed(server: Server, state: DiscoveryState, site: ObservedSite | None) -> bool:
+def _reading_allowed(server: Server, state: DiscoveryState, site: ObservedSite | None) -> bool:
+    """A cache reading is read-only, so it does not ask the change gate."""
     snapshot = state.snapshot
     return (
         site is not None
@@ -212,16 +211,24 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
         convention.DEFAULT_MAXMEMORY_MIB
     )
     client = site.client if site is not None else ""
-    allowed = applicable and _allowed(server, state, site)
-    can_prepare = (
-        allowed
-        and site is not None
-        and site.state == SiteState.MANAGED
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
+    on_decision = decide_for_site(state, user, identifier, replace(preparation.SITE, cache=True))
+    off_decision = decide_for_site(
+        state,
+        user,
+        identifier,
+        replace(
+            preparation.SITE,
+            state=None,
+            allow_partly_applied=True,
+            cache=True,
+        ),
     )
-    can_turn_off = allowed and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
+    can_prepare = applicable and on_decision.allowed
+    can_turn_off = applicable and off_decision.allowed
     can_read = (
-        applicable and _allowed(server, state, site) and user.has_perms(reading.READ_PERMISSIONS)
+        applicable
+        and _reading_allowed(server, state, site)
+        and user.has_perms(reading.READ_PERMISSIONS)
     )
     checked = snapshot.collected_at if snapshot is not None else None
     return {
@@ -248,6 +255,10 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
         "object_cache_can_prepare": can_prepare,
         "object_cache_can_turn_off": can_turn_off,
         "object_cache_can_read": can_read,
+        "object_cache_reason": on_decision.reason.sentence if on_decision.reason else "",
+        "object_cache_turn_off_reason": (
+            off_decision.reason.sentence if off_decision.reason else ""
+        ),
         "object_cache_reading": view,
         "object_cache_checked_at": checked,
         "object_cache_line": line_for(applicable, current, problem, view, checked),

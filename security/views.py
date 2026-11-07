@@ -17,6 +17,7 @@ from operations.lifecycle import OperationRefused
 from operations.models import CHANGE_SHARED
 from servers.discovery_state import server_state
 from servers.models import Server
+from servers.preparation import SERVER_SHARED, decide_for_server, refusal_sentence
 
 from .change import SLUG, STATES
 from .firewall import ACTIONS as FIREWALL_ACTIONS
@@ -47,14 +48,7 @@ def prepare_firewall(request: HttpRequest, pk: int) -> HttpResponse:
         inputs.update(port=port, protocol=protocol)
         if network:
             inputs["network"] = network
-    return _prepare(
-        request,
-        pk,
-        FIREWALL_SLUG,
-        inputs,
-        "This server has no current manageable observation. Run a connection check and "
-        "resolve any findings before changing the firewall.",
-    )
+    return _prepare(request, pk, FIREWALL_SLUG, inputs)
 
 
 @require_POST
@@ -64,13 +58,7 @@ def prepare_sign_in(request: HttpRequest, pk: int) -> HttpResponse:
     """Prepare the fixed key-only sign-in policy."""
     if request.POST.get("selection") != "on":
         return _redirect_problem(request, pk, "Choose Require key sign-in to continue.")
-    return _prepare(
-        request,
-        pk,
-        SIGN_IN_SLUG,
-        {"version": 1, "selection": "on"},
-        "Run a connection check and resolve the server's findings before changing sign-in.",
-    )
+    return _prepare(request, pk, SIGN_IN_SLUG, {"version": 1, "selection": "on"})
 
 
 @require_POST
@@ -81,14 +69,7 @@ def prepare_auto_updates(request: HttpRequest, pk: int) -> HttpResponse:
     state = request.POST.get("state", "")
     if state not in STATES:
         return _redirect_problem(request, pk, "Choose whether to turn automatic updates on or off.")
-    return _prepare(
-        request,
-        pk,
-        SLUG,
-        {"version": 1, "selection": state},
-        "This server has no current manageable observation. Run a connection check and "
-        "resolve any findings before changing automatic updates.",
-    )
+    return _prepare(request, pk, SLUG, {"version": 1, "selection": state})
 
 
 @require_POST
@@ -98,14 +79,7 @@ def prepare_restart(request: HttpRequest, pk: int) -> HttpResponse:
     """Prepare a reviewed restart of the whole server."""
     if request.POST.get("selection") != "on":
         return _redirect_problem(request, pk, "Choose Restart server to continue.")
-    return _prepare(
-        request,
-        pk,
-        RESTART_SLUG,
-        {"version": 1, "selection": "on"},
-        "This server has no current manageable observation. Run a connection check and "
-        "resolve any findings before restarting it.",
-    )
+    return _prepare(request, pk, RESTART_SLUG, {"version": 1, "selection": "on"})
 
 
 @require_POST
@@ -113,14 +87,7 @@ def prepare_restart(request: HttpRequest, pk: int) -> HttpResponse:
 @permission_required((*PREPARE_PERMISSIONS, CHANGE_SHARED), raise_exception=True)
 def prepare_updates_check(request: HttpRequest, pk: int) -> HttpResponse:
     """Refresh Ubuntu's package lists as its own reviewed change."""
-    return _prepare(
-        request,
-        pk,
-        CHECK_SLUG,
-        {"version": 1},
-        "This server has no current manageable observation. Run a connection check and "
-        "resolve any findings before checking for Ubuntu updates.",
-    )
+    return _prepare(request, pk, CHECK_SLUG, {"version": 1})
 
 
 @require_POST
@@ -133,14 +100,7 @@ def prepare_updates_install(request: HttpRequest, pk: int) -> HttpResponse:
         return _redirect_problem(
             request, pk, "Choose whether to install security updates only or all updates."
         )
-    return _prepare(
-        request,
-        pk,
-        INSTALL_SLUG,
-        {"version": 1, "selection": selection},
-        "This server has no current manageable observation. Run a connection check and "
-        "resolve any findings before installing Ubuntu updates.",
-    )
+    return _prepare(request, pk, INSTALL_SLUG, {"version": 1, "selection": selection})
 
 
 def _prepare(
@@ -148,13 +108,13 @@ def _prepare(
     pk: int,
     slug: str,
     inputs: dict[str, object],
-    unmanageable: str,
 ) -> HttpResponse:
     if not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    if not server_state(server).can_prepare_changes:
-        messages.error(request, unmanageable)
+    decision = decide_for_server(server_state(server), request.user, SERVER_SHARED)
+    if not decision.allowed:
+        messages.error(request, refusal_sentence(decision))
         return redirect("server_security", pk=pk)
     try:
         queued = change_services.request_prepare(server, request.user, slug, inputs=inputs)

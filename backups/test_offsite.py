@@ -13,11 +13,12 @@ if TYPE_CHECKING:
 
 from bootstrap.standing import Standing
 from operations import confidential, engine
+from operations.activity_testing import record_change
 from operations.consent import Scope, consent_of
 from operations.engine import BodyContext, ReviewDraft
 from operations.fakes import ChangeTestCase
 from operations.inputs import PreparationInputs
-from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consent
+from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consent, RemoteOperation
 from runtimes.catalog import Architecture, load
 
 from . import change, convention, kit, observation, offsite
@@ -519,3 +520,36 @@ class OffsiteSettingsRequestTests(ChangeTestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ChangePreparation.objects.exists())
+
+    def test_a_running_change_withholds_the_card_and_refuses_the_post_with_the_sentence(
+        self,
+    ) -> None:
+        from .testing import record_backups
+
+        server = self.server
+        record_backups(server, offsite=storage())
+        self.sign_in_with(
+            "view_server", "view_changes", "change_site", "manage_secrets", "view_siteobservation"
+        )
+        offered = self.client.get(f"/servers/{server.pk}/settings/")
+        self.assertContains(offered, "Remove offsite storage")
+        record_change(server, status=RemoteOperation.Status.RUNNING)
+        withheld = self.client.get(f"/servers/{server.pk}/settings/")
+        self.assertNotContains(withheld, "Remove offsite storage")
+        self.assertNotContains(withheld, "Replace recovery passphrase")
+        self.assertContains(
+            withheld,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        refused = self.client.post(
+            f"/servers/{server.pk}/settings/backup-storage/prepare/",
+            {"provider": "s3", "bucket": BUCKET, "region": "us-east-1"},
+            follow=True,
+        )
+        self.assertContains(
+            refused,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 1)

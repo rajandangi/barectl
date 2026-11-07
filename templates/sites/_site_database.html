@@ -26,6 +26,9 @@
         </form>
       {% elif blocking %}
         {% include "operations/_blocking_operation.html" with after="Prepare the site database after it finishes." %}
+        {% if site_database_reason %}<p class="barectl-note">{{ site_database_reason }}</p>{% endif %}
+      {% else %}
+        <p class="barectl-note">{{ site_database_reason }}</p>
       {% endif %}
     {% else %}
       <p class="barectl-note">{{ site_database_panel.note }}</p>

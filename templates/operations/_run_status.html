@@ -75,6 +75,8 @@
           <button type="submit" class="usa-button">{{ next.label }}</button>
         </form>
       {% endif %}
+    {% elif next_reason %}
+      <p class="barectl-note">{{ next_reason }}</p>
     {% endif %}
     {% if run.reconciling and can_acknowledge and run.native_record_missing %}
       <form class="usa-form barectl-acknowledge"

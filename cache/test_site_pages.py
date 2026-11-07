@@ -7,11 +7,12 @@ from unittest import mock
 from django.test import Client
 from django.utils import timezone
 
+from discovery.models import SiteState
 from discovery.snapshot import ObservedCache, ObservedSetting
 from operations.models import ChangePreparation
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
-from sites.ui_testing import record_site_settings
+from sites.ui_testing import record_site_settings, record_site_state
 
 from .instance import SLUG
 from .models import CacheReading
@@ -173,6 +174,55 @@ class ObjectCacheCardTests(ControllerConfigTestCase):
         preparation = ChangePreparation.objects.get()
         self.assertEqual(preparation.kind_slug, "set_site_php_client")
         self.assertEqual(preparation.inputs["php_client"], True)
+
+    def test_a_partly_applied_site_withholds_the_cache_and_client_actions(self) -> None:
+        self.record_laravel()
+        record_site_state(self.server, state=SiteState.PARTLY_APPLIED)
+        sentence = (
+            "This site is partly applied; finish the change that is already in progress first."
+        )
+        response = self.client.get(self.settings_url)
+        self.assertNotContains(response, "Turn on object cache")
+        self.assertContains(response, sentence, html=True)
+        for action in ("on", "client"):
+            with self.subTest(action=action):
+                refusal = self.client.post(
+                    self.prepare_url, {"action": action, "memory": "64"}, follow=True
+                )
+                self.assertEqual(refusal.redirect_chain[0][0], self.settings_url)
+                self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+                self.assertEqual(ChangePreparation.objects.count(), 0)
+
+    def test_a_not_following_site_withholds_turning_the_cache_off_and_the_client(self) -> None:
+        self.record_laravel(state="on", memory=64)
+        record_site_state(self.server, state=SiteState.NOT_FOLLOWING)
+        sentence = "This site does not follow the supported convention; Barectl can only remove it."
+        response = self.client.get(self.settings_url)
+        self.assertNotContains(response, "Turn off object cache")
+        self.assertContains(response, sentence)
+        for action in ("off", "client"):
+            with self.subTest(action=action):
+                refusal = self.client.post(self.prepare_url, {"action": action}, follow=True)
+                self.assertEqual(refusal.redirect_chain[0][0], self.settings_url)
+                self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+                self.assertEqual(ChangePreparation.objects.count(), 0)
+
+    def test_a_site_without_an_observed_cache_row_withholds_with_that_reason(self) -> None:
+        record_site_settings(
+            self.server,
+            identifier="alpha",
+            application="plain",
+            settings=(ObservedSetting("alpha", "laravel", "APP_ENV", "a" * 64, "production"),),
+            cache=(),
+            installed_valkey=True,
+        )
+        sentence = "Barectl has not observed this site's object cache."
+        response = self.client.get(self.settings_url)
+        self.assertNotContains(response, "Turn on object cache")
+        self.assertContains(response, sentence, html=True)
+        refusal = self.client.post(self.prepare_url, {"action": "on", "memory": "64"}, follow=True)
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(ChangePreparation.objects.count(), 0)
 
     def test_a_viewer_is_refused_on_a_direct_prepare_post(self) -> None:
         self.record()

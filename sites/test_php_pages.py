@@ -21,7 +21,12 @@ from servers.testing import ControllerConfigTestCase
 
 from .observation import PHP_TRANSITION_INCOMPLETE
 from .php_change import SLUG
-from .ui_testing import record_http_sites, record_php85_installed, record_step_run
+from .ui_testing import (
+    record_http_sites,
+    record_php85_installed,
+    record_site_state,
+    record_step_run,
+)
 
 BANNED = (
     "master",
@@ -260,6 +265,29 @@ class SitePhpSettingsTests(ControllerConfigTestCase):
         self.assertRedirects(response, self.settings_url)
         self.assertEqual(read_changes(self.server).rows, [])
 
+    def test_a_not_following_site_withholds_the_php_version_card_with_the_gate_sentence(
+        self,
+    ) -> None:
+        record_site_state(self.server, state=SiteState.NOT_FOLLOWING)
+        sentence = "This site does not follow the supported convention; Barectl can only remove it."
+        response = self.client.get(self.settings_url)
+        self.assertNotContains(response, "?change=php#change-php")
+        self.assertContains(response, sentence)
+        refusal = self.client.post(self.url, {"selection": "php85"}, follow=True)
+        self.assertEqual(refusal.redirect_chain[0][0], self.settings_url)
+        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
+        self.assertEqual(read_changes(self.server).rows, [])
+
+    def test_an_incomplete_php_switch_offers_php_version_and_withholds_php_settings(self) -> None:
+        self.record_incomplete_switch()
+        sentence = (
+            "This site is partly applied; finish the change that is already in progress first."
+        )
+        response = self.client.get(self.settings_url)
+        self.assertContains(response, "Finish or reverse the PHP change")
+        self.assertNotContains(response, 'name="max_children"')
+        self.assertContains(response, sentence)
+
     def record_transition(
         self, *, problem: str = "The PHP runtime transition is incomplete."
     ) -> None:
@@ -343,17 +371,30 @@ class SitePhpSettingsTests(ControllerConfigTestCase):
             self.fail("No setup snapshot.")
         observed = snapshot.collected.sites
         site = observed.value[0]
-        for changed in (
-            replace(site, outcome=ObservationOutcome.INACCESSIBLE),
-            replace(site, missing=(*site.missing, "The deploy lock is unsafe.")),
-            replace(site, file="/etc/caddy/sites/foreign.caddy"),
-        ):
-            with self.subTest(changed=changed):
+        cases = (
+            (
+                "unreadable inventory",
+                replace(observed, outcome=ObservationOutcome.INACCESSIBLE),
+                site,
+            ),
+            (
+                "extra problem",
+                observed,
+                replace(site, missing=(*site.missing, "The deploy lock is unsafe.")),
+            ),
+            (
+                "foreign path",
+                observed,
+                replace(site, file="/etc/caddy/sites/foreign.caddy"),
+            ),
+        )
+        for label, sites, changed in cases:
+            with self.subTest(case=label):
                 save_snapshot(
                     record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED),
-                    replace(snapshot.collected, sites=replace(observed, value=(changed,))),
+                    replace(snapshot.collected, sites=replace(sites, value=(changed,))),
                     timezone.now(),
                 )
                 response = self.client.post(self.url, {"selection": "php84"})
-                self.assertRedirects(response, self.settings_url)
+                self.assertEqual(response.status_code, 302)
                 self.assertEqual(read_changes(self.server).rows, [])

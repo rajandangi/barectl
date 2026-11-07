@@ -85,6 +85,60 @@ class HttpSitePageTests(ControllerConfigTestCase):
         self.assertContains(response, "Current release")
         self.assertContains(response, "abc123def456")
         self.assertContains(response, "Deploy")
+        self.assertContains(
+            response,
+            f'action="/servers/{self.server.pk}/sites/alpha/deployments/deploy/prepare/"',
+        )
+
+    def test_a_withheld_overview_deploy_link_shows_the_gate_sentence(self) -> None:
+        from discovery.models import SiteState
+        from discovery.snapshot import ObservedRelease, ObservedSetting
+        from operations.activity_testing import record_change
+
+        record_site_settings(
+            self.server,
+            identifier="alpha",
+            application="laravel",
+            https=True,
+            releases=(
+                ObservedRelease(
+                    "alpha",
+                    "abc123def456-0123456789abcdef",
+                    "abc123def456",
+                    1_700_000_000,
+                    SiteState.MANAGED,
+                    True,
+                ),
+            ),
+            settings=(ObservedSetting("alpha", "laravel", "APP_ENV", "a" * 64, "production"),),
+        )
+        record_change(self.server, status="queued")
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
+        self.assertNotContains(
+            response,
+            f'action="/servers/{self.server.pk}/sites/alpha/deployments/deploy/prepare/"',
+        )
+        self.assertContains(
+            response,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+
+    def test_a_withheld_overview_reopen_link_shows_the_gate_sentence(self) -> None:
+        from django.contrib.auth.models import Permission
+
+        from backups.testing import record_backups, result
+
+        record_backups(
+            self.server,
+            identifier="shop",
+            gated=True,
+            last=result(scope="full", reason="backup_paused"),
+        )
+        self.user.user_permissions.remove(Permission.objects.get(codename="change_site"))
+        response = self.client.get(f"/servers/{self.server.pk}/sites/shop/")
+        self.assertNotContains(response, "Reopen site")
+        self.assertContains(response, "Your account does not have permission to prepare changes.")
 
     def test_overview_summary_ends_with_one_period(self) -> None:
         response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")

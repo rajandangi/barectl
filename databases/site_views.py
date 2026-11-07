@@ -13,15 +13,14 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome, SiteState
 from discovery.presentation import VIEW_SITES
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import server_state
 from servers.models import Server
 from sites.names import valid_identifier
+from sites.preparation import decide_for_site
 
 from . import presentation
 from . import site as site_kind
@@ -34,36 +33,15 @@ def context_for_site(
 ) -> dict[str, object]:
     state = server_state(server)
     snapshot = state.snapshot
-    site = (
-        next(
-            (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-            None,
-        )
-        if snapshot
-        else None
-    )
-    allowed = (
-        site is not None
-        and snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and snapshot.collected.sites.outcome == ObservationOutcome.OBSERVED
-        and site.outcome == ObservationOutcome.OBSERVED
-        and site.file == f"/etc/caddy/sites/{identifier}.caddy"
-        and site.state == SiteState.MANAGED
-    )
+    decision = decide_for_site(state, user, identifier, preparation.SITE)
     return {
         "site_database_panel": (
             presentation.site_panel(snapshot.collected, identifier)
             if snapshot is not None
             else None
         ),
-        "site_database_can_prepare": (
-            allowed
-            and state.can_prepare_changes
-            and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-            and not services.read_changes(server).polling
-        ),
+        "site_database_can_prepare": decision.allowed,
+        "site_database_reason": decision.reason.sentence if decision.reason else "",
     }
 
 
@@ -79,8 +57,11 @@ def prepare_site_database(request: HttpRequest, pk: int, identifier: str) -> Htt
     if not context["site_database_can_prepare"]:
         messages.error(
             request,
-            "Run discovery, resolve the server's findings and install one database engine "
-            "before adding this site's database.",
+            str(context["site_database_reason"])
+            or (
+                "Run discovery, resolve the server's findings and install one database engine "
+                "before adding this site's database."
+            ),
         )
         return redirect("site_database", pk=pk, identifier=identifier)
     try:

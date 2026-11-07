@@ -17,9 +17,11 @@ from discovery.snapshot import (
     save_snapshot,
 )
 from discovery.ssh import CommandResult, RemoteShell
+from operations.activity_testing import record_change
 from operations.consent import Scope
 from operations.engine import BodyContext
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
+from operations.models import ChangePreparation, RemoteOperation
 from operations.services import read_changes
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
@@ -319,6 +321,57 @@ class CertificateEmailPageTests(ControllerConfigTestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(read_changes(self.server).rows, [])
+
+    def test_a_running_change_withholds_and_refuses_with_the_gate_sentence(self) -> None:
+        target_snapshot(self.server, email="ops@example.com", state=SET)
+        offered = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertContains(offered, "Change certificate email")
+        record_change(self.server, status=RemoteOperation.Status.RUNNING)
+        withheld = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertNotContains(withheld, "Change certificate email")
+        self.assertContains(
+            withheld,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        refused = self.client.post(
+            f"/servers/{self.server.pk}/settings/certificate-email/prepare/",
+            {"email": "ops@example.com"},
+            follow=True,
+        )
+        self.assertContains(
+            refused,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
+        self.assertEqual(ChangePreparation.objects.count(), 1)
+
+    def test_a_running_check_withholds_the_card_and_its_neighbour_with_one_sentence(self) -> None:
+        target_snapshot(self.server, email="ops@example.com", state=SET)
+        record_attempt(self.server, DiscoveryAttempt.Status.RUNNING)
+        response = self.client.get(f"/servers/{self.server.pk}/settings/")
+        sentence = "A connection check is running; wait for it to finish before preparing a change."
+        self.assertContains(response, sentence)
+        self.assertNotContains(response, "Change certificate email")
+        self.assertNotContains(response, "Install MariaDB")
+        self.assertNotContains(response, "Install Valkey")
+
+    def test_an_active_log_read_does_not_withhold_the_card(self) -> None:
+        target_snapshot(self.server, email="ops@example.com", state=SET)
+        operation = RemoteOperation.objects.create(
+            server=self.server,
+            ssh_alias=self.server.ssh_alias,
+            kind=RemoteOperation.Kind.LOG_READ,
+            status=RemoteOperation.Status.RUNNING,
+        )
+        self.addCleanup(operation.delete)
+        response = self.client.get(f"/servers/{self.server.pk}/settings/")
+        self.assertContains(response, "Change certificate email")
+        self.assertNotContains(
+            response,
+            "Another change is running for this server; wait for it to finish before "
+            "preparing a change.",
+        )
 
 
 class DiscoveryTests(SimpleTestCase):

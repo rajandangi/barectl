@@ -5,6 +5,8 @@ does not have yet is offered as Step 1 through Add runtime, keeping the choice f
 switch that follows.
 """
 
+from dataclasses import replace
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -12,11 +14,10 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from bootstrap.standing import Standing
 from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from runtimes.change import SLUG as ADD_RUNTIME_SLUG
@@ -28,6 +29,7 @@ from .bodies.common import NODE_INTERRUPTED
 from .forms import SiteNodeForm
 from .names import valid_identifier
 from .node_change import CHOICES, SLUG
+from .preparation import decide_for_site
 
 
 def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
@@ -66,7 +68,6 @@ def context_for_site(
     server: Server, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     state = server_state(server)
-    snapshot = state.snapshot
     site = _site(state, identifier)
     current = site.node_runtime if site else ""
     incomplete = (
@@ -75,13 +76,11 @@ def context_for_site(
         and site.missing == (NODE_INTERRUPTED,)
     )
     choices = switch_choices(state, current=current, incomplete=incomplete)
-    allowed = (
-        site is not None
-        and snapshot is not None
-        and snapshot.collected.standing is not None
-        and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and site.file.startswith("/etc/caddy/sites/")
-        and (site.state == SiteState.MANAGED or incomplete)
+    decision = decide_for_site(
+        state,
+        user,
+        identifier,
+        replace(preparation.SITE, state=None, completes=NODE_INTERRUPTED),
     )
     return {
         "site_node_incomplete": incomplete,
@@ -99,11 +98,8 @@ def context_for_site(
             }
             for choice in choices
         ),
-        "site_node_can_prepare": bool(choices)
-        and allowed
-        and state.can_prepare_changes
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-        and not services.read_changes(server).polling,
+        "site_node_can_prepare": bool(choices) and decision.allowed,
+        "site_node_reason": decision.reason.sentence if decision.reason else "",
     }
 
 
@@ -152,7 +148,11 @@ def prepare_node(request: HttpRequest, pk: int, identifier: str) -> HttpResponse
         request.POST, choices=tuple(choice.entry for choice in choices), selected=current
     )
     if not context["site_node_can_prepare"] or not form.is_valid():
-        messages.error(request, "Choose another Node.js version from a fresh check of this site.")
+        messages.error(
+            request,
+            str(context["site_node_reason"])
+            or "Choose another Node.js version from a fresh check of this site.",
+        )
         return redirect("site_settings", pk=pk, identifier=identifier)
     selection = str(form.cleaned_data["selection"])
     installed = choices_for(state)

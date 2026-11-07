@@ -7,11 +7,12 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
 from bootstrap.standing import Standing
-from operations import services
+from operations import preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
+from servers.preparation import decide_for_server, refusal_sentence
 
 from .defaults import DefaultsObservation
 from .defaults_forms import DefaultRuntimeForm
@@ -33,14 +34,15 @@ def context_for_server(state: DiscoveryState, user: User | AnonymousUser) -> dic
     defaults = observation or DefaultsObservation()
     fresh = snapshot is not None and state.snapshot_notice is None
     standing = snapshot.collected.standing if snapshot is not None else None
-    can_prepare = (
-        fresh
-        and state.can_prepare_changes
-        and user.has_perms(PREPARE_PERMISSIONS)
-        and standing is not None
-        and standing.standing == Standing.TARGET_STACK
-        and not services.read_changes(state.server).polling
+    decision = (
+        decide_for_server(state, user, preparation.SERVER)
+        if isinstance(user, User)
+        else preparation.Decision(False)
     )
+    can_prepare = (
+        decision.allowed and standing is not None and standing.standing == Standing.TARGET_STACK
+    )
+    reason = decision.reason.sentence if decision.reason else ""
     return {
         "default_php_form": DefaultRuntimeForm(
             choices=defaults.php_choices if fresh else (), selected=defaults.php, family="php"
@@ -54,15 +56,18 @@ def context_for_server(state: DiscoveryState, user: User | AnonymousUser) -> dic
         "default_php_can_prepare": can_prepare
         and bool(defaults.php_choices)
         and not defaults.php_problem,
+        "default_php_reason": reason,
         "default_node_can_prepare": can_prepare
         and bool(defaults.node_choices)
         and not defaults.node_problem,
+        "default_node_reason": reason,
         "php_versions": settings_php_versions(snapshot.collected) if snapshot is not None else (),
         "php_additions": (
             settings_php_additions(snapshot.collected) if fresh and snapshot is not None else ()
         ),
         "php_versions_checked": snapshot is not None,
         "can_add_runtime": can_prepare,
+        "can_add_runtime_reason": reason,
     }
 
 
@@ -79,6 +84,10 @@ def prepare_default(request: HttpRequest, pk: int, family: str) -> HttpResponse:
         raise PermissionDenied
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
+    decision = decide_for_server(state, request.user, preparation.SERVER)
+    if not decision.allowed:
+        messages.error(request, refusal_sentence(decision))
+        return redirect("server_settings", pk=pk)
     context = context_for_server(state, request.user)
     if not context["default_" + family + "_can_prepare"]:
         messages.error(
