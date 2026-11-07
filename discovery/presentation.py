@@ -11,6 +11,7 @@ from typing import NamedTuple
 from django.template.defaultfilters import filesizeformat
 
 from bootstrap.standing import HostJudgment
+from sites.bodies.pool import SitePool
 
 from .models import (
     ObservationOutcome,
@@ -25,6 +26,7 @@ from .snapshot import (
     OsRelease,
     ServiceUnit,
     SiteCertificate,
+    SnapshotFacts,
     WebStackComponentObservation,
 )
 
@@ -111,6 +113,23 @@ def present(collected: CollectedSnapshot) -> SnapshotPresentation:
         components=tuple(_component(component) for component in collected.components),
         standing=collected.standing,
     )
+
+
+def summary_warnings(facts: SnapshotFacts | None) -> tuple[ShownObservation, ...]:
+    """The warnings Activity lists for an attempt's snapshot, without the full snapshot."""
+    if facts is None:
+        return ()
+    shown = [
+        _scalar("Operating system", facts.os, _display_name),
+        _scalar("Architecture", facts.architecture, str),
+        _scalar("CPUs", facts.cpu_count, lambda count: f"{count} available"),
+        _scalar("Memory", facts.memory_bytes, _size),
+        _scalar("Root filesystem", facts.filesystem, _filesystem),
+    ]
+    for component in facts.components:
+        observed = _component(component)
+        shown += [observed.package, observed.service]
+    return tuple(item for item in shown if item.outcome in UNINSPECTED and item.warning)
 
 
 def _display_name(release: OsRelease) -> str:
@@ -219,6 +238,11 @@ class ShownSite:
     https: bool = False
     readiness: str = "/"
     application: str = "plain"
+    # The Node.js runtime and the pool's operator-tunable settings, for Settings.
+    node_runtime: str = ""
+    pool: SitePool | None = None
+    # The PHP object-cache client enabled for this site's own master (Phase C #390).
+    client: str = ""
     # Whether the site has a complete recovery point in the fixed 48-hour window (#402).
     recent_backup: bool = True
 
@@ -260,6 +284,9 @@ def _site(site: ObservedSite, recent_missing: Collection[str] | None = None) -> 
         https=site.https,
         readiness=site.readiness,
         application=site.application,
+        node_runtime=site.node_runtime,
+        pool=site.pool,
+        client=site.client,
         recent_backup=recent_missing is None or site.identifier not in recent_missing,
     )
 

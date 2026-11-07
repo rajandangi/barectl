@@ -609,7 +609,10 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertIsNotNone(recorded[1].snapshot)
         # The latest attempt and the current snapshot come from the same read.
         self.assertEqual(discovery.attempt, attempt)
-        self.assertEqual(discovery.snapshot, recorded[1].snapshot)
+        assert discovery.snapshot is not None  # noqa: S101 - narrows the optional for mypy
+        facts = recorded[1].snapshot
+        assert facts is not None  # noqa: S101 - narrows the optional for mypy
+        self.assertEqual(discovery.snapshot.collected_at, facts.collected_at)
         self.assertEqual(discovery.snapshot, current(self.server))
         self.assertEqual({listed.server for listed, _ in history()}, {self.server, other})
 
