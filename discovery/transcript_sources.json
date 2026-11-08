@@ -426,7 +426,7 @@
     "logs/views.py": "440840be37f4855fa39ac2f459381978560e6a6939b750e17f612c371e4e1124",
     "manage.py": "aa57e0677b95467ae43ec29df9bf815490c344056c52e47caf80423c1bba6e34",
     "operations/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "operations/activity.py": "773b6242da7cf294ed6ffe561f48c0a4120c69bf29e8d7a3538ae41c61bf8dfe",
+    "operations/activity.py": "28901a092318f437938d6ce0263765e1f19ad139852227ce0a7479e18950937c",
     "operations/activity_testing.py": "1c1c6544c5e722165e3dea713d0b66e57719daf2d7c6b7b22a266de9009bebe1",
     "operations/apps.py": "9327d2ad25706d83e9e6fb6fea15dbaf6db989837ce3f979fe97e594459d7f44",
     "operations/apt.py": "24d3fbfabee47ca22f4c070e2174b44003d70a6f4db96eabf699509453e209c7",
