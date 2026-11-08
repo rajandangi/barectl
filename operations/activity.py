@@ -20,7 +20,7 @@ from servers.models import Server
 
 from . import engine
 from .models import ChangePreparation, ChangeReview, ChangeRun, RemoteOperation, Result
-from .services import ChangeRow, ServerChanges, change_row, read_changes
+from .services import ChangeRow, ServerChanges, change_row
 
 Kind = Literal["check", "change"]
 
@@ -87,11 +87,11 @@ def check_rows(attempts: Iterable[AttemptView]) -> list[ActivityRow]:
 
 def change_rows(server: Server | None = None) -> list[ActivityRow]:
     """The recorded changes of one server, or of every server, newest first."""
-    if server is not None:
-        return change_rows_from(read_changes(server))
     preparations = ChangePreparation.objects.select_related(
         "server", "review", "review__run"
     ).order_by("-queued_at", "-pk")
+    if server is not None:
+        preparations = preparations.filter(server=server)
     return [_change_row(change_row(preparation)) for preparation in preparations]
 
 
