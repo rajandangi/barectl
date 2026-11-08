@@ -61,6 +61,8 @@ Complete the run only when every sub-issue's acceptance criteria are met and the
 
 A run that changes the harness (skills, steering docs or checks) follows [harness evals](evals.md): prepare a baseline and a candidate arm on the same pinned case, grade both, and merge only when the target metric improves and the regression cases hold. Record a negative result instead of deleting it.
 
+After the final review and merge, close the run with the `barectl-retro` wrapper. Run it in the delivery session before clearing; if the session was already cleared, point it at that session's log. It is operator-invoked; ask for it rather than treating the merged pull request as the end of the delivery. Accepted candidates become eval cases before any harness change, under the same rule.
+
 ## Long-running commands
 
 Run long commands in one persistent tool execution. Use the foreground runner, return the tool's live session handle promptly, and resume that session until the runner exits:
