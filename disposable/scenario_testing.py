@@ -119,6 +119,27 @@ class ScenarioTestCase(TestCase):
                 self.fail("The server's sites could not be read.")
             time.sleep(0.5)
 
+    def wait_for_target_stack(self, *, timeout: float = 60) -> None:
+        """Wait for boot-time package activity to finish before reading standing.
+
+        ``apt-daily.service`` can still be running just after a snapshot container boots.
+        Standing then reads Not manageable, and a change that only needs the target stack
+        would refuse. The wait makes that boot race explicit; a host that never settles
+        still fails the calling scenario.
+        """
+        from bootstrap.standing import Standing
+        from discovery.observations import collect
+
+        end = time.monotonic() + timeout
+        while True:
+            with self.shell() as shell:
+                standing = collect(shell, sites=False).standing
+            if standing is not None and standing.standing is Standing.TARGET_STACK:
+                return
+            if time.monotonic() >= end:
+                self.fail(f"The host did not become the target stack: {standing}")
+            time.sleep(0.5)
+
     def assert_default_server_packages(self) -> None:
         """The default server packages and update units (docs/bootstrap.md#host-standing)."""
         status = self.native(

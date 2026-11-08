@@ -32,6 +32,13 @@ def submit_change(
         # The worker also records the reviewed fence (automation/fence.py) before it stores
         # the review, so a scenario that applies a fenced change uses the same review.
         draft = engine._planned(shell, kind.review(kind.inspect(shell, inputs), inputs))
+        if not draft.eligible and any(
+            reason.startswith("Set up and verify") for reason in draft.refusals
+        ):
+            # A snapshot container's boot-time apt-daily run makes standing briefly Not
+            # manageable. Wait for it before treating the refusal as the scenario's answer.
+            test.wait_for_target_stack()
+            draft = engine._planned(shell, kind.review(kind.inspect(shell, inputs), inputs))
         return submit_draft(test, shell, kind, draft, secret=secret)
 
 
