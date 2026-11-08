@@ -15,6 +15,11 @@ seam the parallel tickets will use, not only its own slice. Give each ticket an 
 list; serialize tickets that share a file. A later ticket that still needs a shared constant
 adds it in its own area module instead of editing the shared seam.
 
+When a ticket changes a module's interface or seam, call the Skill tool with
+`codebase-design` for the deep-module vocabulary and record the chosen seam in the ticket.
+Do not call it for every ticket; a ticket that only fills in an existing interface does not
+need it.
+
 ## Review triage
 
 When `code-review` returns, tag every finding **must-fix** or **judgement** before acting.
