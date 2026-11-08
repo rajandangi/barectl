@@ -23,12 +23,12 @@ from operations import preparation
 from operations.preparation import ReasonName
 from operations.services import ServerChanges, read_changes
 from servers.discovery_state import DiscoveryState, server_state
-from servers.models import ConnectionDefinition, Server
+from servers.models import Server
 from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 from sites.bodies.common import SITE_GATED
 from sites.deploy_views import deploy_context
 from sites.preparation import decide_for_site
-from sites.ui_testing import record_site_settings
+from sites.ui_testing import record_older_snapshots, record_site_settings
 
 DIGEST = "a" * 64
 
@@ -266,35 +266,15 @@ class SettingsPageTests(ControllerConfigTestCase):
         self.laravel()
         url = f"/servers/{self.server.pk}/sites/alpha/settings/"
         assert_query_count_flat_as_history_grows(
-            self.client, url, lambda: self.record_older_snapshots(3)
+            self.client, url, lambda: record_older_snapshots(self.server, 3)
         )
 
     def test_the_environment_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
         self.laravel()
         url = f"/servers/{self.server.pk}/sites/alpha/environment/"
         assert_query_count_flat_as_history_grows(
-            self.client, url, lambda: self.record_older_snapshots(3)
+            self.client, url, lambda: record_older_snapshots(self.server, 3)
         )
-
-    def record_older_snapshots(self, count: int) -> None:
-        """Record attempts for past connection revisions, each holding a real snapshot."""
-        snapshot = current_snapshot(self.server)
-        if snapshot is None:
-            self.fail("No setup snapshot.")
-        for index in range(count):
-            definition = ConnectionDefinition.objects.create(
-                server=self.server,
-                revision=index + 1,
-                mode="agent",
-                alias="web.example.com",
-                address="web.example.com",
-                username="root",
-                port=22,
-            )
-            attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
-            DiscoveryAttempt.objects.filter(pk=attempt.pk).update(connection=definition)
-            attempt.refresh_from_db()
-            save_snapshot(attempt, snapshot.collected, snapshot.collected_at)
 
 
 class SettingsBuilderTests(SimpleTestCase):
