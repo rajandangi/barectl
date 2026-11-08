@@ -987,9 +987,7 @@ def stored(server: Server, identifier: str) -> object | None:
     return BackupRetention.objects.filter(server=server, identifier=identifier).first()
 
 
-def context_for_site(
-    state: DiscoveryState, identifier: str, context: dict[str, object]
-) -> None:
+def context_for_site(state: DiscoveryState, identifier: str, context: dict[str, object]) -> None:
     row = stored(state.server, identifier)
     days = int(getattr(row, "days", 0) or 0)
     installed = bool(getattr(row, "installed", False))

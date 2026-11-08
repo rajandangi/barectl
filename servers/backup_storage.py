@@ -99,9 +99,7 @@ def panel(storage: OffsiteStorage | None, observed: bool) -> BackupStoragePanel:
     )
 
 
-def context_for_server(
-    state: DiscoveryState, user: User | AnonymousUser
-) -> dict[str, object]:
+def context_for_server(state: DiscoveryState, user: User | AnonymousUser) -> dict[str, object]:
     snapshot = state.snapshot
     observed = snapshot is not None and snapshot.collected.offsite.observed
     value = snapshot.collected.offsite.value if snapshot is not None else None

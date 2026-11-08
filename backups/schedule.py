@@ -1102,9 +1102,7 @@ def _state_label(row: ObservedBackupSchedule | BackupSchedule | None) -> str:
     return f"{row.frequency.capitalize()} at {row.at} UTC: {scope}{offsite}"
 
 
-def context_for_site(
-    state: DiscoveryState, identifier: str, context: dict[str, object]
-) -> None:
+def context_for_site(state: DiscoveryState, identifier: str, context: dict[str, object]) -> None:
     """The schedule block the Backups section shows, from the last verified read."""
     row = stored(state.server, identifier)
     context["backup_schedule"] = row
