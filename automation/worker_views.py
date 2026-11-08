@@ -34,7 +34,7 @@ def context_for_site(
     state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     snapshot = state.snapshot
-    facts = site_facts(snapshot, identifier)
+    facts = site_facts(state, identifier)
     laravel = facts.laravel
     row = (
         worker_presentation.row_for(snapshot.collected, identifier)

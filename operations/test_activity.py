@@ -194,6 +194,20 @@ class ActivityPageTests(ControllerConfigTestCase):
         self.assertEqual(after.count("1 observation warning"), 11)
         self.assertEqual(after.count("Observations collected"), 11)
 
+    def test_the_server_activity_page_reads_change_rows_once(self) -> None:
+        self.signed_in("view_changes")
+        record_change(self.web, kind_slug="create_http_site", site="alpha")
+        record_change(self.web, kind_slug="create_http_site", site="beta")
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(f"/servers/{self.web.pk}/activity/")
+        self.assertEqual(response.status_code, 200)
+        reads = [
+            query
+            for query in captured.captured_queries
+            if "operations_changepreparation" in query["sql"]
+        ]
+        self.assertEqual(len(reads), 1)
+
     def test_activity_polls_while_a_row_is_active(self) -> None:
         self.signed_in("view_changes")
         record_attempt(self.web, DiscoveryAttempt.Status.QUEUED)

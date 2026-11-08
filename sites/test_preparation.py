@@ -17,7 +17,10 @@ from discovery.snapshot import (
     SiteAccount,
     Snapshot,
 )
-from operations.preparation import SiteShape
+from operations.preparation import SiteFacts, SiteShape
+from operations.services import ServerChanges
+from servers.discovery_state import DiscoveryState
+from servers.models import Server
 from sites.bodies.common import PHP_TRANSITION_INCOMPLETE, SITE_GATED
 from sites.bodies.pool import SitePool
 from sites.preparation import site_facts
@@ -82,6 +85,21 @@ def snapshot(
     )
 
 
+def read(world: Snapshot | None) -> DiscoveryState:
+    return DiscoveryState(
+        server=Server(name="Web", ssh_alias="web"),
+        attempt=None,
+        snapshot=world,
+        history=[],
+        alias_usable=True,
+        changes=ServerChanges([], None),
+    )
+
+
+def facts(world: Snapshot | None, identifier: str = "alpha") -> SiteFacts:
+    return site_facts(read(world), identifier)
+
+
 class SiteFactsTests(SimpleTestCase):
     def test_a_missing_snapshot_or_unreadable_inventory_is_absent(self) -> None:
         unreadable = snapshot(
@@ -89,19 +107,19 @@ class SiteFactsTests(SimpleTestCase):
         )
         for world in (None, unreadable):
             with self.subTest(world=world):
-                derived = site_facts(world, "alpha")
+                derived = facts(world, "alpha")
                 self.assertFalse(derived.present)
                 self.assertIsNone(derived.shape)
                 self.assertFalse(derived.convention)
                 self.assertEqual(derived.missing, ())
 
     def test_an_absent_identifier_is_not_present(self) -> None:
-        derived = site_facts(snapshot(), "absent1")
+        derived = facts(snapshot(), "absent1")
         self.assertFalse(derived.present)
         self.assertIsNone(derived.shape)
 
     def test_a_managed_site_on_the_convention_path(self) -> None:
-        derived = site_facts(snapshot(), "alpha")
+        derived = facts(snapshot(), "alpha")
         self.assertTrue(derived.present)
         self.assertTrue(derived.convention)
         self.assertIs(derived.shape, SiteShape.MANAGED)
@@ -128,7 +146,7 @@ class SiteFactsTests(SimpleTestCase):
                 (observed_site(file="/etc/caddy/other/alpha.caddy"),),
             )
         )
-        self.assertFalse(site_facts(elsewhere, "alpha").convention)
+        self.assertFalse(facts(elsewhere, "alpha").convention)
         for state, shape in (
             (SiteState.MANAGED, SiteShape.MANAGED),
             (SiteState.PARTLY_APPLIED, SiteShape.PARTLY_APPLIED),
@@ -140,7 +158,7 @@ class SiteFactsTests(SimpleTestCase):
                         ObservationOutcome.OBSERVED, (), "", (observed_site(state=state),)
                     )
                 )
-                self.assertIs(site_facts(world, "alpha").shape, shape)
+                self.assertIs(facts(world, "alpha").shape, shape)
 
     def test_a_partly_applied_site_carries_its_missing_problem(self) -> None:
         world = snapshot(
@@ -156,7 +174,7 @@ class SiteFactsTests(SimpleTestCase):
                 ),
             )
         )
-        derived = site_facts(world, "alpha")
+        derived = facts(world, "alpha")
         self.assertEqual(derived.missing, (PHP_TRANSITION_INCOMPLETE,))
         self.assertFalse(derived.gated)
 
@@ -174,7 +192,7 @@ class SiteFactsTests(SimpleTestCase):
                 ),
             )
         )
-        derived = site_facts(world, "alpha")
+        derived = facts(world, "alpha")
         self.assertTrue(derived.wordpress)
         self.assertEqual(derived.application_problem, "The install is incomplete.")
 
@@ -187,7 +205,7 @@ class SiteFactsTests(SimpleTestCase):
                 (observed_site(application="wordpress_partial"),),
             )
         )
-        self.assertFalse(site_facts(world, "alpha").wordpress)
+        self.assertFalse(facts(world, "alpha").wordpress)
 
     def test_the_pool_is_a_fact_only_when_observed(self) -> None:
         world = snapshot(
@@ -195,7 +213,7 @@ class SiteFactsTests(SimpleTestCase):
                 ObservationOutcome.OBSERVED, (), "", (observed_site(pool=SitePool()),)
             )
         )
-        self.assertTrue(site_facts(world, "alpha").has_pool)
+        self.assertTrue(facts(world, "alpha").has_pool)
 
     def test_laravel_identity_comes_from_a_settings_row(self) -> None:
         world = snapshot(
@@ -206,12 +224,12 @@ class SiteFactsTests(SimpleTestCase):
                 (ObservedSetting("alpha", "laravel", "APP_KEY", "a" * 64),),
             )
         )
-        self.assertTrue(site_facts(world, "alpha").laravel)
+        self.assertTrue(facts(world, "alpha").laravel)
 
     def test_laravel_identity_comes_from_a_release_row(self) -> None:
         release = ObservedRelease("alpha", "release", "commit", 1, SiteState.MANAGED, True)
         world = snapshot(releases=Observation(ObservationOutcome.OBSERVED, (), "", (release,)))
-        self.assertTrue(site_facts(world, "alpha").laravel)
+        self.assertTrue(facts(world, "alpha").laravel)
 
     def test_laravel_identity_is_not_read_from_the_site_application(self) -> None:
         world = snapshot(
@@ -219,7 +237,7 @@ class SiteFactsTests(SimpleTestCase):
                 ObservationOutcome.OBSERVED, (), "", (observed_site(application="laravel"),)
             )
         )
-        derived = site_facts(world, "alpha")
+        derived = facts(world, "alpha")
         self.assertFalse(derived.laravel)
         self.assertFalse(derived.wordpress)
 
@@ -229,7 +247,7 @@ class SiteFactsTests(SimpleTestCase):
         world = snapshot(
             releases=Observation(ObservationOutcome.OBSERVED, (), "", (current, retained))
         )
-        derived = site_facts(world, "alpha")
+        derived = facts(world, "alpha")
         self.assertTrue(derived.releases_observed)
         self.assertTrue(derived.has_releases)
         self.assertTrue(derived.current_release)
@@ -240,7 +258,7 @@ class SiteFactsTests(SimpleTestCase):
         world = snapshot(
             releases=Observation(ObservationOutcome.INACCESSIBLE, (), "Not readable.", (release,))
         )
-        derived = site_facts(world, "alpha")
+        derived = facts(world, "alpha")
         self.assertFalse(derived.releases_observed)
         self.assertTrue(derived.has_releases)
         self.assertTrue(derived.current_release)
@@ -248,13 +266,13 @@ class SiteFactsTests(SimpleTestCase):
     def test_a_non_managed_release_is_not_a_rollback_target(self) -> None:
         release = ObservedRelease("alpha", "old", "old", 1, SiteState.NOT_FOLLOWING, False)
         world = snapshot(releases=Observation(ObservationOutcome.OBSERVED, (), "", (release,)))
-        self.assertFalse(site_facts(world, "alpha").retained_release)
+        self.assertFalse(facts(world, "alpha").retained_release)
 
     def test_a_cache_row_is_a_fact(self) -> None:
         world = snapshot(
             cache=Observation(ObservationOutcome.OBSERVED, (), "", (ObservedCache("alpha", "on"),))
         )
-        self.assertTrue(site_facts(world, "alpha").has_cache)
+        self.assertTrue(facts(world, "alpha").has_cache)
 
     def test_the_gate_and_paused_facts_come_from_the_missing_problem_and_backup(self) -> None:
         gated = observed_site(state=SiteState.PARTLY_APPLIED, missing=(SITE_GATED,))
@@ -277,7 +295,7 @@ class SiteFactsTests(SimpleTestCase):
                 (ObservedBackup("alpha", last=paused),),
             ),
         )
-        derived = site_facts(world, "alpha")
+        derived = facts(world, "alpha")
         self.assertTrue(derived.gated)
         self.assertTrue(derived.paused)
 
@@ -302,7 +320,7 @@ class SiteFactsTests(SimpleTestCase):
                 (ObservedBackup("alpha", last=finished),),
             ),
         )
-        derived = site_facts(world, "alpha")
+        derived = facts(world, "alpha")
         self.assertTrue(derived.gated)
         self.assertFalse(derived.paused)
 
@@ -327,7 +345,7 @@ class SiteFactsTests(SimpleTestCase):
                 (ObservedBackup("alpha", last=restored),),
             ),
         )
-        self.assertTrue(site_facts(world, "alpha").paused)
+        self.assertTrue(facts(world, "alpha").paused)
 
     def test_log_rotation_state_is_carried(self) -> None:
         world = snapshot(
@@ -338,4 +356,4 @@ class SiteFactsTests(SimpleTestCase):
                 (observed_site(log_rotation="supported"),),
             )
         )
-        self.assertEqual(site_facts(world, "alpha").log_rotation, "supported")
+        self.assertEqual(facts(world, "alpha").log_rotation, "supported")

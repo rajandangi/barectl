@@ -467,7 +467,7 @@ def server_page(
         from databases.presentation import panel
         from runtimes.defaults_views import context_for_server as runtime_context_for_server
 
-        context.update(context_for_server(server, request.user, state))
+        context.update(context_for_server(state, request.user))
         context.update(runtime_context_for_server(state, request.user))
         context["database_panel"] = (
             panel(state.snapshot.collected) if state.snapshot is not None else None
@@ -486,7 +486,7 @@ def server_page(
         context["object_cache_kind"] = cache_engine.SLUG
         from servers.backup_storage import context_for_server as backup_storage_context
 
-        context.update(backup_storage_context(server, request.user, state))
+        context.update(backup_storage_context(state, request.user))
     if section == "activity":
         context.update(
             _activity_context(
@@ -598,7 +598,7 @@ def _target_site_context(
         "wordpress",
         "wordpress_partial",
     )
-    laravel = site_facts(snapshot, site.identifier).laravel
+    laravel = site_facts(state, site.identifier).laravel
     if section == "wordpress" and not wordpress:
         raise Http404
     if section == "environment" and not laravel:
@@ -647,7 +647,7 @@ def _site_backups_context(
     context.update(backups_context_for_site(state, identifier, user))
     from backups import schedule as backup_schedule
 
-    backup_schedule.context_for_site(state.server, identifier, context)
+    backup_schedule.context_for_site(state, identifier, context)
     backups = context.get("backups")
     context["backups_repository"] = (
         backup_convention.repository(identifier)
@@ -875,7 +875,10 @@ def _activity_context(
         attempts = state.history if state is not None else recorded_activity()
     rows = activity_read.check_rows(attempts)
     if request.user.has_perm(VIEW_CHANGES):
-        rows += activity_read.change_rows(server)
+        if state is not None:
+            rows += activity_read.change_rows_from(state.changes)
+        else:
+            rows += activity_read.change_rows(server)
     listed = activity_read.Activity(activity_read.newest_first(rows, site=site))
     context: dict[str, object] = {
         "activity": listed,

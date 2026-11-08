@@ -31,6 +31,7 @@ from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
+from servers.discovery_state import DiscoveryState
 from servers.models import Server
 from sites import observation as site_observation
 
@@ -986,8 +987,8 @@ def stored(server: Server, identifier: str) -> object | None:
     return BackupRetention.objects.filter(server=server, identifier=identifier).first()
 
 
-def context_for_site(server: Server, identifier: str, context: dict[str, object]) -> None:
-    row = stored(server, identifier)
+def context_for_site(state: DiscoveryState, identifier: str, context: dict[str, object]) -> None:
+    row = stored(state.server, identifier)
     days = int(getattr(row, "days", 0) or 0)
     installed = bool(getattr(row, "installed", False))
     problem = str(getattr(row, "problem", "") or "")

@@ -63,16 +63,14 @@ class CertificateEmailPanel:
 
 
 def context_for_server(
-    server: Server,
+    state: DiscoveryState,
     user: User | AnonymousUser,
-    state: DiscoveryState | None = None,
 ) -> dict[str, object]:
-    state = state or server_state(server)
     snapshot = state.snapshot
     setting = snapshot.collected.certificate_email_state if snapshot else ""
     observed = setting in READ_STATES
     email = snapshot.collected.certificate_email if snapshot else ""
-    saved = server.certificate_email
+    saved = state.server.certificate_email
     initial = saved if not observed else email if setting == SET else ""
     decision = (
         decide_for_server(state, user, change_requirements.CERTIFICATE_EMAIL)
@@ -111,7 +109,7 @@ def prepare_certificate_email(request: HttpRequest, pk: int) -> HttpResponse:
         raise Http404
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
-    context = context_for_server(server, request.user, state)
+    context = context_for_server(state, request.user)
     panel = cast(CertificateEmailPanel, context["certificate_email_panel"])
     form = CertificateEmailForm(request.POST)
     if not form.is_valid():
