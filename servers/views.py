@@ -875,7 +875,10 @@ def _activity_context(
         attempts = state.history if state is not None else recorded_activity()
     rows = activity_read.check_rows(attempts)
     if request.user.has_perm(VIEW_CHANGES):
-        rows += activity_read.change_rows(server)
+        if state is not None:
+            rows += activity_read.change_rows_from(state.changes)
+        else:
+            rows += activity_read.change_rows(server)
     listed = activity_read.Activity(activity_read.newest_first(rows, site=site))
     context: dict[str, object] = {
         "activity": listed,

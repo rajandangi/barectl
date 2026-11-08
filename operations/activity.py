@@ -20,6 +20,7 @@ from servers.models import Server
 
 from . import engine
 from .models import ChangePreparation, ChangeReview, ChangeRun, RemoteOperation, Result
+from .services import ChangeRow, ServerChanges, change_row, read_changes
 
 Kind = Literal["check", "change"]
 
@@ -86,12 +87,17 @@ def check_rows(attempts: Iterable[AttemptView]) -> list[ActivityRow]:
 
 def change_rows(server: Server | None = None) -> list[ActivityRow]:
     """The recorded changes of one server, or of every server, newest first."""
+    if server is not None:
+        return change_rows_from(read_changes(server))
     preparations = ChangePreparation.objects.select_related(
         "server", "review", "review__run"
     ).order_by("-queued_at", "-pk")
-    if server is not None:
-        preparations = preparations.filter(server=server)
-    return [_change_row(preparation) for preparation in preparations]
+    return [_change_row(change_row(preparation)) for preparation in preparations]
+
+
+def change_rows_from(changes: ServerChanges) -> list[ActivityRow]:
+    """The recorded changes a read already carries, newest first."""
+    return [_change_row(row) for row in changes.rows]
 
 
 def newest_first(rows: Iterable[ActivityRow], *, site: str = "") -> list[ActivityRow]:
@@ -121,8 +127,9 @@ def _check_row(attempt: AttemptView) -> ActivityRow:
     )
 
 
-def _change_row(preparation: ChangePreparation) -> ActivityRow:
-    review = _review(preparation)
+def _change_row(row: ChangeRow) -> ActivityRow:
+    preparation = row.preparation
+    review = row.review
     run = _run(review)
     server = preparation.server
     site = preparation.inputs.get("identifier")
@@ -144,13 +151,6 @@ def _change_row(preparation: ChangePreparation) -> ActivityRow:
         active=(preparation.status in RemoteOperation.ACTIVE)
         or (run is not None and run.status in RemoteOperation.ACTIVE),
     )
-
-
-def _review(preparation: ChangePreparation) -> ChangeReview | None:
-    try:
-        return preparation.review
-    except ChangeReview.DoesNotExist:
-        return None
 
 
 def _run(review: ChangeReview | None) -> ChangeRun | None:
