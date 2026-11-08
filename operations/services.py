@@ -119,7 +119,8 @@ class ServerChanges:
         )
 
 
-def _row(preparation: ChangePreparation) -> ChangeRow:
+def change_row(preparation: ChangePreparation) -> ChangeRow:
+    """The change row for one preparation, with its review once made."""
     try:
         review: ChangeReview | None = preparation.review
     except ChangeReview.DoesNotExist:
@@ -131,11 +132,11 @@ def _row(preparation: ChangePreparation) -> ChangeRow:
 def read_changes(server: Server) -> ServerChanges:
     preparations = list(
         ChangePreparation.objects.filter(server=server)
-        .select_related("review")
+        .select_related("server", "review", "review__run")
         .order_by("-queued_at", "-pk")
     )
     latest_run = ChangeRun.objects.filter(server=server).first()
-    return ServerChanges([_row(preparation) for preparation in preparations], latest_run)
+    return ServerChanges([change_row(preparation) for preparation in preparations], latest_run)
 
 
 @recovers_first
@@ -143,7 +144,7 @@ def read_change(operation_id: int) -> ChangeRow | None:
     preparation = ChangePreparation.objects.select_related("review").filter(pk=operation_id).first()
     if preparation is None:
         return None
-    return _row(preparation)
+    return change_row(preparation)
 
 
 @dataclass(frozen=True)

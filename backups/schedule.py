@@ -40,6 +40,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.lifecycle import OperationRefused
 from operations.models import ChangeReview
 from runtimes.catalog import architecture_of
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites import observation as site_observation
 from sites.bodies.common import SITE_GATED
@@ -1101,9 +1102,9 @@ def _state_label(row: ObservedBackupSchedule | BackupSchedule | None) -> str:
     return f"{row.frequency.capitalize()} at {row.at} UTC: {scope}{offsite}"
 
 
-def context_for_site(server: Server, identifier: str, context: dict[str, object]) -> None:
+def context_for_site(state: DiscoveryState, identifier: str, context: dict[str, object]) -> None:
     """The schedule block the Backups section shows, from the last verified read."""
-    row = stored(server, identifier)
+    row = stored(state.server, identifier)
     context["backup_schedule"] = row
     context["backup_schedule_state"] = _state_label(row)
     context["backup_schedule_next"] = _next_label(row)
@@ -1188,7 +1189,7 @@ def prepare_schedule(request: HttpRequest, pk: int, identifier: str) -> HttpResp
         )
     from .views import context_for_site
 
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     if not context["backups_can_schedule"]:
         messages.error(request, str(context["backups_schedule_reason"]))
         return redirect("site_backups", pk=pk, identifier=identifier)

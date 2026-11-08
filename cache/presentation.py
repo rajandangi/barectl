@@ -12,9 +12,9 @@ from django.contrib.auth.models import AnonymousUser, User
 from django.urls import reverse
 from django.utils import timezone
 
-from discovery.snapshot import CollectedSnapshot, ObservedCache, ObservedSite
+from discovery.snapshot import CollectedSnapshot, ObservedCache
 from operations import change_requirements, preparation
-from servers.discovery_state import DiscoveryState, server_state
+from servers.discovery_state import DiscoveryState
 from servers.models import Server
 from servers.preparation import stored_server_facts
 from sites.names import valid_identifier
@@ -148,16 +148,6 @@ def reading_view(value: dict[str, object] | None) -> ReadingView | None:
     )
 
 
-def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
-    snapshot = state.snapshot
-    if snapshot is None:
-        return None
-    return next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-        None,
-    )
-
-
 def _cache_row(state: DiscoveryState, identifier: str) -> ObservedCache | None:
     snapshot = state.snapshot
     if snapshot is None:
@@ -170,7 +160,7 @@ def _cache_row(state: DiscoveryState, identifier: str) -> ObservedCache | None:
 
 def _laravel_site(state: DiscoveryState, identifier: str) -> bool:
     """The gate's one Laravel identity: a settings row or a release row."""
-    return site_facts(state.snapshot, identifier).laravel
+    return site_facts(state, identifier).laravel
 
 
 def _reading_allowed(state: DiscoveryState) -> bool:
@@ -182,14 +172,15 @@ def _reading_allowed(state: DiscoveryState) -> bool:
     ).allowed
 
 
-def site_context(server: Server, identifier: str, user: User | AnonymousUser) -> dict[str, object]:
+def site_context(
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
+) -> dict[str, object]:
     """The Settings card and Overview line for one site."""
-    state = server_state(server)
-    site = _site(state, identifier)
+    site = state.site(identifier)
     row = _cache_row(state, identifier)
     snapshot = state.snapshot
     collected = snapshot.collected if snapshot is not None else None
-    view = reading_view(reading.latest_reading(server, identifier))
+    view = reading_view(reading.latest_reading(state.server, identifier))
     laravel = _laravel_site(state, identifier)
     application = "laravel" if laravel else (site.application if site is not None else "")
     applicable = site is not None and (site.application == "wordpress" or laravel)
@@ -222,7 +213,7 @@ def site_context(server: Server, identifier: str, user: User | AnonymousUser) ->
         "object_cache_client": client,
         "object_cache_client_missing": applicable and not client,
         "object_cache_prerequisite": (
-            prerequisite(collected, server=server.pk)
+            prerequisite(collected, server=state.server.pk)
             if collected is not None and applicable
             else None
         ),
@@ -275,20 +266,19 @@ def reading_checked(server: Server, identifier: str) -> datetime | None:
 
 
 def overview_context(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
     """The Overview's one cache line, from the stored observation."""
     if not valid_identifier(identifier):
         return {}
-    state = server_state(server)
-    site = _site(state, identifier)
+    site = state.site(identifier)
     if site is None or not (site.application == "wordpress" or _laravel_site(state, identifier)):
         return {}
     row = _cache_row(state, identifier)
     current = row.state if row is not None else "off"
     problem = row.problem if row is not None else ""
-    checked = reading_checked(server, identifier)
-    view = reading_view(reading.latest_reading(server, identifier))
+    checked = reading_checked(state.server, identifier)
+    view = reading_view(reading.latest_reading(state.server, identifier))
     snapshot = state.snapshot
     if checked is None and snapshot is not None:
         checked = snapshot.collected_at

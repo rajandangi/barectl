@@ -14,7 +14,6 @@ from django.views.decorators.http import require_POST
 
 from discovery.models import SiteState
 from discovery.presentation import VIEW_SITES
-from discovery.snapshot import ObservedSite
 from operations import change_requirements, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
@@ -28,16 +27,6 @@ from .observation import PHP_TRANSITION_INCOMPLETE
 from .php_change import CHOICES, SLUG
 from .php_forms import SitePhpForm
 from .preparation import decide_for_site
-
-
-def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
-    snapshot = state.snapshot
-    if snapshot is None:
-        return None
-    return next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-        None,
-    )
 
 
 def choices_for(state: DiscoveryState) -> tuple[str, ...]:
@@ -56,10 +45,9 @@ def switch_choices(
 
 
 def context_for_site(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    state = server_state(server)
-    site = _site(state, identifier)
+    site = state.site(identifier)
     current = site.php_version if site else ""
     incomplete = (
         site is not None
@@ -133,14 +121,14 @@ def prepare_php(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
         raise Http404
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
-    site = _site(state, identifier)
+    site = state.site(identifier)
     current = site.php_version if site else ""
     incomplete = (
         site is not None
         and site.state == SiteState.PARTLY_APPLIED
         and site.missing == (PHP_TRANSITION_INCOMPLETE,)
     )
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(state, identifier, request.user)
     choices = switch_choices(state, current=current, incomplete=incomplete)
     form = SitePhpForm(request.POST, choices=tuple(choice.entry for choice in choices))
     if not context["site_php_can_prepare"] or not form.is_valid():

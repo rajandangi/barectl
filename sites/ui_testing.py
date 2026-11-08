@@ -124,6 +124,29 @@ def attach_current_connection(server: Server, attempt: DiscoveryAttempt) -> None
     attempt.save(update_fields=["connection"])
 
 
+def record_older_snapshots(server: Server, count: int) -> None:
+    """Record attempts for past connection revisions, each holding a real snapshot."""
+    from servers.models import ConnectionDefinition
+
+    snapshot = current_snapshot(server)
+    if snapshot is None:
+        raise AssertionError("No setup snapshot.")
+    for index in range(count):
+        definition = ConnectionDefinition.objects.create(
+            server=server,
+            revision=index + 1,
+            mode="agent",
+            alias=server.ssh_alias,
+            address=server.ssh_alias,
+            username="root",
+            port=22,
+        )
+        attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(connection=definition)
+        attempt.refresh_from_db()
+        save_snapshot(attempt, snapshot.collected, snapshot.collected_at)
+
+
 def record_site_state(
     server: Server,
     *,

@@ -13,7 +13,6 @@ from discovery.presentation import VIEW_SITES
 from operations import preparation
 from operations.consent import PREPARE_PERMISSIONS
 from operations.models import CHANGE_DESTRUCTIVE, CHANGE_SHARED, MANAGE_SECRETS
-from operations.services import read_changes
 
 if TYPE_CHECKING:
     from .discovery_state import DiscoveryState
@@ -65,7 +64,7 @@ def server_facts(state: DiscoveryState, user: Account) -> preparation.ServerFact
     facts = stored_server_facts(state)
     return replace(
         facts,
-        change_active=read_changes(state.server).polling,
+        change_active=state.changes.polling,
         granted=granted_needs(user),
     )
 

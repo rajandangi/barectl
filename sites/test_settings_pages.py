@@ -5,27 +5,30 @@ from dataclasses import replace
 from typing import override
 from unittest import mock
 
+from django.contrib.auth.models import AnonymousUser
+from django.test import SimpleTestCase
 from django.utils import timezone
 
-from discovery.fakes import record_attempt
+from discovery.fakes import COLLECTED, COLLECTED_AT, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import (
     ObservedCache,
     ObservedRelease,
     ObservedSetting,
+    Snapshot,
     current_snapshot,
     save_snapshot,
 )
 from operations import preparation
 from operations.preparation import ReasonName
-from operations.services import read_changes
-from servers.discovery_state import server_state
+from operations.services import ServerChanges, read_changes
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
-from servers.testing import ControllerConfigTestCase
+from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 from sites.bodies.common import SITE_GATED
 from sites.deploy_views import deploy_context
 from sites.preparation import decide_for_site
-from sites.ui_testing import record_site_settings
+from sites.ui_testing import record_older_snapshots, record_site_settings
 
 DIGEST = "a" * 64
 
@@ -259,6 +262,42 @@ class SettingsPageTests(ControllerConfigTestCase):
         deployments = self.client.get(f"/servers/{self.server.pk}/sites/alpha/deployments/")
         self.assertContains(deployments, f"{0:040x}")
 
+    def test_the_settings_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.laravel()
+        url = f"/servers/{self.server.pk}/sites/alpha/settings/"
+        assert_query_count_flat_as_history_grows(
+            self.client, url, lambda: record_older_snapshots(self.server, 3)
+        )
+
+    def test_the_environment_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.laravel()
+        url = f"/servers/{self.server.pk}/sites/alpha/environment/"
+        assert_query_count_flat_as_history_grows(
+            self.client, url, lambda: record_older_snapshots(self.server, 3)
+        )
+
+
+class SettingsBuilderTests(SimpleTestCase):
+    """A section renders from a literal read, with no server, worker or page."""
+
+    def test_a_section_builder_renders_from_a_literal_read(self) -> None:
+        from sites.domains_views import context_for_site as domains_context
+        from sites.php_views import context_for_site as php_context
+
+        state = DiscoveryState(
+            server=Server(name="Web", ssh_alias="web.example.com"),
+            attempt=None,
+            snapshot=Snapshot(COLLECTED, COLLECTED_AT, "web"),
+            history=[],
+            alias_usable=True,
+            changes=ServerChanges([], None),
+        )
+        user = AnonymousUser()
+        php = php_context(state, "alpha", user)
+        domains = domains_context(state, "alpha", user)
+        self.assertEqual(php["site_php_current"], "php85")
+        self.assertEqual(domains["site_domains"], ("alpha.test", "www.alpha.test"))
+
 
 class ReadinessPageTests(ControllerConfigTestCase):
     @override
@@ -328,7 +367,9 @@ class ReadinessPageTests(ControllerConfigTestCase):
         assert reason is not None  # noqa: S101 - narrows the optional for mypy
         self.assertIs(reason.name, ReasonName.RELEASES_NOT_OBSERVED)
         self.assertEqual(reason.sentence, sentence)
-        self.assertFalse(deploy_context(self.server, "alpha", self.user)["deploy_can_prepare"])
+        self.assertFalse(
+            deploy_context(server_state(self.server), "alpha", self.user)["deploy_can_prepare"]
+        )
 
     def test_a_partly_applied_laravel_site_withholds_the_automation_cards(self) -> None:
         release = ObservedRelease("alpha", "release", "commit", 1, SiteState.MANAGED, True)

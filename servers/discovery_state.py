@@ -14,13 +14,16 @@ from discovery.models import ObservationOutcome
 from discovery.presentation import (
     ShownObservation,
     ShownSite,
+    ShownSites,
     SnapshotPresentation,
     present,
     present_sites,
+    summary_warnings,
 )
 from discovery.services import STALE_AFTER, history, latest_attempt_statuses, read_discovery
-from discovery.snapshot import AttemptSnapshot, Snapshot
+from discovery.snapshot import AttemptSummary, Observation, ObservedSite, Snapshot, SnapshotFacts
 from operations.models import RemoteOperation
+from operations.services import ServerChanges, read_changes
 
 from .connections import connection_label
 from .models import Server
@@ -125,12 +128,11 @@ def site_page(state: DiscoveryState, identifier: str) -> SitePage:
     stale = state.snapshot_notice
     if snapshot is None:
         return SitePage(identifier, None, "unknown", stale)
-    sites = snapshot.collected.sites
-    if sites.outcome != ObservationOutcome.OBSERVED:
+    if snapshot.collected.sites.outcome != ObservationOutcome.OBSERVED:
         return SitePage(identifier, None, "unknown", stale)
-    for site in present_sites(sites).sites:
-        if site.identifier == identifier:
-            return SitePage(identifier, site, "", stale)
+    site = state.shown_site(identifier)
+    if site is not None:
+        return SitePage(identifier, site, "", stale)
     return SitePage(identifier, None, "missing", stale)
 
 
@@ -146,8 +148,8 @@ class AttemptView:
     finished_at: datetime | None
     failure: str
     host_key: str
-    # The snapshot the attempt published, if it succeeded and is still the current one.
-    snapshot: Snapshot | None
+    # A summary of the snapshot the attempt published, if it succeeded and still holds one.
+    snapshot: SnapshotFacts | None
 
     connection_revision: int = 0
     original_target: str = ""
@@ -161,11 +163,19 @@ class AttemptView:
         return self.status == Status.QUEUED and self.queued_at < timezone.now() - STALE_AFTER
 
     @property
-    def warnings(self) -> list[ShownObservation]:
-        return present(self.snapshot.collected).warnings if self.snapshot else []
+    def collected_at(self) -> datetime | None:
+        return self.snapshot.collected_at if self.snapshot else None
+
+    @property
+    def os_pretty_name(self) -> str:
+        return self.snapshot.os_pretty_name if self.snapshot else ""
+
+    @cached_property
+    def warnings(self) -> tuple[ShownObservation, ...]:
+        return summary_warnings(self.snapshot)
 
 
-def _view(recorded: AttemptSnapshot) -> AttemptView:
+def _view(recorded: AttemptSummary) -> AttemptView:
     attempt, snapshot = recorded
     return AttemptView(
         operation_id=attempt.pk,
@@ -193,11 +203,42 @@ class DiscoveryState:
     # Every recorded attempt for the server, newest recorded first.
     history: list[AttemptView]
     alias_usable: bool
+    # The server's change activity, read once with the rest of this read.
+    changes: ServerChanges
     # Another kind of remote operation, such as a plan preparation, is active for the
     # server. It blocks a check without the page naming what it is.
     other_active: bool = False
     # That other operation, for pages that link to it.
     other_operation: RemoteOperation | None = None
+
+    @cached_property
+    def sites(self) -> ShownSites:
+        """The site observations presented once for this read."""
+        collected = (
+            self.snapshot.collected.sites
+            if self.snapshot is not None
+            else Observation(ObservationOutcome.ABSENT, (), "", ())
+        )
+        return present_sites(collected)
+
+    @cached_property
+    def observed_sites(self) -> dict[str, ObservedSite]:
+        """The snapshot's site rows keyed by identifier, for a section's own lookups."""
+        if self.snapshot is None:
+            return {}
+        return {site.identifier: site for site in self.snapshot.collected.sites.value}
+
+    def site(self, identifier: str) -> ObservedSite | None:
+        """One site's observed row, without scanning the snapshot's site list."""
+        return self.observed_sites.get(identifier)
+
+    @cached_property
+    def site_index(self) -> dict[str, ShownSite]:
+        """The presented sites keyed by identifier, for the page's one site view."""
+        return {site.identifier: site for site in self.sites.sites}
+
+    def shown_site(self, identifier: str) -> ShownSite | None:
+        return self.site_index.get(identifier)
 
     @cached_property
     def presentation(self) -> SnapshotPresentation | None:
@@ -290,6 +331,7 @@ def server_state(server: Server) -> DiscoveryState:
         discovery.snapshot,
         listed,
         alias_usable=usable,
+        changes=read_changes(server),
         other_active=active is not None and active.kind != RemoteOperation.Kind.DISCOVERY,
         other_operation=(
             active if active is not None and active.kind != RemoteOperation.Kind.DISCOVERY else None

@@ -14,6 +14,7 @@ from discovery.snapshot import Snapshot
 from operations.activity_testing import record_change
 from operations.models import RemoteOperation
 from operations.preparation import EMPTY, SERVER, Freshness, Need, ReasonName, decide
+from operations.services import ServerChanges, read_changes
 
 from .discovery_state import AttemptView, DiscoveryState, Status
 from .models import Server
@@ -65,6 +66,7 @@ def state(
         snapshot=snapshot,
         history=[] if attempt is None else [attempt],
         alias_usable=True,
+        changes=ServerChanges([], None),
     )
 
 
@@ -185,6 +187,7 @@ class ServerFactsTests(TestCase):
             snapshot=judged(Standing.TARGET_STACK),
             history=[],
             alias_usable=True,
+            changes=read_changes(self.server),
         )
 
     def fresh_user(self) -> User:

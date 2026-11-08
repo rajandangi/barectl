@@ -21,12 +21,13 @@ from operations.inputs import PreparationInputs
 from operations.lifecycle import OperationRefused
 from operations.models import RemoteOperation
 from servers.models import Server
-from servers.testing import ControllerConfigTestCase
+from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 from sites.bodies.logrotate import (
     logrotate_parse,
     logrotate_render,
     logrotate_state,
 )
+from sites.ui_testing import record_older_snapshots
 
 CANARY = "canary-log-value-9f2c1d"
 
@@ -46,6 +47,15 @@ class LogsPageTests(ControllerConfigTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "logs permission")
         self.assertNotContains(response, "PHP errors")
+
+    def test_the_logs_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.grant("view_server", "view_siteobservation", "view_changes", "view_evidence")
+        record_log_site(self.server)
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/servers/{self.server.pk}/sites/alpha/logs/",
+            lambda: record_older_snapshots(self.server, 3),
+        )
 
     def test_a_site_operator_lists_every_log_and_the_wordpress_debug_only_when_present(
         self,

@@ -19,7 +19,7 @@ from discovery.snapshot import CollectedSnapshot, ObservedSite
 from operations import change_requirements, lifecycle, preparation
 from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import VIEW_CHANGES, VIEW_EVIDENCE, RemoteOperation
-from servers.discovery_state import DiscoveryState, server_state
+from servers.discovery_state import DiscoveryState
 from servers.models import Server
 from sites.names import valid_identifier
 from sites.preparation import decide_for_site
@@ -70,9 +70,8 @@ class SourceView:
         return self.read is not None and self.read.status in RemoteOperation.ACTIVE
 
 
-@recovers_first
 def context_for_site(
-    server: Server,
+    state: DiscoveryState,
     identifier: str,
     user: User | AnonymousUser,
     *,
@@ -81,12 +80,12 @@ def context_for_site(
 ) -> dict[str, object]:
     """The Logs section from stored rows only; no SSH, no queued operation."""
     _expire()
-    site = _observed_site(server, identifier)
+    server = state.server
+    site = state.site(identifier)
     allowed = user.has_perm(VIEW_EVIDENCE)
     target = site is not None and site.file.startswith("/etc/caddy/sites/")
-    application = _application(server, identifier, site)
+    application = _application(state, identifier, site)
     sources = catalogue(site, application) if allowed and target else ()
-    state = server_state(server)
     snapshot = state.snapshot
     views = tuple(
         SourceView(
@@ -100,7 +99,7 @@ def context_for_site(
     active = any(view.active for view in views)
     # The rotation note and card describe the site, not the selected source: the POST
     # derives the same site-wide evidence, so the two cannot disagree.
-    rotation, rotation_files = _rotation_evidence(server, identifier, site)
+    rotation, rotation_files = _rotation_evidence(state, identifier)
     decision = (
         rotation_decision(state, identifier, user, rotation=rotation)
         if isinstance(user, User)
@@ -141,13 +140,13 @@ def context_for_site(
     }
 
 
-def _application(server: Server, identifier: str, site: ObservedSite | None) -> str:
+def _application(state: DiscoveryState, identifier: str, site: ObservedSite | None) -> str:
     """The site's application for the catalogue, from stored evidence only."""
     if site is None:
         return ""
     if site.application in ("wordpress", "wordpress_partial"):
         return "wordpress"
-    snapshot = server_state(server).snapshot
+    snapshot = state.snapshot
     if snapshot is None:
         return "plain"
     collected = snapshot.collected
@@ -195,20 +194,19 @@ def _configured(
     return None
 
 
-def available_source(server: Server, identifier: str, slug: str) -> LogSource | None:
+def available_source(state: DiscoveryState, identifier: str, slug: str) -> LogSource | None:
     """One catalogue entry this site can read, from stored evidence only."""
     entry = source(slug)
-    site = _observed_site(server, identifier)
+    site = state.site(identifier)
     if entry is None or site is None:
         return None
-    entries = catalogue(site, _application(server, identifier, site))
+    entries = catalogue(site, _application(state, identifier, site))
     return next((item for item in entries if item.slug == slug), None)
 
 
 def _rotation_evidence(
-    server: Server,
+    state: DiscoveryState,
     identifier: str,
-    site: ObservedSite | None,
 ) -> tuple[str, tuple[str, ...]]:
     """The site-wide rotation state the Logs section shows: newest page, then discovery.
 
@@ -217,6 +215,8 @@ def _rotation_evidence(
     typed field has no state, so a stored read page's non-empty state is newer evidence;
     the snapshot supplies it otherwise.
     """
+    server = state.server
+    site = state.site(identifier)
     newest = (
         LogRead.objects.filter(server=server, identifier=identifier)
         .exclude(page={})
@@ -245,10 +245,9 @@ def _rotation_note(state: str) -> str:
     return "This site's log rotation file was edited outside the supported settings."
 
 
-def rotation_evidence(server: Server, identifier: str) -> str:
+def rotation_evidence(state: DiscoveryState, identifier: str) -> str:
     """The rotation state the Logs section itself would render, for its POST."""
-    site = _observed_site(server, identifier)
-    rotation, _files = _rotation_evidence(server, identifier, site)
+    rotation, _files = _rotation_evidence(state, identifier)
     return rotation
 
 
@@ -270,16 +269,6 @@ def rotation_decision(
         identifier,
         change_requirements.LOG_ROTATION,
         rotation=rotation,
-    )
-
-
-def _observed_site(server: Server, identifier: str) -> ObservedSite | None:
-    snapshot = server_state(server).snapshot
-    if snapshot is None:
-        return None
-    return next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-        None,
     )
 
 

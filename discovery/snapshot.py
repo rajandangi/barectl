@@ -858,9 +858,28 @@ def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ..
         record_integrity(snapshot.server, backup.identifier, backup.integrity)
 
 
-class AttemptSnapshot(NamedTuple):
+@dataclass(frozen=True)
+class SnapshotFacts:
+    """The observation facts a history row and Activity need, without the whole snapshot."""
+
+    collected_at: datetime
+    os: Observation[OsRelease | None]
+    architecture: Observation[str | None]
+    cpu_count: Observation[int | None]
+    memory_bytes: Observation[int | None]
+    filesystem: Observation[FilesystemSize | None]
+    # Package and service outcomes, without service-unit rows: only warnings read them.
+    components: tuple[WebStackComponentObservation, ...]
+
+    @property
+    def os_pretty_name(self) -> str:
+        release = self.os.value
+        return release.pretty_name if self.os.observed and release is not None else ""
+
+
+class AttemptSummary(NamedTuple):
     attempt: DiscoveryAttempt
-    snapshot: Snapshot | None
+    snapshot: SnapshotFacts | None
 
 
 def _save_jobs(snapshot: DiscoverySnapshot, reading: JobReading) -> None:
@@ -929,6 +948,17 @@ def current_snapshot(server: Server) -> Snapshot | None:
     return None if row is None else _read(row, connection_label(row.attempt))
 
 
+def snapshot_of(attempt: DiscoveryAttempt) -> Snapshot | None:
+    """The snapshot ``attempt`` published, read in full, or ``None`` when it holds none."""
+    row = (
+        DiscoverySnapshot.objects.filter(attempt=attempt)
+        .select_related("attempt", "attempt__connection")
+        .prefetch_related(*_OBSERVATION_ROWS)
+        .first()
+    )
+    return None if row is None else _read(row, connection_label(attempt))
+
+
 def has_snapshot(server: Server) -> bool:
     return (
         DiscoverySnapshot.objects.filter(server=server).filter(_current_connection(server)).exists()
@@ -941,23 +971,66 @@ def _current_connection(server: Server) -> Q:
     )
 
 
-def attempt_snapshots(attempts: QuerySet[DiscoveryAttempt]) -> list[AttemptSnapshot]:
-    """Each attempt with the snapshot it still holds, in the queryset's order.
+def attempt_summaries(attempts: QuerySet[DiscoveryAttempt]) -> list[AttemptSummary]:
+    """Each attempt with a summary of the snapshot it still holds, in the queryset's order.
 
-    The snapshots are read in a fixed number of queries, however many attempts there are.
+    The summaries are read in a fixed number of queries, however many attempts there are:
+    one for the attempts and their snapshot rows, and one for the components.
     """
     listed = attempts.select_related("snapshot", "connection").prefetch_related(
-        *(f"snapshot__{rows}" for rows in _OBSERVATION_ROWS)
+        "snapshot__components"
     )
-    return [AttemptSnapshot(attempt, _published(attempt)) for attempt in listed]
+    return [AttemptSummary(attempt, _facts(attempt)) for attempt in listed]
 
 
-def _published(attempt: DiscoveryAttempt) -> Snapshot | None:
+def _facts(attempt: DiscoveryAttempt) -> SnapshotFacts | None:
     try:
         row = attempt.snapshot
     except ObjectDoesNotExist:
         return None
-    return _read(row, connection_label(attempt))
+    return SnapshotFacts(
+        collected_at=row.collected_at,
+        os=_observation(
+            row.os_status,
+            row.os_source,
+            row.os_warning,
+            OsRelease(row.os_pretty_name, row.os_name, row.os_id, row.os_version_id),
+        ),
+        architecture=_observation(
+            row.arch_status, row.arch_source, row.arch_warning, row.arch_value
+        ),
+        cpu_count=_observation(row.cpu_status, row.cpu_source, row.cpu_warning, row.cpu_count),
+        memory_bytes=_observation(
+            row.memory_status, row.memory_source, row.memory_warning, row.memory_bytes
+        ),
+        filesystem=_observation(
+            row.filesystem_status,
+            row.filesystem_source,
+            row.filesystem_warning,
+            FilesystemSize(row.filesystem_size_bytes or 0, row.filesystem_avail_bytes or 0),
+        ),
+        components=tuple(_facts_component(component) for component in row.components.all()),
+    )
+
+
+def _facts_component(component: ComponentObservation) -> WebStackComponentObservation:
+    return WebStackComponentObservation(
+        WebStackComponent(component.component),
+        Observation(
+            ObservationOutcome(component.package_status),
+            _reads(component.package_source),
+            component.package_warning,
+            tuple(Package(*line.split(" ", 1)) for line in component.packages.splitlines()),
+        ),
+        Observation(
+            ObservationOutcome(component.service_status),
+            _reads(component.service_source),
+            component.service_warning,
+            (),
+        ),
+        managed=component.managed,
+        deviations=tuple(component.deviations.splitlines()),
+    )
 
 
 def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:

@@ -3,6 +3,7 @@
 from typing import override
 
 from discovery.snapshot import current_snapshot
+from servers.discovery_state import server_state
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 from sites.ui_testing import record_laravel_releases
@@ -35,11 +36,13 @@ class LaravelReleaseIdentityTests(ControllerConfigTestCase):
             self.fail("The snapshot was stored.")
         self.assertEqual(snapshot.collected.settings.value, ())
 
-        workers = worker_context(self.server, "alpha", self.user)
-        scheduler = automation_context(self.server, "alpha", self.user)
-        cache = cache_context(self.server, "alpha", self.user)
-        environment = environment_context(self.server, "alpha", self.user)
-        deploy = deploy_context(self.server, "alpha", self.user)
+        state = server_state(self.server)
+
+        workers = worker_context(state, "alpha", self.user)
+        scheduler = automation_context(state, "alpha", self.user)
+        cache = cache_context(state, "alpha", self.user)
+        environment = environment_context(state, "alpha", self.user)
+        deploy = deploy_context(state, "alpha", self.user)
 
         self.assertTrue(workers["queue_workers_can_prepare"])
         self.assertTrue(scheduler["scheduled_tasks_can_prepare"])

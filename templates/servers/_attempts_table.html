@@ -65,8 +65,8 @@
             {% endif %}
           </td>
           <td>
-            {% if attempt.snapshot %}
-              <time datetime="{{ attempt.snapshot.collected_at|date:'c' }}">{{ attempt.snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
+            {% if attempt.collected_at %}
+              <time datetime="{{ attempt.collected_at|date:'c' }}">{{ attempt.collected_at|date:'M j, Y, H:i:s T' }}</time>
             {% else %}
               —
             {% endif %}

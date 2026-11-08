@@ -126,12 +126,11 @@ def _creation_refusal(
 
 
 def http_site_context(
-    server: Server,
+    state: DiscoveryState,
     user: User | AnonymousUser,
     form: HttpSiteForm | None = None,
     step: continuation.CreationStep | None = None,
 ) -> dict[str, object]:
-    state = server_state(server)
     snapshot = state.snapshot
     versions, installable, initial = _create_options(state, "http", step)
     return {
@@ -150,7 +149,7 @@ def http_site_context(
 
 
 def create_site_context(
-    server: Server,
+    state: DiscoveryState,
     user: User | AnonymousUser,
     form: CreateSiteForm | None = None,
     step: continuation.CreationStep | None = None,
@@ -159,7 +158,6 @@ def create_site_context(
     domain_values: list[str] | None = None,
 ) -> dict[str, object]:
     """The one Create site page: platform, PHP version, domains and More options."""
-    state = server_state(server)
     snapshot = state.snapshot
     choices = prerequisites.php_choices(state)
     versions = tuple(choice.entry for choice in choices if choice.installed)
@@ -254,15 +252,16 @@ def _create_page(
     problem: str = "",
     domain_values: list[str] | None = None,
     status: int = 200,
+    state: DiscoveryState | None = None,
 ) -> HttpResponse:
-    state = server_state(server)
+    state = state or server_state(server)
     step = continuation.requested_step(request, server.pk)
     context: dict[str, object] = {
         "server": server,
         "state": state,
         "create_site_retained": form is not None,
         **create_site_context(
-            server,
+            state,
             request.user,
             form,
             step,
@@ -310,12 +309,11 @@ def site_create(request: HttpRequest, pk: int | None = None) -> HttpResponse:
 
 
 def laravel_site_context(
-    server: Server,
+    state: DiscoveryState,
     user: User | AnonymousUser,
     form: LaravelSiteForm | None = None,
     step: continuation.CreationStep | None = None,
 ) -> dict[str, object]:
-    state = server_state(server)
     snapshot = state.snapshot
     versions, installable, initial = _create_options(state, "laravel", step)
     engine = prerequisites.engine_step(state, "laravel")
@@ -339,12 +337,11 @@ def laravel_site_context(
 
 
 def wordpress_site_context(
-    server: Server,
+    state: DiscoveryState,
     user: User | AnonymousUser,
     form: WordPressSiteForm | None = None,
     step: continuation.CreationStep | None = None,
 ) -> dict[str, object]:
-    state = server_state(server)
     snapshot = state.snapshot
     versions, installable, initial = _create_options(state, "wordpress", step)
     engine = prerequisites.engine_step(state, "wordpress")
@@ -528,7 +525,7 @@ def _stale_wordpress_site(request: HttpRequest, pk: int, form: WordPressSiteForm
             "sites/_wordpress_create.html",
             {
                 "server": fresh,
-                **wordpress_site_context(fresh, request.user, retained),
+                **wordpress_site_context(server_state(fresh), request.user, retained),
                 "wordpress_site_focus": True,
                 "wordpress_site_problem": problem,
             },
@@ -564,7 +561,7 @@ def _stale_laravel_site(request: HttpRequest, pk: int, form: LaravelSiteForm) ->
             "sites/_laravel_create.html",
             {
                 "server": fresh,
-                **laravel_site_context(fresh, request.user, retained),
+                **laravel_site_context(server_state(fresh), request.user, retained),
                 "laravel_site_focus": True,
                 "laravel_site_problem": problem,
             },
@@ -610,6 +607,7 @@ def _stale_http_site(request: HttpRequest, pk: int, form: HttpSiteForm) -> HttpR
         problem=problem,
         domain_values=list(form.cleaned_data["names"]),
         status=409,
+        state=state,
     )
 
 
@@ -676,12 +674,12 @@ def site_create_platform_form(
     if platform == "wordpress":
         if not isinstance(form, WordPressSiteForm):
             raise Http404
-        context.update(wordpress_site_context(server, request.user, form))
+        context.update(wordpress_site_context(state, request.user, form))
         context["wordpress_site_focus"] = True
     else:
         if not isinstance(form, LaravelSiteForm):
             raise Http404
-        context.update(laravel_site_context(server, request.user, form))
+        context.update(laravel_site_context(state, request.user, form))
         context["laravel_site_focus"] = True
     return render(request, "sites/create_platform.html", context, status=409)
 
@@ -704,9 +702,9 @@ def site_create_platform(request: HttpRequest, pk: int, platform: str) -> HttpRe
     }
     step = continuation.requested_step(request, server.pk)
     if platform == "wordpress":
-        context.update(wordpress_site_context(server, request.user, step=step))
+        context.update(wordpress_site_context(state, request.user, step=step))
     else:
-        context.update(laravel_site_context(server, request.user, step=step))
+        context.update(laravel_site_context(state, request.user, step=step))
     return render(request, "sites/create_platform.html", context)
 
 
@@ -737,7 +735,7 @@ def site_create_continue(request: HttpRequest, pk: int) -> HttpResponse:
         installable=prerequisites.installable(choices),
     )
     if not form.is_valid():
-        return _create_page(request, server, form, status=409)
+        return _create_page(request, server, form, status=409, state=state)
     refusal = _creation_refusal(state, user, has_choices=bool(choices))
     if refusal:
         messages.warning(request, refusal)
@@ -789,7 +787,7 @@ def server_http_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     domains = request.POST.getlist("names")
     form = CreateSiteForm(request.POST, php_versions=versions, installable=installable)
     if not form.is_valid():
-        return _create_page(request, server, form, domain_values=domains, status=422)
+        return _create_page(request, server, form, domain_values=domains, status=422, state=state)
     refusal = _creation_refusal(state, user, has_choices=bool(choices))
     if refusal:
         messages.warning(request, refusal)
@@ -825,7 +823,7 @@ def server_laravel_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     if not isinstance(user, User):
         raise PermissionDenied
     state = server_state(server)
-    context = laravel_site_context(server, user, step=continuation.requested_step(request, pk))
+    context = laravel_site_context(state, user, step=continuation.requested_step(request, pk))
     versions, installable, _initial = _create_options(state, "laravel", None)
     form = LaravelSiteForm(request.POST, php_versions=versions, installable=installable)
     if not form.is_valid():
@@ -837,14 +835,14 @@ def server_laravel_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
                 "sites/_laravel_create.html",
                 {
                     "server": server,
-                    **laravel_site_context(server, user, form),
+                    **laravel_site_context(state, user, form),
                     "laravel_site_focus": True,
                 },
                 status=422,
             )
             patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
             return response
-        return server_page(request, pk, "sites", laravel_site_form=form, status=422)
+        return server_page(request, pk, "sites", laravel_site_form=form, status=422, state=state)
     if not context["laravel_site_can_prepare"]:
         messages.warning(
             request,
@@ -888,7 +886,7 @@ def server_wordpress_site_prepare(request: HttpRequest, pk: int) -> HttpResponse
     if not isinstance(user, User):
         raise PermissionDenied
     state = server_state(server)
-    context = wordpress_site_context(server, user, step=continuation.requested_step(request, pk))
+    context = wordpress_site_context(state, user, step=continuation.requested_step(request, pk))
     versions, installable, _initial = _create_options(state, "wordpress", None)
     form = WordPressSiteForm(request.POST, php_versions=versions, installable=installable)
     if not form.is_valid():
@@ -900,14 +898,14 @@ def server_wordpress_site_prepare(request: HttpRequest, pk: int) -> HttpResponse
                 "sites/_wordpress_create.html",
                 {
                     "server": server,
-                    **wordpress_site_context(server, user, form),
+                    **wordpress_site_context(state, user, form),
                     "wordpress_site_focus": True,
                 },
                 status=422,
             )
             patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
             return response
-        return server_page(request, pk, "sites", wordpress_site_form=form, status=422)
+        return server_page(request, pk, "sites", wordpress_site_form=form, status=422, state=state)
     if not context["wordpress_site_can_prepare"]:
         messages.warning(
             request,

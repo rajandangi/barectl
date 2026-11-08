@@ -31,7 +31,9 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consent
 from runtimes.catalog import Architecture, load
 from servers.models import Server
+from servers.testing import assert_query_count_flat_as_history_grows
 from sites.bodies.common import SITE_GATED
+from sites.ui_testing import record_older_snapshots
 
 from . import change, check, convention, kit, observation
 from .bodies import native as backup_native
@@ -438,6 +440,17 @@ class PageTests(ChangeTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Backups")
         self.assertEqual(self.remote.commands, [])
+
+    def test_the_backups_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        server = self.store(
+            backups=(ObservedBackup(IDENTIFIER, RESTIC.path, True, True, (), True, "", None),)
+        )
+        self.sign_in_with("view_server", "view_changes", "view_siteobservation")
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/servers/{server.pk}/sites/{IDENTIFIER}/backups/",
+            lambda: record_older_snapshots(server, 3),
+        )
 
     def test_a_removed_server_forgets_finished_checks(self) -> None:
         from servers.registration import remove_server

@@ -4,9 +4,9 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from servers.models import Server
-from servers.testing import ControllerConfigTestCase
+from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 from sites.forms import HttpSiteForm
-from sites.ui_testing import record_http_sites, record_site_settings
+from sites.ui_testing import record_http_sites, record_older_snapshots, record_site_settings
 
 
 class HttpSiteFormTests(SimpleTestCase):
@@ -50,6 +50,13 @@ class HttpSitePageTests(ControllerConfigTestCase):
             response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/")
         self.assertContains(response, 'href="http://alpha.example.com"')
         self.assertContains(response, "Barectl checks <code>/</code>")
+
+    def test_the_overview_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/servers/{self.server.pk}/sites/alpha/",
+            lambda: record_older_snapshots(self.server, 3),
+        )
 
     def test_a_wordpress_overview_links_the_sign_in_page(self) -> None:
         record_site_settings(self.server, identifier="alpha", application="wordpress", https=True)

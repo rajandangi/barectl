@@ -24,6 +24,8 @@ from operations.models import (
 )
 from operations.plain_words import ChangeWords, Home
 from operations.presentation import plain_change
+from servers.testing import assert_query_count_flat_as_history_grows
+from sites.ui_testing import record_http_sites, record_older_snapshots
 
 from .fakes import APPLY_PERMISSIONS, BOOT_ID, PREPARE_PERMISSIONS, ChangeTestCase
 
@@ -606,3 +608,32 @@ class RunRecoveryTests(ChangeTestCase):
         page = self.client.get(f"/runs/{run.pk}/")
         self.assertContains(page, "Checking what happened")
         self.assertContains(page, "Check what happened")
+
+
+class ChangePageReadCostTests(ScreenTestCase):
+    """A change page costs the same after more recorded attempts are added.
+
+    Each page builds one server read (docs/architecture.md#request-and-execution-flow), so
+    the query count does not grow with the attempt history it shows or gates on.
+    """
+
+    def test_the_change_detail_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        review = self.change("fixture_site")
+        self.sign_in_with("view_changes", "change_site")
+        record_http_sites(self.server)
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/changes/{review.preparation_id}/",
+            lambda: record_older_snapshots(self.server, 3),
+        )
+
+    def test_the_run_detail_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        review = self.change("fixture_site")
+        run = self.apply(review)
+        self.sign_in_with("view_changes", "change_site")
+        record_http_sites(self.server)
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/runs/{run.pk}/",
+            lambda: record_older_snapshots(self.server, 3),
+        )

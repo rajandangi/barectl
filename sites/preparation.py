@@ -11,7 +11,7 @@ from django.contrib.auth.models import AnonymousUser, User
 
 from backups.observation import stopped_by_pause
 from discovery.models import ObservationOutcome, SiteState
-from discovery.snapshot import CollectedSnapshot, Snapshot
+from discovery.snapshot import CollectedSnapshot
 from operations import preparation
 from servers.preparation import server_facts
 from sites.bodies.common import SITE_GATED
@@ -51,22 +51,23 @@ def _paused(collected: CollectedSnapshot, identifier: str, gated: bool) -> bool:
 
 
 def site_facts(
-    snapshot: Snapshot | None,
+    state: DiscoveryState,
     identifier: str,
     *,
     rotation: str | None = None,
 ) -> preparation.SiteFacts:
-    """One site's facts from one observation.
+    """One site's facts from one server read.
 
     ``rotation`` replaces the snapshot's log-rotation value when a section renders read
     evidence newer than the snapshot, so its card and note read the same evidence.
     """
+    snapshot = state.snapshot
     if snapshot is None:
         return _absent()
     collected = snapshot.collected
     if collected.sites.outcome != ObservationOutcome.OBSERVED:
         return _absent()
-    observed = next((site for site in collected.sites.value if site.identifier == identifier), None)
+    observed = state.site(identifier)
     if observed is None:
         return _absent()
 
@@ -111,6 +112,6 @@ def decide_for_site(
 ) -> preparation.Decision:
     return preparation.decide(
         server_facts(state, user),
-        site_facts(state.snapshot, identifier, rotation=rotation),
+        site_facts(state, identifier, rotation=rotation),
         requirements,
     )

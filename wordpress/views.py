@@ -30,13 +30,7 @@ BUSY = "Wait for the current operation before preparing this review."
 
 
 def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
-    snapshot = state.snapshot
-    if snapshot is None:
-        return None
-    return next(
-        (site for site in snapshot.collected.sites.value if site.identifier == identifier),
-        None,
-    )
+    return state.site(identifier)
 
 
 def _requirements(*, secret: bool) -> preparation.Requirements:
@@ -44,9 +38,8 @@ def _requirements(*, secret: bool) -> preparation.Requirements:
 
 
 def context_for_site(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    state = server_state(server)
     site = _site(state, identifier)
     password = decide_for_site(state, user, identifier, _requirements(secret=True))
     core = decide_for_site(state, user, identifier, _requirements(secret=False))
@@ -77,7 +70,7 @@ def _prepare(
     if not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     allowed = (
         context["wordpress_password_can_prepare"]
         if slug == PASSWORD_SLUG

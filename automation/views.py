@@ -16,7 +16,7 @@ from discovery.presentation import VIEW_SITES
 from operations import change_requirements, preparation, services
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
-from servers.discovery_state import server_state
+from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 from sites.names import valid_identifier
 from sites.preparation import decide_for_site, site_facts
@@ -45,17 +45,16 @@ def _application(facts: preparation.SiteFacts) -> str:
 
 
 def context_for_site(
-    server: Server, identifier: str, user: User | AnonymousUser
+    state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    state = server_state(server)
-    facts = site_facts(state.snapshot, identifier)
+    facts = site_facts(state, identifier)
     application = _application(facts)
     lines = (
         presentation.lines(
             state.snapshot.collected,
             identifier,
             state.snapshot.collected_at,
-            presentation.paused_change(server, identifier),
+            presentation.paused_change(state.server, identifier),
         )
         if state.snapshot is not None and application
         else ()
@@ -87,7 +86,7 @@ def prepare_schedule(request: HttpRequest, pk: int, identifier: str) -> HttpResp
     if not valid_identifier(identifier) or not isinstance(request.user, User):
         raise Http404
     server = get_object_or_404(Server, pk=pk)
-    context = context_for_site(server, identifier, request.user)
+    context = context_for_site(server_state(server), identifier, request.user)
     application = str(context["scheduled_tasks_kind"])
     if not context["scheduled_tasks_can_prepare"]:
         messages.error(request, str(context["scheduled_tasks_reason"]))

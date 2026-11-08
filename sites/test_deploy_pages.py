@@ -5,10 +5,10 @@ from django.test import Client
 
 from operations.models import ChangePreparation
 from servers.models import Server
-from servers.testing import ControllerConfigTestCase
+from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 
 from .deploy_views import DEPLOY_SLUG, ROLLBACK_SLUG
-from .ui_testing import record_laravel_releases
+from .ui_testing import record_laravel_releases, record_older_snapshots
 
 
 class SiteDeployPageTests(ControllerConfigTestCase):
@@ -39,6 +39,13 @@ class SiteDeployPageTests(ControllerConfigTestCase):
         self.assertIn(f"/servers/{self.server.pk}/sites/alpha/deployments/deploy/prepare/", body)
         self.assertIn(f"/servers/{self.server.pk}/sites/alpha/deployments/rollback/prepare/", body)
 
+    def test_the_deployments_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        assert_query_count_flat_as_history_grows(
+            self.client,
+            f"/servers/{self.server.pk}/sites/alpha/deployments/",
+            lambda: record_older_snapshots(self.server, 3),
+        )
+
     def unreadable_releases(self) -> None:
         from discovery.models import ObservationOutcome
         from discovery.snapshot import ObservedSetting
@@ -53,10 +60,11 @@ class SiteDeployPageTests(ControllerConfigTestCase):
         )
 
     def test_deploy_and_roll_back_agree_when_releases_are_unreadable(self) -> None:
+        from servers.discovery_state import server_state
         from sites.deploy_views import deploy_context
 
         self.unreadable_releases()
-        context = deploy_context(self.server, "alpha", self.user)
+        context = deploy_context(server_state(self.server), "alpha", self.user)
         sentence = "Barectl could not read this site's releases."
         self.assertFalse(context["deploy_can_prepare"])
         self.assertFalse(context["rollback_can_prepare"])

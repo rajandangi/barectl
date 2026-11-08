@@ -11,11 +11,12 @@ from django.utils import timezone
 
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt, SiteState
+from discovery.snapshot import current_snapshot, save_snapshot
 from operations.activity_testing import record_change, record_run
 from operations.engine import ReviewDraft, save_review
 from operations.fakes import BOOT_ID, PREPARE_PERMISSIONS
 from operations.models import ChangePreparation, ChangeRun, RemoteOperation, Result
-from servers.models import Server
+from servers.models import ConnectionDefinition, Server
 from servers.testing import HTMX_FRAGMENT, ControllerConfigTestCase
 from sites.ui_testing import record_http_sites, record_site_state
 
@@ -157,17 +158,55 @@ class ActivityPageTests(ControllerConfigTestCase):
                 with self.subTest(url=url):
                     self.assertEqual(self.client.get(url).status_code, 200)
 
+    def record_older_snapshot(self, revision: int) -> None:
+        """An attempt for a past connection revision, holding a real snapshot."""
+        snapshot = current_snapshot(self.web)
+        assert snapshot is not None  # noqa: S101 - the setup recorded one
+        definition = ConnectionDefinition.objects.create(
+            server=self.web,
+            revision=revision,
+            mode="agent",
+            alias="web.example.com",
+            address="web.example.com",
+            username="root",
+            port=22,
+        )
+        attempt = record_attempt(self.web, DiscoveryAttempt.Status.SUCCEEDED)
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(connection=definition)
+        attempt.refresh_from_db()
+        save_snapshot(attempt, snapshot.collected, snapshot.collected_at)
+
     def test_the_query_count_does_not_grow_with_the_number_of_rows(self) -> None:
         self.signed_in("view_changes")
-        record_attempt(self.web, DiscoveryAttempt.Status.SUCCEEDED)
+        # The baseline attempt and each added one hold a real snapshot with a warning.
+        record_http_sites(self.web)
         record_change(self.db)
         with CaptureQueriesContext(connection) as few:
-            self.client.get("/activity/")
-        for _ in range(10):
-            record_attempt(self.web, DiscoveryAttempt.Status.FAILED)
+            before = self.client.get("/activity/").content.decode()
+        for revision in range(1, 11):
+            self.record_older_snapshot(revision)
             record_change(self.db)
-        with self.assertNumQueries(len(few)):
-            self.client.get("/activity/")
+        with CaptureQueriesContext(connection) as many:
+            after = self.client.get("/activity/").content.decode()
+        self.assertEqual(len(many), len(few))
+        # Every snapshot row still renders its warning and collection time.
+        self.assertEqual(before.count("1 observation warning"), 1)
+        self.assertEqual(after.count("1 observation warning"), 11)
+        self.assertEqual(after.count("Observations collected"), 11)
+
+    def test_the_server_activity_page_reads_change_rows_once(self) -> None:
+        self.signed_in("view_changes")
+        record_change(self.web, kind_slug="create_http_site", site="alpha")
+        record_change(self.web, kind_slug="create_http_site", site="beta")
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(f"/servers/{self.web.pk}/activity/")
+        self.assertEqual(response.status_code, 200)
+        reads = [
+            query
+            for query in captured.captured_queries
+            if "operations_changepreparation" in query["sql"]
+        ]
+        self.assertEqual(len(reads), 1)
 
     def test_activity_polls_while_a_row_is_active(self) -> None:
         self.signed_in("view_changes")
