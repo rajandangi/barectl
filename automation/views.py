@@ -47,7 +47,7 @@ def _application(facts: preparation.SiteFacts) -> str:
 def context_for_site(
     state: DiscoveryState, identifier: str, user: User | AnonymousUser
 ) -> dict[str, object]:
-    facts = site_facts(state.snapshot, identifier)
+    facts = site_facts(state, identifier)
     application = _application(facts)
     lines = (
         presentation.lines(

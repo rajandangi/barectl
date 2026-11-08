@@ -160,7 +160,7 @@ def _cache_row(state: DiscoveryState, identifier: str) -> ObservedCache | None:
 
 def _laravel_site(state: DiscoveryState, identifier: str) -> bool:
     """The gate's one Laravel identity: a settings row or a release row."""
-    return site_facts(state.snapshot, identifier).laravel
+    return site_facts(state, identifier).laravel
 
 
 def _reading_allowed(state: DiscoveryState) -> bool:

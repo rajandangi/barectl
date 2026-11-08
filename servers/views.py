@@ -598,7 +598,7 @@ def _target_site_context(
         "wordpress",
         "wordpress_partial",
     )
-    laravel = site_facts(snapshot, site.identifier).laravel
+    laravel = site_facts(state, site.identifier).laravel
     if section == "wordpress" and not wordpress:
         raise Http404
     if section == "environment" and not laravel:

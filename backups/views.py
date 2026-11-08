@@ -82,7 +82,7 @@ def context_for_site(
     )
     downloads.expire(server, identifier)
     facts = server_facts(state, user)
-    observed = site_facts(snapshot, identifier)
+    observed = site_facts(state, identifier)
     target = observed.convention
     managed = target and observed.shape is preparation.SiteShape.MANAGED
 
