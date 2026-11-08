@@ -6,7 +6,8 @@ This record lists the evidence for the Phase C exit of specification
 item, names the revision tested, records the measured times against the budget of
 [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md), lists every new native field
 and the file that carries it, and states what is not qualified. Anything this record does not
-list as passing is not qualified. Phase C is not released.
+list as passing is not qualified. Phase C is released in
+[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0).
 
 ## Revisions
 
@@ -321,4 +322,5 @@ class had reached 179.8 s at the previous tip. This branch splits the scheduler 
 
 The branch is `feat/357-398`; the tested head and the exact commands are in
 `notes/handoff-398.md` for the orchestration run, and the pull request that merges it carries
-the same numbers. Phase C is not released.
+the same numbers. Phase C is released in
+[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0).

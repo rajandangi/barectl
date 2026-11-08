@@ -5,8 +5,8 @@ This record lists the evidence for the Phase B exit of specification
 [#387](https://github.com/rajandangi/barectl/issues/387). It audits every user story against
 the code and tests that carry it, names the revision tested, records the measured times against
 the budget of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md), and lists what is
-not qualified. Anything this record does not list as passing is not qualified. Phase B is not
-released.
+not qualified. Anything this record does not list as passing is not qualified. Phase B is
+released in [v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0).
 
 The previous revision of this file qualified only the Laravel Deploy and Roll back slice
 ([#259](https://github.com/rajandangi/barectl/issues/259)); it is superseded by this record,

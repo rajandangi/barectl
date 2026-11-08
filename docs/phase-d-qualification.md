@@ -7,7 +7,8 @@ qualification requirement and the ticket's acceptance criteria item by item, nam
 revision tested, records the measured times against the budget of
 [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md), names the restic and engine
 versions, the provider evidence, and states what is not qualified. Anything this record does
-not list as passing is not qualified. Phase D is not released.
+not list as passing is not qualified. Phase D is released in
+[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0).
 
 ## Revisions
 
@@ -326,4 +327,5 @@ results and integrity findings from native evidence. A repository listing is onl
 ## Handoff
 
 The tested head, the exact commands and what remains unrun are in the orchestration run's
-`handoff-410.md`. Phase D is not released.
+`handoff-410.md`. Phase D is released in
+[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0).

@@ -6,7 +6,9 @@ This record lists the evidence for the Phase E exit of specification
 environments, the measured times against the budget of
 [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md), the native scenarios that
 walk the Security section, and what is not qualified. Anything this record does not list as
-passing is not qualified.
+passing is not qualified. The Security and Server Jobs slices are released in
+[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0); log retention settings
+remain outstanding.
 
 ## Revisions
 

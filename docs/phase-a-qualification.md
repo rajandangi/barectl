@@ -1,6 +1,6 @@
 # Phase A qualification record
 
-This record lists the evidence for the Phase A exit of specification [#325](https://github.com/rajandangi/barectl/issues/325), gathered on 2026-10-17 for [#341](https://github.com/rajandangi/barectl/issues/341). It names the revision tested, what ran on each architecture, the measured times against the budget of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md), and what is not qualified. Anything this record does not list as passing is not qualified. Phase A is not released.
+This record lists the evidence for the Phase A exit of specification [#325](https://github.com/rajandangi/barectl/issues/325), gathered on 2026-10-17 for [#341](https://github.com/rajandangi/barectl/issues/341). It names the revision tested, what ran on each architecture, the measured times against the budget of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md), and what is not qualified. Anything this record does not list as passing is not qualified. Phase A is released in [v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0).
 
 The last revision with the old stack, before its deletion, is tagged [`v0.3-old-stack-final`](https://github.com/rajandangi/barectl/tree/v0.3-old-stack-final).
 

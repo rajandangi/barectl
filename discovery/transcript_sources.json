@@ -575,7 +575,7 @@
     "sites/settings_forms.py": "0466abbe80d34ef32a16498afd17f180494dc1ab909f8a8cb648c0af2e8fd097",
     "sites/ui_testing.py": "cda3e79b1c191ce033485616bb31e5fcde7d4e49293ca21b5394e01aad87cb4a",
     "sites/views.py": "73bd30db9181206e386acd0024fbc7938f1f9f1bfcb5233db114906bd3cf2444",
-    "uv.lock": "7f890989066924198b8c251ebddcfb6e6636ba4b9e7dafb26143f552144f7e48",
+    "uv.lock": "5fbd44a9d45a9cf63f756a047def21da488edfc8020fe3118dbd8fccdae1134c",
     "vulture_allowlist.py": "bcfc97c3e9044f38cc07c37697932d4dee0c13bcb68faab6b2f9277c58fbe3dd",
     "wordpress/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "wordpress/actions.py": "a82c8c0f8f3d6a3cebba674c6077d13b87928f708de9f678009c2c2743d2ebe2",
