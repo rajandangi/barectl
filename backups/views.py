@@ -160,8 +160,8 @@ def context_for_site(
     context["backups_can_keep"], context["backups_keep_reason"] = _offered(
         base, enabled, "Enable backups before keeping a recovery point."
     )
-    retention.context_for_site(server, identifier, context)
-    schedule.context_for_site(server, identifier, context)
+    retention.context_for_site(state, identifier, context)
+    schedule.context_for_site(state, identifier, context)
     return context
 
 

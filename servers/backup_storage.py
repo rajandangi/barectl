@@ -15,7 +15,6 @@ from operations import change_requirements, preparation
 from servers.preparation import decide_for_server
 
 from .discovery_state import DiscoveryState
-from .models import Server
 
 BACKUP_STORAGE = change_requirements.BACKUP_STORAGE
 
@@ -101,7 +100,7 @@ def panel(storage: OffsiteStorage | None, observed: bool) -> BackupStoragePanel:
 
 
 def context_for_server(
-    server: Server, user: User | AnonymousUser, state: DiscoveryState
+    state: DiscoveryState, user: User | AnonymousUser
 ) -> dict[str, object]:
     snapshot = state.snapshot
     observed = snapshot is not None and snapshot.collected.offsite.observed
