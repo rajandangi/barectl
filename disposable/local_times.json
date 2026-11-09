@@ -10,9 +10,7 @@
   "source_manifest_sha256": "744b4c60670247fe039d60b72aec9ec0cb2eb64c4d37d39c501b48d52b95f25f",
   "summary_sha256": "54a627b6eaa556e2e0d3281e21fddd4eaee263f10625f608fa05873c58a68cfb",
   "log_sha256": "e61bb40b4d05fdc2e5e2625491b7e1891d13f4255fd4731874d58f3bd2fed78c",
-  "changed_non_native_inputs_during_run": [
-    "disposable/test_mirror.py"
-  ],
+  "changed_non_native_inputs_during_run": ["disposable/test_mirror.py"],
   "sources": {
     "disposable.test_automation.LaravelQueueWorkers": "local run 2026-11-02 capacity16",
     "disposable.test_automation.WordPressServerCron": "local run 2026-11-02 capacity16",
