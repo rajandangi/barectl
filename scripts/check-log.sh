@@ -10,7 +10,7 @@ set -eu
     exit 2
 }
 target=$1
-pattern='FAIL:|ERROR:|AssertionError|Traceback|##\[error\]|Ran [0-9]+ tests|FAILED|Killed|timed out|OperationalError|NameError|Permission denied'
+pattern='FAIL:|ERROR:|AssertionError|Traceback|##\[error\]|Ran [0-9]+ tests|FAILED|Killed|timed out|OperationalError|NameError|Permission denied|\[native\] FAIL|over [0-9]+ minutes|target missed|FAILED \(failures='
 if gh run view "$target" --json jobs >/dev/null 2>&1; then
     jobs=$(gh run view "$target" --json jobs \
         --jq '.jobs[] | select(.conclusion == "failure") | "\(.databaseId)\t\(.name)"')
@@ -20,8 +20,8 @@ if gh run view "$target" --json jobs >/dev/null 2>&1; then
     fi
     printf '%s\n' "$jobs" | while IFS="$(printf '\t')" read -r job name; do
         printf '== %s ==\n' "$name"
-        gh run view --job "$job" --log 2>/dev/null | grep -E "$pattern" | tail -n 80 || true
+        gh run view --job "$job" --log 2>/dev/null | grep -E -B2 -A2 "$pattern" | tail -n 80 || true
     done
 else
-    gh run view --job "$target" --log 2>/dev/null | grep -E "$pattern" | tail -n 120 || true
+    gh run view --job "$target" --log 2>/dev/null | grep -E -B2 -A2 "$pattern" | tail -n 120 || true
 fi

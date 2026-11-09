@@ -53,6 +53,14 @@ Every ticket passes through three phases, each run by a **fresh** subagent. A ph
 
 Briefs stay short: the ticket, the handoff note, the owning documents and the role. Name only the documents the ticket's area needs, found through the [module map](../architecture.md#module-map). Start from the [implementer brief](implementer-brief.md) shape and return the handoff in the same note.
 
+## Release
+
+Tag the **CI-tested release commit**, not a later merge commit: verify the required checks
+on that exact head, create an annotated tag there, publish the GitHub release as latest with
+the qualification and upgrade links, then finish the merge and cleanup. A release record
+names the tested revision and says which later commit carries only the version and release
+documents.
+
 ## Verification and completion
 
 Test observable behavior, real native effects, failure recovery, authorization, and reconstruction from a fresh controller. Missing or skipped required evidence is not a pass; never weaken an assertion or a requirement to hide a blocker. Finish each slice with the required code review before moving on.

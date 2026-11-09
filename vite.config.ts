@@ -44,6 +44,7 @@ export default defineConfig(({ command }) => ({
       "docker/disposable-server/mirror-manifest.json",
       "docker/disposable-server/fixtures/**",
       "runtimes/catalog_lock.json",
+      "contract/manifest.json",
     ],
   },
   lint: {
