@@ -1135,6 +1135,13 @@ class ResultLineTests(SimpleTestCase):
                 ),
                 engine.ResultLine("refused", "evidence", "host_foundation", ()),
             ),
+            (
+                (
+                    'barectl-result {"class": "succeeded", "change_kind": "create_http_site", '
+                    '"sites": ["alpha"], "contract": 2}\n'
+                ),
+                engine.ResultLine("succeeded", "", "create_http_site", ("alpha",), 2),
+            ),
         ):
             with self.subTest(text=text):
                 self.assertEqual(engine.parse_result_line(text), expected)
@@ -1161,6 +1168,9 @@ class ResultLineTests(SimpleTestCase):
                 'barectl-result {"class": "succeeded", "change_kind": "create_http_site", '
                 '"sites": ["Not A Site"]}\n'
             ),
+            'barectl-result {"class": "succeeded", "contract": "1"}\n',
+            'barectl-result {"class": "succeeded", "contract": true}\n',
+            'barectl-result {"class": "succeeded", "contract": -1}\n',
         ):
             with self.subTest(bad=bad), self.assertRaises(native.Unreadable):
                 engine.parse_result_line(bad)
@@ -1250,6 +1260,9 @@ class EnginePayloadTests(SimpleTestCase):
         self.assertIn("/run/barectl/revert-*", payload)
         self.assertIn('"class":"refused","reason":"affected_sites"', payload)
         self.assertIn('"class":"lock_busy"', payload)
+        from contract.version import VERSION as CONTRACT_VERSION
+
+        self.assertIn(f'"contract":{CONTRACT_VERSION},', payload)
         self.assertEqual(ADMISSION_CENTISECONDS, 15 * 60 * 100)
 
 

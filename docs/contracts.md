@@ -110,3 +110,35 @@ those modules and does not keep a second list:
 - the engine's admission reasons, the shared body reasons, every registered kind's and
   non-kind body's reasons, and the retired names that stay readable as older evidence.
 
+## Application surface
+
+The application surface is what operators and scripts address directly: permission names,
+URL names, management commands and documented environment variables. It is owned by
+`operations/models.py`, the URLconf, Django's command registry, `config.settings` and
+`dashboard/management/commands/`, and described by
+[operator accounts](../README.md#operator-accounts), [site logs](logs.md#permission),
+[settings and secrets](settings.md#permissions-and-discovery),
+[dashboard workflows](dashboard-workflows.md) and [upgrading](upgrade.md). The manifest's
+`application` section is built from those owners and covers:
+
+- the change engine's six scope permissions `operations.view_changes`,
+  `operations.change_site`, `operations.change_shared`, `operations.change_destructive`,
+  `operations.manage_secrets` and `operations.view_evidence`, plus `servers.view_server`,
+  `servers.add_server`, `servers.change_server`, `servers.delete_server`,
+  `discovery.add_discoveryattempt` and `discovery.view_siteobservation`;
+- every named route in `config/urls.py`, including the redirects that keep the old
+  `stack/`, `setup/` and `changes/` paths working;
+- the documented management commands `barectl_upgrade`, `changepassword`, `check`,
+  `collectstatic`, `createsuperuser`, `db_worker`, `makemigrations`, `migrate`,
+  `runserver`, `showmigrations` and `test`; and
+- the documented environment variables `BARECTL_SECRET_KEY`, `BARECTL_ALLOWED_HOSTS`,
+  `BARECTL_DEBUG`, `BARECTL_SSH_CONFIG`, `BARECTL_SSH_KNOWN_HOSTS`,
+  `BARECTL_SSH_APPROVED_KEYS`, `BARECTL_CONFIDENTIAL_KEY`, `BARECTL_EXPORT_STAGING`,
+  `BARECTL_VITE_DEV_SERVER_URL` and `BARECTL_TEST_DATABASE`.
+
+A permission name, URL name, command or documented environment variable is part of the
+contract. Renaming, removing or retyping one is a breaking change under
+[ADR 0042](adr/0042-version-the-native-contract-without-a-server-marker.md): it needs a new
+contract version, a discovery migration or dual-read support for the previous name, and at
+least one release of deprecation. Adding one is additive when every existing shape is
+unchanged.

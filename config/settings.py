@@ -3,8 +3,25 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Final
 
 from django.core.exceptions import ImproperlyConfigured
+
+# docs/contracts.md#application-surface: the environment variables the operator
+# documentation promises. The native contract imports this one constant, so a rename
+# here is a contract change rather than a second list drifting beside this one.
+DOCUMENTED_ENVIRONMENT: Final = (
+    "BARECTL_ALLOWED_HOSTS",
+    "BARECTL_CONFIDENTIAL_KEY",
+    "BARECTL_DEBUG",
+    "BARECTL_EXPORT_STAGING",
+    "BARECTL_SECRET_KEY",
+    "BARECTL_SSH_APPROVED_KEYS",
+    "BARECTL_SSH_CONFIG",
+    "BARECTL_SSH_KNOWN_HOSTS",
+    "BARECTL_TEST_DATABASE",
+    "BARECTL_VITE_DEV_SERVER_URL",
+)
 
 
 def _test_tag(argv: list[str]) -> str:
