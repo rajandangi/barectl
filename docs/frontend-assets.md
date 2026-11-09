@@ -70,6 +70,10 @@ The `{% vite_entry %}` tag follows the Vite guide's order: stylesheets, the entr
 
 ## USWDS
 
+Server and site section navigation uses the `usa-sidenav` Sass module in
+`frontend/styles/main.scss`, including its link spacing and selected-page indicator.
+See the [USWDS side navigation guidance](https://designsystem.digital.gov/components/side-navigation/).
+
 `frontend/styles/_theme.scss` configures `uswds-core` with the palette in `docs/design-palette.md`. `main.scss` forwards only the component packages that Barectl renders. USWDS images resolve from the package through Vite, and small icons are inlined into the CSS.
 
 USWDS component settings that choose text colors from a background must be given theme tokens, not hex values. The body background is therefore the `base-lightest` token for USWDS contrast calculations, and Barectl's stylesheet applies the warmer page color on top. The two colors have nearly the same luminance.

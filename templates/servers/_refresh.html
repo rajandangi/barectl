@@ -1,0 +1,12 @@
+<div id="server-refresh" class="barectl-page-actions">
+  {% if perms.discovery.add_discoveryattempt and state.alias_usable %}
+    {% if state.can_request %}
+      <form method="post" action="{% url 'server_verify' server.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="usa-button usa-button--outline">Refresh server</button>
+      </form>
+    {% else %}
+      <button type="button" class="usa-button usa-button--outline" disabled>Refresh server</button>
+    {% endif %}
+  {% endif %}
+</div>

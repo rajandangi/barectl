@@ -15,6 +15,7 @@ from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
 from discovery.fakes import FakeServer, run_worker
+from discovery.models import DiscoveryAttempt
 from discovery.recorded import ReplayShell, load
 from discovery.ssh import UnknownHostKey
 from servers.models import Server
@@ -152,6 +153,18 @@ class AddServerBrowserTests(BrowserTestCase):
         ).to_be_visible()
         reasons = page.locator("#next-action ul li")
         expect(reasons.first).to_contain_text("Another web stack is installed")
+        refresh = page.get_by_role("button", name="Refresh server", exact=True)
+        refresh.click()
+        expect(refresh).to_be_disabled()
+        server = Server.objects.get(name="Cloud")
+        self.assertEqual(DiscoveryAttempt.objects.filter(server=server).count(), 2)
+        with mock.patch(
+            "discovery.ssh.connect_operation",
+            return_value=contextlib.nullcontext(ReplayShell(load("pristine-26.04"))),
+        ):
+            run_worker()
+        expect(page.get_by_role("heading", name="Ready to set up")).to_be_visible(timeout=10_000)
+        expect(refresh).to_be_enabled()
         page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Advanced", exact=True
         ).click()

@@ -1,4 +1,9 @@
 {% include "servers/_discovery.html" with attempt=state.attempt snapshot=state.snapshot presented=state.presentation %}
+{% if focus or status %}
+  <hx-partial hx-target="#server-refresh" hx-swap="outerHTML">
+  {% include "servers/_refresh.html" %}
+  </hx-partial>
+{% endif %}
 {% if announcement %}
   <hx-partial hx-target="#discovery-announcement" hx-swap="innerHTML">
   {{ announcement }}

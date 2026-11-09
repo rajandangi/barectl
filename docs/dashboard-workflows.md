@@ -50,6 +50,14 @@ line:
 | Connection failed | The last check could not connect, or the alias is unusable. |
 | Not checked yet | No complete observation exists. |
 
+**Refresh server** sits beside the heading on every server section. It queues a
+read-only connection check and fresh discovery, including after changes made outside
+Barectl. The button requires permission to request discovery and a usable connection.
+It is disabled while another server operation runs and becomes available again when
+polling observes completion. Status and the next-action banner update as the check
+finishes. This follows the explicit server revalidation journey in
+[Coolify's server management guidance](https://coolify.io/docs/core/infrastructure/servers/manage-server#revalidate-after-connection-changes).
+
 Below it sits at most one next-action banner, most urgent first: confirm the host's
 identity, check the connection, edit an unusable connection, set up the server, or fix
 the first finding that needs the operator. The banner's action is a CSRF-protected POST

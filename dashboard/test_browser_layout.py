@@ -48,6 +48,11 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         expect(page.get_by_role("link", name="Create site")).to_be_visible()
         current = page.locator("nav[aria-label='Server sections'] a[aria-current='page']")
         expect(current).to_have_text("Sites")
+        expect(current).to_have_css("display", "block")
+        expect(current).to_have_css("font-weight", "700")
+        expect(page.locator("nav[aria-label='Server sections'] .usa-sidenav")).to_have_css(
+            "list-style-type", "none"
+        )
         self.assertEqual(
             page.locator(
                 "main .usa-button:not(.usa-button--outline):not(.usa-button--unstyled)"
@@ -68,6 +73,9 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         page = self.page
         page.get_by_role("link", name="alpha.example.com").first.click()
         expect(page.get_by_role("heading", name="alpha.example.com", level=1)).to_be_visible()
+        current = page.locator("nav[aria-label='Site sections'] a[aria-current='page']")
+        expect(current).to_have_css("display", "block")
+        expect(current).to_have_css("font-weight", "700")
         expect(page.get_by_role("link", name="http://alpha.example.com")).to_be_visible()
         expect(page.get_by_text("PHP version")).to_be_visible()
         expect(page.get_by_text("8.4")).to_be_visible()

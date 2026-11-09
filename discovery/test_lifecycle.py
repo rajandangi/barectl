@@ -287,6 +287,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertEqual(self.client.post(self.verify_url()).status_code, 403)
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertNotContains(page, "Verify connection")
+        self.assertNotContains(page, "Refresh server")
         self.grant("add_discoveryattempt")
         self.assertEqual(self.client.get(self.verify_url()).status_code, 405)
         self.assertFalse(DiscoveryAttempt.objects.exists())
