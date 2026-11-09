@@ -68,6 +68,20 @@
               <th scope="row">Changes</th>
               <td>{% for sentence in change.plain.summary %}<p>{{ sentence }}</p>{% endfor %}</td>
             </tr>
+            {% for label, value in review.details %}
+              {% if label == "Migrations" or label == "Backups" %}
+                <tr>
+                  <th scope="row">{{ label }}</th>
+                  <td>{{ value }}</td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+            {% if change.kind_slug == "remove_site" %}
+              <tr>
+                <th scope="row">Scheduled backups</th>
+                <td>Stopped and removed if configured.</td>
+              </tr>
+            {% endif %}
             {% if review.shared %}
               <tr class="barectl-confirmation__impact">
                 <th scope="row">Sites affected</th>

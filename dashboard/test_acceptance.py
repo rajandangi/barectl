@@ -180,7 +180,9 @@ class FirstSiteActivationTests(BrowserTestCase):
             "I understand this change touches shared resources", exact=False
         )
         if tick.count():
-            tick.check()
+            tick.focus()
+            tick.press("Space")
+            expect(tick).to_be_checked()
         self.activate(self.page.get_by_role("button", name=name, exact=True).click)
 
     def review(self, server: Server, kind: str, stages: tuple[str, ...]) -> ChangePreparation:

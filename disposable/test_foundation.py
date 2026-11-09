@@ -180,7 +180,10 @@ class HostFoundation(ScenarioTestCase):
                         "ExecReload=",
                         "UMask=0077",
                     ):
-                        self.assertContains(reviewed_page, disclosed)
+                        self.assertIn(disclosed, str(review.document))
+                        self.assertNotContains(reviewed_page, disclosed)
+                    self.assertContains(reviewed_page, "/etc/caddy/Caddyfile")
+                    self.assertContains(reviewed_page, "/etc/systemd/system/caddy.service")
                     self.native(
                         "systemd-run --quiet --unit=foundation-admin-watch /bin/sh -c "
                         + shlex.quote(

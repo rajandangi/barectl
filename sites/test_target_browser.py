@@ -326,7 +326,8 @@ class HttpSiteBrowserTests(BrowserTestCase):
             names.fill("alpha.example.com www.example.com")
             https = self.page.get_by_label("Serve over HTTPS", exact=True)
             expect(https).not_to_be_checked()
-            https.check()
+            https.focus()
+            self.page.keyboard.press("Space")
             expect(https).to_be_checked()
             button = self.page.get_by_role("button", name="Change domains and HTTPS", exact=True)
             button.focus()
@@ -415,6 +416,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.sign_in()
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/advanced/")
+        self.page.get_by_role("button", name="Host checks", exact=True).click()
         attention = self.page.get_by_role("region", name="Needs attention")
         expect(attention.get_by_role("listitem")).to_have_count(5)
         self.assertEqual(
@@ -809,7 +811,10 @@ class HttpSiteBrowserTests(BrowserTestCase):
         expect(self.page.get_by_role("heading", name="Remove site", level=1)).to_be_visible()
         # The review names the repositories it keeps and the units it removes.
         self.page.get_by_role("button", name="Show details", exact=True).click()
-        expect(self.page.get_by_text("Backup units removed", exact=True)).to_be_visible()
+        expect(self.page.get_by_text("Scheduled backups", exact=True)).to_be_visible()
+        expect(
+            self.page.get_by_text("Stopped and removed if configured.", exact=True)
+        ).to_be_visible()
         kept = "/var/lib/barectl-backups/alpha/onsite (onsite, kept)"
         expect(self.page.get_by_text(kept)).to_be_visible()
         label = "Type alpha.example.com to confirm this removal."

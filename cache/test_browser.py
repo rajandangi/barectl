@@ -86,7 +86,9 @@ class ValkeyInstallBrowserTests(BrowserTestCase):
         self.review(preparation)
         page.reload()
         tick = page.get_by_label("I understand this change touches shared resources", exact=False)
-        self.activate(tick.check)
+        tick.focus()
+        self.activate(lambda: tick.press("Space"))
+        expect(tick).to_be_checked()
         self.activate(page.get_by_role("button", name="Install Valkey", exact=True).click)
 
         run = ChangeRun.objects.get(review__preparation=preparation)

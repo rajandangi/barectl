@@ -425,6 +425,8 @@ _FILE_PURPOSES = {
 def _file_locations(details: list[tuple[str, str]]) -> list[tuple[str, str]]:
     files: list[tuple[str, str]] = []
     for label, value in details:
+        if label == "Backups":
+            continue
         header = value.partition("\n")[0]
         path, separator, _ = header.partition(" (")
         if separator and re.fullmatch(r"/[A-Za-z0-9_./@+-]+", path):
