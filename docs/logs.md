@@ -198,7 +198,10 @@ re-record on the integration tree; do not hand-edit transcript JSON.
   unrun in `notes/handoff-389.md`. The mirror now carries the `logrotate` package so the
   validator can install it.
 
-## Later: retention
+## Retention deferred to 1.1
 
-Log retention settings are Phase E. The pages here are controller-local and temporary; the
-journals themselves remain journald's own records.
+Log-retention settings are not part of Phase E or 1.0. [ADR 0043](adr/0043-defer-log-retention-settings-to-1-1.md)
+defers them to 1.1. The pages here are controller-local and temporary; the journals
+themselves remain journald's own records, and operators manage their retention with
+journald's documented configuration and `journalctl --vacuum-*`. The 1.0 qualification
+record names the deferral, and no Barectl page promises to set retention.

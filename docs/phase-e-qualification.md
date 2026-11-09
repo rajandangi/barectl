@@ -7,8 +7,9 @@ environments, the measured times against the budget of
 [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md), the native scenarios that
 walk the Security section, and what is not qualified. Anything this record does not list as
 passing is not qualified. The Security and Server Jobs slices are released in
-[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0); log retention settings
-remain outstanding.
+[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0); journald log-retention
+settings are deferred from Phase E and 1.0 to 1.1
+([ADR 0043](adr/0043-defer-log-retention-settings-to-1-1.md)).
 
 ## Revisions
 
@@ -285,6 +286,10 @@ this head the two second-controller scenarios passed together in 41 s (S3 13.4 s
 
 ## Not qualified
 
+- **Journald log-retention settings** are not delivered or qualified. They are deferred from
+  Phase E and 1.0 to 1.1 by [ADR 0043](adr/0043-defer-log-retention-settings-to-1-1.md), and
+  the 1.0 qualification record repeats the deferral. This is a decision, not a pass: Barectl
+  does not set retention, and operators use journald's own configuration and vacuum commands.
 - **The cloud-image foundation** was exercised locally and reached the foundation body, but
   preparing the full foundation on the cloud image is not qualified. The image's auxiliary
   daemons, virtual DHCP and abrupt teardown make it a separate lane; the container scenarios
