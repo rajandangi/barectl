@@ -31,6 +31,17 @@ class Command(BaseCommand):
         except upgrade.UpgradeRefused as refused:
             raise CommandError(str(refused)) from refused
         if outcome.backup is None:
+            pending = outcome.schema.pending
+            if pending:
+                count = len(pending)
+                noun = "migration" if count == 1 else "migrations"
+                self.stdout.write(
+                    f"{count} {noun} pending; run this command without --check to back up "
+                    "and migrate."
+                )
+                self.stdout.write("Next:")
+                self.stdout.write("  uv run --env-file .env python manage.py barectl_upgrade")
+                return
             self.stdout.write("The database schema is already up to date; nothing to do.")
             return
         self.stdout.write(f"Backup written to {outcome.backup}")

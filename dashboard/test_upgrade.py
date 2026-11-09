@@ -13,7 +13,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connections
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 
 from operations.models import RemoteOperation
 from servers.models import Server
@@ -273,6 +273,29 @@ class CommandTests(UpgradeTestCase):
         self.assertIn("Queued a fresh discovery for Web", content)
         self.assertIn("python manage.py db_worker", content)
 
+    def test_check_reports_pending_migrations_and_the_next_step(self) -> None:
+        environment = self.environment(pending_schema())
+
+        with mock.patch.object(upgrade, "default_environment", return_value=environment):
+            out = StringIO()
+            call_command("barectl_upgrade", "--check", stdout=out)
+
+        content = out.getvalue()
+        self.assertIn("Database schema: 0.4.0 with 1 migration pending", content)
+        self.assertIn("1 migration pending; run this command without --check", content)
+        self.assertIn("python manage.py barectl_upgrade", content)
+        self.assertNotIn("already up to date", content)
+
+    def test_check_reports_an_up_to_date_schema(self) -> None:
+        environment = self.environment(SchemaState(applied=V040_MIGRATIONS, known=V040_MIGRATIONS))
+
+        with mock.patch.object(upgrade, "default_environment", return_value=environment):
+            out = StringIO()
+            call_command("barectl_upgrade", "--check", stdout=out)
+
+        content = out.getvalue()
+        self.assertIn("The database schema is already up to date; nothing to do.", content)
+
     def test_command_prints_version_and_schema_before_refusing(self) -> None:
         environment = self.environment(SchemaState(frozenset(), V040_MIGRATIONS))
 
@@ -286,6 +309,13 @@ class CommandTests(UpgradeTestCase):
         content = out.getvalue()
         self.assertIn("Installed version: 1.0.0", content)
         self.assertIn("Database schema: no recorded migrations", content)
+
+
+class FixtureFileTests(SimpleTestCase):
+    def test_the_tracked_fixture_has_no_sqlite_sidecars(self) -> None:
+        for suffix in ("-wal", "-shm"):
+            sidecar = FIXTURE.with_name(FIXTURE.name + suffix)
+            self.assertFalse(sidecar.exists(), f"tracked fixture has a {suffix} sidecar")
 
 
 class FixtureMigrationTests(TransactionTestCase):

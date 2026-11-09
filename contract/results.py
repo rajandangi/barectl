@@ -8,27 +8,16 @@ is built, never at module import.
 """
 
 from dataclasses import fields
-from typing import Final
-
-# The stage marker is written and read by the engine's progress parser
-# (operations.engine.parse_progress) and by every native body (operations.engine).
-STAGE_PREFIX: Final = "barectl-stage "
 
 
 def _wire_fields() -> list[str]:
     """The result line's reader fields, named as the JSON line names them."""
     from operations import engine
 
-    names = [
+    return [
         "class" if field.name == "result_class" else field.name
         for field in fields(engine.ResultLine)
     ]
-    # #536 adds the version field to the reader and the engine's writer. The contract
-    # already promises its name and value so a later ticket fills it in without a shape
-    # change here.
-    if "contract" not in names:
-        names.append("contract")
-    return names
 
 
 def build() -> dict[str, object]:
@@ -39,7 +28,7 @@ def build() -> dict[str, object]:
 
     return {
         "prefix": engine.RESULT_PREFIX,
-        "stage_prefix": STAGE_PREFIX,
+        "stage_prefix": engine.STAGE_PREFIX,
         "classes": sorted(engine.RESULT_CLASSES),
         "fields": _wire_fields(),
         "contract": VERSION,

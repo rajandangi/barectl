@@ -380,6 +380,7 @@ def current_units() -> frozenset[str]:
 # The structured result line -----------------------------------------------------------------
 
 RESULT_PREFIX: Final = "barectl-result "
+STAGE_PREFIX: Final = "barectl-stage "
 SITE_IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}")
 RESULT_CLASSES: Final = frozenset(
     {"succeeded", "refused", "partial", "failed", "lock_busy", "timed_out"}
@@ -459,7 +460,7 @@ def journal_argv(unit: str) -> list[str]:
         # Newest first: systemd 259 already prints a --grep read with -n in that order.
         "--reverse",
         "--grep",
-        "^barectl-(stage |result )",
+        f"^({STAGE_PREFIX}|{RESULT_PREFIX})",
         "--no-pager",
         "-o",
         "cat",
@@ -471,8 +472,8 @@ def parse_progress(text: str, stages: object) -> str:
         return ""
     allowed = {stage for stage in stages if isinstance(stage, str) and len(stage) <= 160}
     for line in text.splitlines():
-        if line.startswith("barectl-stage "):
-            stage = line.removeprefix("barectl-stage ")
+        if line.startswith(STAGE_PREFIX):
+            stage = line.removeprefix(STAGE_PREFIX)
             return stage if stage in allowed else ""
     return ""
 

@@ -8,12 +8,10 @@ rule; discovery and preparation only supply the observed versions and the host s
 
 from collections.abc import Iterable
 from enum import StrEnum
-from typing import Final
+
+from bootstrap.standing import Standing
 
 from .version import VERSION
-
-# bootstrap.standing's value, repeated so this module stays free of the Django apps.
-NOT_MANAGEABLE: Final = "Not manageable"
 
 
 class Recognition(StrEnum):
@@ -37,7 +35,7 @@ def recognize(
     unrecognized. A host that is already not manageable keeps its existing refusal, so
     the recognition rule does not replace it.
     """
-    if standing == NOT_MANAGEABLE:
+    if standing == Standing.NOT_MANAGEABLE:
         return Recognition.RECOGNIZED
     contracts = tuple(observed)
     if any(value > version for value in contracts):

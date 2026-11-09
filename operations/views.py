@@ -321,10 +321,11 @@ def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
 
 
 def _apply_decision(server: Server | None, state: DiscoveryState | None) -> preparation.Decision:
-    """The run admission rule: host standing and freshness only.
+    """The run admission rule: the host's standing, freshness and recognized contract.
 
-    The gate must not decide whether a reviewed change runs. Another active change is
-    not a reason to refuse an apply; the native mutation lock decides that when the run
+    The same decision prepares and applies a change, so its sentence must be valid for
+    both. The gate must not decide whether a reviewed change runs. Another active change
+    is not a reason to refuse an apply; the native mutation lock decides that when the run
     starts (spec #507, US20).
     """
     if server is None or state is None:

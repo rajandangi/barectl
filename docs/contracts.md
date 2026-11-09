@@ -16,8 +16,11 @@ not a tracking record.
 `contract/` owns the machine-readable manifest and its test. `contract/manifest.json` is
 the pinned expectation, and `contract/test_contract.py` builds the manifest from the owning
 modules and fails when a promised shape changes, is removed or is renamed without updating
-the version and the pinned file together. Each section is one module registered in
-`contract/manifest.py`; a later area adds one module and one registry entry.
+the version and the pinned file together. `contract/history.json` records the canonical
+SHA-256 of every released version's section shapes, so a shape change also fails unless
+`contract/version.py` is bumped and the new history entry names its migration and
+deprecation window. Each section is one module registered in `contract/manifest.py`; a
+later area adds one module and one registry entry.
 
 ## Change policy
 

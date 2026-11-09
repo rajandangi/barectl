@@ -44,9 +44,9 @@
     "disposable.test_http_site_identities.HttpSiteIdentityAdmission": "hosted run 41343892143 at d5186fb, three lanes",
     "disposable.test_http_site_reconstruction.HttpSiteReconstruction": "hosted run 41343892143 at d5186fb, three lanes",
     "disposable.test_http_site_recovery.HttpSiteControllerRecovery": "hosted run 41343892143 at d5186fb, three lanes",
-    "disposable.test_http_site_recovery.WorkerKilledBeforeDispatch": "local run 2026-11-09",
-    "disposable.test_http_site_recovery.WorkerKilledAfterDispatch": "local run 2026-11-09",
-    "disposable.test_http_site_recovery.ServerStoppedDuringBody": "local run 2026-11-09",
+    "disposable.test_http_site_recovery.WorkerKilledBeforeDispatch": "local run 2026-11-09 capacity14",
+    "disposable.test_http_site_recovery.WorkerKilledAfterDispatch": "local run 2026-11-09 capacity14",
+    "disposable.test_http_site_recovery.ServerStoppedDuringBody": "local run 2026-11-09 capacity14",
     "disposable.test_http_site_security.HttpSiteSecurityBehavior": "hosted run 41343892143 at d5186fb, three lanes",
     "disposable.test_http_site_transactions.HttpSiteTransactions": "hosted run 41343892143 at d5186fb, three lanes",
     "disposable.test_http_sites.HttpSiteNativeBehavior": "hosted run 41343892143 at d5186fb, three lanes",
@@ -90,7 +90,7 @@
     "disposable.test_target_race.TwoControllerNativeLock": "hosted run 41343892143 at d5186fb, three lanes",
     "disposable.test_target_reconstruction.FreshControllerReconstruction": "hosted run 41343892143 at d5186fb, three lanes",
     "disposable.test_target_shape.JudgeByShape": "hosted run 41343892143 at d5186fb, three lanes",
-    "disposable.test_v040_compatibility.V040ServerCompatibility": "local run 2026-11-09",
+    "disposable.test_v040_compatibility.V040ServerCompatibility": "local run 2026-11-09 capacity14",
     "disposable.test_wordpress_create.WordPressCreateMariaDB": "hosted run 41343892143 at d5186fb, three lanes"
   },
   "stages": {

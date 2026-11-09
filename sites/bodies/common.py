@@ -40,9 +40,16 @@ from sites.bodies.pool_boundary import safe_pool_boundary
 from sites.bodies.site_fpm import RetainedEntry, sfp_file, sfp_retained_shape, site_fpm_evidence
 from sites.names import readiness_directive, readiness_ok, readiness_path, request
 from sites.serving import (
+    HAPROXY_CONFIG_DIRECTORY,
+    HAPROXY_CONFIG_DIRECTORY_MODE,
+    HAPROXY_CONFIG_MODE,
+    HAPROXY_STATE_DIRECTORY,
+    HAPROXY_STATE_DIRECTORY_MODE,
     diagnostic_pool,
     fpm_unit,
     haproxy_config,
+    haproxy_config_path,
+    haproxy_http_socket,
     master_config,
     php_directory,
     site_pool_path,
@@ -198,7 +205,7 @@ def setting(
         account="s" + identifier,
         directory="/var/www/" + identifier,
         socket=f"/run/php-fpm/sites/{identifier}/{entry}/app.sock",
-        proxy_socket=f"/run/haproxy/{identifier}/http.sock",
+        proxy_socket=haproxy_http_socket(identifier),
         proxy="p" + identifier,
     )
 
@@ -532,7 +539,7 @@ def extract(identifier: str, value: object) -> SimpleNamespace:
     servers = http.get("servers", {}) if isinstance(http, dict) else None
     if not isinstance(servers, dict):
         raise ValueError("A site has unsupported private routing.")
-    socket = f"unix//run/haproxy/{identifier}/http.sock"
+    socket = "unix/" + haproxy_http_socket(identifier)
     root = f"/var/www/{identifier}/current/public"
     matches: list[tuple[dict[str, object], list[list[str]], set[str], set[str]]] = []
     for server in servers.values():
@@ -1215,7 +1222,7 @@ def site_pool_record(settings: SimpleNamespace) -> SitePool | None:
 def native_directories(entry: str) -> list[str]:
     directories = ["/etc/caddy", "/etc/caddy/sites", "/var/www"]
     if entry:
-        directories.extend(("/etc/haproxy/sites", "/var/lib/haproxy/sites"))
+        directories.extend((HAPROXY_CONFIG_DIRECTORY, HAPROXY_STATE_DIRECTORY))
     return directories
 
 
@@ -2244,9 +2251,13 @@ def configure_pool(
     )
     start_site_fpm(settings)
     wait_site_fpm(settings)
-    serving_directory("/etc/haproxy/sites")
-    serving_directory("/var/lib/haproxy/sites")
-    write_new(f"/etc/haproxy/sites/{settings.identifier}.cfg", haproxy_config(settings), 0o600)
+    serving_directory(HAPROXY_CONFIG_DIRECTORY, HAPROXY_CONFIG_DIRECTORY_MODE)
+    serving_directory(HAPROXY_STATE_DIRECTORY, HAPROXY_STATE_DIRECTORY_MODE)
+    write_new(
+        haproxy_config_path(settings.identifier),
+        haproxy_config(settings),
+        HAPROXY_CONFIG_MODE,
+    )
     hap_validate(settings.identifier)
     run(
         [
