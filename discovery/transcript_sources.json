@@ -538,7 +538,7 @@
     "servers/registration.py": "a2fb5559caf591ab42a470fc9524d18f469e5eb60bc577d6c0cf1ce52cfde8ed",
     "servers/ssh_config.py": "ee50d222fde1c4e7cff87529a67ff391329edcf9f8819a1104dc8632eb8484e5",
     "servers/testing.py": "8fba39383c49fdf220fd9b59df811675cd08dbb2793a9cfc4e166d659383a5e3",
-    "servers/tests.py": "d6d7fcc867147364b9097b457153726327b16acc7dff84cf400ed511476cd51e",
+    "servers/tests.py": "650d58a267244c764bf7cd361b17976fa0345468739439cd5cfd6ed7fc0b9542",
     "servers/trust.py": "c1b4e995d736935d8633b880521014ab4bcbc60eb997b2ce5f05234129bd95e7",
     "servers/views.py": "98d2595db027ff22df6c78602e2545170859412b503c10800cd12cde8f1fd7ef",
     "sites/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
