@@ -196,7 +196,7 @@
     "disposable.test_target_race.TwoControllerNativeLock": 38.4,
     "disposable.test_target_reconstruction.FreshControllerReconstruction": 64.8,
     "disposable.test_target_shape.JudgeByShape": 32.0,
-    "disposable.test_v040_compatibility.V040ServerCompatibility": 10.6,
+    "disposable.test_v040_compatibility.V040ServerCompatibility": 15.7,
     "disposable.test_wordpress_create.WordPressCreateMariaDB": 88.6
   },
   "stages": {}
