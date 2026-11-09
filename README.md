@@ -64,7 +64,7 @@ In a second terminal, as the same account, start the discovery worker. It runs c
 uv run --env-file .env python manage.py db_worker
 ```
 
-Barectl keeps no migration history from earlier builds: if you ran an earlier build, delete `db.sqlite3` and run `migrate` again.
+Barectl keeps no migration history from builds before 0.4.0: if you ran 0.3.x or earlier, start a new installation instead. To move an existing 0.4.x installation to 1.0, follow [upgrading Barectl](docs/upgrade.md).
 
 Open http://127.0.0.1:8000 and sign in. `npm run build` compiles the styles, scripts and fonts that Django serves. To edit frontend code with live reloading, run `npm run dev` in another terminal and start Django with `BARECTL_VITE_DEV_SERVER_URL=http://localhost:5173`. See [frontend assets](docs/frontend-assets.md). Use **Add server** to enter a display name, address, SSH user and port, then **Save and check**. Saved addresses use the worker's SSH agent or an administrator-approved key file, with default key-file search and forwarding disabled. The worker checks host trust against the controller file named by `BARECTL_SSH_KNOWN_HOSTS`, then reads the host's standing without changing the server. Unknown, changed and revoked host keys are refused before authentication. For an unknown saved host, paste the exact SHA256 fingerprint obtained independently from the provider console to confirm its identity and continue the check. Changed and revoked keys remain hard refusals. An advanced SSH alias remains available from `~/.ssh/config`, or `BARECTL_SSH_CONFIG`; it uses that alias's configured credentials and trust. See [saved server connections](docs/saved-server-connections.md) and [SSH connections and discovery](docs/ssh-connections.md).
 

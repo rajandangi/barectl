@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
     from dashboard.checks import check_built_assets
+    from dashboard.management.commands.barectl_upgrade import Command as UpgradeCommand
     from dashboard.middleware import HtmxAuthenticationMiddleware
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
@@ -250,6 +251,9 @@ if TYPE_CHECKING:
     )
     # The log rotation validator is found by the runner's --validators selection.
     _log_rotation_validator = LogRotationValidators.test_the_supported_file_passes_logrotate_debug
+    # Django discovers management commands by module and class name, then reads this
+    # attribute and calls this hook.
+    _management_command = (UpgradeCommand, UpgradeCommand.help, UpgradeCommand.add_arguments)
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
     _dashboard = (
