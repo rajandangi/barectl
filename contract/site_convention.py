@@ -2,15 +2,15 @@
 
 Every path, account, unit and template below is read from the module that owns it.
 ``sites/configuration.py`` owns the selection and its Caddy and pool templates,
-``sites/serving.py`` owns the per-site HAProxy and PHP-FPM serving configuration, and
-``sites/names.py`` owns the identifier grammar. The one-time layout metadata (owner,
-group and mode) is stated here because the owning module encodes it in its creation
-routine; the pinned manifest makes a change to either side a reviewed contract change.
+``sites/serving.py`` owns the per-site HAProxy and PHP-FPM serving configuration,
+``sites/names.py`` owns the identifier grammar, and ``sites/bodies/common.py`` owns the
+shared layout and deploy-lock constants.
 """
 
 from typing import Final
 
 from sites import configuration, names, serving
+from sites.bodies.common import DEPLOY_LOCK, SITE_LAYOUT
 
 IDENTIFIER_PLACEHOLDER: Final = "zzzsite"
 NAME_PLACEHOLDER: Final = "site.test"
@@ -30,24 +30,15 @@ def _settings(runtime: str) -> configuration.SiteSettings:
 
 
 def _layout(settings: configuration.SiteSettings) -> list[dict[str, str]]:
-    site = _templated(settings.directory)
-    account = _templated(settings.account)
-    entries = (
-        ("/var/www", "root", "root", "0755"),
-        (site, "root", "root", "0755"),
-        (site + "/releases", "root", "root", "0755"),
-        (site + "/releases/initial", account, account, "0711"),
-        (site + "/releases/initial/public", account, "caddy", "2750"),
-        (site + "/private", account, account, "0700"),
-        (site + "/private/sessions", account, account, "0700"),
-        (site + "/private/tmp", account, account, "0700"),
-        (site + "/logs", "caddy", account, "0750"),
-        (site + "/bin", "root", "root", "0755"),
-        (site + "/.deploy.lock", "root", account, "0640"),
-    )
+    values = {"directory": settings.directory, "account": settings.account}
     return [
-        {"path": path, "owner": owner, "group": group, "mode": mode}
-        for path, owner, group, mode in entries
+        {
+            "path": _templated(path.format(**values)),
+            "owner": _templated(owner.format(**values)),
+            "group": _templated(group.format(**values)),
+            "mode": mode,
+        }
+        for path, owner, group, mode in (*SITE_LAYOUT, DEPLOY_LOCK)
     ]
 
 
