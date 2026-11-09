@@ -55,6 +55,26 @@ class RecordedChangeJobsTests(SimpleTestCase):
         self.assertEqual(finished.sites, ("alpha",))
         self.assertEqual(reading.coverage[0].state, "complete")
 
+    def test_the_result_line_contract_version_is_kept(self) -> None:
+        reading = observation.read(
+            journal_shell(
+                units=BOOT + "\n",
+                history=line(result_line(contract=1), usec=1_762_000_000_100_000),
+            )
+        )
+        (row,) = reading.changes
+        self.assertEqual(row.contract, 1)
+
+    def test_a_pre_field_result_line_defaults_to_contract_zero(self) -> None:
+        reading = observation.read(
+            journal_shell(
+                units=BOOT + "\n",
+                history=line(result_line(), usec=1_762_000_000_100_000),
+            )
+        )
+        (row,) = reading.changes
+        self.assertEqual(row.contract, 0)
+
     def test_a_collected_unit_is_kept_without_double_counting(self) -> None:
         reading = observation.read(
             journal_shell(
