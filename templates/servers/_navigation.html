@@ -1,8 +1,15 @@
-<nav class="barectl-layout__nav" aria-label="Server sections">
+<nav class="barectl-layout__nav"
+     aria-label="Server sections"
+     hx-boost:inherited="true"
+     hx-target:inherited="#main-content"
+     hx-select:inherited="#main-content"
+     hx-swap:inherited="outerHTML"
+     hx-sync:inherited="#main-content:replace">
   <ul class="usa-sidenav">
     {% for item in server_sections %}
       <li class="usa-sidenav__item">
-        <a href="{{ item.url }}"
+        <a id="server-section-{{ item.key }}"
+           href="{{ item.url }}"
            {% if section == item.key %}class="usa-current" aria-current="page"{% endif %}>{{ item.title }}</a>
       </li>
     {% endfor %}

@@ -94,14 +94,19 @@ document.addEventListener("change", (event: Event) => {
 
 document.addEventListener("submit", applyFilters);
 
-document.addEventListener("DOMContentLoaded", () => {
+function initializeJobs(): void {
   syncZoneField();
   // A zone exchange replaces the panel, so restore focus after that swap instead.
   if (!sendViewerZone()) restoreFocus();
-});
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeJobs);
+} else {
+  initializeJobs();
+}
 
 document.addEventListener("htmx:after:settle", () => {
-  syncZoneField();
+  initializeJobs();
   announceCount();
-  restoreFocus();
 });

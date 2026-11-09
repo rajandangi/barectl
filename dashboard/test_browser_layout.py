@@ -72,11 +72,16 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
 
     def test_advanced_is_two_activations_from_the_server(self) -> None:
         page = self.page
-        page.get_by_role("navigation", name="Server sections").get_by_role(
+        page.evaluate("window.barectlNavigationTest = 'same-document'")
+        advanced = page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Advanced"
-        ).click()
+        )
+        advanced.focus()
+        page.keyboard.press("Enter")
         expect(page.get_by_role("heading", name="Server details", exact=True)).to_be_visible()
         expect(page.get_by_role("heading", name="Web stack and services")).to_be_visible()
+        self.assertEqual(page.evaluate("window.barectlNavigationTest"), "same-document")
+        expect(advanced).to_be_focused()
         expect(page.get_by_text("Discovery history")).to_be_visible()
         evidence = page.get_by_role("button", name="Host checks", exact=True)
         expect(evidence).to_have_attribute("aria-expanded", "false")
@@ -129,10 +134,13 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         expect(page.get_by_text("Last checked")).to_be_visible()
         expect(page.get_by_text("/var/www/alpha/current/public")).to_be_visible()
         self.assert_no_native_terms(allowed=("caddy",))
-        page.get_by_role("navigation", name="Site sections").get_by_role(
-            "link", name="Logs"
-        ).click()
+        page.evaluate("window.barectlNavigationTest = 'same-document'")
+        logs = page.get_by_role("navigation", name="Site sections").get_by_role("link", name="Logs")
+        logs.focus()
+        page.keyboard.press("Enter")
         expect(page.get_by_role("heading", name="Logs", level=2)).to_be_visible()
+        self.assertEqual(page.evaluate("window.barectlNavigationTest"), "same-document")
+        expect(logs).to_be_focused()
         expect(page.get_by_role("link", name="PHP errors")).to_be_visible()
         page.locator("summary", has_text="Advanced").click()
         expect(page.get_by_role("heading", name="Installed runtime diagnostics")).to_be_visible()

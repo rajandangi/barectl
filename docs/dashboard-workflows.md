@@ -30,6 +30,10 @@ the current place. Each is one activation from any page.
 Opening any page reads stored observations and local records. Only a CSRF-protected POST
 queues work, and no page makes an SSH connection.
 
+Server, site and run side navigation updates the main content without a full page reload.
+The selected section, keyboard focus and URL update together. Direct visits work with or
+without JavaScript, and Back and Forward reload the requested page with fresh access checks.
+
 ## Servers
 
 **Add server** saves a connection and queues a connection check

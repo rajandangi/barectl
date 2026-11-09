@@ -1,5 +1,6 @@
 {% load tz %}
 <div id="jobs-panel"
+     hx-sync="#main-content:abort"
      data-result-count="{{ jobs_view.filters.shown|default:0 }}">
   {% timezone jobs_view.zone.info %}
     {% if jobs_view.last_checked %}

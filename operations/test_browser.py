@@ -209,8 +209,15 @@ class ConfirmAndRunBrowserTests(BrowserTestCase):
         expect(current).to_contain_text("Installing")
         expect(current).to_contain_text("In progress")
         self.assert_no_native_terms()
-        self.page.get_by_role("link", name="Logs", exact=True).click()
+        self.page.evaluate("window.barectlNavigationTest = 'same-document'")
+        logs = self.page.get_by_role("navigation", name="Run sections").get_by_role(
+            "link", name="Logs", exact=True
+        )
+        logs.focus()
+        self.page.keyboard.press("Enter")
         expect(self.page.get_by_role("heading", name="Logs", level=2)).to_be_visible()
+        self.assertEqual(self.page.evaluate("window.barectlNavigationTest"), "same-document")
+        expect(logs).to_be_focused()
         expect(self.page.get_by_text("Systemd unit")).to_be_visible()
         self.assertIn(run.unit_name, self.page.content())
         expect(self.page.get_by_text("Invocation")).to_be_visible()

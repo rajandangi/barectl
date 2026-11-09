@@ -175,6 +175,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.get_by_role("link", name="Production").click()
         nav = page.get_by_role("navigation", name="Server sections")
         for section in SECTIONS.values():
+            page.evaluate("window.barectlNavigationTest = 'same-document'")
+            self.requests.clear()
             link = nav.get_by_role("link", name=section, exact=True)
             link.focus()
             page.keyboard.press("Enter")
@@ -182,6 +184,11 @@ class ProductionAssetBrowserTests(BrowserTestCase):
                 "aria-current", "page"
             )
             expect(page.get_by_role("heading", name="Production", level=1)).to_be_visible()
+            self.assertEqual(page.evaluate("window.barectlNavigationTest"), "same-document")
+            expect(link).to_be_focused()
+            self.assertFalse([r.url for r in self.requests if r.is_navigation_request()])
+            if section == "Jobs":
+                expect(page).to_have_url(re.compile(r"/jobs/\?tz="))
             page.reload()
             expect(nav.get_by_role("link", name=section, exact=True)).to_have_attribute(
                 "aria-current", "page"

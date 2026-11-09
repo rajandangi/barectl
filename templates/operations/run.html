@@ -14,14 +14,22 @@
     </div>
   </div>
   <div class="barectl-layout">
-    <nav class="barectl-layout__nav" aria-label="Run sections">
+    <nav class="barectl-layout__nav"
+         aria-label="Run sections"
+         hx-boost:inherited="true"
+         hx-target:inherited="#main-content"
+         hx-select:inherited="#main-content"
+         hx-swap:inherited="outerHTML"
+         hx-sync:inherited="#main-content:replace">
       <ul class="usa-sidenav">
         <li class="usa-sidenav__item">
-          <a href="{% url 'run_detail' run.run.pk %}"
+          <a id="run-section-progress"
+             href="{% url 'run_detail' run.run.pk %}"
              {% if tab == "progress" %}class="usa-current" aria-current="page"{% endif %}>Progress</a>
         </li>
         <li class="usa-sidenav__item">
-          <a href="{% url 'run_detail' run.run.pk %}?tab=logs"
+          <a id="run-section-logs"
+             href="{% url 'run_detail' run.run.pk %}?tab=logs"
              {% if tab == "logs" %}class="usa-current" aria-current="page"{% endif %}>Logs</a>
         </li>
       </ul>

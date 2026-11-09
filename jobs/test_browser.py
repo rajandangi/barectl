@@ -125,6 +125,16 @@ class JobsBrowserTests(BrowserTestCase):
     def test_jobs_groups_details_check_and_narrow_layout(self) -> None:
         page = self.page
         nav = page.get_by_role("navigation", name="Server sections")
+        page.evaluate("window.barectlNavigationTest = 'same-document'")
+        for _ in range(2):
+            nav.get_by_role("link", name="Sites", exact=True).click()
+            expect(nav.get_by_role("link", name="Sites", exact=True)).to_have_attribute(
+                "aria-current", "page"
+            )
+            nav.get_by_role("link", name="Jobs", exact=True).click()
+            expect(page).to_have_url(re.compile(r"[?&]tz=Europe%2FLondon"))
+            expect(page.locator("#jobs-zone")).to_contain_text("Europe/London")
+            self.assertEqual(page.evaluate("window.barectlNavigationTest"), "same-document")
         expect(nav.get_by_role("link", name="Jobs", exact=True)).to_have_attribute(
             "aria-current", "page"
         )
