@@ -34,13 +34,6 @@ If this run changes the harness (skills, steering docs or checks), follow
 both, and keep the change only when the target metric improves and the regression cases hold.
 A missed target is recorded as a negative result, not hidden.
 
-## Long native passes
-
-A handoff is incomplete while a recording pass, native lane or CI watch still runs. Include
-the command's exit code and the `--check` result, and confirm no `record-all-transcripts`,
-scenario runner or build process remains. Do not end the turn with an unowned long command;
-resume the same session and wait for its status.
-
 ## Records
 
 The repository tracks the runner and the contract, not the cases or results. Cases, prompts,
