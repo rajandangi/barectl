@@ -1,0 +1,332 @@
+{
+  "foundation": {
+    "caddy": {
+      "admin_socket": "/run/caddy/admin.sock",
+      "group": "caddy",
+      "main_configuration": "{\n\tadmin unix//run/caddy/admin.sock|0600\n\tservers {\n\t\tstrict_sni_host on\n\t}\n}\nimport sites/*.caddy\n:80 {\n\trespond 404\n}",
+      "main_file": "/etc/caddy/Caddyfile",
+      "main_file_group": "root",
+      "main_file_mode": "0644",
+      "main_file_owner": "root",
+      "sites_directory": "/etc/caddy/sites",
+      "sites_directory_group": "root",
+      "sites_directory_mode": "0755",
+      "sites_directory_owner": "root",
+      "state_directory": "/var/lib/caddy",
+      "state_directory_mode": "0700",
+      "unit": "[Unit]\nDescription=Caddy\nDocumentation=https://caddyserver.com/docs/\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=notify\nUser=caddy\nGroup=caddy\nExecStart=/nix/var/nix/profiles/barectl/caddy/bin/caddy run --environ --config /etc/caddy/Caddyfile --adapter caddyfile\nExecReload=/nix/var/nix/profiles/barectl/caddy/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --address unix//run/caddy/admin.sock\nTimeoutStopSec=5s\nLimitNOFILE=1048576\nPrivateTmp=true\nProtectSystem=full\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nNoNewPrivileges=true\nUMask=0077\nRuntimeDirectory=caddy\nRuntimeDirectoryMode=0700\nStateDirectory=caddy\nStateDirectoryMode=0700\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target",
+      "unit_file": "/etc/systemd/system/caddy.service",
+      "unit_file_mode": "0644",
+      "user": "caddy"
+    },
+    "catalog_lock": {
+      "architectures": [
+        "x86_64-linux",
+        "aarch64-linux"
+      ],
+      "entry_pattern": "[a-z][a-z0-9_-]{0,31}",
+      "format": 1,
+      "kinds": [
+        "php",
+        "node",
+        "tool",
+        "extension"
+      ],
+      "path": "runtimes/catalog_lock.json"
+    },
+    "journald": {
+      "contents": "[Journal]\nStorage=persistent\n",
+      "mode": "0644",
+      "path": "/etc/systemd/journald.conf.d/50-barectl.conf"
+    },
+    "native_execution": {
+      "exit": {
+        "engine": {
+          "FAILED": 3,
+          "LOCK_BUSY": 10,
+          "PARTIAL": 2,
+          "REFUSED": 1,
+          "SUCCESS": 0
+        },
+        "probe": {
+          "DRIFT": 15,
+          "LOCK_CONFLICT": 10,
+          "UNSAFE_LOCK": 11
+        }
+      },
+      "limits": {
+        "max_payload_bytes": 16384,
+        "max_staged_body_bytes": 196608,
+        "runtime_max": "30min",
+        "timeout_stop_seconds": 60
+      },
+      "lock": {
+        "directory": "/run/lock/barectl",
+        "directory_mode": "0700",
+        "file": "/run/lock/barectl/mutation.lock",
+        "file_shape": "root-owned regular empty file with one link"
+      },
+      "stage_line_prefix": "barectl-stage ",
+      "stages": [
+        "preflight",
+        "Nix",
+        "catalog",
+        "Caddy",
+        "journald",
+        "verify"
+      ],
+      "systemd_run": "/usr/bin/systemd-run",
+      "unit": {
+        "pattern": "barectl-apply-[0-9a-f]{32}\\.service",
+        "prefix": "barectl-apply-"
+      }
+    },
+    "nix": {
+      "catalog_entries": [
+        "php84",
+        "php85",
+        "nodejs_22",
+        "nodejs_24"
+      ],
+      "config": {
+        "mode": "0644",
+        "path": "/etc/nix/nix.conf"
+      },
+      "profile_pattern": "/nix/var/nix/profiles/barectl/<entry>",
+      "profile_root": "/nix/var/nix/profiles/barectl",
+      "profiles": [
+        "caddy",
+        "composer",
+        "wp-cli",
+        "haproxy"
+      ]
+    },
+    "runtime_templates": {
+      "master_unit": {
+        "mode": "0644",
+        "path": "/etc/systemd/system/php-fpm@.service",
+        "template": "[Unit]\nDescription=PHP FastCGI Process Manager for %i\nAfter=network.target\n\n[Service]\nType=notify\nExecStart=/nix/var/nix/profiles/barectl/%i/bin/php-fpm -y /etc/php-fpm/%i/php-fpm.conf -c /etc/php-fpm/%i/php.ini\nExecReload=/bin/kill -USR2 $MAINPID\nRuntimeDirectory=php-fpm/%i\nRuntimeDirectoryMode=0755\nRuntimeDirectoryPreserve=yes\nPrivateDevices=true\nPrivateTmp=true\nProtectSystem=full\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK\nRestart=on-failure\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n"
+      },
+      "site_php_units": {
+        "/etc/systemd/system/php-fpm-site-php84@.service": {
+          "mode": "0644",
+          "template": "[Unit]\nDescription=Independent php84 PHP service for %i\nAfter=network.target\n\n[Service]\nSlice=system.slice\nType=notify\nExecStartPre=/usr/bin/install -d -m 0700 /run/php-fpm/sites/%i/php84/status /run/php-fpm/sites/%i/php84/diagnostic\nExecStartPost=/usr/bin/chmod 0600 /run/php-fpm/sites/%i/php84/status/listen.sock\nExecStart=/nix/var/nix/profiles/barectl/php84/bin/php-fpm -F -y /etc/php-fpm/sites/%i/php84/php-fpm.conf -c /etc/php-fpm/sites/%i/php84/php.ini\nRuntimeDirectory=php-fpm/sites/%i/php84\nRuntimeDirectoryMode=0755\nKillSignal=SIGQUIT\nTimeoutStopSec=310s\nPrivateDevices=true\nPrivateTmp=true\nProtectSystem=full\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK\nRestart=on-failure\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n"
+        },
+        "/etc/systemd/system/php-fpm-site-php85@.service": {
+          "mode": "0644",
+          "template": "[Unit]\nDescription=Independent php85 PHP service for %i\nAfter=network.target\n\n[Service]\nSlice=system.slice\nType=notify\nExecStartPre=/usr/bin/install -d -m 0700 /run/php-fpm/sites/%i/php85/status /run/php-fpm/sites/%i/php85/diagnostic\nExecStartPost=/usr/bin/chmod 0600 /run/php-fpm/sites/%i/php85/status/listen.sock\nExecStart=/nix/var/nix/profiles/barectl/php85/bin/php-fpm -F -y /etc/php-fpm/sites/%i/php85/php-fpm.conf -c /etc/php-fpm/sites/%i/php85/php.ini\nRuntimeDirectory=php-fpm/sites/%i/php85\nRuntimeDirectoryMode=0755\nKillSignal=SIGQUIT\nTimeoutStopSec=310s\nPrivateDevices=true\nPrivateTmp=true\nProtectSystem=full\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK\nRestart=on-failure\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n"
+        }
+      }
+    }
+  },
+  "site_convention": {
+    "accounts": {
+      "proxy": {
+        "home": "/nonexistent",
+        "name": "p<identifier>",
+        "shell": "/usr/sbin/nologin"
+      },
+      "site": {
+        "home": "/var/www/<identifier>",
+        "name": "s<identifier>",
+        "shell": "/usr/sbin/nologin",
+        "supplementary_groups": []
+      },
+      "web": {
+        "name": "caddy"
+      }
+    },
+    "caddy": {
+      "route": "<name> {\n    root * /var/www/<identifier>/current/public\n    encode zstd gzip\n    @hidden {\n        path_regexp hidden (^|/)\\.[^/]+\n        not path /.well-known/*\n    }\n    @wellknownhidden {\n        path_regexp wellknownhidden ^/\\.well-known/([^/]+/)*\\.[^/]+\n    }\n    @config path_regexp config (?i)(^|/)wp-config\\.php(/|$)\n    @uploads path_regexp uploads (?i)^/wp-content/uploads/.*\\.(php[0-9]*|phtml|phar)(/|$)\n    @php path_regexp php \\.php(/|$)\n    @index path /\n    route {\n        respond @hidden 404\n        respond @wellknownhidden 404\n        respond @config 404\n        respond @uploads 404\n        rewrite @index /index.php\n        reverse_proxy @php unix//run/haproxy/<identifier>/http.sock\n        file_server\n    }\n    log {\n        output file /var/www/<identifier>/logs/access.json {\n            roll_size 20MiB\n            roll_keep 5\n            roll_keep_for 14d\n        }\n        format filter {\n            wrap json\n            fields {\n                request>uri query {\n                    replace key REDACTED\n                    replace token REDACTED\n                    replace signature REDACTED\n                }\n            }\n        }\n    }\n}\n",
+      "site_file": "/etc/caddy/sites/<identifier>.caddy",
+      "site_file_group": "root",
+      "site_file_mode": "0644",
+      "site_file_owner": "root"
+    },
+    "haproxy": {
+      "admin_socket": "/run/haproxy/<identifier>/admin.sock",
+      "admin_socket_group": "root",
+      "admin_socket_mode": "0600",
+      "admin_socket_owner": "root",
+      "config": "/etc/haproxy/sites/<identifier>.cfg",
+      "config_mode": "0600",
+      "config_template": "global\n    maxconn 64\n    user p<identifier>\n    group p<identifier>\n    nbthread 1\n    tune.quic.fe.sock-per-conn force-off\n    tune.quic.fe.tx.udp-gso off\n    tune.quic.be.tx.udp-gso off\n    server-state-file /var/lib/haproxy/sites/<identifier>.state\n    stats socket /run/haproxy/<identifier>/admin.sock uid 0 gid 0 mode 600 level admin\n    log /dev/log local0\n    log-tag haproxy-site-<identifier>\ndefaults\n    mode http\n    timeout connect 0\n    timeout client 0\n    timeout server 0\n    timeout queue 0\n    retry-on conn-failure\n    retries 2\nfcgi-app php\n    docroot /var/www/<identifier>/current/public\n    index index.php\n    path-info ^(/.+?\\.php)(/.*)?$\n    set-param HTTP_X_FORWARDED_URI %[req.hdr(X-Forwarded-Uri)]\n    set-param HTTPS %[var(txn.https)]\n    set-param SERVER_PORT %[dst_port]\n    no option keep-conn\nbackend php\n    use-fcgi-app php\n    balance roundrobin\n    load-server-state-from-file global\n    option redispatch\n    server php84 /run/php-fpm/sites/<identifier>/php84/app.sock proto fcgi id 1 maxconn 2 disabled\n    server php85 /run/php-fpm/sites/<identifier>/php85/app.sock proto fcgi id 2 maxconn 2 disabled\nfrontend incoming\n    bind /run/haproxy/<identifier>/http.sock user caddy group caddy mode 600\n    http-request del-header Proxy\n    http-request set-var(txn.https) str(on) if { req.hdr(X-Forwarded-Proto) -i https }\n    http-request set-var(txn.https) str(off) unless { var(txn.https) -m found }\n    default_backend php\n",
+      "http_socket": "/run/haproxy/<identifier>/http.sock",
+      "http_socket_group": "caddy",
+      "http_socket_mode": "0600",
+      "http_socket_owner": "caddy",
+      "service": "haproxy-site@<identifier>.service",
+      "state": "/var/lib/haproxy/sites/<identifier>.state",
+      "state_mode": "0600",
+      "unit": "[Unit]\nDescription=Private HTTP to FastCGI admission for %i\nAfter=network.target\n\n[Service]\nSlice=system.slice\nType=simple\nExecStart=/nix/var/nix/profiles/barectl/haproxy/bin/haproxy -f /etc/haproxy/sites/%i.cfg\nRuntimeDirectory=haproxy/%i\nRuntimeDirectoryMode=0755\nPrivateDevices=true\nPrivateTmp=true\nProtectSystem=full\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX\nRestart=on-failure\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n",
+      "unit_file": "/etc/systemd/system/haproxy-site@.service",
+      "unit_mode": "0644"
+    },
+    "identifier": {
+      "label_pattern": "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
+      "max_name_octets": 253,
+      "max_names": 10,
+      "pattern": "[a-z][a-z0-9]{2,23}",
+      "readiness_max_chars": 200,
+      "readiness_pattern": "/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?",
+      "reserved": [
+        "acme",
+        "admin",
+        "apply",
+        "backup",
+        "barectl",
+        "default",
+        "diagnostic",
+        "fpm",
+        "html",
+        "letsencrypt",
+        "localhost",
+        "nginx",
+        "php",
+        "repo",
+        "root",
+        "site",
+        "www"
+      ],
+      "reserved_names": [
+        "invalid",
+        "localhost"
+      ],
+      "system_accounts": [
+        "saned",
+        "sasl",
+        "sddm",
+        "sgx",
+        "snmp",
+        "squid",
+        "sshd",
+        "sssd",
+        "statd",
+        "stunnel4",
+        "syslog"
+      ]
+    },
+    "layout": [
+      {
+        "group": "root",
+        "mode": "0755",
+        "owner": "root",
+        "path": "/var/www"
+      },
+      {
+        "group": "root",
+        "mode": "0755",
+        "owner": "root",
+        "path": "/var/www/<identifier>"
+      },
+      {
+        "group": "root",
+        "mode": "0755",
+        "owner": "root",
+        "path": "/var/www/<identifier>/releases"
+      },
+      {
+        "group": "s<identifier>",
+        "mode": "0711",
+        "owner": "s<identifier>",
+        "path": "/var/www/<identifier>/releases/initial"
+      },
+      {
+        "group": "caddy",
+        "mode": "2750",
+        "owner": "s<identifier>",
+        "path": "/var/www/<identifier>/releases/initial/public"
+      },
+      {
+        "group": "s<identifier>",
+        "mode": "0700",
+        "owner": "s<identifier>",
+        "path": "/var/www/<identifier>/private"
+      },
+      {
+        "group": "s<identifier>",
+        "mode": "0700",
+        "owner": "s<identifier>",
+        "path": "/var/www/<identifier>/private/sessions"
+      },
+      {
+        "group": "s<identifier>",
+        "mode": "0700",
+        "owner": "s<identifier>",
+        "path": "/var/www/<identifier>/private/tmp"
+      },
+      {
+        "group": "s<identifier>",
+        "mode": "0750",
+        "owner": "caddy",
+        "path": "/var/www/<identifier>/logs"
+      },
+      {
+        "group": "root",
+        "mode": "0755",
+        "owner": "root",
+        "path": "/var/www/<identifier>/bin"
+      },
+      {
+        "group": "s<identifier>",
+        "mode": "0640",
+        "owner": "root",
+        "path": "/var/www/<identifier>/.deploy.lock"
+      }
+    ],
+    "php_fpm": {
+      "config_files": [
+        "php.ini",
+        "php-fpm.conf",
+        "pools/<identifier>.conf",
+        "pools/diagnostic.conf"
+      ],
+      "per_runtime": {
+        "php84": {
+          "app_socket": "/run/php-fpm/sites/<identifier>/php84/app.sock",
+          "app_socket_mode": "0660",
+          "config_directory": "/etc/php-fpm/sites/<identifier>/php84",
+          "diagnostic_pool": "[diagnostic]\nuser = php-probe\ngroup = php-probe\nlisten = /run/php-fpm/sites/<identifier>/php84/diagnostic/listen.sock\nlisten.owner = root\nlisten.group = root\nlisten.mode = 0600\npm = static\npm.max_children = 1\nclear_env = yes\nsecurity.limit_extensions = .php\nphp_admin_value[session.save_path] = /var/lib/php-fpm/sites/<identifier>/php84/diagnostic/session\nphp_admin_value[upload_tmp_dir] = /var/lib/php-fpm/sites/<identifier>/php84/diagnostic/upload\nphp_admin_value[sys_temp_dir] = /var/lib/php-fpm/sites/<identifier>/php84/diagnostic/tmp\n",
+          "diagnostic_socket": "/run/php-fpm/sites/<identifier>/php84/diagnostic/listen.sock",
+          "diagnostic_socket_mode": "0600",
+          "master_config": "[global]\ndaemonize = no\nerror_log = syslog\nprocess_control_timeout = 300s\ninclude = /etc/php-fpm/sites/<identifier>/php84/pools/*.conf\n",
+          "service": "php-fpm-site-php84@<identifier>.service",
+          "status_socket": "/run/php-fpm/sites/<identifier>/php84/status/listen.sock",
+          "status_socket_mode": "0600",
+          "unit": "[Unit]\nDescription=Independent php84 PHP service for %i\nAfter=network.target\n\n[Service]\nSlice=system.slice\nType=notify\nExecStartPre=/usr/bin/install -d -m 0700 /run/php-fpm/sites/%i/php84/status /run/php-fpm/sites/%i/php84/diagnostic\nExecStartPost=/usr/bin/chmod 0600 /run/php-fpm/sites/%i/php84/status/listen.sock\nExecStart=/nix/var/nix/profiles/barectl/php84/bin/php-fpm -F -y /etc/php-fpm/sites/%i/php84/php-fpm.conf -c /etc/php-fpm/sites/%i/php84/php.ini\nRuntimeDirectory=php-fpm/sites/%i/php84\nRuntimeDirectoryMode=0755\nKillSignal=SIGQUIT\nTimeoutStopSec=310s\nPrivateDevices=true\nPrivateTmp=true\nProtectSystem=full\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK\nRestart=on-failure\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n",
+          "unit_file": "/etc/systemd/system/php-fpm-site-php84@.service",
+          "unit_mode": "0644"
+        },
+        "php85": {
+          "app_socket": "/run/php-fpm/sites/<identifier>/php85/app.sock",
+          "app_socket_mode": "0660",
+          "config_directory": "/etc/php-fpm/sites/<identifier>/php85",
+          "diagnostic_pool": "[diagnostic]\nuser = php-probe\ngroup = php-probe\nlisten = /run/php-fpm/sites/<identifier>/php85/diagnostic/listen.sock\nlisten.owner = root\nlisten.group = root\nlisten.mode = 0600\npm = static\npm.max_children = 1\nclear_env = yes\nsecurity.limit_extensions = .php\nphp_admin_value[session.save_path] = /var/lib/php-fpm/sites/<identifier>/php85/diagnostic/session\nphp_admin_value[upload_tmp_dir] = /var/lib/php-fpm/sites/<identifier>/php85/diagnostic/upload\nphp_admin_value[sys_temp_dir] = /var/lib/php-fpm/sites/<identifier>/php85/diagnostic/tmp\n",
+          "diagnostic_socket": "/run/php-fpm/sites/<identifier>/php85/diagnostic/listen.sock",
+          "diagnostic_socket_mode": "0600",
+          "master_config": "[global]\ndaemonize = no\nerror_log = syslog\nprocess_control_timeout = 300s\ninclude = /etc/php-fpm/sites/<identifier>/php85/pools/*.conf\n",
+          "service": "php-fpm-site-php85@<identifier>.service",
+          "status_socket": "/run/php-fpm/sites/<identifier>/php85/status/listen.sock",
+          "status_socket_mode": "0600",
+          "unit": "[Unit]\nDescription=Independent php85 PHP service for %i\nAfter=network.target\n\n[Service]\nSlice=system.slice\nType=notify\nExecStartPre=/usr/bin/install -d -m 0700 /run/php-fpm/sites/%i/php85/status /run/php-fpm/sites/%i/php85/diagnostic\nExecStartPost=/usr/bin/chmod 0600 /run/php-fpm/sites/%i/php85/status/listen.sock\nExecStart=/nix/var/nix/profiles/barectl/php85/bin/php-fpm -F -y /etc/php-fpm/sites/%i/php85/php-fpm.conf -c /etc/php-fpm/sites/%i/php85/php.ini\nRuntimeDirectory=php-fpm/sites/%i/php85\nRuntimeDirectoryMode=0755\nKillSignal=SIGQUIT\nTimeoutStopSec=310s\nPrivateDevices=true\nPrivateTmp=true\nProtectSystem=full\nProtectHome=true\nRestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK\nRestart=on-failure\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n",
+          "unit_file": "/etc/systemd/system/php-fpm-site-php85@.service",
+          "unit_mode": "0644"
+        }
+      },
+      "runtimes": [
+        "php84",
+        "php85"
+      ],
+      "service": "php-fpm-site-<runtime>@<identifier>.service"
+    },
+    "release": {
+      "current": "/var/www/<identifier>/current",
+      "current_owner": "root",
+      "directory": "/var/www/<identifier>/releases",
+      "initial": "releases/initial",
+      "public": "/var/www/<identifier>/releases/<release>/public",
+      "target_pattern": "releases/[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+    }
+  },
+  "version": 1
+}
