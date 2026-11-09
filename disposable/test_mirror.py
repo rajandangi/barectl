@@ -539,6 +539,7 @@ class FixtureCAWorkflowTests(SimpleTestCase):
             ("L3", "l3.tar"),
             ("L4", "l4.tar"),
             ("L5", "l5.tar"),
+            ("V040", "v040.tar"),
             ("fixture", "fixture.tar"),
         ):
             with self.subTest(layer=layer):
@@ -586,6 +587,7 @@ class FixtureCAWorkflowTests(SimpleTestCase):
                 "l3",
                 "l4",
                 "l5",
+                "v040",
             ):
                 with self.subTest(job=job_name, step=identifier):
                     restore = next(item for item in steps if item.get("id") == identifier)
@@ -659,6 +661,7 @@ class FixtureCAWorkflowTests(SimpleTestCase):
             "l3",
             "l4",
             "l5",
+            "v040",
         ):
             with self.subTest(hit=hit):
 
@@ -903,9 +906,11 @@ class SpecialSnapshotCacheTests(SimpleTestCase):
             observed = dict(line.split("=", 1) for line in output.read_text().splitlines())
             self.assertEqual(observed["standing"], images.cache_key("L0-standing"))
             self.assertEqual(observed["ubuntu24"], images.cache_key("L0-24.04"))
+            self.assertEqual(observed["v040"], images.cache_key("V040"))
             self.assertRegex(observed["standing"], r"^standing-26\.04-[0-9a-f]{12}$")
             self.assertRegex(observed["ubuntu24"], r"^l0-24\.04-[0-9a-f]{12}$")
-            self.assertEqual(len(observed), 9)
+            self.assertRegex(observed["v040"], r"^v040-[0-9a-f]{12}$")
+            self.assertEqual(len(observed), 10)
 
     def test_workflow_does_not_publish_keys_after_a_cli_failure(self) -> None:
         workflow = yaml.safe_load(

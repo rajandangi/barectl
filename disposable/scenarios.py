@@ -222,7 +222,7 @@ def _wanted(
 
 def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
     layer = getattr(cls, "layer", None)
-    if layer not in {"L0", "L1", "L2", "L3", "L4", "L5", "L0-standing", "L0-24.04"}:
+    if layer not in {"L0", "L1", "L2", "L3", "L4", "L5", "V040", "L0-standing", "L0-24.04"}:
         raise ScenarioError(f"{cls.__name__} declares no known layer ({layer!r}).")
     return Scenario(
         label=f"{cls.__module__}.{cls.__qualname__}",
@@ -1063,6 +1063,7 @@ _PREPARATIONS = {
     "L3": ("L1", "disposable.test_prepared_wordpress.PrepareWordPress"),
     "L4": ("L3", "disposable.test_prepared_wordpress.PrepareWordPressCache"),
     "L5": ("L1", "disposable.test_prepared_laravel.PrepareLaravel"),
+    "V040": ("L0", "disposable.test_v040_compatibility.PrepareV040"),
 }
 PREPARATION_LAYERS = tuple(_PREPARATIONS)
 SPECIAL_LAYERS = ("L0-standing", "L0-24.04")
@@ -1136,7 +1137,7 @@ def prepare_layers(  # noqa: C901 - dependency waves and cached-layer checks are
     ]
     if chain:
         units.append(chain)
-    units.extend([(label(layer), layer)] for layer in ("L2", "L5") if layer in missing)
+    units.extend([(label(layer), layer)] for layer in ("L2", "L5", "V040") if layer in missing)
     if units:
         outcomes += _prepare_units(runner, units, image, key, remaining(), output, available_lanes)
 
