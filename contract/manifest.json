@@ -1,4 +1,166 @@
 {
+  "backups": {
+    "capture": {
+      "applications": [
+        "plain",
+        "wordpress",
+        "laravel"
+      ],
+      "database_name": "s<identifier>",
+      "dump_filename": "s<identifier>.sql",
+      "expected_parts": {
+        "database": [
+          "database"
+        ],
+        "files": [
+          "files"
+        ],
+        "full": [
+          "database",
+          "files"
+        ]
+      },
+      "headroom_bytes": 1073741824,
+      "identifier_pattern": "[a-z][a-z0-9]{2,23}",
+      "marker": "barectl",
+      "origins": [
+        "manual",
+        "scheduled",
+        "safety"
+      ],
+      "parts": [
+        "database",
+        "files"
+      ],
+      "point_pattern": "[0-9a-f]{16}",
+      "retention_days": [
+        7,
+        14,
+        21,
+        30,
+        182
+      ],
+      "scopes": [
+        "database",
+        "files",
+        "full"
+      ],
+      "tag_pattern": "[a-z0-9:_-]{1,48}",
+      "tags": {
+        "live": [
+          "barectl",
+          "site:<identifier>",
+          "scope:<scope>",
+          "part:<part>",
+          "origin:<origin>",
+          "capture:live",
+          "point:<point>",
+          "application:<application>",
+          "complete"
+        ],
+        "paused": [
+          "barectl",
+          "site:<identifier>",
+          "scope:<scope>",
+          "part:<part>",
+          "origin:<origin>",
+          "capture:paused",
+          "point:<point>",
+          "application:<application>",
+          "complete"
+        ]
+      }
+    },
+    "paths": {
+      "key_root": "/etc/barectl/backups",
+      "offsite": {
+        "bucket_pattern": "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]",
+        "capture": "/etc/barectl/backups/offsite/capture.env",
+        "config": "/etc/barectl/backups/offsite/config",
+        "health": "_health",
+        "health_repository": "s3:<endpoint>/<bucket>/<prefix>/_health",
+        "prefix_pattern": "[a-z0-9][a-z0-9._-]{0,63}(?:/[a-z0-9][a-z0-9._-]{0,63}){0,3}",
+        "provider_labels": {
+          "r2": "Cloudflare R2",
+          "s3": "Amazon S3"
+        },
+        "providers": [
+          "s3",
+          "r2"
+        ],
+        "prune": "/etc/barectl/backups/offsite/prune.env",
+        "region_pattern": "[a-z0-9-]{2,32}",
+        "repository": "s3:<endpoint>/<bucket>/<prefix>/<identifier>",
+        "root": "/etc/barectl/backups/offsite",
+        "sources": "/etc/barectl/backups/offsite/sources"
+      },
+      "onsite": "/var/lib/barectl-backups/<identifier>/onsite",
+      "repository_lock_root": "/run/lock/barectl",
+      "repository_root": "/var/lib/barectl-backups",
+      "server_key": "/etc/barectl/backups/<identifier>.key",
+      "site": "/var/lib/barectl-backups/<identifier>"
+    },
+    "recovery_kit": {
+      "fields": [
+        "server_name",
+        "identifier",
+        "restic_version",
+        "provider",
+        "endpoint",
+        "bucket",
+        "prefix",
+        "region",
+        "sites"
+      ]
+    },
+    "restic": {
+      "binary": "/nix/var/nix/profiles/barectl/restic/bin/restic",
+      "cache": "/var/cache/barectl/restic",
+      "entry": "restic",
+      "profile": "/nix/var/nix/profiles/barectl/restic",
+      "profile_root": "/nix/var/nix/profiles/barectl"
+    },
+    "schedule": {
+      "calendar": {
+        "daily": "*-*-* 03:00:00 UTC",
+        "weekly": "Mon *-*-* 03:00:00 UTC"
+      },
+      "frequencies": [
+        "daily",
+        "weekly"
+      ],
+      "lock_wait_seconds": 30,
+      "payload": "/etc/barectl/backups/schedule/<identifier>.json",
+      "root": "/etc/barectl/backups/schedule",
+      "run_timeout": "2h",
+      "scopes": [
+        "database",
+        "files",
+        "full"
+      ],
+      "script": "/etc/barectl/backups/schedule/<identifier>.sh",
+      "time_pattern": "([01][0-9]|2[0-3]):([0-5][0-9])\\Z",
+      "units": {
+        "service": {
+          "contents": "[Unit]\nDescription=Barectl backup capture for <identifier>\nConditionPathIsDirectory=/var/www/<identifier>\n\n[Service]\nType=oneshot\nTimeoutStartSec=2h\nKillMode=control-group\nSlice=barectl-site-<identifier>-backup.slice\nExecStart=/bin/sh /etc/barectl/backups/schedule/<identifier>.sh /etc/barectl/backups/schedule/<identifier>.json\n",
+          "file": "/etc/systemd/system/barectl-site-<identifier>-backup.service",
+          "name": "barectl-site-<identifier>-backup.service"
+        },
+        "slice": {
+          "contents": "[Unit]\nDescription=Barectl backups for <identifier>\n\n[Slice]\n",
+          "file": "/etc/systemd/system/barectl-site-<identifier>-backup.slice",
+          "name": "barectl-site-<identifier>-backup.slice"
+        },
+        "timer": {
+          "contents": "[Unit]\nDescription=Barectl backup schedule for <identifier>\n\n[Timer]\nOnCalendar=*-*-* 03:00:00 UTC\nAccuracySec=1s\nRandomizedDelaySec=0\nPersistent=false\nDeferReactivation=yes\nUnit=barectl-site-<identifier>-backup.service\nSlice=barectl-site-<identifier>-backup.slice\n\n[Install]\nWantedBy=timers.target\n",
+          "file": "/etc/systemd/system/barectl-site-<identifier>-backup.timer",
+          "name": "barectl-site-<identifier>-backup.timer"
+        }
+      },
+      "weekly_day": "Mon",
+      "window_minutes": 60
+    }
+  },
   "foundation": {
     "caddy": {
       "admin_socket": "/run/caddy/admin.sock",
@@ -118,6 +280,742 @@
         }
       }
     }
+  },
+  "results": {
+    "classes": [
+      "failed",
+      "lock_busy",
+      "partial",
+      "refused",
+      "succeeded",
+      "timed_out"
+    ],
+    "contract": 1,
+    "fields": [
+      "class",
+      "reason",
+      "change_kind",
+      "sites",
+      "contract"
+    ],
+    "prefix": "barectl-result ",
+    "reasons": {
+      "admission": [
+        "active_backup",
+        "active_run",
+        "affected_sites",
+        "apt_active",
+        "apt_unreadable",
+        "boot",
+        "capacity",
+        "deadline",
+        "evidence",
+        "revert_active",
+        "unsafe_lock"
+      ],
+      "bodies": {
+        "backup_integrity": [
+          "backup_lock",
+          "backup_password",
+          "backup_repository",
+          "backup_unknown",
+          "integrity_offsite",
+          "integrity_pack",
+          "integrity_readback"
+        ],
+        "backup_retention_cleanup": [
+          "backup_lock",
+          "backup_site",
+          "backup_unknown",
+          "backup_verify",
+          "cleanup_clock"
+        ]
+      },
+      "kinds": {
+        "add_runtime": [
+          "runtime_realise",
+          "runtime_start"
+        ],
+        "add_site_database": [
+          "site_database",
+          "site_database_after",
+          "site_database_database",
+          "site_database_driver",
+          "site_database_principal",
+          "site_database_privileges",
+          "site_database_probe",
+          "site_database_proof",
+          "site_database_schema"
+        ],
+        "back_up_full_site": [
+          "automation_fence",
+          "automation_restore",
+          "backup_disk",
+          "backup_dump",
+          "backup_files",
+          "backup_gate",
+          "backup_idle",
+          "backup_lock",
+          "backup_partial",
+          "backup_paused",
+          "backup_repository",
+          "backup_site",
+          "backup_verify",
+          "offsite_copy",
+          "offsite_key",
+          "offsite_repository",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "back_up_now": [
+          "backup_disk",
+          "backup_dump",
+          "backup_lock",
+          "backup_partial",
+          "backup_password",
+          "backup_repository",
+          "backup_site",
+          "backup_unknown",
+          "backup_verify",
+          "offsite_copy",
+          "offsite_key",
+          "offsite_repository"
+        ],
+        "check_for_ubuntu_updates": [
+          "updates_refresh",
+          "updates_refresh_failed"
+        ],
+        "cleanup_runs": [
+          "cleanup"
+        ],
+        "connect_existing_backup_storage": [
+          "connect_key",
+          "connect_password",
+          "connect_repository",
+          "connect_review",
+          "connect_settings"
+        ],
+        "copy_offsite_again": [
+          "backup_lock",
+          "offsite_copy",
+          "offsite_key",
+          "offsite_repository"
+        ],
+        "create_http_site": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "create_laravel_site": [
+          "automation_fence",
+          "automation_restore",
+          "laravel_composer",
+          "laravel_disk",
+          "laravel_fetch",
+          "laravel_gate",
+          "laravel_migrations",
+          "laravel_readiness",
+          "laravel_release",
+          "laravel_shared",
+          "laravel_source",
+          "readiness_publish",
+          "release_absent",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "create_wordpress_site": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness",
+          "wordpress_create",
+          "wordpress_gate",
+          "wordpress_publish",
+          "wordpress_secret"
+        ],
+        "delete_removed_backups": [
+          "backup_lock",
+          "offsite_key",
+          "removed_backup"
+        ],
+        "deploy_laravel_site": [
+          "automation_fence",
+          "automation_restore",
+          "laravel_composer",
+          "laravel_disk",
+          "laravel_fetch",
+          "laravel_gate",
+          "laravel_migrations",
+          "laravel_readiness",
+          "laravel_release",
+          "laravel_shared",
+          "laravel_source",
+          "readiness_publish",
+          "release_absent",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "disable_backup_retention": [
+          "automation_fence",
+          "automation_restore",
+          "backup_lock",
+          "backup_site",
+          "backup_unknown",
+          "backup_verify",
+          "cleanup_clock",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "edit_laravel_environment": [
+          "automation_fence",
+          "automation_restore",
+          "laravel_composer",
+          "laravel_config",
+          "laravel_disk",
+          "laravel_environment",
+          "laravel_environment_managed",
+          "laravel_fetch",
+          "laravel_gate",
+          "laravel_migrations",
+          "laravel_readiness",
+          "laravel_release",
+          "laravel_shared",
+          "laravel_source",
+          "laravel_worker",
+          "readiness_publish",
+          "release_absent",
+          "settings_secret",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "edit_wordpress_settings": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "settings_secret",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness",
+          "wordpress_settings"
+        ],
+        "enable_backups": [
+          "backup_check",
+          "backup_key",
+          "backup_lock",
+          "backup_password",
+          "backup_repository",
+          "backup_site",
+          "backup_unknown",
+          "integrity_offsite",
+          "integrity_pack",
+          "integrity_readback"
+        ],
+        "export_recovery_point": [
+          "export_database",
+          "export_evidence",
+          "export_files",
+          "export_lock",
+          "export_repository",
+          "export_secret",
+          "export_size",
+          "export_stage",
+          "restore_config",
+          "restore_data",
+          "restore_disk",
+          "restore_done",
+          "restore_dump",
+          "restore_engine",
+          "restore_evidence",
+          "restore_files",
+          "restore_gate",
+          "restore_idle",
+          "restore_import",
+          "restore_lock",
+          "restore_open",
+          "restore_paused",
+          "restore_point",
+          "restore_readiness",
+          "restore_repository",
+          "restore_safety",
+          "restore_site",
+          "restore_target"
+        ],
+        "host_foundation": [
+          "download",
+          "foreign_stack",
+          "foundation",
+          "installer_digest",
+          "nix_incomplete"
+        ],
+        "install_database_engine": [
+          "database_engine",
+          "database_reload"
+        ],
+        "install_ubuntu_updates": [
+          "updates_conffile",
+          "updates_failed",
+          "updates_hold",
+          "updates_pending",
+          "updates_transaction",
+          "updates_verify"
+        ],
+        "install_valkey": [
+          "valkey_mask",
+          "valkey_reload",
+          "valkey_server"
+        ],
+        "keep_recovery_point": [
+          "backup_lock",
+          "backup_site",
+          "backup_unknown",
+          "backup_verify",
+          "cleanup_clock"
+        ],
+        "manage_firewall": [
+          "firewall_apply",
+          "firewall_outside",
+          "firewall_package",
+          "firewall_ports",
+          "firewall_standard",
+          "firewall_verify",
+          "revert_arm",
+          "revert_preimage"
+        ],
+        "remove_database_engine": [
+          "database_engine",
+          "database_reload"
+        ],
+        "remove_offsite_storage": [
+          "backup_lock",
+          "offsite_bucket",
+          "offsite_key",
+          "offsite_remove",
+          "offsite_repository"
+        ],
+        "remove_runtime": [
+          "defaults_unreadable",
+          "runtime_in_use"
+        ],
+        "remove_site": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness",
+          "site_remove",
+          "site_remove_accounts",
+          "site_remove_caddy",
+          "site_remove_certificate",
+          "site_remove_database",
+          "site_remove_evidence",
+          "site_remove_verify"
+        ],
+        "reopen_site": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness",
+          "site_reopen"
+        ],
+        "replace_recovery_passphrase": [
+          "passphrase_key",
+          "passphrase_new",
+          "passphrase_old",
+          "passphrase_repository",
+          "passphrase_review",
+          "passphrase_server_key",
+          "passphrase_value"
+        ],
+        "require_key_sign_in": [
+          "revert_arm",
+          "revert_preimage",
+          "sign_in_apply",
+          "sign_in_reload",
+          "sign_in_syntax",
+          "sign_in_verify"
+        ],
+        "reset_wordpress_password": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness",
+          "wordpress_checksums",
+          "wordpress_checksums_unavailable",
+          "wordpress_password",
+          "wordpress_password_unverified",
+          "wordpress_secret"
+        ],
+        "restart_server": [
+          "restart_apply",
+          "restart_evidence",
+          "restart_work"
+        ],
+        "restore_database": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "restore_config",
+          "restore_data",
+          "restore_disk",
+          "restore_done",
+          "restore_dump",
+          "restore_engine",
+          "restore_evidence",
+          "restore_files",
+          "restore_gate",
+          "restore_idle",
+          "restore_import",
+          "restore_lock",
+          "restore_open",
+          "restore_paused",
+          "restore_point",
+          "restore_readiness",
+          "restore_repository",
+          "restore_safety",
+          "restore_site",
+          "restore_target",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "revert_runtime": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "runtime_realise",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "rollback_laravel_site": [
+          "automation_fence",
+          "automation_restore",
+          "laravel_composer",
+          "laravel_disk",
+          "laravel_fetch",
+          "laravel_gate",
+          "laravel_migrations",
+          "laravel_readiness",
+          "laravel_release",
+          "laravel_shared",
+          "laravel_source",
+          "readiness_publish",
+          "release_absent",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_automatic_security_updates": [
+          "automatic_updates_configure",
+          "automatic_updates_failed",
+          "automatic_updates_package",
+          "automatic_updates_settings",
+          "automatic_updates_verify"
+        ],
+        "set_backup_retention": [
+          "automation_fence",
+          "automation_restore",
+          "backup_lock",
+          "backup_site",
+          "backup_unknown",
+          "backup_verify",
+          "cleanup_clock",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_backup_schedule": [
+          "automation_fence",
+          "automation_restore",
+          "backup_disk",
+          "backup_lock",
+          "backup_repository",
+          "backup_site",
+          "backup_unknown",
+          "backup_verify",
+          "readiness_publish",
+          "schedule_install",
+          "schedule_timer",
+          "schedule_units",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_certificate_email": [
+          "certificate_email"
+        ],
+        "set_default_node": [
+          "runtime_config"
+        ],
+        "set_default_php": [
+          "runtime_config"
+        ],
+        "set_laravel_queue_workers": [
+          "automation_fence",
+          "automation_restore",
+          "queue_workers",
+          "queue_workers_activation",
+          "queue_workers_environment",
+          "queue_workers_site",
+          "queue_workers_start",
+          "queue_workers_stop",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_laravel_scheduler": [
+          "automation",
+          "automation_fence",
+          "automation_restore",
+          "automation_run",
+          "automation_running",
+          "automation_scheduler",
+          "automation_start",
+          "automation_units",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_site_domains": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_site_node": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_site_object_cache": [
+          "automation_fence",
+          "automation_restore",
+          "object_cache",
+          "object_cache_instance",
+          "object_cache_plugin",
+          "object_cache_verify",
+          "object_cache_wiring",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_site_php": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_site_php_client": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_site_pool": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_site_readiness": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "set_up_log_rotation": [
+          "logrotate_missing",
+          "rotation_invalid"
+        ],
+        "set_up_offsite_storage": [
+          "backup_lock",
+          "offsite_bucket",
+          "offsite_key",
+          "offsite_remove",
+          "offsite_repository"
+        ],
+        "set_wordpress_server_cron": [
+          "automation",
+          "automation_configuration",
+          "automation_fence",
+          "automation_restore",
+          "automation_site",
+          "automation_start",
+          "automation_tick",
+          "automation_units",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "update_catalog": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "runtime_realise",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness"
+        ],
+        "verify_wordpress_core": [
+          "automation_fence",
+          "automation_restore",
+          "readiness_publish",
+          "site_caddy",
+          "site_client",
+          "site_create",
+          "site_domains",
+          "site_pool",
+          "site_readiness",
+          "wordpress_checksums",
+          "wordpress_checksums_unavailable",
+          "wordpress_password",
+          "wordpress_password_unverified",
+          "wordpress_secret"
+        ]
+      },
+      "retired": [
+        "backup_offsite",
+        "laravel_platform",
+        "site_remove_configuration",
+        "site_remove_files",
+        "site_remove_gate",
+        "site_remove_services",
+        "wordpress_archive",
+        "wordpress_archive_digest",
+        "wordpress_configuration",
+        "wordpress_extract",
+        "wordpress_install",
+        "wordpress_readiness",
+        "wordpress_tables"
+      ],
+      "shared": [
+        "headroom",
+        "platform",
+        "precondition",
+        "privilege",
+        "runtime_cache",
+        "runtime_config",
+        "settings_secret"
+      ]
+    },
+    "site_pattern": "[a-z][a-z0-9]{2,23}",
+    "stage_prefix": "barectl-stage "
   },
   "site_convention": {
     "accounts": {

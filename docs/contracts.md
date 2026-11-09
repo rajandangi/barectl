@@ -70,3 +70,43 @@ covers:
 - the root-controlled mutation lock directory and file; and
 - the transient unit prefix and name pattern, the payload and staged-body limits, the
   setup stages and the engine's exit contract.
+
+## Backups
+
+The backup layout is owned by [backups](backups.md); the operator's recovery commands are
+[native recovery](recovery.md). The module that publishes the shapes is
+`backups/convention.py`, and the recovery kit's fields come from its public signature. The
+manifest's `backups` section covers:
+
+- the onsite repository root, a site's repository directory and its root-only server key;
+- the offsite storage root, non-secret config file, capture and pruning credential files,
+  source-site list and health repository, plus the `s3:<endpoint>/<bucket>/<prefix>/<site>`
+  repository shape and the supported providers;
+- the pinned restic profile, entry, binary, cache directory and repository lock root;
+- the capture marker, identifier, tag and point grammars, the database name and dump
+  filename, the scope, part, origin and application names, the parts each scope requires,
+  the retention policies and free-space headroom;
+- the live and paused snapshot tag order, including `complete`;
+- the schedule's script, payload and slice, service and timer files and contents, its
+  frequencies, weekly day, UTC calendar expressions, scopes, timeout, lock wait and window;
+  and
+- the recovery kit's non-secret fields.
+
+## Results
+
+The result line and its vocabulary are owned by the
+[one change engine](adr/0035-one-change-engine-with-effect-derived-consent.md), read by
+[server jobs](server-jobs.md) and written into the operator's
+[native recovery](recovery.md) journal evidence. `operations/engine.py` is the one reader,
+and `operations/reasons.py`, `operations/body_reasons.py` and each app's
+`bodies/reasons.py` declare the reasons. The manifest's `results` section is built from
+those modules and does not keep a second list:
+
+- the `barectl-result ` line and its `barectl-stage ` progress prefix;
+- every wire field: `class`, `reason`, `change_kind`, `sites` and the contract version
+  field `contract`, whose current value is 1;
+- the result classes `succeeded`, `refused`, `partial`, `failed`, `lock_busy` and
+  `timed_out`, and the site identifier grammar the `sites` field accepts;
+- the engine's admission reasons, the shared body reasons, every registered kind's and
+  non-kind body's reasons, and the retired names that stay readable as older evidence.
+
