@@ -12,6 +12,7 @@ from django.utils import timezone
 from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
+from operations.check_progress import CheckProgress, CheckStage
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import ReviewDraft, save_review
 from operations.fakes import BOOT_ID
@@ -48,7 +49,15 @@ def prepare(
             stages=STAGES,
             boot_id=BOOT_ID,
             uptime_centiseconds=500000,
-            document={"version": 1, "details": [{"label": "Web server", "value": "Installed"}]},
+            document={
+                "version": 1,
+                "details": [
+                    {
+                        "label": "Main Caddy configuration",
+                        "value": "/etc/caddy/Caddyfile (root:root, 0644):\nconfiguration-canary",
+                    }
+                ],
+            },
         ),
         host_key="ssh-ed25519 key",
         collected_at=timezone.now(),
@@ -86,15 +95,31 @@ class ConfirmAndRunBrowserTests(BrowserTestCase):
         self.page.goto(f"{self.live_server_url}/changes/{preparation.pk}/")
         expect(self.page.get_by_role("heading", name="Set up Production", level=1)).to_be_visible()
         expect(self.page.get_by_text("This change also touches these sites:")).to_be_visible()
-        expect(self.page.get_by_text("alpha, beta").first).to_be_visible()
+        expect(self.page.locator(".barectl-confirmation__impact li")).to_have_text(
+            ["alpha", "beta"]
+        )
         self.assert_no_native_terms()
-        # Show details is a closed accordion holding the full review.
+        expect(self.page.get_by_role("table", name="Change summary", exact=True)).to_be_visible()
+        # Extra information stays concise when the operator opens it.
         details = self.page.get_by_role("button", name="Show details", exact=True)
         expect(details).to_have_attribute("aria-expanded", "false")
         expect(self.page.locator("#show-details")).to_be_hidden()
         details.click()
         expect(details).to_have_attribute("aria-expanded", "true")
-        expect(self.page.get_by_text("Consent level")).to_be_visible()
+        expect(self.page.get_by_text("Last checked", exact=True)).to_be_visible()
+        expect(self.page.get_by_role("table", name="About this change", exact=True)).to_be_visible()
+        expect(self.page.get_by_role("table", name="File locations", exact=True)).to_be_visible()
+        expect(self.page.get_by_text("/etc/caddy/Caddyfile", exact=True)).to_be_visible()
+        self.assertNotIn("configuration-canary", self.page.content())
+        expect(self.page.get_by_text("Consent level")).to_have_count(0)
+        self.page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            self.page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+        self.page.set_viewport_size({"width": 1280, "height": 900})
         # The tick box is required: without it the browser submits nothing.
         apply = self.page.get_by_role("button", name="Set up server", exact=True)
         apply.click()
@@ -114,6 +139,7 @@ class ConfirmAndRunBrowserTests(BrowserTestCase):
         expect(self.page.get_by_role("heading", name="Queued")).to_be_visible()
 
     def test_an_expired_confirmation_offers_check_again(self) -> None:
+        self.page.clock.install()
         preparation = prepare(self.server, expired=True)
         self.sign_in()
         self.page.goto(f"{self.live_server_url}/changes/{preparation.pk}/")
@@ -122,6 +148,42 @@ class ConfirmAndRunBrowserTests(BrowserTestCase):
         self.page.get_by_role("button", name="Check again", exact=True).click()
         expect(self.page.get_by_text("Checking the server…")).to_be_visible()
         self.assertEqual(ChangePreparation.objects.count(), 2)
+        expect(self.page.get_by_text("Waiting for the background worker")).to_be_visible()
+        pending = ChangePreparation.objects.exclude(pk=preparation.pk).get()
+        RemoteOperation.objects.filter(pk=pending.pk).update(
+            status=RemoteOperation.Status.RUNNING, started_at=timezone.now()
+        )
+        progress = CheckProgress(pending)
+        progress.report(CheckStage.INSPECT)
+        progress.read_finished()
+        home_link = self.page.locator(".barectl-eyebrow a")
+        home_link.focus()
+        self.page.clock.fast_forward(2000)
+        current = self.page.locator(".barectl-check [aria-current='step']")
+        expect(current).to_contain_text("Read server configuration")
+        expect(
+            self.page.get_by_role("table", name="Server check steps", exact=True)
+        ).to_be_visible()
+        expect(self.page.locator(".barectl-check")).to_contain_text("1 server read finished")
+        expect(self.page.get_by_role("button", name="Set up server", exact=True)).to_have_count(0)
+        expect(home_link).to_be_focused()
+        progress.read_finished()
+        self.page.clock.fast_forward(2000)
+        expect(self.page.locator(".barectl-check")).to_contain_text("2 server reads finished")
+        expect(home_link).to_be_focused()
+        RemoteOperation.objects.filter(pk=pending.pk).update(
+            status=RemoteOperation.Status.FAILED,
+            finished_at=timezone.now(),
+            failure="The connection ended before the check finished.",
+        )
+        self.page.clock.fast_forward(2000)
+        expect(
+            self.page.get_by_role("heading", name="Barectl could not prepare this change")
+        ).to_be_visible()
+        expect(self.page.locator("#change-status")).not_to_have_attribute("hx-trigger")
+        expect(self.page.locator("#change-announcement")).to_have_text(
+            "Barectl could not finish checking the server."
+        )
 
     def test_progress_marks_the_current_step_and_logs_hold_the_native_record(self) -> None:
         preparation = prepare(self.server)

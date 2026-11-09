@@ -1,8 +1,8 @@
 {% with review=change.review %}
   <section id="change-status"
-           class="barectl-card"
+           class="barectl-card barectl-confirmation"
            aria-labelledby="change-status-heading"
-           {% if change.active %}hx-get="{% url 'change_detail' change.operation_id %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+           {% if change.active %}hx-get="{% url 'change_detail' change.operation_id %}?shown={{ change.check.token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
     {% if creation_banner %}
       <div class="usa-alert usa-alert--info usa-alert--slim" id="creation-step">
         <div class="usa-alert__body">
@@ -14,13 +14,10 @@
     {% endif %}
     {% if change.active %}
       <h2 id="change-status-heading">Checking the server…</h2>
-      <p>
-        Barectl is reading the server before it asks you to confirm. This page updates by
-        itself.
-      </p>
+      <p>Reading the current configuration before you confirm. Nothing changes on the server.</p>
+      {% include "operations/_check_progress.html" with check=change.check %}
     {% elif review %}
       <h2 id="change-status-heading"
-          class="usa-sr-only"
           {% if focus_heading %}autofocus tabindex="-1"{% endif %}>What will happen</h2>
       {% if out_of_date %}
         <div class="usa-alert usa-alert--warning" id="confirmation-out-of-date">
@@ -60,40 +57,62 @@
             </div>
           </div>
         {% endif %}
-        {% for sentence in change.plain.summary %}<p>{{ sentence }}</p>{% endfor %}
-        {% if review.fence %}
-          <div class="barectl-fence" id="what-pauses">
-            <h3>Background work</h3>
-            <dl class="barectl-facts">
-              <div>
-                <dt>Pauses</dt>
-                <dd>
+        <table class="usa-table usa-table--borderless barectl-key-table">
+          <caption class="usa-sr-only">Change summary</caption>
+          <tbody>
+            <tr>
+              <th scope="row">Server</th>
+              <td>{{ change.server_name }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Changes</th>
+              <td>{% for sentence in change.plain.summary %}<p>{{ sentence }}</p>{% endfor %}</td>
+            </tr>
+            {% if review.shared %}
+              <tr class="barectl-confirmation__impact">
+                <th scope="row">Sites affected</th>
+                <td>
+                  {% if review.affected_sites %}
+                    <p>This change also touches these sites:</p>
+                    <ul class="usa-list">
+                      {% for site in review.affected_sites %}<li>{{ site }}</li>{% endfor %}
+                    </ul>
+                  {% else %}
+                    No existing sites are affected. This changes shared server resources.
+                  {% endif %}
+                </td>
+              </tr>
+            {% endif %}
+            {% if review.fence and review.fence.pauses or review.fence.resumes %}
+              <tr id="what-pauses">
+                <th scope="row">Pauses</th>
+                <td>
                   {% if review.fence.pauses %}
                     {{ review.fence.pauses|join:', ' }}
                   {% else %}
                     Nothing. This change touches no site's background work.
                   {% endif %}
-                </dd>
-              </div>
-              <div>
-                <dt>Starts again</dt>
-                <dd>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Starts again</th>
+                <td>
                   {% if review.fence.resumes %}
                     {{ review.fence.resumes|join:', ' }} after the change is checked.
                   {% else %}
                     Nothing. Any work that was paused stays stopped until you turn it back on.
                   {% endif %}
-                </dd>
-              </div>
-              <div>
-                <dt>Checked</dt>
-                <dd>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Checked</th>
+                <td>
                   <time datetime="{{ review.review.collected_at|date:'c' }}">{{ review.review.collected_at|date:'M j, Y, H:i:s T' }}</time>
-                </dd>
-              </div>
-            </dl>
-          </div>
-        {% endif %}
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
         {% if review.fence.work_off and server %}
           <div class="usa-alert usa-alert--warning" id="background-work-off">
             <div class="usa-alert__body">
@@ -113,16 +132,6 @@
               </ul>
             </div>
           </div>
-        {% endif %}
-        {% if review.shared %}
-          <p>
-            <strong>This change also touches these sites:</strong>
-            {% if review.affected_sites %}
-              {{ review.affected_sites|join:", " }}.
-            {% else %}
-              none. It changes only what the server shares between sites.
-            {% endif %}
-          </p>
         {% endif %}
         {% if review.kit_lines %}
           <section class="barectl-card" aria-labelledby="recovery-kit-heading">

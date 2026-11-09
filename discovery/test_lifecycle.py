@@ -6,8 +6,10 @@ only remote execution is substituted, at ``discovery.ssh.connect``.
 
 import datetime
 import inspect
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
+from html import unescape
 from typing import ClassVar, override
 from unittest import mock
 
@@ -330,7 +332,10 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertIn(f"/servers/{self.server.pk}/discovery/?shown=QUEUED", content)
         self.assertIn('<hx-partial hx-target="#discovery-announcement"', content)
         self.assertIn("Connection check queued.", content)
-        poll = f"/servers/{self.server.pk}/discovery/?shown=QUEUED"
+        polling_url = re.search(r'hx-get="([^\"]*/discovery/[^\"]+)"', content)
+        if polling_url is None:
+            self.fail("The rendered connection check must provide its polling URL.")
+        poll = unescape(polling_url.group(1))
         status = self.client.get(
             f"/servers/{self.server.pk}/status/", headers=HTMX_FRAGMENT
         ).content.decode()
@@ -773,7 +778,7 @@ class RecoveryTests(DiscoveryTestCase):
         self.interrupt_running()
         self.sign_in_with("view_server")
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
-        self.assertContains(page, "Checking the connection…")
+        self.assertContains(page, 'aria-label="Server check progress"')
         self.assertContains(
             self.client.get(f"/servers/{self.server.pk}/advanced/"),
             "A new connection check is running",

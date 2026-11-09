@@ -23,6 +23,7 @@ from discovery.presentation import (
 )
 from discovery.services import STALE_AFTER, history, latest_attempt_statuses, read_discovery
 from discovery.snapshot import AttemptSummary, Observation, ObservedSite, Snapshot, SnapshotFacts
+from operations.check_progress import CheckView, present_check
 from operations.models import RemoteOperation
 from operations.services import ServerChanges, read_changes
 
@@ -154,6 +155,7 @@ class AttemptView:
 
     connection_revision: int = 0
     original_target: str = ""
+    check: CheckView | None = None
 
     @property
     def older_connection(self) -> bool:
@@ -191,6 +193,7 @@ def _view(recorded: AttemptSummary) -> AttemptView:
         snapshot=snapshot,
         connection_revision=attempt.connection.revision if attempt.connection else 0,
         original_target=(attempt.connection.target_label if attempt.connection else ""),
+        check=present_check(attempt) if attempt.status in RemoteOperation.ACTIVE else None,
     )
 
 
@@ -313,16 +316,29 @@ class DiscoveryState:
         Only the attempt's part decides what is announced; the fragment itself is replaced
         on every poll, so the check action returns when another operation finishes.
         """
-        return f"{self.shown}.busy" if self.other_active else self.shown
+        token = self.shown
+        if self.attempt is not None and self.attempt.check is not None:
+            token = f"{token}~{self.attempt.check.token}"
+        return f"{token}.busy" if self.other_active else token
 
     def changed_since(self, shown: str | None) -> bool:
         """Whether the latest attempt's state differs from ``shown``, the token the page sent."""
         attempt_part = (shown or "").removesuffix(".busy")
-        return self.attempt is not None and self.shown != attempt_part
+        status, _, progress = attempt_part.partition("~")
+        return self.attempt is not None and (
+            self.shown != status
+            or bool(progress and self.attempt.check and self.attempt.check.token != progress)
+        )
 
     @property
     def announcement(self) -> str:
         """What the page's live region says when the state changes."""
+        if self.attempt is not None and self.attempt.check is not None:
+            check = self.attempt.check
+            return (
+                f"{_ANNOUNCEMENTS[self.attempt.status]} {check.label}. "
+                f"{check.reads} server reads finished."
+            )
         return _ANNOUNCEMENTS[self.attempt.status] if self.attempt else ""
 
 

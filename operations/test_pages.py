@@ -1,6 +1,7 @@
-"""The confirm screen and the run page as #179 describes them: plain words by default,
-the full record under Show details and Logs, and the same stored review and run behind
-both (docs/dashboard-workflows.md)."""
+"""The confirm screen's operator information and the run's separate diagnostic record.
+
+docs/dashboard-workflows.md
+"""
 
 import hashlib
 import re
@@ -337,7 +338,9 @@ class ConfirmScreenTests(ScreenTestCase):
         preparation = ChangePreparation.objects.get()
         page = self.client.get(f"/changes/{preparation.pk}/")
         self.assertContains(page, "Checking the server…")
-        self.assertContains(page, f'hx-get="/changes/{preparation.pk}/"')
+        self.assertContains(page, "Waiting for the background worker")
+        self.assertContains(page, 'aria-label="Server check progress"')
+        self.assertContains(page, f'hx-get="/changes/{preparation.pk}/?shown=')
         self.assertContains(page, 'hx-trigger="every 2s"')
         fragment = self.client.get(
             f"/changes/{preparation.pk}/",
@@ -364,7 +367,8 @@ class ConfirmScreenTests(ScreenTestCase):
         page = self.client.get(f"/changes/{review.preparation_id}/")
         content = page.content.decode()
         self.assertIn("This change also touches these sites:", content)
-        self.assertIn("alpha, beta", content)
+        self.assertContains(page, "<li>alpha</li>", html=True)
+        self.assertContains(page, "<li>beta</li>", html=True)
         self.assertIn('name="affected_sites"', content)
         self.assertIn("required", content)
         self.assertEqual(content.count('class="usa-button"'), 1)
@@ -373,16 +377,18 @@ class ConfirmScreenTests(ScreenTestCase):
         review = self.change("fixture_shared_none")
         self.sign_in_with("view_changes", "change_shared")
         page = self.client.get(f"/changes/{review.preparation_id}/")
-        self.assertContains(page, "This change also touches these sites:")
-        self.assertContains(page, "none. It changes only what the server shares between sites.")
+        self.assertContains(page, "Sites affected")
+        self.assertContains(page, "No existing sites are affected.")
 
-    def test_show_details_is_closed_and_holds_the_full_review(self) -> None:
+    def test_show_details_is_closed_and_shows_operator_information(self) -> None:
         review = self.change("fixture_site")
         self.sign_in_with("view_changes", "change_site")
         page = self.client.get(f"/changes/{review.preparation_id}/")
         self.assertContains(page, 'aria-expanded="false"')
         self.assertContains(page, 'aria-controls="show-details"')
         self.assertContains(page, '<div id="show-details" class="usa-accordion__content" hidden>')
+        self.assertContains(page, "Last checked")
+        self.assertContains(page, "Confirmation expires")
         for detail in (
             "Consent level",
             "Admission deadline",
@@ -391,7 +397,7 @@ class ConfirmScreenTests(ScreenTestCase):
             "Stages",
             "Intent",
         ):
-            self.assertContains(page, detail)
+            self.assertNotContains(page, detail)
 
     def test_the_default_text_has_no_native_terms(self) -> None:
         review = self.change("fixture_site")

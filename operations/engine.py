@@ -29,6 +29,7 @@ from contract.version import VERSION as CONTRACT_VERSION
 from discovery import ssh
 from discovery.ssh import ConnectionFailed, RemoteShell
 from operations import apt, confidential, lifecycle, native, reasons, revert
+from operations.check_progress import CheckProgress, CheckReader, CheckStage
 from operations.lifecycle import OperationRefused
 from operations.models import RemoteOperation
 
@@ -934,15 +935,22 @@ def _prepare(preparation: ChangePreparation) -> None:
     except ValueError as error:
         raise OperationRefused(str(error)) from error
     collected_at = timezone.now()
-    with ssh.connect_operation(preparation) as shell:
+    progress = CheckProgress(preparation)
+    progress.report(CheckStage.CONNECT)
+    with ssh.connect_operation(preparation) as connection:
+        shell = CheckReader(connection, progress)
+        progress.report(CheckStage.INSPECT)
         evidence = kind.inspect(shell, inputs)
+        progress.report(CheckStage.REVIEW)
         draft = _planned(shell, kind.review(evidence, inputs))
         host_key = shell.host_key
+        progress.report(CheckStage.AFFECTED_SITES)
         sites_digest = _sites_digest(shell, draft)
     if draft.eligible and (not draft.boot_id or draft.uptime_centiseconds is None):
         raise OperationRefused(UNREADABLE_FAILURE)
     # Publish the review and the outcome together; a recovery that already marked this
     # preparation interrupted wins, so a stale worker never records a review after it.
+    progress.report(CheckStage.SAVE)
     with transaction.atomic():
         if not lifecycle.succeed(preparation.pk, timezone.now(), host_key=host_key):
             return

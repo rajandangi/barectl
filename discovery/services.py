@@ -17,6 +17,7 @@ from django.db.models import OuterRef, Q, QuerySet, Subquery
 from django.utils import timezone
 
 from operations import lifecycle
+from operations.check_progress import CheckProgress, CheckReader, CheckStage
 from operations.lifecycle import OperationBusy, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
@@ -182,9 +183,13 @@ def forget_discovery(server: Server) -> None:
 
 def _discover(attempt: DiscoveryAttempt) -> None:
     _authorize(attempt)
+    progress = CheckProgress(attempt)
+    progress.report(CheckStage.CONNECT)
     try:
         with ssh.connect_operation(attempt, expected_host_key=attempt.expected_host_key) as shell:
-            collected = collect(shell, releases=True)
+            collected = collect(
+                CheckReader(shell, progress), releases=True, progress=progress.report
+            )
             host_key = shell.host_key
     except ssh.UnknownHostKey as challenge:
         _authorize(attempt)
@@ -199,6 +204,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         )
         raise
     now = timezone.now()
+    progress.report(CheckStage.SAVE)
     # A recovery that already marked this attempt interrupted wins: a stale worker never
     # creates a snapshot after recovery.
     with transaction.atomic():

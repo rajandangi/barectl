@@ -849,10 +849,10 @@ class SharedConsentTests(SiteKindTestCase):
         self.sign_in_with("view_changes", "change_shared")
         page = self.client.get(f"/changes/{review.preparation_id}/")
         self.assertContains(page, "This change also touches these sites:")
-        self.assertContains(page, "alpha, beta")
+        self.assertContains(page, "<li>alpha</li>", html=True)
+        self.assertContains(page, "<li>beta</li>", html=True)
         self.assertContains(page, 'name="affected_sites"')
-        # The digest the run rechecks under the mutation lock is under Show details.
-        self.assertContains(page, review.sites_digest)
+        self.assertNotContains(page, review.sites_digest)
 
     def test_review_refuses_when_the_sites_read_disagrees_with_declared_effects(self) -> None:
         from discovery.ssh import CommandResult

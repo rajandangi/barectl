@@ -565,6 +565,9 @@ if TYPE_CHECKING:
     )
     # templates/servers/_connection.html presents this recorded dispatch delay.
     _saved_connection_worker_delay = AttemptView.worker_unavailable
+    # templates/operations/_check_progress.html explains a delayed server response.
+    _check_view = SimpleNamespace()
+    _check_waiting_for_response = _check_view.quiet
     # templates/servers/_next_action.html presents these banner fields.
     _banner_template_fields = (
         Banner.show_queue,

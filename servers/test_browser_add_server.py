@@ -10,6 +10,7 @@ from unittest import mock
 from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.test import override_settings, tag
+from django.utils import timezone
 from paramiko import ECDSAKey
 from playwright.sync_api import expect
 
@@ -18,6 +19,8 @@ from discovery.fakes import FakeServer, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.recorded import ReplayShell, load
 from discovery.ssh import UnknownHostKey
+from operations.check_progress import CheckProgress, CheckStage
+from operations.models import RemoteOperation
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 
@@ -94,6 +97,7 @@ class AddServerBrowserTests(BrowserTestCase):
         expect(page.get_by_role("button", name="Set up server")).to_be_visible()
 
     def test_more_options_hold_port_and_alias_and_focus_survives_polling(self) -> None:
+        self.page.clock.install()
         self.grant("add_server", "add_discoveryattempt")
         self.sign_in()
         page = self.page
@@ -115,8 +119,25 @@ class AddServerBrowserTests(BrowserTestCase):
 
         servers = page.get_by_role("navigation", name="Primary").get_by_role("link", name="Servers")
         servers.focus()
-        page.wait_for_timeout(2500)
+        attempt = DiscoveryAttempt.objects.get()
+        RemoteOperation.objects.filter(pk=attempt.pk).update(
+            status=RemoteOperation.Status.RUNNING, started_at=timezone.now()
+        )
+        progress = CheckProgress(attempt)
+        progress.report(CheckStage.SOFTWARE)
+        progress.read_finished()
+        page.clock.fast_forward(2000)
+        current = page.locator(".barectl-check [aria-current='step']")
+        expect(current).to_contain_text("Check installed software")
+        expect(page.locator(".barectl-check")).to_contain_text("1 server read finished")
         expect(servers).to_be_focused()
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
 
     def test_connection_failed_shows_the_failure_and_its_actions(self) -> None:
         self.grant("add_server", "add_discoveryattempt", "change_server")

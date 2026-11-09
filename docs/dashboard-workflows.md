@@ -176,9 +176,23 @@ Every change is prepared, reviewed, applied natively, verified and reconciled by
 change engine. A confirm screen is rendered from the stored review and adds no second
 review document or consent level.
 
-- While preparation runs the screen says **Checking the server…** and polls.
+- While preparation runs the screen says **Checking the server…** and polls. Its
+  step/status table marks completed work and the current step, with finished server reads and
+  elapsed time. Waiting for the worker and waiting for a server response are distinct.
+  The step lists live in `operations/check_progress.py`; a finished read does not mean
+  its findings passed. Each poll redraws the feedback without taking keyboard focus.
 - The title and sentences are plain words; the primary action is named for the change and
   **Cancel** returns to where it started.
+- **What will happen** uses a label/value table for the server, change summary, affected
+  sites and any background work that pauses or starts again, followed by a separate
+  approval area. This follows the tabular settings in
+  [Coolify's server guidance](https://coolify.io/docs/core/infrastructure/servers/manage-server)
+  and the [USWDS table guidance](https://designsystem.digital.gov/components/table/).
+  The checkbox uses the
+  [USWDS checkbox component](https://designsystem.digital.gov/components/checkbox/).
+  Check progress uses the existing [HTMX 4 polling contract](frontend-assets.md#htmx-4). The activity
+  indicator respects reduced-motion preferences. Counts and completed steps come from
+  worker updates; the page never estimates a completion percentage.
 - A Shared review names the affected sites and requires the existing acknowledgement tick
   box. With no sites affected it says so. A Site review has one button.
 - A change that alters a site's code, schema, runtime, settings or files names **Pauses**
@@ -186,9 +200,15 @@ review document or consent level.
   scheduled tasks or queue workers stop for it, and which start again after it is checked.
   A change that names no site says it touches no site's background work. A removal says
   nothing starts again.
-- **Show details** is a closed accordion holding the full review: effects, stages, the
-  connection and its revision, the admission deadline, digests, consent level, targets,
-  kept resources, postconditions and refusals.
+- **Show details** is a closed accordion with the last check time, confirmation expiry,
+  any findings that block the change and useful file locations. It names files by their
+  purpose and gives their paths so an administrator can inspect them on the server.
+  Configuration contents, service definitions, installer metadata, hashes, internal
+  stages and connection revisions are omitted from the confirmation page. The engine's
+  stored review, consent checks and admission evidence remain unchanged. Label/value
+  rows stack on narrow screens, and file paths wrap inside their cells. This keeps the
+  operator workflow separate from configuration editing, as in
+  [CloudPanel's settings](https://www.cloudpanel.io/docs/v2/frontend-area/settings/).
 - An account without the permission applying needs sees no button and the reason.
 - A review that expired or whose connection drifted says **This confirmation is out of
   date.** and offers **Check again**, which prepares a fresh review of the same kind and

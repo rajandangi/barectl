@@ -110,7 +110,7 @@ def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("server_changes", pk=pk)
     messages.success(
         request,
-        f"Barectl is checking {server.name} before it asks you to confirm. Nothing changes yet.",
+        f"Server check requested for {server.name}.",
     )
     return redirect("change_detail", operation_id=queued.pk)
 
@@ -174,8 +174,16 @@ def _change_context(
         "creation_banner": _creation_banner(request, preparation, view=None),
         "focus_heading": fragment and not view.active,
     }
-    if fragment and not view.active:
-        context["announcement"] = "Barectl finished checking the server."
+    if fragment:
+        if view.active and view.check is not None:
+            if request.GET.get("shown") != view.check.token:
+                context["announcement"] = (
+                    f"{view.check.label}. {view.check.reads} server reads finished."
+                )
+        elif view.review is not None:
+            context["announcement"] = "Barectl finished checking the server."
+        else:
+            context["announcement"] = "Barectl could not finish checking the server."
     return context
 
 
@@ -287,7 +295,7 @@ def change_prepare_again(request: HttpRequest, operation_id: int) -> HttpRespons
             "change again after it finishes.",
         )
         return redirect("change_detail", operation_id=operation_id)
-    messages.success(request, "Barectl is checking the server for a fresh confirmation.")
+    messages.success(request, "A fresh server check was requested.")
     return redirect("change_detail", operation_id=queued.pk)
 
 

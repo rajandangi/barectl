@@ -154,7 +154,6 @@ _WORDS: Final[dict[str, ChangeWords]] = {
                 "and keep its logs across reboots."
             ),
             "It downloads a few packages and takes a few minutes.",
-            "No sites change.",
         ),
         action="Set up server",
         steps={

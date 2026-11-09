@@ -3,6 +3,7 @@
 import hashlib
 import re
 import shlex
+from collections.abc import Callable
 from dataclasses import replace
 
 from automation import observation as automation_observation
@@ -17,6 +18,7 @@ from jobs import observation as jobs_observation
 from jobs.observation import JobReading
 from laravel import observation as laravel_observation
 from operations import native
+from operations.check_progress import CheckStage
 from runtimes import defaults as runtime_defaults
 from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
@@ -59,7 +61,13 @@ SITES_NOT_READ = "Barectl reads sites only on a host whose standing is Target st
 JOBS_NOT_READ = "Barectl reads Jobs only on a server set up on its supported stack."
 
 
-def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -> CollectedSnapshot:
+def collect(
+    shell: RemoteShell,
+    *,
+    sites: bool = True,
+    releases: bool = False,
+    progress: Callable[[CheckStage], None] | None = None,
+) -> CollectedSnapshot:
     """docs/adr/0001-configuration-observations-depend-on-package-observation.md
 
     ``sites`` False skips the hosting-site inventory for a caller that reads only host
@@ -70,6 +78,8 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     ``releases`` opts a full discovery attempt into the Laravel release inventory; a
     transcribed read keeps it off so recorded command sets stay exact.
     """
+    if progress is not None:
+        progress(CheckStage.SYSTEM)
     os_release = _collect_os_release(shell)
     architecture = _collect_architecture(shell)
     cpu_count = _collect_cpu_count(shell)
@@ -80,6 +90,8 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         if os_release.observed and os_release.value
         else None
     )
+    if progress is not None:
+        progress(CheckStage.SOFTWARE)
     components, installed_packages = _collect_web_stack(shell, release)
     standing = collect_standing(shell, os_release, architecture, filesystem, installed_packages)
     runtime_architecture = architecture_of(architecture.value or "")
@@ -96,6 +108,8 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
             )
         else:
             runtimes = runtime_observation.observations(value["runtimes"], runtime_architecture)
+    if progress is not None:
+        progress(CheckStage.SITES)
     hosting = (
         _hosting_sites(shell, standing)
         if sites
@@ -131,6 +145,8 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
     certificate_email, certificate_email_state = "", ""
     if sites and standing.standing == Standing.TARGET_STACK:
         certificate_email_state, certificate_email = caddy_email.read(shell)
+    if progress is not None:
+        progress(CheckStage.PROTECTION)
     security: Observation[security_observation.SecurityState | None] = (
         security_observation.collect(shell)
         if sites

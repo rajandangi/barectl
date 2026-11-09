@@ -1,5 +1,5 @@
 <div id="discovery"
      class="barectl-discovery"
-     {% if state.polling %}hx-get="{% url 'server_discovery' server.pk %}?shown={{ state.poll_token }}&section={{ section|default:'settings' }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+     {% if state.polling %}hx-get="{% url 'server_discovery' server.pk %}?shown={{ state.poll_token }}&amp;section={{ section|default:'settings' }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   {% include "servers/_connection.html" %}
 </div>

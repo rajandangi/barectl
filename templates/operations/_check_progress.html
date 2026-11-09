@@ -1,0 +1,34 @@
+<section class="barectl-check" aria-label="Server check progress">
+  <div class="barectl-check__activity">
+    <span class="barectl-check__pulse" aria-hidden="true"></span>
+    <strong>{{ check.label }}</strong>
+    <span class="barectl-note">{{ check.elapsed }} {% if check.waiting %}queued{% else %}elapsed{% endif %}</span>
+  </div>
+  {% if check.reads %}
+    <p class="barectl-note">{{ check.reads }} server read{{ check.reads|pluralize }} finished.</p>
+  {% endif %}
+  <table class="usa-table usa-table--borderless barectl-check__table">
+    <caption class="usa-sr-only">Server check steps</caption>
+    <thead>
+      <tr>
+        <th scope="col">Step</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for step in check.steps %}
+        <tr class="barectl-check__step barectl-check__step--{{ step.state|lower }}"
+            {% if step.current %}aria-current="step"{% endif %}>
+          <th scope="row">{{ step.label }}</th>
+          <td><span class="barectl-check__state barectl-check__state--{{ step.state|lower }}">{% if step.current %}In progress{% else %}{{ step.state }}{% endif %}</span></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if check.waiting %}
+    <p class="barectl-note">The check starts when the worker is available.</p>
+  {% elif check.quiet %}
+    <p class="barectl-note">Waiting for the server to respond. This page is still checking for updates.</p>
+  {% endif %}
+  <p class="barectl-note">You can leave this page and come back. The check continues in the background.</p>
+</section>

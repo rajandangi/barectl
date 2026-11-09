@@ -71,15 +71,20 @@ class CleanupReviewTests(ChangeTestCase):
 
 
 class CleanupApplyTests(ChangeTestCase):
-    def test_review_discloses_escaped_kind_details(self) -> None:
+    def test_confirmation_keeps_raw_kind_details_in_the_stored_review(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         review = self.change()
         review.document["details"] = [
             {"label": "Public listeners", "value": "SSH and HTTP <only>"},
+            {
+                "label": "Main Caddy configuration",
+                "value": "/etc/caddy/Caddyfile (root:root, 0644):\nconfiguration-content-canary",
+            },
             {"label": "invalid", "value": []},
         ]
         view = review_view(review)
-        self.assertEqual(view.details, [("Public listeners", "SSH and HTTP <only>")])
+        self.assertEqual(view.details[0], ("Public listeners", "SSH and HTTP <only>"))
+        self.assertEqual(view.files, [("Web server settings", "/etc/caddy/Caddyfile")])
         preparation_id = review.preparation_id
         if preparation_id is None:
             self.fail("The review must retain its preparation.")
@@ -98,7 +103,10 @@ class CleanupApplyTests(ChangeTestCase):
                 )
             },
         )
-        self.assertIn("SSH and HTTP &lt;only&gt;", page)
+        self.assertNotIn("Public listeners", page)
+        self.assertIn("/etc/caddy/Caddyfile", page)
+        self.assertNotIn("configuration-content-canary", page)
+        self.assertNotIn("SSH and HTTP &lt;only&gt;", page)
         self.assertNotIn("SSH and HTTP <only>", page)
 
     def test_a_body_that_cannot_be_staged_is_not_submitted(self) -> None:
@@ -116,11 +124,10 @@ class CleanupApplyTests(ChangeTestCase):
         self.systemd.units[FAILED] = finished_unit(2, failed=True)
         review = self.change()
         page = self.client.get(f"/changes/{review.preparation_id}/")
-        self.assertContains(page, "Finished barectl runs to clear")
-        self.assertContains(page, EXITED)
-        self.assertContains(page, "Shared")
-        self.assertContains(page, "Consent level")
-        self.assertContains(page, "Stages")
+        self.assertContains(page, "2 finished run records")
+        self.assertNotContains(page, EXITED)
+        self.assertNotContains(page, "Consent level")
+        self.assertNotContains(page, "Stages")
         run = self.apply(review)
         self.assertEqual(run.status, "succeeded", run.failure)
         self.assertEqual(run.execution, Result.SUCCEEDED)

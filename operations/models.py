@@ -81,6 +81,9 @@ class RemoteOperation(models.Model):
     host_key = models.CharField(max_length=200, blank=True)
     revision = models.PositiveIntegerField(default=0)
     check_requested_at = models.DateTimeField(null=True, blank=True)
+    check_stage = models.CharField(max_length=24, blank=True)
+    check_reads = models.PositiveIntegerField(default=0)
+    check_updated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-queued_at", "-pk"]

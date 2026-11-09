@@ -2,6 +2,7 @@
 whether a review is eligible or expired, what a run's result established, or what consent
 applying needs."""
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -13,6 +14,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from . import engine, plain_words, revert
+from .check_progress import CheckView, present_check
 from .consent import Scope, permissions_for
 from .models import (
     ChangePreparation,
@@ -327,6 +329,7 @@ class ReviewView:
     postconditions: list[str]
     refusals: list[str]
     details: list[tuple[str, str]] = field(default_factory=list)
+    files: list[tuple[str, str]] = field(default_factory=list)
     targets: list[dict[str, object]] = field(default_factory=list)
     kept: list[str] = field(default_factory=list)
     note: str = ""
@@ -384,6 +387,7 @@ class ChangeView:
     review: ReviewView | None = None
     kind_slug: str = ""
     plain: PlainChange = field(default_factory=lambda: PlainChange("", (), "", ""))
+    check: CheckView | None = None
 
     @property
     def active(self) -> bool:
@@ -409,6 +413,23 @@ def _extra_action(review: ChangeReview) -> ExtraAction | None:
         "Back up first",
         reverse("site_backups_before_deploy_prepare", args=[server_id, identifier]),
     )
+
+
+_FILE_PURPOSES = {
+    "Main Caddy configuration": "Web server settings",
+    "Caddy systemd unit": "Web server service",
+    "Persistent native journal": "Server log settings",
+}
+
+
+def _file_locations(details: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    files: list[tuple[str, str]] = []
+    for label, value in details:
+        header = value.partition("\n")[0]
+        path, separator, _ = header.partition(" (")
+        if separator and re.fullmatch(r"/[A-Za-z0-9_./@+-]+", path):
+            files.append((_FILE_PURPOSES.get(label, "Server settings"), path))
+    return files
 
 
 def review_view(review: ChangeReview) -> ReviewView:
@@ -450,6 +471,7 @@ def review_view(review: ChangeReview) -> ReviewView:
         postconditions=[str(item) for item in document.get("postconditions", [])],
         refusals=[str(item) for item in document.get("refusals", [])],
         details=details,
+        files=_file_locations(details),
         targets=targets,
         kept=kept,
         note=str(document.get("note", "")),
@@ -530,6 +552,7 @@ def change_view(row: ChangeRow) -> ChangeView:
         failure=preparation.failure,
         review=review,
         kind_slug=preparation.kind_slug,
+        check=present_check(preparation) if preparation.status in RemoteOperation.ACTIVE else None,
         plain=plain_change(
             preparation.kind_slug,
             row.kind_label,
