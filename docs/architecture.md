@@ -113,7 +113,7 @@ Saved connections choose the controller account's SSH agent or an approved key-f
 
 ## Changes and jobs
 
-Every change has a reviewed plan, revalidation against current state under the native lock, coordination across controllers, bounded timeouts, records in the Barectl application database, and explicit failure recovery. A review is not a transaction or an automatic rollback guarantee. Configuration is validated before a reload, and a failed Caddy reload restores the previous files.
+Every change has a reviewed plan, revalidation against current state under the native lock, coordination across controllers, bounded timeouts, records in the Barectl application database, and explicit failure recovery. A review is not a transaction or an automatic rollback guarantee ([recovery guarantees](recovery-guarantees.md)). Configuration is validated before a reload, and a failed Caddy reload restores the previous files.
 
 Accepted changes run as transient systemd services under the native lock ([ADR 0006](adr/0006-use-native-bootstrap-execution.md)) and continue when the initiating device disconnects; Barectl inspects their native status on reconnection. General scheduling is later work ([ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md)). This does not permit a Barectl agent or a custom operation journal on the server. Requests that never reached the server remain local and unexecuted; an uncertain outcome is verified, never blindly retried.
 
