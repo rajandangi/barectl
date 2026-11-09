@@ -1,6 +1,52 @@
 # Changelog
 
-Upgrading an existing 0.4.x installation to 1.0: see the [upgrade guide](docs/upgrade.md).
+## 1.0.0 - 2026-11-09
+
+Barectl 1.0 is a compatibility and proof release, not a feature release. A 0.4.x
+installation upgrades in place: the local database, saved connections, servers, settings,
+permissions and operation history are kept. **v0.3.0 and earlier are not upgradeable**;
+their database and Nginx, Certbot and APT-PHP stack were replaced, so start a new
+installation and discover the servers again. The tested revisions, environments and every
+unqualified case are in the [qualification record](docs/v1.0-qualification.md).
+
+Upgrade with the [upgrade guide](docs/upgrade.md): stop the worker, back up the database and
+`.env`, install 1.0, run `python manage.py barectl_upgrade`, restart the worker, and check
+every server. The command refuses a pre-0.4.0 database, active work or a live worker, writes
+a timestamped backup, migrates, and queues a fresh discovery for every saved server.
+
+### Stable native contract
+
+- The contract is versioned at **1** and published in [native contracts](docs/contracts.md).
+  It freezes the site convention, server foundation, backup layout, `barectl-result` line and
+  reason vocabulary, and the permission, URL, command and environment surface. A changed
+  shape requires a new contract version with a migration or dual-read and a deprecation
+  window; the fast contract test and `contract/history.json` enforce it.
+- Every change result line carries `"contract": 1`. Discovery records the version from the
+  retained line and reports **Outside supported settings** when it cannot recognize it; every
+  change card is withheld and a direct prepare is refused. Discovery stays read-only and
+  writes no version marker on a server.
+- A server built by the v0.4.0 release is discovered by 1.0 as the target stack and accepts
+  an ordinary change without a server-side edit (the `V040` native fixture).
+
+### Recovery guarantees
+
+- [The recovery guarantee matrix](docs/recovery-guarantees.md) lists each covered failure,
+  the test that proves it, the operator action and the explicit non-promise.
+- New native abrupt-termination cases cover a worker killed after review before dispatch,
+  a worker killed after dispatch, a server stopped during a body, and a reboot during a
+  paused full capture. They prove the result class, no replay and the single recovery action.
+- A review is not a transaction: there is no automatic rollback or replay, and no RPO/RTO is
+  promised beyond the measured restore scenarios.
+
+### Phase E close
+
+- Journald log-retention settings are deferred from Phase E and 1.0 to 1.1 by
+  [ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md); Phase E is complete
+  without them.
+- The [1.0 low-resource result](docs/v1.0-low-resource.md) records 1, 2 and 4 GiB
+  memory-capped containers for memory and disk. The 1 GiB cgroup headroom is a recorded miss
+  against the provisional 900 MiB threshold, with its next action; the 2 and 4 GiB classes
+  meet it. No real small host was measured.
 
 ## 0.4.0 - 2026-11-08
 
