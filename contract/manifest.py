@@ -17,8 +17,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from . import application, backups, foundation, results, site_convention
-
-VERSION: Final = 1
+from .version import VERSION as VERSION
 
 
 @dataclass(frozen=True)
