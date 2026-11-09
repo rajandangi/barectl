@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
 
-from . import foundation, site_convention
+from . import backups, foundation, results, site_convention
 
 VERSION: Final = 1
 
@@ -32,6 +32,8 @@ class Section:
 SECTIONS: Final[tuple[Section, ...]] = (
     Section("site_convention", site_convention.build),
     Section("foundation", foundation.build),
+    Section("backups", backups.build),
+    Section("results", results.build),
 )
 
 
