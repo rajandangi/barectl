@@ -198,7 +198,7 @@ re-record on the integration tree; do not hand-edit transcript JSON.
   unrun in `notes/handoff-389.md`. The mirror now carries the `logrotate` package so the
   validator can install it.
 
-## Retention deferred to 1.1
+## Later: retention
 
 Log-retention settings are not part of Phase E or 1.0. [ADR 0043](adr/0043-defer-log-retention-settings-to-1-1.md)
 defers them to 1.1. The pages here are controller-local and temporary; the journals
