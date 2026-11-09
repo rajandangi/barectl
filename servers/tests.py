@@ -73,8 +73,8 @@ class InventoryTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         response = self.client.get("/")
         self.assertContains(response, '<a class="usa-button" href="/servers/add/">Add server</a>')
-        # Editing a connection starts from the server's Settings > Connection.
-        self.assertNotContains(response, "/edit/")
+        self.assertContains(response, f'href="/servers/{self.server.pk}/edit/"')
+        self.assertContains(response, 'aria-label="Edit connection for Production"')
         self.assertNotContains(response, "/admin/")
 
     def test_aliases_removed_from_the_controller_are_flagged(self) -> None:

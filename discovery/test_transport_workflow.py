@@ -236,7 +236,8 @@ class TransportFailureTests(TransportWorkflowCase):
             self.server.stalled = False
             self.known_hosts.write_text("", encoding="utf-8")
             self.refresh(server)
-        page = self.client.get(f"/servers/{server.pk}/settings/").content.decode()
+        self.grant("change_server")
+        page = self.client.get(f"/servers/{server.pk}/edit/").content.decode()
         activity = self.client.get("/activity/").content.decode()
         failures = "\n".join(
             attempt.failure
