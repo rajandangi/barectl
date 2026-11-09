@@ -85,7 +85,12 @@ if TYPE_CHECKING:
     from disposable.test_http_site_consent import HttpSiteConsent
     from disposable.test_http_site_identities import HttpSiteIdentityAdmission
     from disposable.test_http_site_reconstruction import HttpSiteReconstruction
-    from disposable.test_http_site_recovery import HttpSiteControllerRecovery
+    from disposable.test_http_site_recovery import (
+        HttpSiteControllerRecovery,
+        ServerStoppedDuringBody,
+        WorkerKilledAfterDispatch,
+        WorkerKilledBeforeDispatch,
+    )
     from disposable.test_http_site_security import HttpSiteSecurityBehavior
     from disposable.test_http_site_transactions import HttpSiteTransactions
     from disposable.test_http_site_validators import HttpSiteValidators
@@ -499,6 +504,9 @@ if TYPE_CHECKING:
         RuntimeClientRetention,
         HttpSiteSecurityBehavior,
         HttpSiteControllerRecovery,
+        ServerStoppedDuringBody,
+        WorkerKilledAfterDispatch,
+        WorkerKilledBeforeDispatch,
         SitePHPControllerRecovery,
         SitePHPPartialFilesystemFinish,
         SitePHPPartialFilesystemReverse,
