@@ -4,7 +4,7 @@ Upgrading an existing 0.4.x installation to 1.0: see the [upgrade guide](docs/up
 
 ## 0.4.0 - 2026-11-08
 
-Barectl 0.4.0 replaces the Nginx, Certbot and APT PHP stack with the [target stack](docs/target-architecture.md): Caddy, Nix-supplied runtimes, and a private HAProxy process and PHP-FPM master per site. It completes Phases A to D and the Security and Server Jobs parts of Phase E; log retention settings remain outstanding. Servers set up by earlier builds are read as Not manageable, and the local database must be rebuilt because earlier migrations are not kept.
+Barectl 0.4.0 replaces the Nginx, Certbot and APT PHP stack with the [target stack](docs/target-architecture.md): Caddy, Nix-supplied runtimes, and a private HAProxy process and PHP-FPM master per site. It completes Phases A to D and the Security and Server Jobs parts of Phase E; journald log-retention settings are deferred from 1.0 to 1.1 ([ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md)). Servers set up by earlier builds are read as Not manageable, and the local database must be rebuilt because earlier migrations are not kept.
 
 ### Dashboard
 

@@ -292,7 +292,7 @@
     "disposable/shard_times.py": "8a96b50f6fff8c724363c3fb177a6e5ccb6027b4397b8378c5997678e297f6fb",
     "disposable/test_automation.py": "cbe9ea97c1f8204e4f45d4ede4b633d0f8bf6c9f3df447ce020c9c02d7c44cb7",
     "disposable/test_automation_validators.py": "0e66acac1d6d7fa078c79689b59a1ee8cf72ed2633e36ace16093294e0aae6c8",
-    "disposable/test_backups.py": "d18ccb9bf56d6af23012e1c2ff00be742384f8da35b86e8473325b95365438d8",
+    "disposable/test_backups.py": "a01746a483926776a2afa465cfa41a7221cb29288da223c9d8a8e818a53d82c8",
     "disposable/test_breadth.py": "a99de960c0e5ecb40c291d9ab4cca2ad475dcf6b8963144b8d1dc43f10e7996b",
     "disposable/test_cache.py": "abc4bb1eca5284c35c8ea5aa6f4af6f8db3255c3575df22646137b95490846e3",
     "disposable/test_catalog_update.py": "2baa8835a1a1276d4047b4de256e8299d1470912cc4d44b81c2af2b23ce52d08",
@@ -308,7 +308,7 @@
     "disposable/test_http_site_consent.py": "2776ad01b06240be9bd91826758f7231f869d818586feabaabf0c91ff6fa2f68",
     "disposable/test_http_site_identities.py": "7f7539556b2d80ddf4c2834474c42fe0a773e0c93c2f70dfebc423c470e68aa7",
     "disposable/test_http_site_reconstruction.py": "19e43beda299c2b46b601db9c966b65abbf2655e5c847d4736ccee9802c4e475",
-    "disposable/test_http_site_recovery.py": "ce4a151a3902100dc96cd931611f824c893e0c3ae2e89bb8e1e3009e59092329",
+    "disposable/test_http_site_recovery.py": "b6a50fb06f9df2635d645a42f3c7230d6466510b844a75dd1fb57c6aefe7be6b",
     "disposable/test_http_site_security.py": "62fbf5e952dfc8d11e71934f5efb817c52319e077f404a6758e84c571cb42ef3",
     "disposable/test_http_site_transactions.py": "3d37447a1822617d6c4cbdd72fac121209d5cddb1f77ff73cfadf44928780634",
     "disposable/test_http_site_validators.py": "19097609912f2fa537234a416d992a8947bb9c81f231c006e3b263c11edc00c2",
@@ -459,7 +459,7 @@
     "operations/reason_testing.py": "4e765263ce363a12f07036c1f303fbe8530d1f68a3b4397717b39fd0b951ac01",
     "operations/reasons.py": "8596c853b01b567ce25dd90f722e6551fa4317c7485a7b75854260286f8861de",
     "operations/recovery.py": "65956fea460a3a66ca7117b9f72e2848010ab87279063f30cd30797c31acc222",
-    "operations/recovery_testing.py": "af6165cabb47b9429308b278cadcb19a36c95a14975c5b99cfcf9ddb8df3e20b",
+    "operations/recovery_testing.py": "43b2d8a79dba155405670c189d0235aefdfc8c304a2eb12525c08cbfe590329e",
     "operations/revert.py": "7ddfcffbc5abaa4403cf8185199e28217aab16241155ce6dcad963e70f7c2de2",
     "operations/secret_testing.py": "b2f0b30b1c1bd41712665b789c2ec68f74b501b757f134510d89d9e9bd5b0bba",
     "operations/services.py": "76158f7e334cb202cbb15e3ba1def2b973ef6e0bbfa93d552f9af0142b778dff",
@@ -585,7 +585,7 @@
     "sites/ui_testing.py": "cda3e79b1c191ce033485616bb31e5fcde7d4e49293ca21b5394e01aad87cb4a",
     "sites/views.py": "73bd30db9181206e386acd0024fbc7938f1f9f1bfcb5233db114906bd3cf2444",
     "uv.lock": "5fbd44a9d45a9cf63f756a047def21da488edfc8020fe3118dbd8fccdae1134c",
-    "vulture_allowlist.py": "c64109d0e25c7fced658a1a17cc3b8e7390fb6245123fed48a4b52844bef34d3",
+    "vulture_allowlist.py": "1083e8d293c25a397a6e39c5a83d7ec61960b28e6d0acc47269d1670f04a1327",
     "wordpress/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "wordpress/actions.py": "a82c8c0f8f3d6a3cebba674c6077d13b87928f708de9f678009c2c2743d2ebe2",
     "wordpress/apps.py": "9e18a4526c86967fcd68986a0e99a9f5b961c8dd5e3b0597adc7be3d58c6ad8d",
@@ -706,11 +706,11 @@
     "wordpress/convention.py": "a25e359d7d788d9b82163b6effc17f5a4a3558d9125dd7cc93cd838bc9520472"
   },
   "capture_pins": {
-    "catalog-sha256": "c37a8bdbe84441a2e3d07218d7ea5a3a1dcb584a608ef7528b8372727277c55d",
+    "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
+    "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78",
     "nix-version": "2.35.2",
     "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
-    "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
-    "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
+    "catalog-sha256": "c37a8bdbe84441a2e3d07218d7ea5a3a1dcb584a608ef7528b8372727277c55d"
   },
   "capture_states": {
     "apache-26.04": "b5934bf9e38e5ecde3fb9546d0ae29104bdcb8459df7cab041611211c8ae1813",
