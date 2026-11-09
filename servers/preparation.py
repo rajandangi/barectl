@@ -31,7 +31,7 @@ def _freshness(state: DiscoveryState) -> preparation.Freshness:
 
 
 def stored_server_facts(state: DiscoveryState) -> preparation.ServerFacts:
-    """Standing and freshness for a read-only check, with no permission or active change.
+    """Standing, freshness and contract recognition for a read-only check.
 
     A cache reading and a change both use these facts; only the requirements differ.
     """
@@ -41,6 +41,7 @@ def stored_server_facts(state: DiscoveryState) -> preparation.ServerFacts:
         freshness=_freshness(state),
         change_active=False,
         granted=frozenset(),
+        outside_contract=state.outside_contract,
     )
 
 

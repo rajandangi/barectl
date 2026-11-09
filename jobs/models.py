@@ -71,6 +71,8 @@ class JobObservation(models.Model):
     sites = models.JSONField(default=list)
     result_class = models.CharField(max_length=20, blank=True)
     reason = models.CharField(max_length=40, blank=True)
+    # The native contract version that wrote the result line; zero before the field existed.
+    contract = models.PositiveSmallIntegerField(default=0)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     running = models.BooleanField(default=False)

@@ -1,5 +1,12 @@
-"""Shared native-result and rendered-recovery contract for access-changing kinds."""
+"""Shared native-result and rendered-recovery contracts for interrupted changes.
 
+Access-changing kinds use :func:`assert_access_failure`; a run that an abrupt termination
+left without a terminal result uses :func:`assert_abrupt_run`. Both compare independently
+established effects with the emitted result and render the real recovery template, so a
+page cannot claim success or "nothing changed" for an outcome the evidence does not support.
+"""
+
+from collections.abc import Mapping
 from enum import StrEnum
 from unittest import TestCase
 
@@ -102,3 +109,63 @@ def assert_access_failure(
             "unless a new verified connection confirms it."
         )
         test.assertIn(explanation, page)
+
+
+def assert_abrupt_run(
+    test: TestCase,
+    recorded: Mapping[str, object],
+    *,
+    result: str,
+    action: str,
+    action_kind: str,
+    changed_possible: bool,
+) -> None:
+    """Render an abruptly ended run and check its one recovery action and result words.
+
+    ``recorded`` is the run's stored state: ``status``, ``execution``, ``failure``,
+    ``progress_stage``, ``kind_slug``, ``consent``, ``document``, ``preparation`` and
+    ``server_name``. ``changed_possible`` is the evidence boundary: an undispatched run may
+    say nothing changed, while a dispatched run or a stopped body may not.
+    """
+    kind_slug = str(recorded["kind_slug"])
+    preparation_id = recorded.get("preparation")
+    preparation = ChangePreparation(
+        pk=preparation_id if isinstance(preparation_id, int) else 1,
+        kind_slug=kind_slug,
+    )
+    review = ChangeReview(
+        preparation=preparation,
+        kind_slug=kind_slug,
+        consent=str(recorded["consent"]),
+        document=recorded["document"] if isinstance(recorded["document"], dict) else {},
+    )
+    run = ChangeRun(
+        pk=1,
+        review=review,
+        status=str(recorded["status"]),
+        execution=str(recorded["execution"]),
+        result_reason=str(recorded.get("result_reason", "")),
+        window_outcome="",
+        progress_stage=str(recorded.get("progress_stage", "")),
+        server_name=str(recorded.get("server_name", "Contract server")),
+        failure=str(recorded.get("failure", "")),
+    )
+    view = run_view(run)
+    page = " ".join(
+        render_to_string("operations/_run_status.html", {"run": view, "plain": view.plain}).split()
+    )
+    test.assertEqual(view.plain.result, result)
+    test.assertNotEqual(view.plain.result, "Done")
+    test.assertNotIn("Barectl finished this change", page)
+    test.assertNotIn("Applied and verified", page)
+    next_action = view.plain.next
+    if next_action is None:
+        test.fail("An abruptly ended run has no recovery action.")
+    test.assertEqual(next_action.label, action)
+    test.assertEqual(next_action.kind, action_kind)
+    test.assertIn(action, page)
+    if changed_possible:
+        test.assertNotIn("Nothing changed", page)
+        test.assertNotIn("stopped before making any requested change", page)
+    else:
+        test.assertIn("nothing changed", page)

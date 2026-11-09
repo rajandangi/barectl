@@ -40,9 +40,16 @@ from sites.bodies.pool_boundary import safe_pool_boundary
 from sites.bodies.site_fpm import RetainedEntry, sfp_file, sfp_retained_shape, site_fpm_evidence
 from sites.names import readiness_directive, readiness_ok, readiness_path, request
 from sites.serving import (
+    HAPROXY_CONFIG_DIRECTORY,
+    HAPROXY_CONFIG_DIRECTORY_MODE,
+    HAPROXY_CONFIG_MODE,
+    HAPROXY_STATE_DIRECTORY,
+    HAPROXY_STATE_DIRECTORY_MODE,
     diagnostic_pool,
     fpm_unit,
     haproxy_config,
+    haproxy_config_path,
+    haproxy_http_socket,
     master_config,
     php_directory,
     site_pool_path,
@@ -128,6 +135,27 @@ ADMIN = "unix//run/caddy/admin.sock"
 RUNTIME_READ_SOURCE = ""
 NATIVE_PROBE = ""
 KNOWN_FCGI: dict[str, tuple[str, ...]] = {}
+# The site layout's one owner/group/mode table (docs/site-conventions.md#site-directory).
+# Creation and the native contract both read this tuple.
+SITE_LAYOUT: Final[tuple[tuple[str, str, str, str], ...]] = (
+    ("/var/www", "root", "root", "0755"),
+    ("{directory}", "root", "root", "0755"),
+    ("{directory}/releases", "root", "root", "0755"),
+    ("{directory}/releases/initial", "{account}", "{account}", "0711"),
+    ("{directory}/releases/initial/public", "{account}", "caddy", "2750"),
+    ("{directory}/private", "{account}", "{account}", "0700"),
+    ("{directory}/private/sessions", "{account}", "{account}", "0700"),
+    ("{directory}/private/tmp", "{account}", "{account}", "0700"),
+    ("{directory}/logs", "caddy", "{account}", "0750"),
+    ("{directory}/bin", "root", "root", "0755"),
+)
+# The stable per-site deployment lock; changes to the site hold it with flock.
+DEPLOY_LOCK: Final[tuple[str, str, str, str]] = (
+    "{directory}/.deploy.lock",
+    "root",
+    "{account}",
+    "0640",
+)
 
 
 def run(args: list[str], text: str | None = None, *, check: bool = True) -> str:
@@ -177,7 +205,7 @@ def setting(
         account="s" + identifier,
         directory="/var/www/" + identifier,
         socket=f"/run/php-fpm/sites/{identifier}/{entry}/app.sock",
-        proxy_socket=f"/run/haproxy/{identifier}/http.sock",
+        proxy_socket=haproxy_http_socket(identifier),
         proxy="p" + identifier,
     )
 
@@ -511,7 +539,7 @@ def extract(identifier: str, value: object) -> SimpleNamespace:
     servers = http.get("servers", {}) if isinstance(http, dict) else None
     if not isinstance(servers, dict):
         raise ValueError("A site has unsupported private routing.")
-    socket = f"unix//run/haproxy/{identifier}/http.sock"
+    socket = "unix/" + haproxy_http_socket(identifier)
     root = f"/var/www/{identifier}/current/public"
     matches: list[tuple[dict[str, object], list[list[str]], set[str], set[str]]] = []
     for server in servers.values():
@@ -1194,7 +1222,7 @@ def site_pool_record(settings: SimpleNamespace) -> SitePool | None:
 def native_directories(entry: str) -> list[str]:
     directories = ["/etc/caddy", "/etc/caddy/sites", "/var/www"]
     if entry:
-        directories.extend(("/etc/haproxy/sites", "/var/lib/haproxy/sites"))
+        directories.extend((HAPROXY_CONFIG_DIRECTORY, HAPROXY_STATE_DIRECTORY))
     return directories
 
 
@@ -1997,22 +2025,26 @@ def create_account(settings: SimpleNamespace, identity: int) -> pwd.struct_passw
 
 
 def create_layout(settings: SimpleNamespace) -> int:
-    for path, owner, group, mode in (
-        ("/var/www", "root", "root", "755"),
-        (settings.directory, "root", "root", "755"),
-        (settings.directory + "/releases", "root", "root", "755"),
-        (settings.directory + "/releases/initial", settings.account, settings.account, "711"),
-        (settings.directory + "/releases/initial/public", settings.account, "caddy", "2750"),
-        (settings.directory + "/private", settings.account, settings.account, "700"),
-        (settings.directory + "/private/sessions", settings.account, settings.account, "700"),
-        (settings.directory + "/private/tmp", settings.account, settings.account, "700"),
-        (settings.directory + "/logs", "caddy", settings.account, "750"),
-        (settings.directory + "/bin", "root", "root", "755"),
-    ):
-        run(["/usr/bin/install", "-d", "-o", owner, "-g", group, "-m", mode, path])
+    values = {"directory": settings.directory, "account": settings.account}
+    for path, owner, group, mode in SITE_LAYOUT:
+        run(
+            [
+                "/usr/bin/install",
+                "-d",
+                "-o",
+                owner.format(**values),
+                "-g",
+                group.format(**values),
+                "-m",
+                mode,
+                path.format(**values),
+            ]
+        )
     os.symlink("releases/initial", settings.directory + "/current")
-    write_new(settings.directory + "/.deploy.lock", "", 0o640, "root", settings.account)
-    descriptor = os.open(settings.directory + "/.deploy.lock", os.O_RDONLY | os.O_NOFOLLOW)
+    lock, owner, group, mode = DEPLOY_LOCK
+    lock_path = lock.format(**values)
+    write_new(lock_path, "", int(mode, 8), owner.format(**values), group.format(**values))
+    descriptor = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         populate_layout(settings)
@@ -2219,9 +2251,13 @@ def configure_pool(
     )
     start_site_fpm(settings)
     wait_site_fpm(settings)
-    serving_directory("/etc/haproxy/sites")
-    serving_directory("/var/lib/haproxy/sites")
-    write_new(f"/etc/haproxy/sites/{settings.identifier}.cfg", haproxy_config(settings), 0o600)
+    serving_directory(HAPROXY_CONFIG_DIRECTORY, HAPROXY_CONFIG_DIRECTORY_MODE)
+    serving_directory(HAPROXY_STATE_DIRECTORY, HAPROXY_STATE_DIRECTORY_MODE)
+    write_new(
+        haproxy_config_path(settings.identifier),
+        haproxy_config(settings),
+        HAPROXY_CONFIG_MODE,
+    )
     hap_validate(settings.identifier)
     run(
         [

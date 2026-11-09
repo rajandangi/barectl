@@ -1616,7 +1616,7 @@ class RebootedFullBackup(BackupCase):
     breadth = True
 
     def test_a_reboot_during_a_full_capture_keeps_the_gate(self) -> None:
-        from backups import change, reopen
+        from backups import change, presentation, reopen
 
         self.prepare_site()
         self.enable()
@@ -1631,6 +1631,46 @@ class RebootedFullBackup(BackupCase):
         self.assertEqual(self.site_status("/"), 503)
         site_file = self.native(f"cat /etc/caddy/sites/{self.identifier}.caddy")
         self.assertIn("respond 503", site_file)
+        # The reboot destroyed the transient unit, so the evidence-warranted outcome is
+        # partial with the one Reopen site action, never a finished or unchanged claim.
+        observed = self.observe()
+        row = self.backup_row(observed)
+        if row.last is None:
+            self.fail("The rebooted capture left no in-progress point.")
+        self.assertEqual(row.last.result_class, "partial")
+        self.assertEqual(row.last.reason, "backup_paused")
+        state = presentation.view(
+            None,
+            observed,
+            self.identifier,
+            None,
+            checking=False,
+            gated=True,
+        )
+        self.assertTrue(state.reopen)
+        self.assertEqual(
+            state.last.headline if state.last else "",
+            "The full backup stopped after pausing the site.",
+        )
+        page = render_to_string(
+            "backups/_site_backups.html",
+            {
+                "backups_target": True,
+                "backups": state,
+                "backups_can_reopen": True,
+                "server": SimpleNamespace(pk=1),
+                "identifier": self.identifier,
+                "csrf_token": "",
+            },
+        )
+        self.assertEqual(
+            page.count(
+                "This stopped after pausing the site for a full backup. Nothing after it ran."
+            ),
+            1,
+        )
+        self.assertEqual(page.count("Reopen site"), 1)
+        self.assertNotIn("Finished", page)
         apply_change(
             self,
             reopen.REOPEN_SITE,

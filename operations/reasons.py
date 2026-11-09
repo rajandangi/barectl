@@ -275,8 +275,20 @@ _INDEX: Final[dict[tuple[str, Result], str]] = {}
 _RETIRED_INDEX: Final[dict[tuple[str, Result], str]] = {}
 _KIND_REASONS: Final[dict[str, tuple[ResultReason, ...]]] = {}
 _BODY_VOCABULARIES: Final[dict[str, tuple[tuple[ResultReason, ...], tuple[str, ...]]]] = {}
+# The declarations the installed apps made while Django loaded them. A test or ad-hoc
+# caller may register more afterwards; the contract pins only what the shipped app set
+# declares, so a test fixture never becomes a promised shape.
+_STARTUP_KINDS: Final[dict[str, tuple[ResultReason, ...]]] = {}
+_STARTUP_BODIES: Final[dict[str, tuple[tuple[ResultReason, ...], tuple[str, ...]]]] = {}
 _KIND_BY_SLUG: Final[dict[str, object]] = {}
 _ACCEPTED: Final[set[str]] = {""} | RETIRED | {reason.name for reason in ADMISSION}
+
+
+def _during_app_start() -> bool:
+    """Whether an app is still registering its kinds and body vocabularies."""
+    from django.apps import apps
+
+    return not apps.ready
 
 
 def _index(reason: ResultReason) -> None:
@@ -308,6 +320,8 @@ def register_kind(kind: object) -> None:
         raise ValueError(f"Change kind {slug!r} stages a body but declares no result reasons.")
     _KIND_REASONS[slug] = declared
     _KIND_BY_SLUG[slug] = kind
+    if _during_app_start():
+        _STARTUP_KINDS[slug] = declared
     for reason in declared:
         _index(reason)
     _ACCEPTED.update(reason.name for reason in declared)
@@ -320,6 +334,8 @@ def register_body(
 ) -> None:
     """Register a non-kind composer's vocabulary, such as a scheduled integrity body."""
     _BODY_VOCABULARIES[name] = (tuple(declared), tuple(sources))
+    if _during_app_start():
+        _STARTUP_BODIES[name] = (tuple(declared), tuple(sources))
     for reason in declared:
         _index(reason)
     _ACCEPTED.update(reason.name for reason in declared)
@@ -332,6 +348,34 @@ def accepted(reason: str) -> bool:
 
 def accepted_reasons() -> frozenset[str]:
     return frozenset(_ACCEPTED)
+
+
+def declared_reasons() -> dict[str, object]:
+    """Every reason the installed apps declare, grouped by the source that owns it.
+
+    The engine's admission prelude is declared once for all kinds; the shared body reasons
+    are declared once for every body that stages them; each registered kind and each
+    non-kind body declares its own; and the retired names stay readable. Registered kinds
+    and bodies exist only after Django app loading, so this mapping holds the declarations
+    the installed apps made while they loaded. A reader asks for this mapping instead of
+    reaching into the registries, so the manifest pins the vocabulary without copying a
+    list of its own, and a declaration a test registers later never becomes a pinned shape.
+    """
+    shared = _STARTUP_BODIES.get("shared")
+    return {
+        "admission": sorted(reason.name for reason in ADMISSION),
+        "shared": sorted(reason.name for reason in (shared[0] if shared is not None else ())),
+        "kinds": {
+            slug: sorted(reason.name for reason in declared)
+            for slug, declared in sorted(_STARTUP_KINDS.items())
+        },
+        "bodies": {
+            name: sorted(reason.name for reason in declared)
+            for name, (declared, _sources) in sorted(_STARTUP_BODIES.items())
+            if name != "shared"
+        },
+        "retired": sorted(RETIRED),
+    }
 
 
 def sentence(outcome: Result, reason: str) -> str:

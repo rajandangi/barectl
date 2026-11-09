@@ -35,6 +35,10 @@ SENTENCES: dict[ReasonName, str] = {
     ReasonName.HOST_NOT_MANAGEABLE: (
         "Barectl cannot manage this server, so it cannot prepare this change."
     ),
+    ReasonName.OUTSIDE_CONTRACT: (
+        "Barectl does not recognize the version this server was set up with, so the server "
+        "is outside supported settings and will not change it."
+    ),
     ReasonName.CHECK_RUNNING: (
         "A connection check is running; wait for it to finish before preparing a change."
     ),
@@ -127,6 +131,7 @@ class ServerChanges(TypedDict, total=False):
     freshness: Freshness
     change_active: bool
     granted: frozenset[Need]
+    outside_contract: bool
 
 
 class SiteChanges(TypedDict, total=False):
@@ -167,6 +172,12 @@ class ReasonTableTests(SimpleTestCase):
         (
             ReasonName.HOST_NOT_MANAGEABLE,
             server(standing=NOT_MANAGEABLE),
+            MANAGED_SITE,
+            SERVER,
+        ),
+        (
+            ReasonName.OUTSIDE_CONTRACT,
+            server(outside_contract=True),
             MANAGED_SITE,
             SERVER,
         ),
@@ -348,8 +359,16 @@ class ReasonTableTests(SimpleTestCase):
                 decision = decide(facts, observed, requirements)
                 self.assertFalse(decision.allowed)
                 self.assertEqual(decision.reason, Reason(name, SENTENCES[name]))
+
+    def test_an_unrecognized_contract_withholds_every_card(self) -> None:
+        facts = server(outside_contract=True)
+        for requirements in (EMPTY, SERVER, SITE):
+            with self.subTest(requirements=requirements):
+                decision = decide(facts, MANAGED_SITE, requirements)
+                self.assertFalse(decision.allowed)
                 self.assertEqual(
-                    decision.reason.sentence if decision.reason else None, SENTENCES[name]
+                    decision.reason,
+                    Reason(ReasonName.OUTSIDE_CONTRACT, SENTENCES[ReasonName.OUTSIDE_CONTRACT]),
                 )
 
     def test_the_reason_table_is_the_whole_vocabulary_and_the_fixed_wording(self) -> None:

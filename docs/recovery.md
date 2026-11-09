@@ -1,6 +1,6 @@
 # Native recovery
 
-A target-stack server stays manageable with ordinary Linux tools when Barectl is unavailable. This guide lists where each part lives, how to inspect and restart it, and what to do after a change that stopped partway. Barectl never resumes a partial change by itself, never replays a lost request and never removes resources to clean up. Commands below run as root, or with `sudo`.
+A target-stack server stays manageable with ordinary Linux tools when Barectl is unavailable. This guide lists where each part lives, how to inspect and restart it, and what to do after a change that stopped partway. Barectl never resumes a partial change by itself, never replays a lost request and never removes resources to clean up. Commands below run as root, or with `sudo`. The [recovery guarantee matrix](recovery-guarantees.md) states what each covered failure guarantees, the test that proves it, and what is not promised.
 
 ## Where things live
 

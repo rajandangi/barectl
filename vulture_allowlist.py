@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
     from dashboard.checks import check_built_assets
+    from dashboard.management.commands.barectl_upgrade import Command as UpgradeCommand
     from dashboard.middleware import HtmxAuthenticationMiddleware
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
@@ -84,7 +85,12 @@ if TYPE_CHECKING:
     from disposable.test_http_site_consent import HttpSiteConsent
     from disposable.test_http_site_identities import HttpSiteIdentityAdmission
     from disposable.test_http_site_reconstruction import HttpSiteReconstruction
-    from disposable.test_http_site_recovery import HttpSiteControllerRecovery
+    from disposable.test_http_site_recovery import (
+        HttpSiteControllerRecovery,
+        ServerStoppedDuringBody,
+        WorkerKilledAfterDispatch,
+        WorkerKilledBeforeDispatch,
+    )
     from disposable.test_http_site_security import HttpSiteSecurityBehavior
     from disposable.test_http_site_transactions import HttpSiteTransactions
     from disposable.test_http_site_validators import HttpSiteValidators
@@ -136,6 +142,10 @@ if TYPE_CHECKING:
     from disposable.test_target_race import TwoControllerNativeLock
     from disposable.test_target_reconstruction import FreshControllerReconstruction
     from disposable.test_target_shape import JudgeByShape
+    from disposable.test_v040_compatibility import (
+        PrepareV040,
+        V040ServerCompatibility,
+    )
     from disposable.test_vm_lane import VmReboot, VmRestart
     from disposable.test_wordpress_create import WordPressCreateMariaDB
     from jobs.apps import JobsConfig
@@ -250,6 +260,9 @@ if TYPE_CHECKING:
     )
     # The log rotation validator is found by the runner's --validators selection.
     _log_rotation_validator = LogRotationValidators.test_the_supported_file_passes_logrotate_debug
+    # Django discovers management commands by module and class name, then reads this
+    # attribute and calls this hook.
+    _management_command = (UpgradeCommand, UpgradeCommand.help, UpgradeCommand.add_arguments)
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
     _dashboard = (
@@ -495,6 +508,9 @@ if TYPE_CHECKING:
         RuntimeClientRetention,
         HttpSiteSecurityBehavior,
         HttpSiteControllerRecovery,
+        ServerStoppedDuringBody,
+        WorkerKilledAfterDispatch,
+        WorkerKilledBeforeDispatch,
         SitePHPControllerRecovery,
         SitePHPPartialFilesystemFinish,
         SitePHPPartialFilesystemReverse,
@@ -503,6 +519,8 @@ if TYPE_CHECKING:
         NativeFixtures,
         PrepareSites,
         PreparedSitesReuse,
+        PrepareV040,
+        V040ServerCompatibility,
         HttpsSite,
         DatabaseEngineMariaDB,
         DatabaseEnginePostgreSQL,
