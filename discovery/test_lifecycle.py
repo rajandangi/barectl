@@ -156,7 +156,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
             ("Ubuntu 26.04.1 LTS", "ubuntu", "26.04", ("/etc/os-release",)),
         )
         page = self.client.get(f"/servers/{server.pk}/advanced/")
-        self.assertContains(page, "<td>Ubuntu 26.04.1 LTS</td>", html=True)
+        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertNotContains(page, '<th scope="row">Version</th>')
         self.assertNotContains(page, "Commands used")
         self.assertNotContains(page, f"<code>{HOST_KEY}</code>")
@@ -352,7 +352,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertNotIn("Checking", status)
         self.assertContains(
             self.client.get(f"/servers/{self.server.pk}/advanced/"),
-            "<td>Ubuntu 26.04.1 LTS</td>",
+            "<dd>Ubuntu 26.04.1 LTS</dd>",
             html=True,
         )
         self.assertIn("HX-Request-Type", finished.headers["Vary"])
@@ -518,7 +518,7 @@ class RefreshTests(DiscoveryTestCase):
         self.assertContains(page, "could not reach the SSH service")
         self.assertContains(page, "Refresh server")
         advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
-        self.assertContains(advanced, "<td>Ubuntu 26.04.1 LTS</td>", html=True)
+        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(advanced, "The latest connection check failed, so these observations")
         # No automatic retry: one failed attempt stays until the operator retries.
         self.assertEqual(DiscoveryAttempt.objects.count(), 2)
@@ -568,7 +568,7 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "did not finish within")
         advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
-        self.assertContains(advanced, "<td>Ubuntu 26.04.1 LTS</td>", html=True)
+        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(advanced, "may be out of date")
 
 
@@ -639,7 +639,7 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertContains(page, "stopped before finishing")
         self.assertContains(page, "Refresh server")
         advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
-        self.assertContains(advanced, "<td>Ubuntu 26.04.1 LTS</td>", html=True)
+        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(advanced, "may be out of date")
 
         self.client.post(f"/servers/{self.server.pk}/verify/")
@@ -757,7 +757,7 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertIn("Retry connection check", content)
         self.assertContains(
             self.client.get(f"/servers/{self.server.pk}/advanced/"),
-            "<td>Ubuntu 26.04.1 LTS</td>",
+            "<dd>Ubuntu 26.04.1 LTS</dd>",
             html=True,
         )
         self.assertRegex(

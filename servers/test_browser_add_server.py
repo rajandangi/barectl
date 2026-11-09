@@ -95,6 +95,10 @@ class AddServerBrowserTests(BrowserTestCase):
             run_worker()
         expect(page.get_by_role("heading", name="Ready to set up")).to_be_visible(timeout=10_000)
         expect(page.get_by_role("button", name="Set up server")).to_be_visible()
+        summary = page.get_by_role("region", name="Server details", exact=True)
+        expect(summary).to_contain_text("Ubuntu 26.04")
+        expect(summary).to_contain_text("Memory")
+        expect(summary).to_contain_text("Storage")
 
     def test_more_options_hold_port_and_alias_and_focus_survives_polling(self) -> None:
         self.page.clock.install()

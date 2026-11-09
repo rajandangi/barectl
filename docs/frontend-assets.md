@@ -10,6 +10,7 @@ The sign-in page, the Servers and server pages, the server forms and the access-
 | `frontend/uswds-init.ts` | USWDS initializer, loaded before first paint |
 | `frontend/jobs-time.ts` | Jobs viewer zone: sends the browser's IANA zone and keeps filter focus under the HTMX lifecycle |
 | `frontend/uswds.ts` | USWDS component setup for the page shell and HTMX fragments |
+| `frontend/server-address.ts` | Server address copying with accessible feedback and manual selection if clipboard access fails |
 | `frontend/styles/` | USWDS theme settings, palette, fonts and Barectl styles |
 | `vite.config.ts` | Vite development server and production build |
 | `dashboard/vite.py` | Django manifest reader and `{% vite_entry %}` template tag |
@@ -69,6 +70,12 @@ uv run python manage.py collectstatic
 The `{% vite_entry %}` tag follows the Vite guide's order: stylesheets, the entry module, then `modulepreload` links for imported chunks. `classic=True` renders a render-blocking `<script>` in production and rejects entries that import other chunks. The development server always serves modules.
 
 ## USWDS
+
+Server headings use the browser's [Clipboard.writeText API](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText)
+from an explicit Copy button. Clipboard permission or secure-context failures select the
+visible address and offer manual copying. This adds no dependency. Basic server capacity
+stays above the section navigation, following the detected server details in
+[Coolify's server guidance](https://coolify.io/docs/core/infrastructure/servers/manage-server#server-details).
 
 Server and site section navigation uses the `usa-sidenav` Sass module in
 `frontend/styles/main.scss`, including its link spacing and selected-page indicator.

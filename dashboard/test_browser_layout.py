@@ -37,6 +37,8 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.server = Server.objects.get(name="Production")
+        self.server.address = "203.0.113.10"
+        self.server.save(update_fields=["address"])
         record_http_sites(self.server)
         self.sign_in()
         self.page.goto(f"{self.live_server_url}/servers/{self.server.pk}/")
@@ -45,6 +47,29 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         page = self.page
         expect(page.get_by_role("heading", name="Production", level=1)).to_be_visible()
         expect(page.locator("#connection-status")).to_have_text("Ready")
+        summary = page.get_by_role("region", name="Server details", exact=True)
+        expect(summary).to_be_visible()
+        expect(summary).to_contain_text("Ubuntu 26.04.1 LTS")
+        expect(summary).to_contain_text("Memory")
+        expect(summary).to_contain_text("Storage")
+        summary_box = summary.bounding_box()
+        navigation_box = page.get_by_role("navigation", name="Server sections").bounding_box()
+        if summary_box is None or navigation_box is None:
+            self.fail("The server summary and navigation must be visible.")
+        self.assertLess(summary_box["y"] + summary_box["height"], navigation_box["y"])
+        self.context.grant_permissions(["clipboard-read", "clipboard-write"])
+        copy_address = page.get_by_role("button", name="Copy server address", exact=True)
+        copy_address.focus()
+        page.keyboard.press("Enter")
+        expect(page.get_by_role("status").filter(has_text="Address copied")).to_be_visible()
+        self.assertEqual(page.evaluate("navigator.clipboard.readText()"), "203.0.113.10")
+        page.evaluate(
+            "() => { navigator.clipboard.writeText = "
+            "() => Promise.reject(new DOMException('Denied')); }"
+        )
+        copy_address.click()
+        expect(page.get_by_role("status").filter(has_text="copy it manually")).to_be_visible()
+        self.assertEqual(page.evaluate("window.getSelection().toString()"), "203.0.113.10")
         expect(page.get_by_role("link", name="Create site")).to_be_visible()
         current = page.locator("nav[aria-label='Server sections'] a[aria-current='page']")
         expect(current).to_have_text("Sites")
@@ -78,7 +103,7 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         )
         advanced.focus()
         page.keyboard.press("Enter")
-        expect(page.get_by_role("heading", name="Server details", exact=True)).to_be_visible()
+        expect(page.get_by_role("region", name="Server details", exact=True)).to_be_visible()
         expect(page.get_by_role("heading", name="Web stack and services")).to_be_visible()
         self.assertEqual(page.evaluate("window.barectlNavigationTest"), "same-document")
         expect(advanced).to_be_focused()

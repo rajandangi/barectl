@@ -31,7 +31,9 @@ class ServerSectionTests(ControllerConfigTestCase):
     def test_sections_are_local_reads_and_history_restores_are_full_pages(self) -> None:
         self.grant("view_server", "view_siteobservation")
         self.client.force_login(self.user)
-        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        server = Server.objects.create(
+            name="Web", ssh_alias="web.example.com", address="203.0.113.10"
+        )
         with mock.patch("discovery.ssh.connect_alias") as connect:
             for key, title in SECTIONS.items():
                 suffix = "" if key == "sites" else f"{key}/"
@@ -41,6 +43,11 @@ class ServerSectionTests(ControllerConfigTestCase):
                         headers={"HX-Request": "true", "HX-History-Restore-Request": "true"},
                     )
                     self.assertContains(response, "<html")
+                    self.assertContains(response, 'id="server-summary"', count=1)
+                    self.assertContains(response, "No observations yet")
+                    self.assertContains(
+                        response, '<code id="server-address">203.0.113.10</code>', html=True
+                    )
                     self.assertContains(response, 'aria-label="Server sections"')
                     self.assertContains(response, f'aria-current="page">{title}</a>')
                     if key == "settings":
@@ -66,6 +73,8 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         body = self.client.get(f"/servers/{server.pk}/").content.decode()
+        self.assertIn("Server address unavailable", body)
+        self.assertNotIn("data-copy-address", body)
         positions = [body.index(f">{title}</a>") for title in SECTIONS.values()]
         self.assertEqual(positions, sorted(positions))
         listing = self.client.get("/")
@@ -126,6 +135,9 @@ class ServerSectionTests(ControllerConfigTestCase):
         response = self.client.get(f"/servers/{server.pk}/")
         self.assertContains(response, "Connection failed")
         self.assertContains(response, "The latest connection check failed")
+        self.assertContains(response, "Ubuntu 26.04.1 LTS")
+        self.assertContains(response, "Memory")
+        self.assertContains(response, "Storage")
         advanced = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(advanced, "Ubuntu 26.04.1 LTS")
         self.assertContains(advanced, 'aria-label="Selected stack details"')

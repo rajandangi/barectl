@@ -1,0 +1,35 @@
+{% with presented=state.presentation snapshot=state.snapshot %}
+  <section id="server-summary"
+           class="barectl-server-summary"
+           aria-labelledby="server-details-heading">
+    <h2 id="server-details-heading" class="usa-sr-only">Server details</h2>
+    {% if presented %}
+      <dl class="barectl-server-summary__facts">
+        <div>
+          <dt>Operating system</dt>
+          <dd>
+            {% if presented.os.observed %}
+              {{ presented.os.lines|join:", " }}
+              {% if presented.os.warning %}<p class="barectl-note">{{ presented.os.warning }}</p>{% endif %}
+            {% else %}
+              <strong>{{ presented.os.outcome.label }}:</strong> {{ presented.os.warning }}
+            {% endif %}
+          </dd>
+        </div>
+        {% for observation in presented.capacity %}
+          <div>
+            <dt>{% if observation.label == "Root filesystem" %}Storage{% else %}{{ observation.label }}{% endif %}</dt>
+            <dd>
+              <span>{% include "servers/_lines.html" with lines=observation.lines %}</span>
+              {% if observation.warning %}<p class="barectl-note">{{ observation.warning }}</p>{% endif %}
+            </dd>
+          </div>
+        {% endfor %}
+      </dl>
+      <p class="barectl-note">Last checked <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time> ({{ snapshot.collected_at|timesince }} ago). This is a snapshot, not live status.</p>
+      {% include "servers/_snapshot_notice.html" with notice=state.snapshot_notice %}
+    {% else %}
+      <p class="barectl-note">No observations yet. Server details appear after the first successful check.</p>
+    {% endif %}
+  </section>
+{% endwith %}

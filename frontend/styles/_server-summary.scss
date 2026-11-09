@@ -1,0 +1,107 @@
+@use "uswds-core" as *;
+
+.barectl-server-address {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: units(1);
+  margin-top: units(1.5);
+  color: color("base-dark");
+
+  code {
+    min-width: 0;
+    padding: units(0.5) units(1.5);
+    border: units(1px) solid color("base-lighter");
+    border-radius: radius("md");
+    background-color: color("base-lightest");
+    color: color("ink");
+    font-size: font-size("ui", "sm");
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
+
+  .usa-button {
+    width: auto;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: units(0.5);
+    padding: units(1);
+    border: units(1px) solid color("base-lighter");
+    border-radius: radius("md");
+    background-color: color("base-lightest");
+    text-decoration: none;
+
+    &:hover {
+      border-color: color("primary-light");
+      background-color: color("primary-lighter");
+    }
+  }
+
+  #connection-status {
+    padding: units(0.5) units(1.5);
+    border-radius: radius("pill");
+    background-color: color("base-lighter");
+    font-size: font-size("ui", "3xs");
+    font-weight: font-weight("medium");
+  }
+}
+
+.barectl-icon--copy {
+  width: units(2);
+  height: units(2);
+  mask: url("@uswds/uswds/img/usa-icons/content_copy.svg") center / contain no-repeat;
+}
+
+.barectl-server-summary {
+  margin-bottom: units(3);
+  overflow: hidden;
+  border: units(1px) solid color("base-lighter");
+  border-radius: units(1.5);
+  background-color: color("base-lightest");
+  box-shadow: 0 units(0.5) units(2) rgb(color("ink"), 0.04);
+
+  > .barectl-note {
+    margin: 0;
+    padding: units(1.5) units(3);
+    border-top: units(1px) solid color("base-lighter");
+    font-size: font-size("ui", "3xs");
+  }
+}
+
+.barectl-server-summary__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: units(3) 0;
+  margin: 0;
+  padding: units(3) 0;
+
+  > div {
+    padding: 0 units(3);
+
+    &:nth-child(even) {
+      border-left: units(1px) solid color("base-lighter");
+    }
+  }
+
+  @include at-media("tablet") {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+
+    > div + div {
+      border-left: units(1px) solid color("base-lighter");
+    }
+  }
+
+  dt {
+    margin-bottom: units(1);
+    color: color("base-dark");
+    font-size: font-size("ui", "3xs");
+  }
+
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-weight: font-weight("semibold");
+    line-height: line-height("body", 3);
+  }
+}

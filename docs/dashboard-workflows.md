@@ -44,8 +44,18 @@ host's identity is confirmed by pasting the provider's fingerprint
 Credentials and host trust stay on the controller host; Barectl offers no browser key
 upload or host-trust bypass.
 
-A server page opens on **Sites**. Its heading shows the name, the address and one status
-line:
+A server page opens on **Sites**. Every server section starts with the name, the address
+with **Copy**, and one status line. A compact **Server details** summary above the section
+navigation shows the operating system, architecture, CPUs, memory and root filesystem
+storage, including available space. It uses the last successful observation, shows when
+it was checked, and retains warnings for unreadable values and failed or running checks.
+The summary updates when **Refresh server** finishes. With no observation it explains
+how to read the details. Copy uses the browser's clipboard; if access is denied, it selects
+the address for manual copying. Alias connections show their saved target address. An
+older registration with no saved address says it is unavailable and offers no copy
+button, so copying never substitutes the server name or SSH alias for an address.
+
+The status line is one of:
 
 | Status | Meaning |
 | --- | --- |
@@ -74,10 +84,9 @@ where it starts a change.
 | Sites (default) | Observed sites led by their domains, each opening its site page, and **Create site**. |
 | Activity | This server's checks and changes, newest first. |
 | Settings | Server-wide choices: **PHP versions** with the sites using each and **Add PHP version**, **Default PHP**, **Default Node.js**, **HTTPS** with the optional certificate contact email, **Database** with the server's MariaDB or PostgreSQL engine and its install or remove review, **Object cache (Valkey)** with the installed version and the one install review, and **Remove server**. |
-| Advanced | Server details, host checks, installed packages, web software, PHP versions, software catalog, discovery history, and **Clean up finished runs**. |
+| Advanced | Host checks, installed packages, web software, PHP versions, software catalog, discovery history, and **Clean up finished runs**. |
 
-Advanced opens with one **Server details** table for the operating system and capacity,
-and the time of the last successful check. **Host checks** holds the remaining
+**Host checks** under Advanced holds the remaining
 prerequisites and setup components in Check / Value tables. **Installed packages** lists
 distribution web-stack components in one Component / Packages / Services table; confirmed
 absent components are omitted, while unreadable observations retain their explanations.

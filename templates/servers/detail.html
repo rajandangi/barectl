@@ -8,13 +8,26 @@
         <a href="{% url 'servers' %}">Servers</a>
       </p>
       <h1>{{ server.name }}</h1>
-      <p class="barectl-note">
-        <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code>
-        · {% include "servers/_status_line.html" %}
-      </p>
+      <div class="barectl-server-address">
+        {% if server.address %}
+          <code id="server-address">{{ server.address }}</code>
+          <button type="button"
+                  class="usa-button usa-button--unstyled"
+                  data-copy-address
+                  aria-label="Copy server address">
+            <span class="barectl-icon barectl-icon--copy" aria-hidden="true"></span>
+            Copy
+          </button>
+        {% else %}
+          <span class="barectl-note">Server address unavailable</span>
+        {% endif %}
+        {% include "servers/_status_line.html" %}
+        <span id="address-copy-status" class="barectl-note" role="status"></span>
+      </div>
     </div>
     {% include "servers/_refresh.html" %}
   </div>
+  {% include "servers/_summary.html" %}
   {# Announces connection check progress, which the status poll updates. #}
   <p id="discovery-announcement" class="usa-sr-only" role="status"></p>
   {% include "servers/_next_action.html" %}

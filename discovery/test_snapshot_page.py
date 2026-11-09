@@ -84,7 +84,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
         self.assertIn("Barectl cannot manage this server", page)
         self.assertIn("Another web stack is installed: Apache.", page)
         self.assertInHTML('<tr><th scope="row">Nix installation</th><td>absent</td></tr>', page)
-        self.assertIn("Root filesystem", page)
+        self.assertIn("Storage", page)
         self.assertIn("Installed packages", page)
         checks = self.section(page, "advanced-host-heading")
         self.assertInHTML('<tr><th scope="row">APT version</th><td>3.2</td></tr>', checks)
@@ -121,7 +121,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
             replace(COLLECTED, os=Observation(OBSERVED, ("/usr/lib/os-release",), "", release))
         )
         os = self.section(page, "server-details-heading")
-        self.assertInHTML("<td>Debian GNU/Linux</td>", os)
+        self.assertInHTML("<dd>Debian GNU/Linux</dd>", os)
         self.assertNotIn("Distribution ID", os)
         self.assertNotIn('<th scope="row">Version</th>', os)
 
