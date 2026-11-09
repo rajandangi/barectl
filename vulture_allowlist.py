@@ -142,6 +142,10 @@ if TYPE_CHECKING:
     from disposable.test_target_race import TwoControllerNativeLock
     from disposable.test_target_reconstruction import FreshControllerReconstruction
     from disposable.test_target_shape import JudgeByShape
+    from disposable.test_v040_compatibility import (
+        PrepareV040,
+        V040ServerCompatibility,
+    )
     from disposable.test_vm_lane import VmReboot, VmRestart
     from disposable.test_wordpress_create import WordPressCreateMariaDB
     from jobs.apps import JobsConfig
@@ -515,6 +519,8 @@ if TYPE_CHECKING:
         NativeFixtures,
         PrepareSites,
         PreparedSitesReuse,
+        PrepareV040,
+        V040ServerCompatibility,
         HttpsSite,
         DatabaseEngineMariaDB,
         DatabaseEnginePostgreSQL,

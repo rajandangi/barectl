@@ -300,11 +300,12 @@ Every item time names the run it came from (`sources` in the record); a ticket t
 
 ### Adding a scenario
 
-A new native scenario registers in four places; a missing one fails a meta-test or leaves dead code:
+A new native scenario registers in five places; a missing one fails a meta-test or leaves dead code:
 
 - the test class with `@tag(SCENARIO_TAG)`, `layer`, `prefix` and `records`;
+- a preparation class also in `_PREPARATIONS` in `disposable/scenarios.py`, so the runner builds its layer on demand and in `--prepare-all`;
 - its import and tuple entry in `vulture_allowlist.py`;
-- its item time and source in `disposable/shard_times.json`;
+- its item time and source in `disposable/shard_times.json` (ordinary scenarios only; a preparation class is not scheduled and needs none);
 - its expected standing in `discovery/test_host_standing.py` when it records a state.
 
 Record new states on the ticket branch and run the scenario through `run-scenarios.sh` before pushing.

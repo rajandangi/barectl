@@ -4,6 +4,12 @@ docs/quality.md#native-layer. L0 is the pinned base image by digest (``pins.json
 the server packages and the harness's fixture CA, so a scenario starts from the same
 foundation on every host. The image is keyed by a hash of its inputs, so a change to the
 base, the Dockerfile or the CA builds a new image and every host agrees on its name.
+
+``V040`` is the one prepared layer that is not built from this release: a preparation
+scenario boots L0, runs the ``v0.4.0`` tag's own controller against it, and commits the
+result. Its key names the exact tag commit, so a different tag or a changed preparation
+flow never reuses the image, and ``ensure("V040")`` raises instead of falling back to a
+current layer.
 """
 
 import hashlib
@@ -32,6 +38,12 @@ L0_FORMAT = "2"
 # keys are immutable, so this also retires an archive saved under a key whose tag it no
 # longer holds.
 PREPARED_FORMAT = "2"
+# The 1.0 compatibility fixture is the v0.4.0 tag's own product managing a real L0 server,
+# never a current snapshot relabelled (docs/v1.0-qualification.md).
+V040_TAG = "v0.4.0"
+V040_COMMIT = "e6edf430cea3d7df3e990fb00ae6c6b1eefa2464"
+# Raise when the v0.4.0 preparation flow or the fixture's contents change.
+V040_FORMAT = "1"
 
 
 def base(release: str = RELEASE) -> str:
@@ -43,7 +55,7 @@ def base(release: str = RELEASE) -> str:
     return value
 
 
-def _layer(layer: str) -> tuple[str, str, str]:
+def _layer(layer: str) -> tuple[str, str, str]:  # noqa: C901 - one closed layer table
     if layer == "L0":
         return RELEASE, "l0", "l0"
     if layer == "L1":
@@ -56,6 +68,8 @@ def _layer(layer: str) -> tuple[str, str, str]:
         return RELEASE, "l4", "l4"
     if layer == "L5":
         return RELEASE, "l5", "l5"
+    if layer == "V040":
+        return RELEASE, "v040", "v040"
     if layer == "L0-standing":
         return RELEASE, "l0-standing", "standing-26.04"
     if layer == "fixture":
@@ -79,6 +93,10 @@ def key(layer: str = "L0") -> str:
         digest.update(prepared_cache_inputs())
     if layer == "L5":
         digest.update(prepared_laravel_cache_inputs())
+    if layer == "V040":
+        # The tag commit, the L0 it was applied to and the preparation format decide the
+        # fixture; a different v0.4.0 commit or a changed flow rebuilds it.
+        digest.update(f"{V040_TAG} {V040_COMMIT} {V040_FORMAT} {key('L0')}".encode())
     certificate, _ = mirror.fixture_ca()
     digest.update(certificate.read_bytes())
     return digest.hexdigest()[:12]
@@ -363,6 +381,11 @@ def ensure(layer: str = "L0") -> str:
         raise DockerError(
             "The prepared-Laravel L5 snapshot is missing. Run its preparation scenario first."
         )
+    if layer == "V040":
+        raise DockerError(
+            "The v0.4.0 compatibility V040 snapshot is missing. Run its preparation "
+            "scenario first; a current snapshot is never a substitute."
+        )
     build(layer)
     store(layer)
     return image
@@ -377,7 +400,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--layer",
         default="L0",
-        choices=("L0", "L0-standing", "L0-24.04", "L1", "L2", "L3", "L4", "L5", "fixture"),
+        choices=(
+            "L0",
+            "L0-standing",
+            "L0-24.04",
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5",
+            "V040",
+            "fixture",
+        ),
     )
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if options.command == "cache-key":

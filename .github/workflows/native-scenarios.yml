@@ -40,6 +40,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.ref || github.sha }}
+          # The V040 fixture is built from the v0.4.0 tag in a detached worktree.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
@@ -105,6 +107,8 @@ jobs:
           echo "l4=$snapshot_key" >> "$GITHUB_OUTPUT"
           snapshot_key=$(uv run python -m disposable.images cache-key --layer L5)
           echo "l5=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer V040)
+          echo "v040=$snapshot_key" >> "$GITHUB_OUTPUT"
           snapshot_key=$(uv run python -m disposable.images cache-key --layer fixture)
           echo "fixture=$snapshot_key" >> "$GITHUB_OUTPUT"
       - name: Restore the fixture snapshot
@@ -124,6 +128,7 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/v040.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
@@ -172,6 +177,12 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
           key: ${{ inputs.cache-namespace }}native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
+      - name: Restore the V040 snapshot
+        id: v040
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/v040.tar
+          key: ${{ inputs.cache-namespace }}native-v040-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.v040 }}
       - name: Require a genuinely cold cache
         if: inputs.cache-namespace != ''
         run: |
@@ -186,7 +197,8 @@ jobs:
             "${{ steps.l2.outputs.cache-hit }}" \
             "${{ steps.l3.outputs.cache-hit }}" \
             "${{ steps.l4.outputs.cache-hit }}" \
-            "${{ steps.l5.outputs.cache-hit }}"; do
+            "${{ steps.l5.outputs.cache-hit }}" \
+            "${{ steps.v040.outputs.cache-hit }}"; do
             if [ "$hit" = "true" ]; then
               echo "Cold qualification restored an existing cache; use a fresh namespace." >&2
               exit 1
@@ -198,14 +210,14 @@ jobs:
         run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
       - name: Diagnose native layer archives
         run: |
-          for layer in l1 l2 l3 l4 l5; do
+          for layer in l1 l2 l3 l4 l5 v040; do
             printf '== %s: ' "$layer"
             tar -xOf "$BARECTL_NATIVE_L0_CACHE/$layer.tar" manifest.json 2>/dev/null | head -c 300 || true
             echo
           done
           uv run python - <<'PY'
           from disposable import images
-          for layer in ("L1", "L2", "L3", "L4", "L5"):
+          for layer in ("L1", "L2", "L3", "L4", "L5", "V040"):
               print(layer, images.tag(layer))
           PY
       - name: Prepare missing snapshots
@@ -305,6 +317,7 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/v040.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
@@ -393,6 +406,18 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
           key: ${{ steps.l5.outputs.cache-primary-key }}
+      - id: v040-archive
+        if: always() && steps.v040.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/v040.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the V040 snapshot
+        if: always() && steps.v040-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/v040.tar
+          key: ${{ steps.v040.outputs.cache-primary-key }}
       - id: fixture-archive
         if: always() && steps.fixture.outputs.cache-hit != 'true'
         run: |
@@ -432,6 +457,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.ref || github.sha }}
+          # A shard that misses the V040 archive rebuilds the fixture from the tag.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
@@ -479,6 +506,8 @@ jobs:
           echo "l4=$snapshot_key" >> "$GITHUB_OUTPUT"
           snapshot_key=$(uv run python -m disposable.images cache-key --layer L5)
           echo "l5=$snapshot_key" >> "$GITHUB_OUTPUT"
+          snapshot_key=$(uv run python -m disposable.images cache-key --layer V040)
+          echo "v040=$snapshot_key" >> "$GITHUB_OUTPUT"
           snapshot_key=$(uv run python -m disposable.images cache-key --layer fixture)
           echo "fixture=$snapshot_key" >> "$GITHUB_OUTPUT"
       - name: Restore the fixture snapshot
@@ -498,6 +527,7 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/v040.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
@@ -546,16 +576,22 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
           key: ${{ inputs.cache-namespace }}native-l5-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l5 }}
+      - name: Restore the V040 snapshot
+        id: v040
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/v040.tar
+          key: ${{ inputs.cache-namespace }}native-v040-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.v040 }}
       - name: Diagnose native layer archives
         run: |
-          for layer in l1 l2 l3 l4 l5; do
+          for layer in l1 l2 l3 l4 l5 v040; do
             printf '== %s: ' "$layer"
             tar -xOf "$BARECTL_NATIVE_L0_CACHE/$layer.tar" manifest.json 2>/dev/null | head -c 300 || true
             echo
           done
           uv run python - <<'PY'
           from disposable import images
-          for layer in ("L1", "L2", "L3", "L4", "L5"):
+          for layer in ("L1", "L2", "L3", "L4", "L5", "V040"):
               print(layer, images.tag(layer))
           PY
       # One 900 s build stop covers every native stage of the shard.
@@ -636,6 +672,7 @@ jobs:
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l3.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l4.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/v040.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/standing-26.04.tar
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l0-24.04.tar
@@ -724,6 +761,18 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l5.tar
           key: ${{ steps.l5.outputs.cache-primary-key }}
+      - id: v040-archive
+        if: always() && steps.v040.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/v040.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the V040 snapshot
+        if: always() && steps.v040-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/v040.tar
+          key: ${{ steps.v040.outputs.cache-primary-key }}
       - id: fixture-archive
         if: always() && steps.fixture.outputs.cache-hit != 'true'
         run: |

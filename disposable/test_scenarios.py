@@ -489,8 +489,8 @@ class BuildStopTests(SimpleTestCase):
             scenarios.main(["--time-limit", "20", "--lanes", "1", "--no-lock"])
         self.assertEqual(prepared_limits, [15])
         self.assertEqual(limits, [12])
-        self.assertEqual(stored, ["fixture", "L1", "L2", "L3", "L4", "L5"])
-        self.assertEqual(summarize.call_args.args[2], 17)
+        self.assertEqual(stored, ["fixture", "L1", "L2", "L3", "L4", "L5", "V040"])
+        self.assertEqual(summarize.call_args.args[2], 18)
 
     def test_each_cold_layer_spends_the_same_preparation_limit(self) -> None:
         clock = 0.0
@@ -638,7 +638,7 @@ class BuildStopTests(SimpleTestCase):
             )
         self.assertEqual(
             [[[layer for _, layer in unit] for unit in wave] for wave in waves],
-            [[["L1"]], [["L3", "L4"], ["L2"], ["L5"]]],
+            [[["L1"]], [["L3", "L4"], ["L2"], ["L5"], ["V040"]]],
         )
 
     def test_preparation_waves_use_one_lane_per_unit(self) -> None:
