@@ -25,6 +25,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from contract.version import VERSION as CONTRACT_VERSION
 from discovery import ssh
 from discovery.ssh import ConnectionFailed, RemoteShell
 from operations import apt, confidential, lifecycle, native, reasons, revert
@@ -389,15 +390,25 @@ RESULT_CLASSES: Final = frozenset(
 class ResultLine:
     """The one structured line a payload prints to the journal before it exits.
 
-    ``change_kind`` is the registered slug of the kind whose body ran, and ``sites`` are
-    the site identifiers the stored review declared; both are empty on a run that predates
-    the fields (docs/adr/0035-one-change-engine-with-effect-derived-consent.md).
+    ``change_kind`` is the registered slug of the kind whose body ran, ``sites`` are
+    the site identifiers the stored review declared, and ``contract`` is the native
+    contract version that wrote the line; they are empty or zero on a run that predates
+    the fields (docs/adr/0035-one-change-engine-with-effect-derived-consent.md,
+    docs/adr/0042-version-the-native-contract-without-a-server-marker.md).
     """
 
     result_class: str
     reason: str
     change_kind: str = ""
     sites: tuple[str, ...] = ()
+    contract: int = 0
+
+
+def _contract_field(value: object) -> int:
+    """The result line's contract version; zero when an older line recorded none."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise native.Unreadable("The result line is not in the engine's form.")
+    return value
 
 
 def parse_result_line(text: str) -> ResultLine | None:
@@ -429,11 +440,12 @@ def parse_result_line(text: str) -> ResultLine | None:
             not isinstance(site, str) or SITE_IDENTIFIER.fullmatch(site) is None for site in sites
         ):
             raise native.Unreadable("The result line is not in the engine's form.")
+        contract = _contract_field(value.get("contract", 0))
         # A full capture or restore records the pause before it starts copying so discovery
         # can name an interrupted run. It is not the run's outcome: the final result follows.
         if reason in ("backup_paused", "restore_paused"):
             continue
-        return ResultLine(result_class, reason, change_kind, tuple(sites))
+        return ResultLine(result_class, reason, change_kind, tuple(sites), contract)
     return None
 
 
@@ -569,12 +581,21 @@ def _result_fields(kind: ChangeKind, review: ChangeReview) -> tuple[str, str]:
     return kind.slug, _review_sites(review)
 
 
-def _result_function(kind: ChangeKind, review: ChangeReview) -> str:
+def _result_prefix(kind: ChangeKind, review: ChangeReview) -> str:
+    """The contract's fixed fields on every result line the engine or its body prints.
+
+    ``change_kind`` and ``sites`` name the work without the starting controller's
+    database; ``contract`` names the native contract that wrote the line so a controller
+    with a different contract can refuse it instead of guessing
+    (docs/adr/0042-version-the-native-contract-without-a-server-marker.md).
+    """
     slug, sites = _result_fields(kind, review)
-    return (
-        f'r() {{ printf \'barectl-result {{"change_kind":"{slug}","sites":{sites},%s\\n\' '
-        '"${1#\\{}"; }'
-    )
+    return f'"change_kind":"{slug}","sites":{sites},"contract":{CONTRACT_VERSION},'
+
+
+def _result_function(kind: ChangeKind, review: ChangeReview) -> str:
+    fields = _result_prefix(kind, review)
+    return f"r() {{ printf 'barectl-result {{{fields}%s\\n' \"${{1#\\{{}}\"; }}"
 
 
 def _body_step(
@@ -585,10 +606,8 @@ def _body_step(
     ``sed -u`` streams each line to the journal without waiting, and ``bash -o pipefail``
     keeps the body's exit status as the unit's even though sed is the last pipeline stage.
     """
-    slug, sites = _result_fields(kind, review)
-    substitution = (
-        's/^barectl-result [{]/barectl-result {"change_kind":"' + slug + '","sites":' + sites + ",/"
-    )
+    fields = _result_prefix(kind, review)
+    substitution = "s/^barectl-result [{]/barectl-result {" + fields + "/"
     command = (
         shlex.join(["/usr/bin/sh", path, *arguments])
         + " | /usr/bin/sed -u "

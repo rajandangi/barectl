@@ -10,8 +10,7 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-from . import VERSION, manifest
-from .manifest import SECTIONS
+from .manifest import SECTIONS, VERSION, manifest
 
 PINNED = Path(__file__).with_name("manifest.json")
 
