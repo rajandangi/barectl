@@ -210,6 +210,15 @@ so they are conservative: that change removed work from every discovery.
 The journal read is line-capped, not byte-capped; the 91-line answer stayed at about 50 KiB,
 well inside the 64 KiB SSH answer bound.
 
+**Low-resource result.** The near-final 1.0 candidate reran the same 1, 2 and 4 GiB cgroup
+classes and added disk and foundation-capacity reads. The [1.0 low-resource load
+result](v1.0-low-resource.md) holds the revision, environment and literal memory and disk
+figures. Every class met the provisional 4 GiB free-disk target, and the literal 900 MiB
+available-memory read was met only because `/proc/meminfo` is the shared Docker VM's; read
+within the cgroup, the 1 GiB class left 534.2 MiB at peak, a recorded miss against that
+provisional threshold with its own next action. The caveat below still applies: these are
+cgroups, not whole hosts.
+
 **Native-read cost.** The first delivered read priced the Running group with the retained
 unit state of all `barectl-apply-*` units and read the journal twice. At the 100-unit
 retention cap that cost about 2.6 s per discovery on the 1 GiB lane, and the hosted Native
@@ -317,7 +326,10 @@ this head the two second-controller scenarios passed together in 41 s (S3 13.4 s
 - **A real 1, 2 or 4 GiB host.** The Check now figures are containers capped with
   `--memory`; the kernel, page cache and Docker VM are shared, so they are not whole-host
   measurements. The 60-unit journal used for the cap is synthetic evidence, not 30 days of
-  real changes; the cap is a line bound and journal retention remains native policy.
+  real changes; the cap is a line bound and journal retention remains native policy. The
+  [1.0 low-resource load result](v1.0-low-resource.md) adds memory and disk readings from
+  the same capped containers, including a recorded 1 GiB headroom miss against the
+  provisional 900 MiB threshold; it still does not measure a real small host.
 - **Runs written before the result line carried kind and sites** stay **A Barectl change** with
   no site. The fast layer covers those lines; the native scenarios do not manufacture one.
 - **No copy timer.** Phase D's scheduled capture performs the offsite copy, so Jobs shows copy

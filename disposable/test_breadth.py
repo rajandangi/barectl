@@ -6,7 +6,8 @@ These run only in the weekly/dispatched breadth job, never in the merge build:
   in a burst, and a maintenance gate keeps boot activation off across the boot;
 - a scheduler tick longer than a minute: ``DeferReactivation`` delays the next start to the
   next calendar elapse instead of starting immediately;
-- memory per cache instance and per queue worker inside 1, 2 and 4 GiB memory cgroups.
+- memory per cache instance and per queue worker inside 1, 2 and 4 GiB memory cgroups,
+  with the site's disk use and the foundation's provisional headroom in the same sample.
 
 Every class starts from the prepared L5 snapshot (#393) so the measurement or the reboot is
 the item, not the site's setup. The containers share the Docker VM's kernel, so the reboot is
@@ -18,12 +19,12 @@ import json
 import os
 import shlex
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, NamedTuple, override
 
-from django.test import tag
+from django.test import SimpleTestCase, tag
 
 from discovery import ssh
 from operations.inputs import PreparationInputs
@@ -46,6 +47,32 @@ if TYPE_CHECKING:
 SITE = "sqwalpha"
 DOMAIN = "site.fixture.test"
 CACHE_UNIT = f"valkey-server@{SITE}.service"
+SITE_ROOT = f"/var/www/{SITE}"
+BACKUP_ROOT = f"/var/lib/barectl-backups/{SITE}"
+# bootstrap/standing.py's provisional, unqualified headroom thresholds.
+DISK_TARGET_BYTES = 4 * 1024**3
+MEMORY_TARGET_BYTES = 900 * 1024**2
+DISK_ROOTS = ("/", "/var", SITE_ROOT, BACKUP_ROOT)
+
+
+_FilesystemReading = tuple[str | None, bool, int | None]
+
+
+class _DiskCapacity(NamedTuple):
+    measured_path: str | None
+    present: bool
+    avail_bytes: int | None
+    target_bytes: int
+    met: bool
+
+
+class _Capacity(NamedTuple):
+    available_memory_bytes: int | None
+    available_memory_target_bytes: int
+    available_memory_met: bool
+    disk: dict[str, _DiskCapacity]
+    site_bytes: int | None
+    backup_bytes: int | None
 
 
 def _int(value: str) -> int:
@@ -53,6 +80,97 @@ def _int(value: str) -> int:
         return int(value.strip().removeprefix("@"))
     except ValueError:
         return 0
+
+
+def _byte_count(value: str) -> int | None:
+    try:
+        number = int(value.strip())
+    except ValueError:
+        return None
+    return number if number >= 0 else None
+
+
+def _target_met(observed: int | None, target: int) -> bool:
+    """An unreadable value is not a pass."""
+    return observed is not None and observed >= target
+
+
+def _filesystem_readings(output: str) -> dict[str, _FilesystemReading]:
+    """Parse ``requested<TAB>measured<TAB>avail`` lines from the disk probe."""
+    readings: dict[str, _FilesystemReading] = {}
+    for line in output.splitlines():
+        requested, tab, rest = line.partition("\t")
+        measured, separator, avail = rest.partition("\t")
+        if not tab or not separator or not requested.strip():
+            continue
+        readings[requested.strip()] = (
+            measured.strip(),
+            requested.strip() == measured.strip(),
+            _byte_count(avail),
+        )
+    return readings
+
+
+def _du_bytes(output: str) -> int | None:
+    first = output.split(maxsplit=1)[0] if output.split() else ""
+    return _byte_count(first)
+
+
+def measure_capacity(native: Callable[[str], str]) -> _Capacity:
+    """Read the foundation's disk and memory headroom beside the cgroup figures.
+
+    An absent root is measured on its nearest existing ancestor, so the figure is the
+    filesystem that would receive the site or its backups rather than a zero.
+    """
+    roots = " ".join(shlex.quote(path) for path in DISK_ROOTS)
+    output = native(
+        f'for p in {roots}; do q=$p; while [ ! -e "$q" ]; do q=$(dirname "$q"); done; '
+        'printf \'%s\\t%s\\t%s\\n\' "$p" "$q" '
+        '"$(df -B1 --output=avail "$q" | tail -n 1 | tr -d \' \')"; done'
+    )
+    readings = _filesystem_readings(output)
+    available = _byte_count(
+        native("awk '/^MemAvailable:/ {printf \"%d\\n\", $2 * 1024}' /proc/meminfo")
+    )
+    disk: dict[str, _DiskCapacity] = {}
+    for path in DISK_ROOTS:
+        measured_path, present, avail = readings.get(path, (None, False, None))
+        disk[path] = _DiskCapacity(
+            measured_path,
+            present,
+            avail,
+            DISK_TARGET_BYTES,
+            _target_met(avail, DISK_TARGET_BYTES),
+        )
+    return _Capacity(
+        available,
+        MEMORY_TARGET_BYTES,
+        _target_met(available, MEMORY_TARGET_BYTES),
+        disk,
+        _du_bytes(native(f"du -sb {shlex.quote(SITE_ROOT)} 2>/dev/null || true")),
+        _du_bytes(native(f"du -sb {shlex.quote(BACKUP_ROOT)} 2>/dev/null || true")),
+    )
+
+
+def _capacity_json(capacity: _Capacity) -> dict[str, object]:
+    """The one machine-readable sample piece carried by ``BREADTH_MEMORY``."""
+    return {
+        "available_memory_bytes": capacity.available_memory_bytes,
+        "available_memory_target_bytes": capacity.available_memory_target_bytes,
+        "available_memory_met": capacity.available_memory_met,
+        "disk": {
+            path: {
+                "measured_path": reading.measured_path,
+                "present": reading.present,
+                "avail_bytes": reading.avail_bytes,
+                "target_bytes": reading.target_bytes,
+                "met": reading.met,
+            }
+            for path, reading in capacity.disk.items()
+        },
+        "site_bytes": capacity.site_bytes,
+        "backup_bytes": capacity.backup_bytes,
+    }
 
 
 class BreadthCase(LaravelDeployCase):
@@ -556,6 +674,7 @@ class MemoryCase(BreadthCase):
             "cache_bytes": cache,
             "cache_maxmemory_bytes": maxmemory,
             "workers": workers,
+            "capacity": _capacity_json(measure_capacity(self.native)),
         }
         print("BREADTH_MEMORY " + json.dumps(sample, sort_keys=True))  # noqa: T201
         self.assertGreater(cache, 0)
@@ -594,6 +713,55 @@ class MemoryFourGiB(MemoryCase):
 
     def test_measures_the_cache_instance_and_each_worker(self) -> None:
         self.check_memory()
+
+
+class CapacityMeasurementTests(SimpleTestCase):
+    """The foundation's provisional thresholds are recorded, never smoothed."""
+
+    def test_a_below_target_value_is_a_miss_and_an_unreadable_value_is_not_a_pass(
+        self,
+    ) -> None:
+        self.assertFalse(_target_met(DISK_TARGET_BYTES - 1, DISK_TARGET_BYTES))
+        self.assertTrue(_target_met(DISK_TARGET_BYTES, DISK_TARGET_BYTES))
+        self.assertTrue(_target_met(MEMORY_TARGET_BYTES, MEMORY_TARGET_BYTES))
+        self.assertFalse(_target_met(None, MEMORY_TARGET_BYTES))
+
+    def test_a_missing_root_is_measured_on_its_nearest_existing_ancestor(self) -> None:
+        readings = _filesystem_readings(f"/\t/\t8589934592\n{BACKUP_ROOT}\t/var/lib\t4294967296\n")
+        self.assertEqual(readings["/"], ("/", True, 8589934592))
+        self.assertEqual(readings[BACKUP_ROOT], ("/var/lib", False, 4294967296))
+        self.assertEqual(_du_bytes(f"{12 * 1024**2}\t{SITE_ROOT}\n"), 12 * 1024**2)
+        self.assertIsNone(_du_bytes(""))
+
+    def test_the_capacity_sample_records_memory_disk_and_each_verdict(self) -> None:
+        def native(command: str) -> str:
+            if command.startswith("for p in"):
+                return (
+                    "/\t/\t8589934592\n"
+                    "/var\t/var\t8589934592\n"
+                    f"{SITE_ROOT}\t{SITE_ROOT}\t4294967296\n"
+                    f"{BACKUP_ROOT}\t/var/lib\t10737418234\n"
+                )
+            if "MemAvailable" in command:
+                return str(1024**3)
+            if command.startswith("du -sb") and SITE_ROOT in command:
+                return f"{12 * 1024**2}\t{SITE_ROOT}\n"
+            if command.startswith("du -sb"):
+                return ""
+            raise AssertionError(command)
+
+        sample = measure_capacity(native)
+        self.assertEqual(sample.available_memory_bytes, 1024**3)
+        self.assertTrue(sample.available_memory_met)
+        self.assertEqual(sample.site_bytes, 12 * 1024**2)
+        self.assertIsNone(sample.backup_bytes)
+        self.assertEqual(sample.disk["/"].avail_bytes, 8589934592)
+        self.assertTrue(sample.disk["/"].met)
+        self.assertFalse(sample.disk[BACKUP_ROOT].present)
+        self.assertEqual(sample.disk[BACKUP_ROOT].measured_path, "/var/lib")
+        self.assertTrue(sample.disk[BACKUP_ROOT].met)
+        rendered = json.loads(json.dumps(_capacity_json(sample)))
+        self.assertEqual(rendered["disk"][BACKUP_ROOT]["target_bytes"], DISK_TARGET_BYTES)
 
 
 __all__ = [
