@@ -111,6 +111,8 @@ class ObservedChange:
     sub_state: str = ""
     exec_main_status: int | None = None
     result_evidence: engine.ResultEvidence = engine.ResultEvidence.ABSENT
+    # The native contract version that wrote the result line; zero before the field existed.
+    contract: int = 0
 
 
 def stored_result_evidence(
@@ -290,6 +292,7 @@ class _Group:
     sites: tuple[str, ...] = ()
     result_seen: bool = False
     result_evidence: engine.ResultEvidence = engine.ResultEvidence.ABSENT
+    contract: int = 0
 
 
 @dataclass(frozen=True)
@@ -330,6 +333,7 @@ def _parse(text: str) -> tuple[list[ObservedChange], bool, int]:
             started_at=group.started_at,
             finished_at=group.finished_at,
             result_evidence=group.result_evidence,
+            contract=group.contract,
         )
         for group in groups.values()
     ]
@@ -390,6 +394,7 @@ def _apply(group: _Group, entry: _Entry) -> bool:
     group.reason = parsed.reason
     group.kind_slug = parsed.change_kind
     group.sites = parsed.sites
+    group.contract = parsed.contract
     return False
 
 

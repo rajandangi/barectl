@@ -39,6 +39,7 @@ def change(
     finished_at: datetime | None = None,
     running: bool = False,
     result_evidence: engine.ResultEvidence | None = None,
+    contract: int = 1,
 ) -> ObservedChange:
     return ObservedChange(
         unit=unit,
@@ -57,6 +58,7 @@ def change(
             if result_evidence is not None
             else (engine.ResultEvidence.PRESENT if result_class else engine.ResultEvidence.ABSENT)
         ),
+        contract=contract,
     )
 
 
@@ -329,12 +331,15 @@ def result_line(
     reason: str = "",
     kind: str = "",
     sites: tuple[str, ...] = (),
+    contract: int | None = None,
 ) -> str:
     document: dict[str, object] = {"class": result_class, "reason": reason}
     if kind:
         document["change_kind"] = kind
     if sites:
         document["sites"] = list(sites)
+    if contract is not None:
+        document["contract"] = contract
     return "barectl-result " + json.dumps(document, separators=(",", ":"))
 
 

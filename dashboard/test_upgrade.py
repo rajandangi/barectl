@@ -5,13 +5,13 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
-from typing import ClassVar, override
+from typing import ClassVar, cast, override
 from unittest import mock
 
 from django.contrib.auth.hashers import check_password
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import connection
+from django.db import connections
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase
 
@@ -290,14 +290,29 @@ class CommandTests(UpgradeTestCase):
 
 class FixtureMigrationTests(TransactionTestCase):
     database: ClassVar[Path]
+    # The fixture is migrated through its own alias so the test's in-memory database stays.
+    alias: ClassVar = "upgrade_fixture"
 
     @classmethod
     @override
     def setUpClass(cls) -> None:
-        super().setUpClass()
         directory = Path(cls.enterClassContext(tempfile.TemporaryDirectory()))
         cls.database = directory / "fixture.sqlite3"
         shutil.copyfile(FIXTURE, cls.database)
+        super().setUpClass()
+        connections.settings[cls.alias] = {
+            **connections.settings["default"],
+            "NAME": str(cls.database),
+            "TEST": {**connections.settings["default"]["TEST"], "NAME": None},
+        }
+        cls.databases = cast(set[str], cls.databases) | {cls.alias}
+        cls.addClassCleanup(cls._remove_alias)
+
+    @classmethod
+    def _remove_alias(cls) -> None:
+        connections[cls.alias].close()
+        del connections[cls.alias]
+        del connections.settings[cls.alias]
 
     def one(
         self, database: sqlite3.Connection, sql: str, parameters: tuple[object, ...] = ()
@@ -308,22 +323,20 @@ class FixtureMigrationTests(TransactionTestCase):
         return tuple(row)
 
     def test_every_represented_record_survives_migration(self) -> None:
-        original = connection.settings_dict["NAME"]
-        connection.close()
-        connection.settings_dict["NAME"] = str(self.database)
-        try:
-            executor = MigrationExecutor(connection)
-            executor.migrate(executor.loader.graph.leaf_nodes())
-        finally:
-            connection.close()
-            connection.settings_dict["NAME"] = original
+        fixture = connections[self.alias]
+        executor = MigrationExecutor(fixture)
+        targets = executor.loader.graph.leaf_nodes()
+        executor.migrate(targets)
+        # Closing the only connection checkpoints the WAL for the plain sqlite3 read below.
+        fixture.close()
 
         with sqlite3.connect(self.database) as database:
             applied = frozenset(
                 (str(app), str(name))
                 for app, name in database.execute("SELECT app, name FROM django_migrations")
             )
-            self.assertEqual(applied, V040_MIGRATIONS)
+            self.assertTrue(applied >= V040_MIGRATIONS)
+            self.assertTrue(set(targets) <= applied)
             for table in (
                 "auth_user",
                 "servers_server",

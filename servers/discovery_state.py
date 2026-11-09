@@ -10,6 +10,7 @@ from django.conf import settings
 from django.db.models import QuerySet
 from django.utils import timezone
 
+from contract.recognition import Recognition, recognize
 from discovery.models import ObservationOutcome
 from discovery.presentation import (
     ShownObservation,
@@ -239,6 +240,25 @@ class DiscoveryState:
 
     def shown_site(self, identifier: str) -> ShownSite | None:
         return self.site_index.get(identifier)
+
+    @cached_property
+    def outside_contract(self) -> bool:
+        """Whether a retained result line names a contract version this controller cannot act on.
+
+        The version is native evidence from Jobs; discovery never writes a server-side
+        marker (ADR 0042).
+        """
+        if self.snapshot is None:
+            return False
+        collected = self.snapshot.collected
+        standing = collected.standing
+        return (
+            recognize(
+                (change.contract for change in collected.jobs.value.changes),
+                standing.standing.value if standing is not None else None,
+            )
+            is not Recognition.RECOGNIZED
+        )
 
     @cached_property
     def presentation(self) -> SnapshotPresentation | None:

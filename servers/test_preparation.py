@@ -10,7 +10,9 @@ from django.utils import timezone
 
 from bootstrap.standing import HostJudgment, Standing
 from discovery.fakes import COLLECTED, COLLECTED_AT
-from discovery.snapshot import Snapshot
+from discovery.models import ObservationOutcome
+from discovery.snapshot import Observation, Snapshot
+from jobs.observation import JobReading, ObservedChange, ProviderCoverage
 from operations.activity_testing import record_change
 from operations.models import RemoteOperation
 from operations.preparation import EMPTY, SERVER, Freshness, Need, ReasonName, decide
@@ -18,6 +20,7 @@ from operations.services import ServerChanges, read_changes
 
 from .discovery_state import AttemptView, DiscoveryState, Status
 from .models import Server
+from .page import OUTSIDE_CONTRACT, status_line
 from .preparation import decide_for_server, granted_needs, server_facts, stored_server_facts
 
 AttemptStatus = RemoteOperation.Status
@@ -36,6 +39,25 @@ def judged(standing: Standing | None) -> Snapshot:
         collected=replace(
             COLLECTED,
             standing=HostJudgment(standing, (), (), ()) if standing is not None else None,
+        ),
+    )
+
+
+def with_jobs(*contracts: int, standing: Standing = Standing.TARGET_STACK) -> Snapshot:
+    """A snapshot whose Jobs read holds one result line per observed contract version."""
+    base = judged(standing)
+    reading = JobReading(
+        changes=tuple(
+            ObservedChange(unit=f"barectl-apply-{index:032x}.service", contract=contract)
+            for index, contract in enumerate(contracts)
+        ),
+        coverage=(ProviderCoverage("barectl_changes", "complete"),),
+    )
+    return replace(
+        base,
+        collected=replace(
+            base.collected,
+            jobs=Observation(ObservationOutcome.OBSERVED, ("journalctl",), "", reading),
         ),
     )
 
@@ -109,6 +131,40 @@ class StoredServerFactsTests(SimpleTestCase):
         facts = stored_server_facts(current)
         self.assertEqual(facts.standing, Standing.NOT_MANAGEABLE.value)
         decision = decide(facts, None, EMPTY)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason and decision.reason.name, ReasonName.HOST_NOT_MANAGEABLE)
+
+    def test_a_newer_contract_is_outside_supported_settings(self) -> None:
+        current = state(AttemptStatus.SUCCEEDED, snapshot=with_jobs(2))
+        facts = stored_server_facts(current)
+
+        self.assertTrue(facts.outside_contract)
+        decision = decide(facts, None, SERVER)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason and decision.reason.name, ReasonName.OUTSIDE_CONTRACT)
+        self.assertIn("outside supported settings", decision.sentence)
+
+    def test_the_server_page_reports_an_unrecognized_contract(self) -> None:
+        current = state(AttemptStatus.SUCCEEDED, snapshot=with_jobs(2))
+
+        self.assertEqual(status_line(current), OUTSIDE_CONTRACT)
+
+    def test_a_result_line_at_this_contract_is_compatible(self) -> None:
+        for contracts in ((1,), (0,), ()):
+            with self.subTest(contracts=contracts):
+                current = state(AttemptStatus.SUCCEEDED, snapshot=with_jobs(*contracts))
+                facts = stored_server_facts(current)
+
+                self.assertFalse(facts.outside_contract)
+                self.assertTrue(decide(facts, None, EMPTY).allowed)
+
+    def test_a_not_manageable_host_keeps_its_own_refusal(self) -> None:
+        current = state(
+            AttemptStatus.SUCCEEDED,
+            snapshot=with_jobs(2, standing=Standing.NOT_MANAGEABLE),
+        )
+        decision = decide(stored_server_facts(current), None, SERVER)
+
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.reason and decision.reason.name, ReasonName.HOST_NOT_MANAGEABLE)
 

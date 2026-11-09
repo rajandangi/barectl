@@ -19,6 +19,7 @@ from .discovery_state import DiscoveryState, Status
 READY = "Ready"
 NEEDS_SETUP = "Needs setup"
 CHECKING = "Checking…"
+OUTSIDE_CONTRACT = "Outside supported settings"
 CANNOT_BE_MANAGED = "Cannot be managed"
 CONNECTION_FAILED = "Connection failed"
 NOT_CHECKED = "Not checked yet"
@@ -66,6 +67,8 @@ def status_line(state: DiscoveryState) -> str:
     standing = snapshot.collected.standing
     if standing is None:
         return NOT_CHECKED
+    if state.outside_contract:
+        return OUTSIDE_CONTRACT
     if standing.standing == Standing.NOT_MANAGEABLE:
         return CANNOT_BE_MANAGED
     if standing.standing == Standing.TARGET_STACK:

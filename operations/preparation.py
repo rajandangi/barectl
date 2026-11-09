@@ -44,6 +44,8 @@ class ServerFacts:
     # An active change preparation or change run, not a read.
     change_active: bool
     granted: frozenset[Need]
+    # A result line recorded a native contract version this controller cannot act on.
+    outside_contract: bool = False
 
 
 class SiteShape(StrEnum):
@@ -113,6 +115,7 @@ class Requirements:
 
 class ReasonName(StrEnum):
     HOST_NOT_MANAGEABLE = "host_not_manageable"
+    OUTSIDE_CONTRACT = "outside_contract"
     CHECK_RUNNING = "check_running"
     CHECK_FAILED = "check_failed"
     HOST_NOT_OBSERVED = "host_not_observed"
@@ -164,6 +167,10 @@ class Decision:
 REASONS: Mapping[ReasonName, str] = {
     ReasonName.HOST_NOT_MANAGEABLE: (
         "Barectl cannot manage this server, so it cannot prepare this change."
+    ),
+    ReasonName.OUTSIDE_CONTRACT: (
+        "Barectl does not recognize the version this server was set up with, so the server "
+        "is outside supported settings and it cannot prepare this change."
     ),
     ReasonName.CHECK_RUNNING: (
         "A connection check is running; wait for it to finish before preparing a change."
@@ -239,6 +246,12 @@ def _host_not_manageable(
     server: ServerFacts, site: SiteFacts | None, requirements: Requirements
 ) -> bool:
     return server.standing == NOT_MANAGEABLE
+
+
+def _outside_contract(
+    server: ServerFacts, site: SiteFacts | None, requirements: Requirements
+) -> bool:
+    return server.outside_contract
 
 
 def _check_running(server: ServerFacts, site: SiteFacts | None, requirements: Requirements) -> bool:
@@ -437,6 +450,7 @@ def _log_rotation_supported(
 # when the host or the caller's permission already refuses the change.
 _FAILURES: dict[ReasonName, _Failure] = {
     ReasonName.HOST_NOT_MANAGEABLE: _host_not_manageable,
+    ReasonName.OUTSIDE_CONTRACT: _outside_contract,
     ReasonName.CHECK_RUNNING: _check_running,
     ReasonName.CHECK_FAILED: _check_failed,
     ReasonName.HOST_NOT_OBSERVED: _host_not_observed,

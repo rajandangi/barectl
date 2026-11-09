@@ -110,6 +110,15 @@ those modules and does not keep a second list:
 - the engine's admission reasons, the shared body reasons, every registered kind's and
   non-kind body's reasons, and the retired names that stay readable as older evidence.
 
+Jobs keeps the `contract` value on each observed result line. A controller compares it
+with its own contract version before it offers a change. A recorded version newer than the
+controller's, or an older positive version, is reported as **Outside supported settings**:
+the server page says so, every change card is withheld with one plain sentence, and a
+direct preparation request is refused. A line written before the field existed recorded
+`0`; v0.4.0 wrote no field and is contract 1, so `0` is compatible. No result lines
+establish no version and are not by themselves unrecognized. Discovery stays read-only:
+it reads the retained line and never writes a version marker on the server.
+
 ## Application surface
 
 The application surface is what operators and scripts address directly: permission names,

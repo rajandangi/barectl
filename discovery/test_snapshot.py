@@ -12,6 +12,8 @@ from backups.observation import (
     ObservedBackup,
 )
 from bootstrap.standing import HostJudgment, Standing
+from jobs.models import JobObservation
+from jobs.observation import JobReading, ObservedChange, ProviderCoverage
 from servers.models import Server
 
 from .fakes import COLLECTED, COLLECTED_AT
@@ -51,6 +53,24 @@ class SnapshotStorageTests(TestCase):
             current_snapshot(self.server),
             Snapshot(COLLECTED, COLLECTED_AT, "web.example.com", self.server.snapshots.get().pk),
         )
+
+    def test_a_job_contract_version_reads_back_from_typed_rows(self) -> None:
+        unit = "barectl-apply-" + "a" * 32 + ".service"
+        reading = JobReading(
+            changes=(ObservedChange(unit=unit, contract=1),),
+            coverage=(ProviderCoverage("barectl_changes", "complete"),),
+        )
+        collected = replace(
+            COLLECTED,
+            jobs=Observation(OBSERVED, ("journalctl",), "", reading),
+        )
+        save_snapshot(self.attempt(), collected, COLLECTED_AT)
+
+        loaded = current_snapshot(self.server)
+        if loaded is None:
+            self.fail("The saved snapshot did not read back.")
+        self.assertEqual(loaded.collected.jobs.value.changes[0].contract, 1)
+        self.assertEqual(JobObservation.objects.get().contract, 1)
 
     def test_backup_runs_and_timers_read_back_from_typed_rows(self) -> None:
         backup = ObservedBackup(
