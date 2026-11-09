@@ -2,6 +2,8 @@
 
 from django.test import SimpleTestCase
 
+from bootstrap.standing import Standing
+
 from .recognition import Recognition, recognize
 from .version import VERSION
 
@@ -28,6 +30,6 @@ class RecognitionTests(SimpleTestCase):
 
     def test_a_not_manageable_host_keeps_the_existing_host_refusal(self) -> None:
         self.assertIs(
-            recognize((VERSION + 1,), "Not manageable"),
+            recognize((VERSION + 1,), Standing.NOT_MANAGEABLE),
             Recognition.RECOGNIZED,
         )

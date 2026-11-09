@@ -88,6 +88,8 @@ def _runtime_templates() -> dict[str, object]:
 
 
 def _native_execution() -> dict[str, object]:
+    from operations import engine
+
     return {
         "systemd_run": native.SYSTEMD_RUN,
         "lock": {
@@ -109,7 +111,7 @@ def _native_execution() -> dict[str, object]:
             "timeout_stop_seconds": int(native.TIMEOUT_STOP),
         },
         "stages": list(foundation.STAGES),
-        "stage_line_prefix": "barectl-stage ",
+        "stage_line_prefix": engine.STAGE_PREFIX,
         "exit": {
             "probe": {member.name: int(member) for member in native.Exit},
             "engine": {member.name: int(member) for member in native.Code},

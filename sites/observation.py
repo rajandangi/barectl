@@ -65,7 +65,23 @@ ADMISSION_SOURCE: Final = (
     .joinpath("admission.py")
     .read_text()
     .replace("from sites.configuration import SiteSettings\n", "")
-    .replace("from sites.serving import HAPROXY_UNIT, haproxy_config\n", "")
+    .replace(
+        "from sites.serving import (\n"
+        "    HAPROXY_CONFIG_MODE,\n"
+        "    HAPROXY_RUNTIME_DIRECTORY_MODE,\n"
+        "    HAPROXY_SOCKET_MODE,\n"
+        "    HAPROXY_STATE_DIRECTORY_MODE,\n"
+        "    HAPROXY_STATE_MODE,\n"
+        "    HAPROXY_UNIT,\n"
+        "    haproxy_admin_socket,\n"
+        "    haproxy_config,\n"
+        "    haproxy_config_path,\n"
+        "    haproxy_http_socket,\n"
+        "    haproxy_runtime_directory,\n"
+        "    haproxy_state_path,\n"
+        ")\n",
+        "",
+    )
     .replace(
         "KNOWN_HAPROXY: dict[str, tuple[str, ...]] = {}",
         "KNOWN_HAPROXY = "
@@ -118,8 +134,21 @@ COMMON_SOURCE: Final = with_bounded(
         "",
     )
     .replace(
-        "from sites.serving import (\n    diagnostic_pool,\n    fpm_unit,\n    haproxy_config,\n"
-        "    master_config,\n    php_directory,\n    site_pool_path,\n)\n",
+        "from sites.serving import (\n"
+        "    HAPROXY_CONFIG_DIRECTORY,\n"
+        "    HAPROXY_CONFIG_DIRECTORY_MODE,\n"
+        "    HAPROXY_CONFIG_MODE,\n"
+        "    HAPROXY_STATE_DIRECTORY,\n"
+        "    HAPROXY_STATE_DIRECTORY_MODE,\n"
+        "    diagnostic_pool,\n"
+        "    fpm_unit,\n"
+        "    haproxy_config,\n"
+        "    haproxy_config_path,\n"
+        "    haproxy_http_socket,\n"
+        "    master_config,\n"
+        "    php_directory,\n"
+        "    site_pool_path,\n"
+        ")\n",
         "",
     )
     .replace(

@@ -1,18 +1,53 @@
 """The fast guard on Barectl's promised native shapes (docs/contracts.md, ADR 0042).
 
 The test compares the manifest built from the owning modules with the pinned expectation in
-``manifest.json``. A changed, removed or renamed shape fails here unless the contract
-version and the pinned file change together in the same review.
+``manifest.json`` and with the released shape digests in ``history.json``. A changed,
+removed or renamed shape fails here unless the contract version, the pinned file and a new
+history entry change together in the same review.
 """
 
+import hashlib
 import json
 from pathlib import Path
+from typing import cast
 
 from django.test import SimpleTestCase
 
 from .manifest import SECTIONS, VERSION, manifest
 
 PINNED = Path(__file__).with_name("manifest.json")
+HISTORY = Path(__file__).with_name("history.json")
+HISTORY_NOTICE = (
+    "Bump contract/version.py and add a contract/history.json entry for the new version "
+    "with a migration/dual-read and a deprecation window."
+)
+
+
+def shapes_digest(built: dict[str, object]) -> str:
+    """The canonical SHA-256 of a manifest's section shapes, excluding its version."""
+    shapes = {name: value for name, value in built.items() if name != "version"}
+    encoded = json.dumps(shapes, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def history_problems(built: dict[str, object], history: dict[str, str], version: int) -> list[str]:
+    """Every way ``history`` fails to record the built shapes, each naming the fix."""
+    problems: list[str] = []
+    expected = [str(number) for number in range(1, version + 1)]
+    keys = sorted(history, key=lambda key: int(key) if key.isdigit() else -1)
+    if keys != expected:
+        problems.append(
+            f"contract/history.json must name exactly versions 1..{version}; found {keys}. "
+            + HISTORY_NOTICE
+        )
+    recorded = history.get(str(version))
+    digest = shapes_digest(built)
+    if recorded != digest:
+        problems.append(
+            f"contract/history.json version {version} records {recorded!r}, but the built "
+            f"shapes hash to {digest}. {HISTORY_NOTICE}"
+        )
+    return problems
 
 
 def _mapping(value: object) -> dict[str, object] | None:
@@ -83,6 +118,25 @@ class ManifestContractTest(SimpleTestCase):
     def test_pinned_manifest_carries_the_contract_version(self) -> None:
         pinned = json.loads(PINNED.read_text(encoding="utf-8"))
         self.assertEqual(pinned.get("version"), VERSION)
+        self.assertEqual(manifest()["version"], VERSION)
+
+    def test_history_records_every_released_contract_shape(self) -> None:
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+        self.assertEqual(history_problems(manifest(), history, VERSION), [])
+
+    def test_a_changed_shape_without_a_history_entry_fails(self) -> None:
+        built = manifest()
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+        changed = dict(built)
+        results = cast(dict[str, object], built["results"])
+        changed["results"] = {**results, "prefix": "barectl-changed "}
+
+        problems = history_problems(changed, history, VERSION)
+
+        self.assertTrue(problems)
+        message = " ".join(problems)
+        self.assertIn("contract/version.py", message)
+        self.assertIn("deprecation window", message)
 
     def test_manifest_is_a_json_serializable_mapping(self) -> None:
         built = manifest()

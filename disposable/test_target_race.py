@@ -198,6 +198,7 @@ class TwoControllerNativeLock(ScenarioTestCase):
     def record_refused_run(self, unit: str) -> None:
         """The server and the refused run's native evidence, as the losing controller reads them
         after the race."""
+        from contract.version import VERSION
         from discovery.observations import collect
         from operations import engine, native
 
@@ -207,7 +208,10 @@ class TwoControllerNativeLock(ScenarioTestCase):
             line = engine.read_result(shell, unit)
             from sites.change import SLUG
 
-            self.assertEqual(line, engine.ResultLine("lock_busy", "", SLUG, ("s10beta",)))
+            self.assertEqual(
+                line,
+                engine.ResultLine("lock_busy", "", SLUG, ("s10beta",), VERSION),
+            )
             self.checkpoint("race-lock-busy-26.04", shell)
 
     def await_native_lock(self, timeout: float = 70) -> None:

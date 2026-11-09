@@ -26,7 +26,8 @@ the installation. Two processes use the local database:
 Stop both before upgrading. The command also refuses while any change preparation or change
 run is queued or running, while the worker still has a queued or running task, or while a
 `db_worker` process is alive. Wait for that work to finish; it is recorded work, not
-something to discard.
+something to discard. Do not start the dashboard or worker again until the upgrade command
+exits, because the active-worker check runs immediately before the backup.
 
 `python manage.py barectl_upgrade --check` reports the installed version and the database
 schema without changing anything. Use it first.

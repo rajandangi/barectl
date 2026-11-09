@@ -188,6 +188,13 @@ def run(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
     )
 
 
+def copy_database(source: Path, destination: Path) -> None:
+    """Copy ``source`` with SQLite's backup API after folding its WAL into the database."""
+    with sqlite3.connect(source) as original, sqlite3.connect(destination) as copy:
+        original.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        original.backup(copy)
+
+
 def environment_from(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
@@ -241,7 +248,9 @@ def main() -> int:
                 env=environment,
             )
             fixture.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(tree / "db.sqlite3", fixture)
+            copy_database(tree / "db.sqlite3", fixture)
+            for suffix in ("-wal", "-shm"):
+                fixture.with_name(fixture.name + suffix).unlink(missing_ok=True)
     with sqlite3.connect(fixture) as database:
         migrations = database.execute(
             "SELECT app, name FROM django_migrations ORDER BY app, name"

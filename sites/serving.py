@@ -2,8 +2,46 @@
 
 from pathlib import PurePosixPath
 from types import SimpleNamespace
+from typing import Final
 
 from .configuration import SiteSettings
+
+# The one owner of every per-site admission path and mode. The native bodies, the creation
+# path and the contract manifest read these instead of repeating the literals.
+HAPROXY_CONFIG_DIRECTORY: Final = "/etc/haproxy/sites"
+HAPROXY_STATE_DIRECTORY: Final = "/var/lib/haproxy/sites"
+HAPROXY_RUNTIME_DIRECTORY: Final = "/run/haproxy"
+HAPROXY_CONFIG_MODE: Final = 0o600
+HAPROXY_STATE_MODE: Final = 0o600
+HAPROXY_CONFIG_DIRECTORY_MODE: Final = 0o755
+HAPROXY_STATE_DIRECTORY_MODE: Final = 0o755
+HAPROXY_RUNTIME_DIRECTORY_MODE: Final = 0o755
+HAPROXY_SOCKET_MODE: Final = 0o600
+HAPROXY_ADMIN_SOCKET_OWNER: Final = "root"
+HAPROXY_ADMIN_SOCKET_GROUP: Final = "root"
+HAPROXY_HTTP_SOCKET_OWNER: Final = "caddy"
+HAPROXY_HTTP_SOCKET_GROUP: Final = "caddy"
+
+
+def haproxy_config_path(identifier: str) -> str:
+    return f"{HAPROXY_CONFIG_DIRECTORY}/{identifier}.cfg"
+
+
+def haproxy_state_path(identifier: str) -> str:
+    return f"{HAPROXY_STATE_DIRECTORY}/{identifier}.state"
+
+
+def haproxy_runtime_directory(identifier: str) -> str:
+    return f"{HAPROXY_RUNTIME_DIRECTORY}/{identifier}"
+
+
+def haproxy_admin_socket(identifier: str) -> str:
+    return f"{haproxy_runtime_directory(identifier)}/admin.sock"
+
+
+def haproxy_http_socket(identifier: str) -> str:
+    return f"{haproxy_runtime_directory(identifier)}/http.sock"
+
 
 HAPROXY_UNIT = """[Unit]
 Description=Private HTTP to FastCGI admission for %i
@@ -63,6 +101,10 @@ WantedBy=multi-user.target
 
 def haproxy_config(settings: SiteSettings | SimpleNamespace) -> str:
     site = settings.identifier
+    bind = (
+        f"{haproxy_http_socket(site)} user {HAPROXY_HTTP_SOCKET_OWNER} "
+        f"group {HAPROXY_HTTP_SOCKET_GROUP} mode {HAPROXY_SOCKET_MODE:o}"
+    )
     return f"""global
     maxconn 64
     user p{site}
@@ -71,8 +113,8 @@ def haproxy_config(settings: SiteSettings | SimpleNamespace) -> str:
     tune.quic.fe.sock-per-conn force-off
     tune.quic.fe.tx.udp-gso off
     tune.quic.be.tx.udp-gso off
-    server-state-file /var/lib/haproxy/sites/{site}.state
-    stats socket /run/haproxy/{site}/admin.sock uid 0 gid 0 mode 600 level admin
+    server-state-file {haproxy_state_path(site)}
+    stats socket {haproxy_admin_socket(site)} uid 0 gid 0 mode {HAPROXY_SOCKET_MODE:o} level admin
     log /dev/log local0
     log-tag haproxy-site-{site}
 defaults
@@ -99,7 +141,7 @@ backend php
     server php84 /run/php-fpm/sites/{site}/php84/app.sock proto fcgi id 1 maxconn 2 disabled
     server php85 /run/php-fpm/sites/{site}/php85/app.sock proto fcgi id 2 maxconn 2 disabled
 frontend incoming
-    bind /run/haproxy/{site}/http.sock user caddy group caddy mode 600
+    bind {bind}
     http-request del-header Proxy
     http-request set-var(txn.https) str(on) if {{ req.hdr(X-Forwarded-Proto) -i https }}
     http-request set-var(txn.https) str(off) unless {{ var(txn.https) -m found }}

@@ -170,7 +170,7 @@ REASONS: Mapping[ReasonName, str] = {
     ),
     ReasonName.OUTSIDE_CONTRACT: (
         "Barectl does not recognize the version this server was set up with, so the server "
-        "is outside supported settings and it cannot prepare this change."
+        "is outside supported settings and will not change it."
     ),
     ReasonName.CHECK_RUNNING: (
         "A connection check is running; wait for it to finish before preparing a change."

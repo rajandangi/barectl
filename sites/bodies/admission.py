@@ -21,7 +21,20 @@ from typing import TypedDict
 
 from runtimes.bounded import bounded
 from sites.configuration import SiteSettings
-from sites.serving import HAPROXY_UNIT, haproxy_config
+from sites.serving import (
+    HAPROXY_CONFIG_MODE,
+    HAPROXY_RUNTIME_DIRECTORY_MODE,
+    HAPROXY_SOCKET_MODE,
+    HAPROXY_STATE_DIRECTORY_MODE,
+    HAPROXY_STATE_MODE,
+    HAPROXY_UNIT,
+    haproxy_admin_socket,
+    haproxy_config,
+    haproxy_config_path,
+    haproxy_http_socket,
+    haproxy_runtime_directory,
+    haproxy_state_path,
+)
 
 KNOWN_HAPROXY: dict[str, tuple[str, ...]] = {}
 STATE_FIELDS = [
@@ -210,13 +223,13 @@ def hap_execution(
 
 
 def hap_validate(identifier: str) -> None:
-    cfg = f"/etc/haproxy/sites/{identifier}.cfg"
+    cfg = haproxy_config_path(identifier)
     command = ["/nix/var/nix/profiles/barectl/haproxy/bin/haproxy", "-c", "-f", cfg]
     status, output = bounded(shlex.join(command) + " 2>&1", limit=16384)
     if status:
         raise ValueError("Native proxy configuration failed validation.")
     warnings = []
-    state = f"/var/lib/haproxy/sites/{identifier}.state"
+    state = haproxy_state_path(identifier)
     continuation = {
         "   | While not properly invalid, you will certainly encounter various problems",
         "   | with such a configuration. To fix this, please ensure that all following",
@@ -261,8 +274,8 @@ def hap_validate(identifier: str) -> None:
 
 
 def hap_sockets(identifier: str, pid: str) -> dict[str, list[int]]:
-    base = f"/run/haproxy/{identifier}"
-    hap_safe(base, mode=0o755)
+    base = haproxy_runtime_directory(identifier)
+    hap_safe(base, mode=HAPROXY_RUNTIME_DIRECTORY_MODE)
     unix = [line.split() for line in pathlib.Path("/proc/net/unix").read_text().splitlines()[1:]]
     descriptors: set[str] = set()
     for descriptor in pathlib.Path(f"/proc/{pid}/fd").iterdir():
@@ -272,15 +285,17 @@ def hap_sockets(identifier: str, pid: str) -> dict[str, list[int]]:
             continue
     caddy = pwd.getpwnam("caddy")
     records: dict[str, list[int]] = {}
-    for name, uid, gid in (("admin.sock", 0, 0), ("http.sock", caddy.pw_uid, caddy.pw_gid)):
-        path = base + "/" + name
+    for path, uid, gid in (
+        (haproxy_admin_socket(identifier), 0, 0),
+        (haproxy_http_socket(identifier), caddy.pw_uid, caddy.pw_gid),
+    ):
         value = pathlib.Path(path).lstat()
         if not stat.S_ISSOCK(value.st_mode) or (
             value.st_uid,
             value.st_gid,
             stat.S_IMODE(value.st_mode),
             value.st_nlink,
-        ) != (uid, gid, 0o600, 1):
+        ) != (uid, gid, HAPROXY_SOCKET_MODE, 1):
             raise ValueError("Unsupported private proxy socket ownership.")
         matches = [
             row
@@ -367,7 +382,7 @@ def hap_process(identifier: str) -> dict[str, object]:
     if profile not in KNOWN_HAPROXY.get(os.uname().machine, ()):
         raise ValueError("Unknown proxy build.")
     executable = profile + "/bin/haproxy"
-    cfg = f"/etc/haproxy/sites/{identifier}.cfg"
+    cfg = haproxy_config_path(identifier)
     argv = ["/nix/var/nix/profiles/barectl/haproxy/bin/haproxy", "-f", cfg]
     process = pathlib.Path("/proc") / pid
     proxy = hap_proxy_account(identifier)
@@ -399,7 +414,7 @@ def hap_process(identifier: str) -> dict[str, object]:
     guarded = (cfg, "/etc/systemd/system/haproxy-site@.service")
     files: dict[str, object] = {}
     for name in guarded:
-        item = hap_safe(name, mode=0o644 if name.endswith(".service") else 0o600)
+        item = hap_safe(name, mode=0o644 if name.endswith(".service") else HAPROXY_CONFIG_MODE)
         # A derived start is accurate to one second; a reload never changes either file.
         if max(item.st_ctime_ns, item.st_mtime_ns) >= (start + 1_000_000) * 1000:
             raise ValueError("Proxy configuration changed after its loaded boundary.")
@@ -445,7 +460,7 @@ def hap_inventory() -> list[str]:
             identifier = match[1]
             loaded = hap_process(identifier)
             if loaded["pid"] != int(process.name) or pathlib.Path(
-                f"/etc/haproxy/sites/{identifier}.cfg"
+                haproxy_config_path(identifier)
             ).read_text() != haproxy_config(SimpleNamespace(identifier=identifier)):
                 raise ValueError("Foreign HAProxy executable or serving configuration.")
         except OSError, ValueError, KeyError, subprocess.TimeoutExpired:
@@ -462,7 +477,7 @@ def hap_wait(identifier: str) -> None:
     while True:
         try:
             hap_process(identifier)
-            if stat.S_ISSOCK(pathlib.Path(f"/run/haproxy/{identifier}/admin.sock").lstat().st_mode):
+            if stat.S_ISSOCK(pathlib.Path(haproxy_admin_socket(identifier)).lstat().st_mode):
                 return
         except OSError, ValueError:
             pass
@@ -473,7 +488,7 @@ def hap_wait(identifier: str) -> None:
 
 def hap_api(identifier: str, command: str, *, seconds: float = 5) -> str:
     before = hap_process(identifier)
-    path = f"/run/haproxy/{identifier}/admin.sock"
+    path = haproxy_admin_socket(identifier)
     value = pathlib.Path(path).lstat()
     if not stat.S_ISSOCK(value.st_mode) or (
         value.st_uid,
@@ -521,7 +536,7 @@ def serving_errors(stats: list[dict[str, str | list[str] | None]]) -> dict[str, 
 def haproxy_state(settings: SiteSettings | SimpleNamespace) -> ProxyState:
     identifier = settings.identifier
     process = hap_process(identifier)
-    cfg = f"/etc/haproxy/sites/{identifier}.cfg"
+    cfg = haproxy_config_path(identifier)
     if pathlib.Path(cfg).read_text() != haproxy_config(settings):
         raise ValueError("Proxy ACL/configuration differs from its immutable convention.")
     batch = hap_api(identifier, "show info;show servers state;show stat")
@@ -557,8 +572,8 @@ def haproxy_state(settings: SiteSettings | SimpleNamespace) -> ProxyState:
         ):
             raise ValueError("Backend connection capacity changed.")
     errors = serving_errors(stats)
-    state_path = f"/var/lib/haproxy/sites/{identifier}.state"
-    hap_safe(state_path, mode=0o600)
+    state_path = haproxy_state_path(identifier)
+    hap_safe(state_path, mode=HAPROXY_STATE_MODE)
     persistent = state_selection(pathlib.Path(state_path).read_text())
     if hap_process(identifier) != process:
         raise ValueError("Proxy identity changed during observation.")
@@ -580,10 +595,10 @@ def haproxy_state(settings: SiteSettings | SimpleNamespace) -> ProxyState:
 def persist_proxy_state(settings: SiteSettings | SimpleNamespace) -> str:
     raw = hap_api(settings.identifier, "show servers state") + "\n"
     selected = state_selection(raw)
-    path = pathlib.Path(f"/var/lib/haproxy/sites/{settings.identifier}.state")
-    hap_safe(str(path.parent), mode=0o755)
+    path = pathlib.Path(haproxy_state_path(settings.identifier))
+    hap_safe(str(path.parent), mode=HAPROXY_STATE_DIRECTORY_MODE)
     if path.exists() or path.is_symlink():
-        hap_safe(str(path), mode=0o600)
+        hap_safe(str(path), mode=HAPROXY_STATE_MODE)
     descriptor, staged = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
     temporary = pathlib.Path(staged)
     try:
