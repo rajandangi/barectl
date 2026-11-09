@@ -256,9 +256,14 @@ def stale() -> tuple[str, ...]:
         path for path in set(recorded) | set(current) if recorded.get(path) != current.get(path)
     }
     from . import recorded as transcripts
-    from .transcript_provenance import plan
+    from . import transcript_provenance as provenance
 
-    changes.update(f"capture:{state}" for state in plan(transcripts.stored()))
+    changes.update(f"capture:{state}" for state in provenance.plan(transcripts.stored()))
+    # The capture audit also covers files that no recorded command embeds, such as a new
+    # test helper or harness module. A changed audit means the recorded inputs no longer
+    # describe this tree even when every source digest still matches.
+    if not provenance.audited_exclusion():
+        changes.add("audit")
     return tuple(sorted(changes))
 
 
@@ -288,6 +293,12 @@ def main(argv: list[str] | None = None) -> int:
     changes = stale()
     for path in changes:
         print(path)  # noqa: T201
+    if "audit" in changes:
+        print(  # noqa: T201
+            "audit: the recorded capture inputs no longer describe this tree; run "
+            "scripts/refresh-transcript-baseline.sh",
+            file=sys.stderr,
+        )
     return 1 if changes else 0
 
 

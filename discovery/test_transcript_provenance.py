@@ -34,6 +34,13 @@ class CaptureSelectionTests(SimpleTestCase):
                     states,
                 )
 
+    def test_a_changed_audit_without_a_capture_names_the_audit_refresh(self) -> None:
+        current = provenance.inputs()
+        with mock.patch.object(
+            provenance, "inputs", return_value={**current, "new/harness.py": "0" * 64}
+        ):
+            self.assertIn("audit", source_manifest.stale())
+
     def test_legacy_manifest_without_receipts_is_stale(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "manifest.json"
@@ -41,7 +48,7 @@ class CaptureSelectionTests(SimpleTestCase):
             with mock.patch.object(source_manifest, "MANIFEST", manifest):
                 self.assertEqual(
                     source_manifest.stale(),
-                    tuple(f"capture:{state}" for state in recorded.stored()),
+                    ("audit", *(f"capture:{state}" for state in recorded.stored())),
                 )
 
     def test_real_recorded_states_select_only_affected_captures(self) -> None:

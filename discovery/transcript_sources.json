@@ -270,7 +270,7 @@
     "discovery/root_read.py": "19eedbe42e4d8dc2c3fb92070ac0d2f8f634af46f3a31e0d8f93ce6f8b2d7f47",
     "discovery/services.py": "bfd519b49e180f203df5b777c1dd82b97ff1b82754cb18eb56e367f288272b3e",
     "discovery/snapshot.py": "e851322ee0be272d28c882ed987ca4cdcc3d9ff78748f71bb2b1d17512f948db",
-    "discovery/source_manifest.py": "1c7428ef068a8d268a2df6f5bbc2a5f7d7741f16c55adc5a3741a520efa9d0f1",
+    "discovery/source_manifest.py": "b207a571ed280e741eab79bb5413c7cd52e89dbe0b56a2b2ac671b6462c9002b",
     "discovery/ssh.py": "7c98822276fdad55c608f2400c649a2d6970443f6180c244d6d77b8cc9dde8e8",
     "discovery/ssh_testing.py": "47f04b161192226a41513ad0d5092f677d544ccafc35ef1c3da098d8dbf292dd",
     "discovery/transcript_provenance.py": "fc26e5ca30add92e4497ba50a3f90901ff042e942e0e092cac19b5d51a35e84b",
