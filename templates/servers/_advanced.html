@@ -1,11 +1,35 @@
-{% include "servers/_host_standing.html" %}
-{% include "servers/_connection_evidence.html" %}
-{% include "servers/_native_observations.html" %}
-<section class="margin-top-4" aria-labelledby="advanced-stack-heading">
-  <h2 id="advanced-stack-heading">Web stack and services</h2>
-  {% include "bootstrap/_foundation_stack.html" %}
-</section>
-<section class="margin-top-4" aria-labelledby="advanced-cleanup-heading">
+{% include "servers/_advanced_summary.html" %}
+{% include "servers/_stack_panel.html" %}
+<p class="barectl-note">Open a section below for the checks and records behind this server's status.</p>
+<div class="barectl-diagnostics">
+  <section class="usa-accordion usa-accordion--bordered"
+           aria-labelledby="advanced-host-heading">
+    <h2 class="usa-accordion__heading" id="advanced-host-heading">
+      <button type="button"
+              class="usa-accordion__button"
+              aria-expanded="false"
+              aria-controls="advanced-host-evidence">Host checks</button>
+    </h2>
+    <div id="advanced-host-evidence" class="usa-accordion__content" hidden>
+      {% include "servers/_host_standing.html" %}
+    </div>
+  </section>
+  <section class="usa-accordion usa-accordion--bordered"
+           aria-labelledby="advanced-system-heading">
+    <h2 class="usa-accordion__heading" id="advanced-system-heading">
+      <button type="button"
+              class="usa-accordion__button"
+              aria-expanded="false"
+              aria-controls="advanced-system-evidence">Installed packages</button>
+    </h2>
+    <div id="advanced-system-evidence" class="usa-accordion__content" hidden>
+      {% include "servers/_native_observations.html" %}
+    </div>
+  </section>
+  {% include "servers/_history.html" %}
+</div>
+<section class="barectl-maintenance"
+         aria-labelledby="advanced-cleanup-heading">
   <h2 id="advanced-cleanup-heading">Finished runs</h2>
   <p class="barectl-note">
     Barectl leaves a record of each change on the server. Cleaning up finished runs clears
@@ -26,37 +50,3 @@
     </p>
   {% endif %}
 </section>
-<section class="margin-top-4" aria-labelledby="advanced-security-heading">
-  <h2 id="advanced-security-heading">Security reads</h2>
-  {% if security_reads %}
-    <p class="barectl-note">
-      The evidence behind each Security check, including the reads it recorded and why a check
-      could not be read. The checks themselves are on the
-      <a href="{% url 'server_security' server.pk %}">Security</a> page.
-    </p>
-    <table class="usa-table usa-table--borderless">
-      <thead>
-        <tr>
-          <th scope="col">Check</th>
-          <th scope="col">Outcome</th>
-          <th scope="col">Read</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for name, check in security_reads %}
-          <tr>
-            <th scope="row">{{ name }}</th>
-            <td>{{ check.status.label }}</td>
-            <td>
-              {% if check.warning %}<p>{{ check.warning }}</p>{% endif %}
-              {% for read in check.source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p class="barectl-note">No discovery check has read the security evidence yet.</p>
-  {% endif %}
-</section>
-{% include "servers/_history.html" %}

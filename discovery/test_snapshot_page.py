@@ -39,38 +39,34 @@ class SnapshotPageTests(ControllerConfigTestCase):
         start = page.index(f'aria-labelledby="{heading}"')
         return page[start : page.index("</section>", start)]
 
-    def assert_alert(self, html: str, label: str, warning: str) -> None:
-        self.assertInHTML(
-            f'<p class="usa-alert__text"><strong>{label}:</strong> {warning}</p>', html
-        )
+    def assert_warning(self, html: str, label: str, warning: str) -> None:
+        self.assertIn(label, html)
+        self.assertIn(warning, html)
 
-    def test_observed_values_and_their_sources_are_shown(self) -> None:
+    def test_observed_values_appear_once_without_source_commands(self) -> None:
         page = self.show(COLLECTED)
-        os = self.section(page, "os-heading")
+        os = self.section(page, "server-details-heading")
         self.assertIn("Ubuntu 26.04.1 LTS", os)
-        self.assertIn("from <code>/etc/os-release</code>", os)
-        # A field the os-release file does not set is reported as such.
-        self.assertIn("Not reported", os)
-        capacity = self.section(page, "capacity-heading")
+        self.assertNotIn("<code>/etc/os-release</code>", os)
+        self.assertEqual(os.count("Ubuntu 26.04.1 LTS"), 1)
+        self.assertNotIn("Distribution ID", os)
+        capacity = self.section(page, "server-details-heading")
         self.assertIn("x86_64", capacity)
-        self.assertIn("(4121137152 bytes)", capacity)
-        self.assertIn("total (53689778176 bytes), 0\xa0bytes available (0 bytes)", capacity)
-        self.assertIn(
-            "Read with <code>uname -m</code>, <code>nproc</code>, <code>/proc/meminfo</code>, "
-            "<code>df -B1 --output=size,avail,target /</code>.",
-            capacity,
-        )
-        web_stack = self.section(page, "web-stack-heading")
+        self.assertIn("3.8\xa0GB", capacity)
+        self.assertIn("0\xa0bytes available of 50.0\xa0GB", capacity)
+        self.assertNotIn("4121137152", capacity)
+        self.assertNotIn("53689778176", capacity)
+        for source in ("uname -m", "nproc", "/proc/meminfo", "df -B1 --output=size,avail,target /"):
+            self.assertNotIn(f"<code>{source}</code>", capacity)
+        web_stack = self.section(page, "advanced-system-heading")
+        self.assertNotIn("Nginx", web_stack)
         self.assertIn("postgresql 18+290ubuntu1<br>postgresql-18 18.6-0", web_stack)
         self.assertIn(
             "postgresql.service active (exited), enabled<br>postgresql@18-main.service not found",
             web_stack,
         )
-        self.assertIn(
-            "Read with <code>dpkg-query</code>, <code>ls -1b /etc/postgresql</code>, "
-            "<code>systemctl show postgresql.service</code>.",
-            web_stack,
-        )
+        for source in ("dpkg-query", "ls -1b /etc/postgresql", "systemctl show postgresql.service"):
+            self.assertNotIn(f"<code>{source}</code>", web_stack)
 
     def test_not_manageable_advanced_keeps_evidence_and_hides_change_links(self) -> None:
         standing = HostJudgment(
@@ -78,35 +74,56 @@ class SnapshotPageTests(ControllerConfigTestCase):
             ("Another web stack is installed: Apache.",),
             (),
             (("Nix", "absent"), ("Catalog realisation", "absent")),
+            evidence=(
+                ("Architecture", "amd64"),
+                ("APT series", "3.2"),
+                ("Nix installation", "absent"),
+            ),
         )
         page = self.show(replace(COLLECTED, standing=standing))
-        self.assertIn("Not manageable", page)
+        self.assertIn("Barectl cannot manage this server", page)
         self.assertIn("Another web stack is installed: Apache.", page)
-        self.assertIn("Nix: absent", page)
+        self.assertInHTML('<tr><th scope="row">Nix installation</th><td>absent</td></tr>', page)
         self.assertIn("Root filesystem", page)
-        self.assertIn("Nginx packages", page)
+        self.assertIn("Installed packages", page)
+        checks = self.section(page, "advanced-host-heading")
+        self.assertInHTML('<tr><th scope="row">APT version</th><td>3.2</td></tr>', checks)
+        self.assertNotIn("Architecture", checks)
         self.assertNotIn("Reviewed hosting Setup", page)
         self.assertNotIn("Reviewed site creation", page)
 
-    def test_an_observation_that_is_not_observed_is_an_alert_with_its_outcome(self) -> None:
-        page = self.show(COLLECTED)
-        capacity = self.section(page, "capacity-heading")
-        self.assertInHTML("<dd>Unsupported</dd>", capacity)
-        self.assert_alert(capacity, "Unsupported", "nproc did not report the CPU count.")
-        web_stack = self.section(page, "web-stack-heading")
-        self.assertIn("Packages: Absent", web_stack)
-        self.assertIn("Service units: Absent", web_stack)
-        self.assertEqual(web_stack.count("<strong>Absent:</strong>"), 2)
+    def test_unreadable_observations_keep_their_outcome_and_explanation(self) -> None:
+        unreadable_package = replace(
+            COLLECTED.components[1],
+            package=Observation(
+                ObservationOutcome.UNSUPPORTED,
+                ("dpkg-query",),
+                "Packages could not be read.",
+                (),
+            ),
+        )
+        page = self.show(
+            replace(COLLECTED, components=(COLLECTED.components[0], unreadable_package))
+        )
+        capacity = self.section(page, "server-details-heading")
+        self.assertInHTML("<span>Unsupported</span>", capacity)
+        self.assert_warning(capacity, "Unsupported", "nproc did not report the CPU count.")
+        web_stack = self.section(page, "advanced-system-heading")
+        self.assertNotIn("<strong>Absent:</strong>", web_stack)
+        self.assertNotIn("usa-alert--warning", web_stack)
+        self.assertIn("Nginx", web_stack)
+        self.assertIn("Packages could not be read.", web_stack)
+        self.assertNotIn("No distribution web-stack packages or services were found.", web_stack)
 
     def test_the_os_name_stands_in_for_a_missing_pretty_name(self) -> None:
         release = OsRelease("", "Debian GNU/Linux", "debian", "")
         page = self.show(
             replace(COLLECTED, os=Observation(OBSERVED, ("/usr/lib/os-release",), "", release))
         )
-        os = self.section(page, "os-heading")
-        self.assertInHTML("<dd>Debian GNU/Linux</dd>", os)
-        self.assertInHTML("<dd>debian</dd>", os)
-        self.assertInHTML("<dd>Not reported</dd>", os)
+        os = self.section(page, "server-details-heading")
+        self.assertInHTML("<td>Debian GNU/Linux</td>", os)
+        self.assertNotIn("Distribution ID", os)
+        self.assertNotIn('<th scope="row">Version</th>', os)
 
     def test_capacity_that_was_not_observed_is_never_shown_as_zero(self) -> None:
         unsupported = ObservationOutcome.UNSUPPORTED
@@ -123,10 +140,17 @@ class SnapshotPageTests(ControllerConfigTestCase):
                 ),
             )
         )
-        capacity = self.section(page, "capacity-heading")
+        capacity = self.section(page, "server-details-heading")
         # The architecture, CPUs and memory are unsupported, and the filesystem inaccessible.
-        self.assertInHTML("<dd>Unsupported</dd>", capacity, count=3)
-        self.assertInHTML("<dd>Inaccessible</dd>", capacity, count=1)
-        self.assertNotIn("<dd>0</dd>", capacity)
+        self.assertInHTML("<span>Unsupported</span>", capacity, count=3)
+        self.assertInHTML("<span>Inaccessible</span>", capacity, count=1)
+        self.assertNotIn("<span>0</span>", capacity)
         self.assertNotIn("bytes", capacity)
-        self.assertEqual(capacity.count("usa-alert--warning"), 4)
+        self.assertNotIn("usa-alert--warning", capacity)
+        for warning in (
+            "No architecture.",
+            "No memory.",
+            "No filesystem.",
+            "nproc did not report the CPU count.",
+        ):
+            self.assertIn(warning, capacity)

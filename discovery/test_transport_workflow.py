@@ -110,9 +110,7 @@ class TransportWorkflowCase(ControllerConfigTestCase):
         page = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(page, "may be out of date")
         self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
-        self.assertContains(
-            self.client.get(f"/servers/{server.pk}/settings/"), "Retry connection check"
-        )
+        self.assertContains(self.client.get(f"/servers/{server.pk}/settings/"), "Refresh server")
 
     def assert_disconnected(self, *servers: SshServer) -> None:
         """Wait for the servers, by default the test's own, to see every session closed."""

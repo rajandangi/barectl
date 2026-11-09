@@ -1,13 +1,10 @@
-<nav aria-label="Stack sections">
+<nav class="barectl-stack-navigation" aria-label="Stack sections">
   <ul class="usa-list usa-list--unstyled">
-    <li><a href="?tab=web"
-   {% if stack_tab == 'web' %} aria-current="page"{% endif %}>Web</a></li>
-    <li><a href="?tab=services"
-   {% if stack_tab == 'services' %} aria-current="page"{% endif %}>Services</a></li>
-    <li><a href="?tab=php"
-   {% if stack_tab == 'php' %} aria-current="page"{% endif %}>PHP runtimes</a></li>
-    <li><a href="?tab=catalog"
-   {% if stack_tab == 'catalog' %} aria-current="page"{% endif %}>Runtime catalog</a></li>
+    {% for key, label in stack_tabs %}
+      <li>
+        <a id="stack-tab-{{ key }}" href="{% url 'server_advanced' server.pk %}?tab={{ key }}" hx-get="{% url 'server_advanced' server.pk %}?tab={{ key }}" hx-target="#server-stack" hx-swap="outerHTML" hx-sync="#server-stack:replace" hx-push-url="true" {% if stack_tab == key %}aria-current="page"{% if stack_focus %} autofocus{% endif %}{% endif %}>{{ label }}</a>
+      </li>
+    {% endfor %}
   </ul>
 </nav>
 {% if stack_tab == "catalog" %}
@@ -26,37 +23,47 @@
     {% endif %}
   </section>
 {% else %}
-  <section class="barectl-card" aria-labelledby="foundation-stack-heading">
-    <h2 id="foundation-stack-heading">{% if stack_tab == "web" %}Web{% else %}Services{% endif %}</h2>
-    <p class="barectl-note">From the current connection's last discovery. Opening this page makes no SSH connection.</p>
+  <section aria-label="Selected stack details">
     {% if stack_tab == "web" and foundation_web %}
-      <dl class="barectl-facts">
-        {% for label, value in foundation_web %}
-          <div>
-            <dt>{{ label }}</dt>
-            <dd>
-              {{ value }}
-            </dd>
-          </div>
-        {% endfor %}
-      </dl>
+      <table class="usa-table usa-table--borderless barectl-info-table">
+        <thead>
+          <tr>
+            <th scope="col">Information</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for label, value in foundation_web %}
+            <tr>
+              <th scope="row">{{ label }}</th>
+              <td>{{ value }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     {% elif stack_tab == "services" and foundation_services %}
-      <dl class="barectl-facts">
-        {% for label, value in foundation_services %}
-          <div>
-            <dt>{{ label }}</dt>
-            <dd>
-              {{ value }}
-            </dd>
-          </div>
-        {% endfor %}
-      </dl>
+      <table class="usa-table usa-table--borderless barectl-info-table">
+        <thead>
+          <tr>
+            <th scope="col">Information</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for label, value in foundation_services %}
+            <tr>
+              <th scope="row">{{ label }}</th>
+              <td>{{ value }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     {% else %}
-      <p>No verified foundation service evidence. Check the connection, then review server setup if the host is ready.</p>
+      <p>No server software has been observed for this section.</p>
     {% endif %}
   </section>
-  {% if stack_tab == "web" %}
-    <section class="barectl-card" aria-labelledby="site-files-heading">
+  {% if stack_tab == "web" and site_files %}
+    <section aria-labelledby="site-files-heading">
       <h2 id="site-files-heading">Site files</h2>
       {% if site_files %}
         <p class="barectl-note">

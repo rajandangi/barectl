@@ -74,10 +74,6 @@
   {% if firewall_panel %}
     {% include "servers/_firewall_ports.html" %}
   {% endif %}
-  <p class="barectl-note">
-    Engine detail, such as service state and configuration files, stays in
-    <a href="{% url 'server_advanced' server.pk %}">Advanced</a>.
-  </p>
 {% else %}
   <p>No security checks have been read yet.</p>
   <p class="barectl-note">

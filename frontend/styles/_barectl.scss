@@ -453,6 +453,70 @@ body {
   padding: 0;
 }
 
+.barectl-diagnostics {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: units(1);
+}
+
+.barectl-advanced-stack {
+  margin-top: units(3);
+}
+
+.barectl-maintenance {
+  margin-top: units(4);
+  padding-top: units(2);
+  border-top: units(1px) solid color("base-lighter");
+}
+
+.barectl-info-table {
+  width: 100%;
+  table-layout: fixed;
+
+  th,
+  td {
+    overflow-wrap: anywhere;
+    vertical-align: top;
+    white-space: normal;
+  }
+
+  th:first-child {
+    width: 35%;
+  }
+}
+
+.barectl-stack-navigation {
+  ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 units(1);
+    border-bottom: units(1px) solid color("base-lighter");
+  }
+
+  li {
+    margin: 0;
+  }
+
+  a {
+    display: block;
+    padding: units(1.5) units(1);
+    border-bottom: units(0.5) solid transparent;
+    color: color("base-dark");
+    text-decoration: none;
+
+    &:hover {
+      background-color: color("primary-lighter");
+      color: color("primary");
+    }
+  }
+
+  [aria-current="page"] {
+    color: color("primary");
+    border-bottom-color: color("primary");
+    font-weight: font-weight("bold");
+  }
+}
+
 // A long action label wraps inside its button instead of widening a narrow page.
 .barectl-layout__content .usa-button,
 #next-action .usa-button {

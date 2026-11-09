@@ -60,14 +60,61 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
             1,
         )
         self.assert_no_native_terms()
+        self.user.user_permissions.add(Permission.objects.get(codename="change_server"))
+        page.get_by_role("navigation", name="Primary").get_by_role(
+            "link", name="Servers", exact=True
+        ).click()
+        expect(page.get_by_role("columnheader", name="Actions", exact=True)).to_be_visible()
+        page.get_by_role("link", name="Edit connection for Production", exact=True).click()
+        expect(page.get_by_role("heading", name="Edit Production", level=1)).to_be_visible()
+        page.get_by_role("link", name="Cancel", exact=True).click()
+        expect(page.get_by_role("heading", name="Servers", level=1)).to_be_visible()
 
     def test_advanced_is_two_activations_from_the_server(self) -> None:
         page = self.page
         page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Advanced"
         ).click()
+        expect(page.get_by_role("heading", name="Server details", exact=True)).to_be_visible()
         expect(page.get_by_role("heading", name="Web stack and services")).to_be_visible()
         expect(page.get_by_text("Discovery history")).to_be_visible()
+        evidence = page.get_by_role("button", name="Host checks", exact=True)
+        expect(evidence).to_have_attribute("aria-expanded", "false")
+        expect(page.locator("#advanced-host-evidence")).to_be_hidden()
+        evidence.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#advanced-host-evidence")).to_be_visible()
+        expect(evidence).to_have_attribute("aria-expanded", "true")
+        expect(page.get_by_text("Connection record", exact=True)).to_have_count(0)
+        expect(page.get_by_text("Commands used", exact=True)).to_have_count(0)
+        page.evaluate("window.barectlStackTest = 'same-page'")
+        for label, key in (
+            ("Services", "services"),
+            ("PHP versions", "php"),
+            ("Software catalog", "catalog"),
+            ("Web server", "web"),
+        ):
+            link = page.get_by_role("navigation", name="Stack sections").get_by_role(
+                "link", name=label, exact=True
+            )
+            link.focus()
+            page.keyboard.press("Enter")
+            expect(link).to_have_attribute("aria-current", "page")
+            expect(link).to_be_focused()
+            expect(page).to_have_url(
+                f"{self.live_server_url}/servers/{self.server.pk}/advanced/?tab={key}"
+            )
+            self.assertEqual(page.evaluate("window.barectlStackTest"), "same-page")
+            expect(page.locator("#advanced-host-evidence")).to_be_visible()
+        page.get_by_role("button", name="Discovery history", exact=True).click()
+        expect(page.locator("#discovery-history-content")).to_be_visible()
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
 
     def test_site_overview_shows_the_site_and_logs_hold_the_detail(self) -> None:
         page = self.page

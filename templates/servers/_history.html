@@ -1,28 +1,35 @@
 <section id="discovery-history"
-         class="barectl-card"
+         class="usa-accordion usa-accordion--bordered"
          aria-labelledby="history-heading">
-  <h2 id="history-heading">Discovery history</h2>
-  {% if history %}
-    {% include "servers/_attempts_table.html" with attempts=history show_servers=False %}
-    {% for attempt in history %}
-      {% if attempt.older_connection and attempt.collected_at %}
-        <details>
-          <summary>Older observations, connection revision {{ attempt.connection_revision }}</summary>
-          <p>Older evidence collected over connection <code>{{ attempt.ssh_alias }}</code>. Original target <code>{{ attempt.original_target|default:attempt.ssh_alias }}</code>. These observations do not verify the current connection.</p>
-          <dl>
-            <dt>Operating system</dt>
-            <dd>
-              {{ attempt.os_pretty_name }}
-            </dd>
-          </dl>
-        </details>
-      {% endif %}
-    {% endfor %}
-    <p class="barectl-note">
-      Attempts are recorded when they are queued, newest first. A snapshot exists only for a
-      succeeded attempt and describes the server at its collection time; it is not live status.
-    </p>
-  {% else %}
-    <p>No discovery attempts yet. Barectl records one when it checks this server's connection.</p>
-  {% endif %}
+  <h2 id="history-heading" class="usa-accordion__heading">
+    <button type="button"
+            class="usa-accordion__button"
+            aria-expanded="false"
+            aria-controls="discovery-history-content">Discovery history</button>
+  </h2>
+  <div id="discovery-history-content" class="usa-accordion__content" hidden>
+    {% if history %}
+      {% include "servers/_attempts_table.html" with attempts=history show_servers=False %}
+      {% for attempt in history %}
+        {% if attempt.older_connection and attempt.collected_at %}
+          <details>
+            <summary>Older observations, connection revision {{ attempt.connection_revision }}</summary>
+            <p>Older evidence collected over connection <code>{{ attempt.ssh_alias }}</code>. Original target <code>{{ attempt.original_target|default:attempt.ssh_alias }}</code>. These observations do not verify the current connection.</p>
+            <dl>
+              <dt>Operating system</dt>
+              <dd>
+                {{ attempt.os_pretty_name }}
+              </dd>
+            </dl>
+          </details>
+        {% endif %}
+      {% endfor %}
+      <p class="barectl-note">
+        Attempts are recorded when they are queued, newest first. A snapshot exists only for a
+        succeeded attempt and describes the server at its collection time; it is not live status.
+      </p>
+    {% else %}
+      <p>No discovery attempts yet. Barectl records one when it checks this server's connection.</p>
+    {% endif %}
+  </div>
 </section>

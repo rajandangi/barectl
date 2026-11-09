@@ -95,11 +95,11 @@ class SecuritySectionTests(ControllerConfigTestCase):
         self.assertContains(response, "Could not check sign-in for every login account")
         self.assertNotContains(response, "Only key sign-in is allowed")
 
-    def test_advanced_shows_the_reads_behind_the_checks(self) -> None:
+    def test_advanced_omits_collection_commands(self) -> None:
         self.store(ok_state())
         response = self.client.get(f"/servers/{self.server.pk}/advanced/")
-        self.assertContains(response, "Security reads")
-        self.assertContains(response, "a fixed read")
+        self.assertNotContains(response, "Security reads")
+        self.assertNotContains(response, "a fixed read")
 
     def test_a_failed_later_check_marks_the_checks_stale(self) -> None:
         self.store(ok_state())

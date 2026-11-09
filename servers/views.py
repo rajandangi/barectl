@@ -31,6 +31,7 @@ from sites.forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
 from sites.preparation import site_facts
 from sites.recognition import site_files, site_pools
 
+from .advanced import STACK_TABS, host_checks, package_checks, setup_components
 from .attention import needs_attention
 from .discovery_state import (
     AttemptView,
@@ -322,11 +323,13 @@ def _advanced_section(
     """Advanced holds the Stack and the stored evidence, read from the last observation."""
     if section == "advanced":
         snapshot = state.snapshot
+        context["host_checks"] = host_checks(state.presentation)
+        context["package_checks"] = package_checks(state.presentation)
+        context["setup_components"] = setup_components(state.presentation)
         requested_tab = request.GET.get("tab", "web")
-        stack_tab = (
-            requested_tab if requested_tab in {"web", "services", "catalog", "php"} else "web"
-        )
+        stack_tab = next((key for key, _ in STACK_TABS if key == requested_tab), "web")
         context["stack_tab"] = stack_tab
+        context["stack_tabs"] = STACK_TABS
         standing = snapshot.collected.standing if snapshot else None
         context["foundation_web"] = (
             tuple(
@@ -345,7 +348,7 @@ def _advanced_section(
             tuple(
                 (label, value)
                 for label, value in standing.evidence
-                if label in {"Caddy state", "Nix daemon", "Journal storage"}
+                if label in {"Nix daemon", "Journal storage"}
             )
             if standing
             else ()
@@ -369,10 +372,6 @@ def _advanced_section(
             checked=snapshot is not None,
             machine=snapshot.collected.architecture.value if snapshot is not None else None,
         )
-        from security.presentation import check_reads
-
-        security = snapshot.collected.security.value if snapshot is not None else None
-        context["security_reads"] = check_reads(security)
 
 
 def _jobs_context(request: HttpRequest, state: DiscoveryState, context: dict[str, object]) -> None:
@@ -505,6 +504,14 @@ def server_page(
             return response
     if section == "advanced":
         context["presented"] = state.presentation
+        if (
+            _is_fragment_request(request)
+            and request.headers.get("HX-Target", "").partition("#")[2] == "server-stack"
+        ):
+            context["stack_focus"] = True
+            response = render(request, "servers/_stack_panel.html", context)
+            patch_vary_headers(response, ("HX-Request", "HX-Request-Type", "HX-Target"))
+            return response
     if section == "security":
         from security.presentation import firewall_panel
         from security.presentation import present as present_security

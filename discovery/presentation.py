@@ -159,15 +159,12 @@ def _scalar[T](
 
 
 def _size(size_bytes: int) -> str:
-    return f"{filesizeformat(size_bytes)} ({size_bytes} bytes)"
+    return filesizeformat(size_bytes)
 
 
 def _filesystem(size: FilesystemSize) -> str:
     total, avail = size.size_bytes, size.avail_bytes
-    return (
-        f"{filesizeformat(total)} total ({total} bytes), "
-        f"{filesizeformat(avail)} available ({avail} bytes)"
-    )
+    return f"{filesizeformat(avail)} available of {filesizeformat(total)}"
 
 
 def _component(observed: WebStackComponentObservation) -> ShownComponent:

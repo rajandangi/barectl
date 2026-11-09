@@ -9,6 +9,7 @@
             <th scope="col" data-sortable>Address or SSH alias</th>
             <th scope="col">Status</th>
             <th scope="col" data-sortable>Added</th>
+            {% if perms.servers.change_server %}<th scope="col">Actions</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -23,6 +24,12 @@
                 <td data-sort-value="{{ server.created_at|date:'U' }}">
                   <time datetime="{{ server.created_at|date:'c' }}">{{ server.created_at|date:'M j, Y' }}</time>
                 </td>
+                {% if perms.servers.change_server %}
+                  <td>
+                    <a href="{% url 'server_edit' server.pk %}"
+                       aria-label="Edit connection for {{ server.name }}">Edit connection</a>
+                  </td>
+                {% endif %}
               </tr>
             {% endwith %}
           {% endfor %}

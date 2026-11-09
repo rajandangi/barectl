@@ -94,12 +94,7 @@
       <p class="barectl-form-note">Save and check queues a read-only connection check. It changes nothing on the server.</p>
       <div class="barectl-form-actions">
         <button type="submit" class="usa-button">{{ submit_label }}</button>
-        {% if server %}
-          <a class="usa-button usa-button--unstyled"
-             href="{% url 'server_settings' server.pk %}#connection">Cancel</a>
-        {% else %}
-          <a class="usa-button usa-button--unstyled" href="{% url 'servers' %}">Cancel</a>
-        {% endif %}
+        <a class="usa-button usa-button--unstyled" href="{% url 'servers' %}">Cancel</a>
       </div>
     </form>
   </div>

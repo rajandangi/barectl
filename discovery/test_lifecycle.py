@@ -126,8 +126,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertContains(page, "No observations yet.")
         self.assertContains(
             page,
-            "No component observations yet. Barectl reads web-stack components after it "
-            "verifies the connection.",
+            "No package observations yet. Refresh server to check installed software.",
         )
 
         self.run_worker()
@@ -155,10 +154,10 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
             ("Ubuntu 26.04.1 LTS", "ubuntu", "26.04", ("/etc/os-release",)),
         )
         page = self.client.get(f"/servers/{server.pk}/advanced/")
-        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
-        self.assertContains(page, "<dd>26.04</dd>", html=True)
-        self.assertContains(page, "from <code>/etc/os-release</code>")
-        self.assertContains(page, f"<code>{HOST_KEY}</code>")
+        self.assertContains(page, "<td>Ubuntu 26.04.1 LTS</td>", html=True)
+        self.assertNotContains(page, '<th scope="row">Version</th>')
+        self.assertNotContains(page, "Commands used")
+        self.assertNotContains(page, f"<code>{HOST_KEY}</code>")
         self.assertContains(page, "This is a snapshot, not live status.")
         self.assertContains(page, f'datetime="{self.snapshot.collected_at.isoformat()}"')
         self.assertNotContains(page, "hx-trigger")
@@ -186,7 +185,9 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertEqual(self.remote.targets, [])
         page = self.client.get(f"/servers/{server.pk}/settings/")
         self.assertContains(page, "Connection failed")
-        self.assertContains(page, "It is no longer a Host entry.")
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/advanced/"), "It is no longer a Host entry."
+        )
 
     def test_aliases_that_connect_differently_from_ssh_are_refused(self) -> None:
         self.register()
@@ -302,8 +303,8 @@ class VerifyConnectionTests(DiscoveryTestCase):
     def test_explicit_verification_queues_one_attempt(self) -> None:
         self.sign_in_with("view_server", "add_discoveryattempt")
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
-        self.assertContains(page, "<strong>Not verified.</strong>", html=True)
-        self.assertContains(page, "Verify connection")
+        self.assertContains(page, "Not checked yet")
+        self.assertContains(page, "Refresh server")
         response = self.client.post(self.verify_url())
         self.assertRedirects(response, f"/servers/{self.server.pk}/", fetch_redirect_response=False)
         # Repeated submissions share the active attempt instead of queueing another.
@@ -314,8 +315,8 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.run_worker()
         self.assertEqual(self.remote.targets[0].alias, "web.example.com")
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
-        self.assertContains(page, "<strong>Verified</strong>", html=True)
-        self.assertContains(page, "Refresh observations")
+        self.assertContains(page, 'id="connection-status"')
+        self.assertContains(page, "Refresh server")
         response = self.client.post(self.verify_url(), follow=True)
         self.assertContains(response, "Barectl queued a connection check for Web.")
         self.assertEqual(DiscoveryAttempt.objects.count(), 2)
@@ -346,7 +347,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertNotIn("Checking", status)
         self.assertContains(
             self.client.get(f"/servers/{self.server.pk}/advanced/"),
-            "<dd>Ubuntu 26.04.1 LTS</dd>",
+            "<td>Ubuntu 26.04.1 LTS</td>",
             html=True,
         )
         self.assertIn("HX-Request-Type", finished.headers["Vary"])
@@ -363,7 +364,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.run_worker()
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "rejected the SSH credentials")
-        self.assertContains(page, "Retry connection check")
+        self.assertContains(page, "Refresh server")
         self.remote.failure = ""
         self.client.post(self.verify_url())
         self.run_worker()
@@ -421,7 +422,7 @@ class RefreshTests(DiscoveryTestCase):
         first = self.succeed_once()
         self.sign_in_with("view_server", "add_discoveryattempt")
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
-        self.assertContains(page, "Refresh observations")
+        self.assertContains(page, "Refresh server")
         self.assertNotContains(page, "hx-trigger")
 
         response = self.client.post(self.verify_url(), headers=HTMX_FRAGMENT)
@@ -510,9 +511,9 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "Connection failed")
         self.assertContains(page, "could not reach the SSH service")
-        self.assertContains(page, "Retry connection check")
+        self.assertContains(page, "Refresh server")
         advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
-        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(advanced, "<td>Ubuntu 26.04.1 LTS</td>", html=True)
         self.assertContains(advanced, "The latest connection check failed, so these observations")
         # No automatic retry: one failed attempt stays until the operator retries.
         self.assertEqual(DiscoveryAttempt.objects.count(), 2)
@@ -523,8 +524,8 @@ class RefreshTests(DiscoveryTestCase):
         self.assertEqual(DiscoveryAttempt.objects.count(), 3)
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
-        self.assertContains(page, "<strong>Verified</strong>", html=True)
-        self.assertContains(page, "Refresh observations")
+        self.assertContains(page, 'id="connection-status"')
+        self.assertContains(page, "Refresh server")
 
     def test_partial_refresh_keeps_warnings_not_absent_software(self) -> None:
         self.succeed_once()
@@ -562,7 +563,7 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "did not finish within")
         advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
-        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(advanced, "<td>Ubuntu 26.04.1 LTS</td>", html=True)
         self.assertContains(advanced, "may be out of date")
 
 
@@ -631,9 +632,9 @@ class RecoveryTests(DiscoveryTestCase):
         self.sign_in_with("view_server", "add_discoveryattempt")
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "stopped before finishing")
-        self.assertContains(page, "Retry connection check")
+        self.assertContains(page, "Refresh server")
         advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
-        self.assertContains(advanced, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(advanced, "<td>Ubuntu 26.04.1 LTS</td>", html=True)
         self.assertContains(advanced, "may be out of date")
 
         self.client.post(f"/servers/{self.server.pk}/verify/")
@@ -751,7 +752,7 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertIn("Retry connection check", content)
         self.assertContains(
             self.client.get(f"/servers/{self.server.pk}/advanced/"),
-            "<dd>Ubuntu 26.04.1 LTS</dd>",
+            "<td>Ubuntu 26.04.1 LTS</td>",
             html=True,
         )
         self.assertRegex(
@@ -772,9 +773,7 @@ class RecoveryTests(DiscoveryTestCase):
         self.interrupt_running()
         self.sign_in_with("view_server")
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
-        self.assertContains(
-            page, "<strong>Checking the connection…</strong> Started at", html=False
-        )
+        self.assertContains(page, "Checking the connection…")
         self.assertContains(
             self.client.get(f"/servers/{self.server.pk}/advanced/"),
             "A new connection check is running",

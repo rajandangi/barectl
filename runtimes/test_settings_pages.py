@@ -115,7 +115,7 @@ class ServerSettingsPageTests(ControllerConfigTestCase):
 
     def test_settings_keeps_native_runtime_detail_in_advanced(self) -> None:
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
-        for detail in ("Master state", "Site pools", "Store path", "Runtime catalog"):
+        for detail in ("Master state", "Site pools", "Store path", "Software catalog"):
             self.assertNotContains(page, detail)
         advanced = self.client.get(f"/servers/{self.server.pk}/advanced/?tab=php")
         self.assertContains(advanced, "Master state")

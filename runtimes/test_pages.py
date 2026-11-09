@@ -23,7 +23,8 @@ class RuntimeCatalogPageTests(DiscoveryTestCase):
 
     def assert_offers(self, machine: str, architecture: Architecture, other: Architecture) -> None:
         page = self.advanced_page(machine)
-        self.assertIn(f"<code>{architecture}</code>", page)
+        self.assertInHTML(f"<span>{machine}</span>", page)
+        self.assertNotIn(f"<code>{architecture}</code>", page)
         for build in load().offered(architecture):
             if build.kind is Kind.EXTENSION:
                 # phpdbg-style extension builds are supply, not a runtime an operator adds.
@@ -61,12 +62,12 @@ class RuntimeCatalogPageTests(DiscoveryTestCase):
 
     def test_the_catalog_table_is_in_advanced_and_not_in_settings(self) -> None:
         page = self.advanced_page("x86_64")
-        self.assertIn("Runtime catalog", page)
+        self.assertIn("Software catalog", page)
         self.assertIn("Download size", page)
         self.assertNotIn("Add runtime php84", page)
         settings = self.client.get(f"/servers/{Server.objects.get().pk}/settings/")
         self.assertEqual(settings.status_code, 200)
-        self.assertNotContains(settings, "Runtime catalog")
+        self.assertNotContains(settings, "Software catalog")
         self.assertNotContains(settings, "Download size")
         self.assertNotContains(settings, "Unpacked size")
 

@@ -105,5 +105,5 @@ class RuntimeSettingsBrowserTests(BrowserTestCase):
         self.page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Advanced", exact=True
         ).click()
-        self.page.get_by_role("link", name="PHP runtimes", exact=True).click()
+        self.page.get_by_role("link", name="PHP versions", exact=True).click()
         expect(self.page.get_by_text("Master state", exact=True)).to_be_visible()

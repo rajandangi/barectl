@@ -52,8 +52,8 @@ class PresentationTests(SimpleTestCase):
             [
                 ("x86_64",),
                 ("Unsupported",),
-                ("3.8\xa0GB (4121137152 bytes)",),
-                ("50.0\xa0GB total (53689778176 bytes), 0\xa0bytes available (0 bytes)",),
+                ("3.8\xa0GB",),
+                ("0\xa0bytes available of 50.0\xa0GB",),
             ],
         )
         postgresql, nginx = presented.components

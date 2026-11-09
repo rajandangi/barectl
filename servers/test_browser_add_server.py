@@ -135,7 +135,11 @@ class AddServerBrowserTests(BrowserTestCase):
         page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Advanced", exact=True
         ).click()
-        expect(page.get_by_role("heading", name="Connection record")).to_be_visible()
+        expect(page.get_by_role("heading", name="Connection record")).to_have_count(0)
+        page.get_by_role("button", name="Discovery history", exact=True).click()
+        expect(page.locator("#discovery-history-content")).to_contain_text(
+            "could not reach the SSH service"
+        )
 
     def test_cannot_be_managed_lists_one_line_per_reason(self) -> None:
         self.grant("add_server", "add_discoveryattempt")
@@ -153,6 +157,13 @@ class AddServerBrowserTests(BrowserTestCase):
         ).to_be_visible()
         reasons = page.locator("#next-action ul li")
         expect(reasons.first).to_contain_text("Another web stack is installed")
+        sections = page.get_by_role("navigation", name="Server sections")
+        sections.get_by_role("link", name="Advanced", exact=True).click()
+        page.get_by_role("button", name="Installed packages", exact=True).click()
+        packages = page.get_by_role("table", name="Installed distribution packages")
+        expect(packages).to_be_visible()
+        expect(packages).to_contain_text("nginx")
+        sections.get_by_role("link", name="Sites", exact=True).click()
         refresh = page.get_by_role("button", name="Refresh server", exact=True)
         refresh.click()
         expect(refresh).to_be_disabled()
@@ -168,7 +179,11 @@ class AddServerBrowserTests(BrowserTestCase):
         page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Advanced", exact=True
         ).click()
-        expect(page.get_by_text("Discovery evidence")).to_be_visible()
+        expect(page.get_by_text("Host checks")).to_be_visible()
+        page.get_by_role("button", name="Installed packages", exact=True).click()
+        expect(
+            page.get_by_text("No distribution web-stack packages or services were found.")
+        ).to_be_visible()
 
     def test_key_choice_reveals_the_chosen_public_half(self) -> None:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))

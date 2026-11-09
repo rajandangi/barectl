@@ -17,6 +17,8 @@ the current place. Each is one activation from any page.
 
 - **Servers** lists saved servers with their connection status. With no servers it asks
   for the first one and offers **Add server**.
+  Its Actions column offers **Edit connection** to operators with permission to edit
+  servers. Cancelling an edit opened there returns to the list.
 - **Sites** lists every observed site across servers and offers **Create site**.
 - **Activity** is this controller's record of checks and changes, newest first. It never
   establishes a server's current state.
@@ -67,8 +69,32 @@ where it starts a change.
 | --- | --- |
 | Sites (default) | Observed sites led by their domains, each opening its site page, and **Create site**. |
 | Activity | This server's checks and changes, newest first. |
-| Settings | Server-wide choices: **PHP versions** with the sites using each and **Add PHP version**, **Default PHP**, **Default Node.js**, **HTTPS** with the optional certificate contact email, **Database** with the server's MariaDB or PostgreSQL engine and its install or remove review, **Object cache (Valkey)** with the installed version and the one install review, the connection with **Edit connection**, and **Remove server**. |
-| Advanced | Host standing and its evidence, the foundation stages, operating system, capacity, components, the web stack and services, the runtime catalog, masters, protections, site pools, the connection record with its host key, discovery history, and **Clean up finished runs**. |
+| Settings | Server-wide choices: **PHP versions** with the sites using each and **Add PHP version**, **Default PHP**, **Default Node.js**, **HTTPS** with the optional certificate contact email, **Database** with the server's MariaDB or PostgreSQL engine and its install or remove review, **Object cache (Valkey)** with the installed version and the one install review, and **Remove server**. |
+| Advanced | Server details, host checks, installed packages, web software, PHP versions, software catalog, discovery history, and **Clean up finished runs**. |
+
+Advanced opens with one **Server details** table for the operating system and capacity,
+and the time of the last successful check. **Host checks** holds the remaining
+prerequisites and setup components in Check / Value tables. **Installed packages** lists
+distribution web-stack components in one Component / Packages / Services table; confirmed
+absent components are omitted, while unreadable observations retain their explanations.
+Hardware values and check timestamps are not repeated in these panels. Connection
+details are edited from the server list; Settings has no Connection panel. Attempt times
+and outcomes live in Discovery history. There is no Connection record
+or raw Security reads panel. Web server, Services, PHP versions and Software catalog switch
+only the stack panel through HTMX, retain the rest of the page and keyboard focus, and
+keep their URL usable for a direct visit. The site list stays on Sites. Failed or
+running-check notices remain visible beside the summary.
+
+The dashboard explains tasks for people hosting applications without server expertise.
+It does not list collection commands or implementation steps. A command belongs in the
+interface only when the operator needs to copy or run it for a specific task, such as
+independently checking a new server's fingerprint or recovering access.
+Capacity uses readable units, without repeating exact byte counts beside each value.
+
+This applies the separation of server details and advanced settings in
+[Coolify's server guidance](https://coolify.io/docs/core/infrastructure/servers/manage-server)
+and the grouped settings in [Forge](https://laravel.com/forge/docs/servers/the-basics).
+The disclosures use the existing [USWDS accordion](https://designsystem.digital.gov/components/accordion/).
 
 Removing a server deletes its local connection and history from this installation. It
 changes nothing on the server.

@@ -13,6 +13,7 @@ from discovery.snapshot import save_snapshot
 from operations import preparation
 from operations.activity_testing import record_change
 from operations.models import ChangePreparation, RemoteOperation
+from servers.advanced import STACK_TABS
 from servers.views import SECTIONS
 from sites.ui_testing import record_http_sites, record_older_snapshots
 
@@ -42,6 +43,21 @@ class ServerSectionTests(ControllerConfigTestCase):
                     self.assertContains(response, "<html")
                     self.assertContains(response, 'aria-label="Server sections"')
                     self.assertContains(response, f'aria-current="page">{title}</a>')
+                    if key == "settings":
+                        body = response.content.decode()
+                        self.assertNotIn('id="connection-heading"', body)
+                        self.assertNotIn("<dt>SSH user</dt>", body)
+                        self.assertNotIn("settings-connection-heading", body)
+            for tab_key, label in STACK_TABS:
+                response = self.client.get(
+                    f"/servers/{server.pk}/advanced/?tab={tab_key}",
+                    headers={**HTMX_FRAGMENT, "HX-Target": "section#server-stack"},
+                )
+                self.assertContains(response, 'id="server-stack"')
+                self.assertNotContains(response, "<html")
+                self.assertNotContains(response, "Server details")
+                self.assertContains(response, f">{label}</a>")
+                self.assertIn("HX-Target", response.headers["Vary"])
             connect.assert_not_called()
         self.assertFalse(RemoteOperation.objects.exists())
 
@@ -52,6 +68,12 @@ class ServerSectionTests(ControllerConfigTestCase):
         body = self.client.get(f"/servers/{server.pk}/").content.decode()
         positions = [body.index(f">{title}</a>") for title in SECTIONS.values()]
         self.assertEqual(positions, sorted(positions))
+        listing = self.client.get("/")
+        self.assertNotContains(listing, "Edit connection for Web")
+        self.grant("change_server")
+        listing = self.client.get("/")
+        self.assertContains(listing, '<th scope="col">Actions</th>', html=True)
+        self.assertContains(listing, f"/servers/{server.pk}/edit/")
 
     def test_removed_sections_redirect_to_their_new_homes(self) -> None:
         self.grant("view_server", "view_siteobservation")
@@ -106,7 +128,7 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.assertContains(response, "The latest connection check failed")
         advanced = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(advanced, "Ubuntu 26.04.1 LTS")
-        self.assertContains(advanced, 'id="foundation-stack-heading"')
+        self.assertContains(advanced, 'aria-label="Selected stack details"')
 
     def test_unavailable_alias_has_remediation_and_no_check_control(self) -> None:
         self.grant("view_server", "add_discoveryattempt", "view_siteobservation")
