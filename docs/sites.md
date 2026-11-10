@@ -45,7 +45,7 @@ A review is refused, with each reason, when the host is not Target stack, the ru
 
 ## Applying
 
-A Site operator applies a Site review; a Shared review needs an Administrator and an explicit acknowledgement of the listed sites ([operator accounts](../README.md#operator-accounts)). The review must be applied within 15 minutes of preparation. The run is a transient systemd unit under the shared mutation lock and continues if the controller disconnects. It reports the stages `preflight`, `account`, `layout`, `pool`, `caddy` and `verify`:
+A Site operator applies a Site review; a Shared review needs an Administrator and an explicit acknowledgement of the listed sites ([operator accounts](operator-accounts.md)). The review must be applied within 15 minutes of preparation. The run is a transient systemd unit under the shared mutation lock and continues if the controller disconnects. It reports the stages `preflight`, `account`, `layout`, `pool`, `caddy` and `verify`:
 
 1. Under the lock, recheck the boot, the deadline, the reviewed evidence and the list of affected sites, and refuse without changes if any differ.
 2. Create the site and proxy accounts with the reviewed IDs.

@@ -128,7 +128,7 @@ The application surface is what operators and scripts address directly: permissi
 URL names, management commands and documented environment variables. It is owned by
 `operations/models.py`, the URLconf, Django's command registry, `config.settings` and
 `dashboard/management/commands/`, and described by
-[operator accounts](../README.md#operator-accounts), [site logs](logs.md#permission),
+[operator accounts](operator-accounts.md), [site logs](logs.md#permission),
 [settings and secrets](settings.md#permissions-and-discovery),
 [dashboard workflows](dashboard-workflows.md) and [upgrading](upgrade.md). The manifest's
 `application` section is built from those owners and covers:

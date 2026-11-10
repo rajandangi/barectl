@@ -1,6 +1,6 @@
 # Hosting status
 
-Barectl is designed to be self-hostable, but this initial foundation has not completed production deployment or remote credential testing. The included `runserver` command is for local development.
+Barectl supports running the dashboard locally. Deployment to a private management host and remote credential handling still need qualification. Use `runserver` for local development.
 
 The default product model is a local Barectl application and database on each device. Each authorized device can discover and manage the same server through SSH without another device's database or a hosted Barectl service. See [management from multiple devices](architecture.md#management-from-multiple-devices) for the planned coordination requirements.
 

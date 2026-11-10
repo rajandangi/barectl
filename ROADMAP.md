@@ -1,28 +1,29 @@
 # Roadmap
 
-The [README](README.md#current-status) lists implemented behavior, and [Releases](https://github.com/rajandangi/barectl/releases) records published versions. GitHub Issues own implementation priorities and ticket state. Release publication and qualification evidence establish availability; a specification or a completed local implementation alone does not.
+[GitHub Releases](https://github.com/rajandangi/barectl/releases) lists published versions. [GitHub Issues](https://github.com/rajandangi/barectl/issues) tracks implementation and priorities.
 
-Every phase follows the [core philosophy](README.md#core-philosophy): local operation by default, native server state as authority, and independent discovery from another authorized device. Barectl's own history stays in its application database. Provisioning uses one standard configuration and proves reconstruction without that database or custom server-side tracking records.
+## Next
 
-## Phases
+**1.1** includes the planned dashboard setting for journald log retention, deferred from 1.0 in [ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md). See [Unreleased changes](CHANGELOG.md#unreleased) for dashboard updates already in development.
 
-The [target architecture](docs/target-architecture.md), tracked in [#323](https://github.com/rajandangi/barectl/issues/323), is the one stack Barectl manages: fresh Ubuntu 26.04 hosts with Caddy, Nix-supplied runtimes, per-site HAProxy and PHP-FPM, systemd automation and restic ([ADR 0026](docs/adr/0026-manage-fresh-hosts-on-one-target-stack.md)). Each phase has its own specification, tickets and qualification record.
+## Later
 
-- **A. Foundation, implemented.** Specification [#325](https://github.com/rajandangi/barectl/issues/325). [Saved connections](docs/saved-server-connections.md) with host keys confirmed against the provider's fingerprint ([ADR 0034](docs/adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md)), the [host foundation](docs/bootstrap.md), [runtimes and server defaults](docs/runtimes.md), [plain PHP sites](docs/sites.md) with per-site PHP and Node selection, discovery and fresh-controller reconstruction, the one change engine of [ADR 0035](docs/adr/0035-one-change-engine-with-effect-derived-consent.md) and the snapshot-based native test harness of [ADR 0033](docs/adr/0033-prove-real-behavior-in-two-test-layers.md). The Nginx, Certbot, APT-PHP and rclone code and its tests were deleted at the phase exit, and Phase B later added HTTPS, databases, WordPress and Laravel on the same foundation. The [qualification record](docs/phase-a-qualification.md) lists the measured build times and what is not qualified.
-- **B. PHP sites, implemented.** Specification [#356](https://github.com/rajandangi/barectl/issues/356): WordPress and Laravel creation and deployment, site databases, HTTPS, settings and secrets, site and runtime removal and catalog updates. The [qualification record](docs/phase-b-qualification.md) audits every user story, names the tested revision and lists what is not qualified.
-- **C. Automation, implemented.** Specification [#357](https://github.com/rajandangi/barectl/issues/357): WordPress cron, Laravel scheduler and queue workers, per-site object cache and log viewing. The [qualification record](docs/phase-c-qualification.md) names the tested revision and lists what is not qualified.
-- **D. Protection, implemented.** Specification [#358](https://github.com/rajandangi/barectl/issues/358): restic backups onsite and to S3-compatible storage, recovery points and selective restore. The [qualification record](docs/phase-d-qualification.md) names the tested revision, the measured scenarios and what is not qualified.
-- **E. Operations, implemented.** Specifications [#301](https://github.com/rajandangi/barectl/issues/301) for Security and [#284](https://github.com/rajandangi/barectl/issues/284) for [Server Jobs](docs/server-jobs.md): the three-level dashboards and scoped permissions, the server's security lifecycle (firewall, key-only sign-in, automatic and Ubuntu updates, restart), and the Jobs section read from native evidence. The [qualification record](docs/phase-e-qualification.md) names the tested revision and what is not qualified. Journald log-retention settings are deferred from Phase E and 1.0 to 1.1 ([ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md)).
+- Optional shared database for Barectl records across installations.
+- Fleet overview and CLI parity.
+- Tested team hosting with credential management.
 
-Phases A to E and the 1.0 compatibility guarantees are released in [v1.0.0](https://github.com/rajandangi/barectl/releases/tag/v1.0.0).
+## Released
 
-A full local build targets five minutes and never exceeds 15, and so does each required CI shard; adding code must not make the suite slower ([test time budget](docs/quality.md#test-time-budget)). Each phase measures memory and disk on small hosts before claiming a minimum size.
+[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0) introduced the [current hosting stack](docs/target-architecture.md) and the capabilities below. [v1.0.0](https://github.com/rajandangi/barectl/releases/tag/v1.0.0) completed Phase E and added in-place upgrades from 0.4.x, stable contracts, and tested recovery procedures. [1.0 specification](https://github.com/rajandangi/barectl/issues/528) · [1.0 qualification](docs/v1.0-qualification.md)
 
-## After the phases
+| Phase | Shipped scope | Specification | Qualification |
+| --- | --- | --- | --- |
+| A | SSH connections, server setup, runtimes, plain PHP sites, and discovery from a fresh controller | [#325](https://github.com/rajandangi/barectl/issues/325) | [Phase A](docs/phase-a-qualification.md) |
+| B | HTTPS, databases, WordPress, and Laravel deployment | [#356](https://github.com/rajandangi/barectl/issues/356) | [Phase B](docs/phase-b-qualification.md) |
+| C | Site schedules, Laravel queues, Valkey, and log viewing | [#357](https://github.com/rajandangi/barectl/issues/357) | [Phase C](docs/phase-c-qualification.md) |
+| D | Encrypted restic backups, offsite copies, and selective restore | [#358](https://github.com/rajandangi/barectl/issues/358) | [Phase D](docs/phase-d-qualification.md) |
+| E | Scoped operator permissions, server security, and jobs reported by the server | [Security #301](https://github.com/rajandangi/barectl/issues/301), [Server Jobs #284](https://github.com/rajandangi/barectl/issues/284) | [Phase E](docs/phase-e-qualification.md) |
 
-- **1.0, released.** Documented upgrades, stable configuration contracts and recovery guarantees proven by integration tests ([specification](https://github.com/rajandangi/barectl/issues/528), [qualification record](docs/v1.0-qualification.md), [upgrade guide](docs/upgrade.md), [contracts](docs/contracts.md), [recovery matrix](docs/recovery-guarantees.md)). A 0.4.x installation upgrades in place; v0.3.0 and earlier remain unsupported. Journald log-retention settings move to 1.1 ([ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md)).
-- **After 1.0:** Optional shared remote database support across local installations, fleet overview, CLI parity, and tested team hosting with credential management. Hosted application or shared database use remains optional.
+## Outside scope
 
-Email hosting, billing, reseller management, DNS hosting, and container orchestration are outside scope.
-
-Long-running operations accepted by the server and server schedules use native Linux facilities or established packages and continue without a connected Barectl device. Accepted changes already run as transient systemd units; discovery and change preparation still depend on the controller's worker. See [changes and jobs](docs/architecture.md#changes-and-jobs).
+Email hosting, billing, reseller management, DNS hosting, and container orchestration.

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Dashboard
+
+- Servers open on **Sites**. Each server page shows its address and last checked details, with a **Refresh server** action. Edit saved connections from the server list.
+- Find connection checks and changes across servers in **Activity**, with a filter for individual servers.
+- Change your password in **Settings > Your account**. Settings also shows approved SSH keys, instructions for starting the worker, and the software Barectl offers.
+- Updated navigation, table spacing, and alert styling for narrow screens.
+
 ## 1.0.0 - 2026-11-09
 
 Barectl 1.0 is a compatibility and proof release, not a feature release. A 0.4.x

@@ -13,7 +13,7 @@ Every discovery and every review judges the server's standing from native eviden
 - **Target stack**: the whole foundation is present. Runtimes and sites can be added.
 - **Not manageable**: another release or architecture, missing privilege, a web server installed from APT (Apache, Nginx, Lighttpd, Caddy, HAProxy or OpenLiteSpeed), APT PHP packages, HAProxy processes outside the site convention, a hosting panel's directories, a Nix installation that is not Barectl's, Nix build-user IDs already taken, or another listener on ports 80 or 443. A server set up by an earlier Barectl build has Nginx and APT PHP, and is reported as such. Barectl shows each reason and offers no changes; resolve them through ordinary administration and run discovery again.
 
-Overview shows the standing, its named reasons and each foundation stage. A clock that NTP has not synchronized is a warning, not a refusal.
+The server page shows its status and any reasons it cannot be managed. Open **Advanced > Host checks** for the foundation checks. An unsynchronized clock appears as a warning.
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ The server:
 
 ## Host foundation
 
-Open the server's **Setup** section, or follow **Set up server** from Overview, and prepare the review. The steps are Connect, Check host, Review, Apply and verify. Opening setup, review or Stack pages reads stored evidence and makes no SSH connection.
+Choose **Set up server** on the server page, then review the proposed changes before confirming. Opening the server or review page reads stored evidence.
 
 The engine's stored review records every effect: the Nix release and its installer's SHA-256, the shell profile files the installer edits, the 32 build users at UIDs 30001 to 30032, the catalog store paths with their download and unpacked sizes, the Caddy unit and main configuration, the per-site service templates, the journald setting and the network destinations (`releases.nixos.org` and `cache.nixos.org` over HTTPS). The dashboard presents a plain-language summary, affected sites and optional file locations, without rendering those configuration contents or internal metadata ([confirmation screen](dashboard-workflows.md#reviews-and-consent)). Its effects are server-wide, so applying needs Shared consent: an Administrator, or the `operations.change_shared` permission.
 

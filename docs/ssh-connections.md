@@ -6,12 +6,12 @@ Discovery attempts and their history belong to this Barectl application database
 
 ## Workflow
 
-1. Registering a server, choosing a new alias for it, or pressing **Verify connection**, **Refresh observations** or **Retry connection check** queues a discovery attempt. The request returns immediately; it does not connect.
+1. Saving a new connection, changing its SSH target, or choosing **Refresh server** queues a discovery attempt. The request returns immediately; it does not connect.
 2. The worker claims the attempt and marks it running. It rechecks the captured connection definition, and for an alias resolves the SSH configuration again.
 3. It connects, verifies the server's host key against the controller's trust files, then authenticates.
 4. It reads the operating system release, architecture, CPU count, memory, root filesystem capacity, the [component observations](#component-observations) and the [host standing](bootstrap.md#host-standing). On a Target stack host it also reads the runtimes, the server defaults and the [sites](#site-observations). It publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
 
-The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears before the first check, **Refresh observations** after a success, and **Retry connection check** after a failure or interruption.
+The server page polls while an attempt is queued or running and announces changes in a live region. A failed check also offers **Check again** on the server page.
 
 The worker records check progress in the local operation row before connecting, between
 the groups in `operations/check_progress.py`, and after each remote read returns. The page
@@ -26,7 +26,7 @@ Attempts are stored separately from registrations and snapshots, with the states
 
 ## Server removal
 
-An operator with the `servers.view_server` and `servers.delete_server` permissions removes a server from its page. **Remove** opens a confirmation page, and only its CSRF-protected **Remove server** button deletes anything.
+An operator with the `servers.view_server` and `servers.delete_server` permissions opens **Settings > Remove server** on the server page. The button labelled **Remove** followed by the server name opens a confirmation page. Only its CSRF-protected **Remove server** button deletes anything.
 
 - Removal deletes the server's registration, its discovery attempts and snapshots, its change preparations and unapplied reviews, and the worker's task records for those operations, all from the Barectl database. Finished runs are kept as audit with the server detached, with their reviews, and stay listed in Activity. The removal page counts change preparations only for accounts that may view changes. A task record that a running worker claimed within the last ten minutes is kept, since that worker saves it when it finishes.
 - It never connects to the server and never touches the controller's SSH configuration, keys, agent or known_hosts. The alias can be registered again.
@@ -57,7 +57,7 @@ For an SSH alias, establish trust outside Barectl by comparing the key fingerpri
 
 ### Confirming a fresh saved-address host
 
-An unknown host stops the worker check before authentication. Overview shows the captured key type and SHA256 fingerprint. Read the fingerprint independently from the provider console, serial console output, or provider web shell. For example, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints the ED25519 host key fingerprint. Select the host key file for the displayed key type. Copy only its `SHA256:...` fingerprint into **Provider host key fingerprint**, then choose **Confirm fingerprint and check**.
+An unknown host stops the worker check before authentication. The server page shows the captured SHA256 fingerprint and lists the key type under **More options**. Read the fingerprint independently from the provider console, serial console output, or provider web shell. For example, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints the ED25519 host key fingerprint. Select the host key file for the displayed key type. Copy only its `SHA256:...` fingerprint into **Provider fingerprint**, then choose **Confirm and check**.
 
 The input must match exactly. A malformed value, another key's fingerprint or surrounding whitespace records nothing. The confirmation requires `servers.view_server`, `servers.change_server` and `discovery.add_discoveryattempt`, a CSRF-protected POST and the current saved connection revision. Browser input cannot supply the endpoint, public key or trust-file path. The failed attempt stores those public key facts and its immutable connection definition.
 
