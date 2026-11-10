@@ -14,7 +14,7 @@
 
 ## Released
 
-[v0.4.0](https://github.com/rajandangi/barectl/releases/tag/v0.4.0) introduced the [current hosting stack](docs/target-architecture.md) and the capabilities below. [v1.0.0](https://github.com/rajandangi/barectl/releases/tag/v1.0.0) completed Phase E and added in-place upgrades from 0.4.x, stable contracts, and tested recovery procedures. [1.0 specification](https://github.com/rajandangi/barectl/issues/528) · [1.0 qualification](docs/v1.0-qualification.md)
+[v1.0.0](https://github.com/rajandangi/barectl/releases/tag/v1.0.0) is the first official release. It delivers the capabilities below on the [supported hosting stack](docs/target-architecture.md), with stable configuration contracts and tested recovery procedures. [1.0 specification](https://github.com/rajandangi/barectl/issues/528) · [1.0 qualification](docs/v1.0-qualification.md)
 
 | Phase | Shipped scope | Specification | Qualification |
 | --- | --- | --- | --- |
