@@ -40,19 +40,31 @@
                       <div>
                         <dt>CPU</dt>
                         <dd>
-                          {{ row.capacity.cpus|default_if_none:"Unavailable" }}
+                          {% if row.capacity.cpus is not None %}
+                            {{ row.capacity.cpus }}
+                          {% else %}
+                            {% include "servers/_capacity_unavailable.html" %}
+                          {% endif %}
                         </dd>
                       </div>
                       <div>
                         <dt>RAM</dt>
                         <dd>
-                          {% if row.capacity.ram is not None %}{{ row.capacity.ram|filesizeformat }}{% else %}Unavailable{% endif %}
+                          {% if row.capacity.ram is not None %}
+                            {{ row.capacity.ram|filesizeformat }}
+                          {% else %}
+                            {% include "servers/_capacity_unavailable.html" %}
+                          {% endif %}
                         </dd>
                       </div>
                       <div>
                         <dt>Root disk</dt>
                         <dd>
-                          {% if row.capacity.storage is not None %}{{ row.capacity.storage|filesizeformat }}{% else %}Unavailable{% endif %}
+                          {% if row.capacity.storage is not None %}
+                            {{ row.capacity.storage|filesizeformat }}
+                          {% else %}
+                            {% include "servers/_capacity_unavailable.html" %}
+                          {% endif %}
                         </dd>
                       </div>
                     </dl>

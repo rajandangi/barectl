@@ -98,8 +98,13 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         expect(page.get_by_role("heading", name="Edit Production", level=1)).to_be_visible()
         page.get_by_role("link", name="Cancel", exact=True).click()
         expect(page.get_by_role("heading", name="Servers", level=1)).to_be_visible()
+        frame = page.locator(".barectl-server-list")
+        expect(frame).to_have_css("border-top-width", "1px")
+        expect(frame).to_have_css("overflow", "clip")
         page.set_viewport_size({"width": 320, "height": 800})
         expect(row.get_by_text("Root disk", exact=True)).to_be_visible()
+        expect(row.get_by_role("rowheader")).to_have_css("padding-top", "0px")
+        expect(row.get_by_role("rowheader")).to_have_css("border-top-width", "0px")
         expect(row.get_by_role("link", name="Edit connection for Production")).to_be_visible()
         self.assertEqual(
             page.evaluate("document.documentElement.scrollWidth"),
