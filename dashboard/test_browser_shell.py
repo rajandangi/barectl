@@ -63,6 +63,20 @@ class ShellBrowserTests(BrowserTestCase):
         page.goto(f"{self.live_server_url}/settings/")
         expect(page.get_by_role("heading", name="Your account")).to_be_visible()
         expect(page.locator("#main-content").get_by_text("Signed in as operator")).to_be_visible()
+        software = page.get_by_role("button", name="Software available in this release")
+        expect(software).to_have_attribute("aria-expanded", "false")
+        expect(page.locator("#settings-software")).to_be_hidden()
+        software.click()
+        expect(page.locator("#settings-software")).to_be_visible()
+        expect(page.get_by_role("rowheader", name="Caddy", exact=True)).to_be_visible()
+        expect(page.get_by_role("rowheader", name="HAProxy", exact=True)).to_be_visible()
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
 
     def test_keyboard_and_narrow_layout(self) -> None:
         self._grant_all()

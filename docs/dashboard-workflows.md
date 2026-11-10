@@ -25,7 +25,9 @@ the current place. Each is one activation from any page.
 - **Settings** is installation-wide: the signed-in account and how to change its
   password from the terminal, the controller's approved SSH keys with their public
   halves, how to check that the background worker runs, and the Barectl version with the
-  runtimes it offers. Nothing here changes a server.
+  software it offers behind **Software available in this release**. The list names each
+  program and groups matching versions across server processors; it describes available
+  software rather than what is installed on a server. Nothing here changes a server.
 
 Opening any page reads stored observations and local records. Only a CSRF-protected POST
 queues work, and no page makes an SSH connection.

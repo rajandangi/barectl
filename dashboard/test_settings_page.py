@@ -70,6 +70,12 @@ class InstallationSettingsTests(ControllerConfigTestCase):
         self.assertContains(response, "python manage.py db_worker")
         self.assertContains(response, "Barectl")
         self.assertContains(response, "PHP")
+        self.assertContains(response, "Software available in this release")
+        self.assertContains(response, "This list does not show what is installed on a server.")
+        for name in ("Caddy", "HAProxy", "Composer", "WP-CLI", "restic", "FastCGI client"):
+            self.assertContains(response, f'<th scope="row">{name}</th>', count=1, html=True)
+        self.assertNotContains(response, '<th scope="row">Tool</th>', html=True)
+        self.assertContains(response, "x86_64, arm64")
 
     def test_settings_need_only_sign_in(self) -> None:
         self.client.force_login(self.user)

@@ -66,31 +66,42 @@
     </section>
     <section class="barectl-card" aria-labelledby="settings-version-heading">
       <h2 id="settings-version-heading">Barectl {{ barectl_version }}</h2>
-      <p>This release offers these runtimes for your servers:</p>
+      <p>This list does not show what is installed on a server.</p>
       {% if catalog %}
-        <div class="usa-table-container--scrollable" tabindex="0">
-          <table class="usa-table">
-            <caption class="usa-sr-only">Runtimes offered by this Barectl release</caption>
-            <thead>
-              <tr>
-                <th scope="col">Runtime</th>
-                <th scope="col">Version</th>
-                <th scope="col">Processor</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in catalog %}
-                <tr>
-                  <th scope="row">{{ row.language }}</th>
-                  <td>{{ row.version }}</td>
-                  <td>{{ row.architecture }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <div class="usa-accordion">
+          <h3 class="usa-accordion__heading">
+            <button type="button"
+                    class="usa-accordion__button"
+                    aria-expanded="false"
+                    aria-controls="settings-software">Software available in this release</button>
+          </h3>
+          <div id="settings-software" class="usa-accordion__content" hidden>
+            <p>Barectl can install these software versions on your servers.</p>
+            <div class="usa-table-container--scrollable" tabindex="0">
+              <table class="usa-table">
+                <caption class="usa-sr-only">Software available in this release</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Software</th>
+                    <th scope="col">Version</th>
+                    <th scope="col">Server processors</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in catalog %}
+                    <tr>
+                      <th scope="row">{{ row.name }}</th>
+                      <td>{{ row.version }}</td>
+                      <td>{{ row.architecture }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       {% else %}
-        <p>The runtime catalog could not be read.</p>
+        <p>The available software list could not be read.</p>
       {% endif %}
     </section>
   </div>
