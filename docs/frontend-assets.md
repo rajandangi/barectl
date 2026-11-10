@@ -83,6 +83,30 @@ See the [USWDS side navigation guidance](https://designsystem.digital.gov/compon
 
 `frontend/styles/_theme.scss` configures `uswds-core` with the palette in `docs/design-palette.md`. `main.scss` forwards only the component packages that Barectl renders. USWDS images resolve from the package through Vite, and small icons are inlined into the CSS.
 
+### Workspace presentation
+
+`frontend/styles/_workspace.scss` styles the existing USWDS components with a compact
+desktop header, an inset selected navigation item, rounded resource cards, and more
+distinct page headings. The mobile menu keeps USWDS's keyboard and focus behavior.
+Navigation icons come from the installed USWDS package; decorative server artwork is
+local HTML and Sass. Neither needs an additional dependency or remote asset request.
+The sign-in page uses a two-column layout on wide screens and a single form on mobile.
+
+The presentation takes resource context and explicit server revalidation from
+[Coolify's server management](https://coolify.io/docs/core/infrastructure/servers/manage-server),
+site-focused actions from [Forge's site management](https://laravel.com/forge/docs/sites/the-basics),
+and grouped site configuration from
+[CloudPanel's settings](https://www.cloudpanel.io/docs/v2/frontend-area/settings/).
+These are references for Barectl's presentation, not a claim of equivalent features or
+measured usability. The four places, resource sections, review steps and next actions
+remain the workflows in [dashboard workflows](dashboard-workflows.md).
+
+The component boundaries follow the installed
+[USWDS 3.14 header source](https://github.com/uswds/uswds/blob/v3.14.0/packages/usa-header/src/styles/_usa-header.scss)
+and [side navigation guidance](https://designsystem.digital.gov/components/side-navigation/).
+All colors still use the existing semantic palette. Hover transitions respect reduced
+motion, statuses retain their text, and capacity values come from stored observations.
+
 USWDS component settings that choose text colors from a background must be given theme tokens, not hex values. The body background is therefore the `base-lightest` token for USWDS contrast calculations, and Barectl's stylesheet applies the warmer page color on top. The two colors have nearly the same luminance.
 
 USWDS's installation guidance loads `uswds-init.min.js` in the document head to prevent JavaScript-dependent components from flashing. Barectl bundles that initializer as the classic `uswds-init.ts` entry. Barectl imports individual component behaviors rather than the complete `uswds.js` bundle, so `main.ts` sets `window.uswdsPresent` after setup, as the complete bundle does.

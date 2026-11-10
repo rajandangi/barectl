@@ -239,6 +239,16 @@ Shard 1 retained all six validator classes, all 25 tests in 100 seconds, and the
 
 A cold run is longer end to end than a warm run because the shared preparation phase precedes the shards; each measured phase remains under the unchanged target and each command under the 900-second hard limit. The ten non-validator shards restore the mirror cache; their `mirror.sh -- fetch` is a verification when that restore hits, and it runs outside the shard phase timer. If a future restore misses, that network preparation would fall outside the shard timer, so the preparation phase carries the cold mirror fetch and the shard-side gap remains a documented limitation. The qualification uses an isolated cache namespace, fails on any unexpected hit, and deletes only its own namespace caches afterwards; it never deletes or rewrites unrelated caches.
 
+## Dashboard presentation diagnostic, 2026-11-10
+
+A local run on base `2e848b94` with uncommitted dashboard presentation changes passed
+all 91 native scenarios in 333 seconds. It missed the 300-second target and stayed
+within the 900-second hard limit. Controller and browser checks overlapped this run;
+this measurement does not isolate the presentation change's effect or qualify a full
+build. The separate controller-fast run passed 2,688 tests in 32.736 seconds, with one
+existing skip. No scenarios or test thresholds changed. The native target miss remains
+unresolved and requires a controlled comparison before attributing a regression.
+
 ## Guidance and decisions
 
 The project follows [Django's class-level parallel test guidance](https://docs.djangoproject.com/en/6.1/ref/django-admin/#cmdoption-test-parallel). Snapshot reuse uses existing [Actions cache scoping and exact keys](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching), [same-run artifact sharing](https://docs.github.com/en/actions/tutorials/store-and-share-data#passing-data-between-jobs-in-a-workflow) and [explicit cache save](https://github.com/actions/cache/tree/main/save#always-save-cache). Leaf coordination reuses [Python 3.14 flock](https://docs.python.org/3.14/library/fcntl.html#fcntl.flock), and build command deadlines use [BSD timeout](https://man.freebsd.org/cgi/man.cgi?query=timeout&sektion=1&format=html) and [GNU timeout](https://www.gnu.org/software/coreutils/manual/html_node/timeout-invocation.html). No new package, certificate client, execution path or scheduler was added.

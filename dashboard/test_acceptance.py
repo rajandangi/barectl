@@ -75,10 +75,12 @@ class AcceptanceSweepTests(BrowserTestCase):
         page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Security"
         ).click()
+        expect(page.locator("#server-section-security")).to_have_attribute("aria-current", "page")
         self.assert_no_native_terms()
         page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Jobs"
         ).click()
+        expect(page.locator("#server-section-jobs")).to_have_attribute("aria-current", "page")
         self.assert_no_native_terms()
         page.goto(f"{self.live_server_url}/servers/{self.server.pk}/")
         page.get_by_role("link", name="alpha.example.com").first.click()
@@ -86,10 +88,12 @@ class AcceptanceSweepTests(BrowserTestCase):
         page.get_by_role("navigation", name="Site sections").get_by_role(
             "link", name="Settings"
         ).click()
+        expect(page.locator("#site-section-settings")).to_have_attribute("aria-current", "page")
         self.assert_no_native_terms()
         page.get_by_role("navigation", name="Site sections").get_by_role(
             "link", name="Logs"
         ).click()
+        expect(page.locator("#site-section-logs")).to_have_attribute("aria-current", "page")
         self.assert_no_native_terms()
 
     def test_one_filled_primary_button_per_default_page(self) -> None:

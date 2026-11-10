@@ -17,7 +17,12 @@
             {% with server=row.server %}
               <tr>
                 <th scope="row">
-                  <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a>
+                  <a class="barectl-resource-link"
+                     href="{% url 'server_detail' server.pk %}">
+                    <span class="barectl-resource-mark"
+                          aria-hidden="true"><span class="barectl-icon barectl-icon--servers"></span></span>
+                    <span>{{ server.name }}</span>
+                  </a>
                 </th>
                 <td>{% if server.connection_mode == "alias" %}{{ server.ssh_alias|default:"None" }}{% else %}{{ server.address }} · {{ server.username }} · {{ server.port }}{% endif %}</td>
                 <td>{{ row.status }}</td>

@@ -25,6 +25,7 @@
                    width="154"
                    height="56">
             </a>
+            <span class="barectl-logo__caption">Server workspace</span>
           </div>
           {% if user.is_authenticated %}
             <button type="button" class="usa-menu-btn">Menu</button>
@@ -50,7 +51,9 @@
                 <li class="usa-nav__primary-item">
                   <a href="{% url 'sites' %}"
                      class="usa-nav-link{% if request.resolver_match.url_name == 'sites' %} usa-current{% endif %}"
-                     {% if request.resolver_match.url_name == 'sites' %}aria-current="page"{% endif %}><span>Sites</span></a>
+                     {% if request.resolver_match.url_name == 'sites' %}aria-current="page"{% endif %}>
+                    <span>Sites</span>
+                  </a>
                 </li>
               {% endif %}
               {% if perms.servers.view_server %}
@@ -72,6 +75,8 @@
             </ul>
             <form class="barectl-account" method="post" action="{% url 'logout' %}">
               {% csrf_token %}
+              <span class="barectl-avatar"
+                    aria-hidden="true">{{ user.get_username|first|upper }}</span>
               <span class="barectl-account__name">Signed in as {{ user.get_username }}</span>
               <button type="submit" class="usa-button usa-button--outline">Sign out</button>
             </form>

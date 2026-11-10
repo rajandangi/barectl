@@ -8,7 +8,7 @@ body {
 
 .barectl-header {
   background-color: color("base-lightest");
-  border-top: units(0.5) solid color("secondary");
+  border-top: units(2px) solid color("secondary");
   border-bottom: units(1px) solid color("base-lighter");
 }
 
@@ -69,7 +69,7 @@ body {
   padding-bottom: units(8);
 
   @include at-media("tablet") {
-    padding-top: units(6);
+    padding-top: units(5);
   }
 
   &:focus {
@@ -89,10 +89,10 @@ body {
 .barectl-page-heading {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: units(2);
-  margin-bottom: units(3);
+  margin-bottom: units(4);
 
   > div {
     min-width: 0;
@@ -100,6 +100,10 @@ body {
 
   h1 {
     margin: units(1) 0 0;
+    font-size: clamp(1.85rem, 4vw, 2.5rem);
+    font-weight: font-weight("semibold");
+    letter-spacing: -0.045em;
+    line-height: 1.15;
     overflow-wrap: anywhere;
   }
 
@@ -112,11 +116,21 @@ body {
   max-width: none;
   padding: units(3);
   border: units(1px) solid color("base-lighter");
-  border-radius: radius("md");
+  border-radius: units(2);
   background-color: color("base-lightest");
+  box-shadow: 0 units(2px) units(0.5) rgb(color("ink"), 0.025);
+
+  > :first-child {
+    margin-top: 0;
+  }
+
+  > :last-child {
+    margin-bottom: 0;
+  }
 }
 
 .barectl-sign-in {
+  width: 100%;
   max-width: units("mobile-lg");
   margin: 0 auto;
 
@@ -253,7 +267,7 @@ body {
 
 .barectl-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(units("card"), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, units("card")), 1fr));
   gap: units(2) units(3);
   margin: units(3) 0;
 
@@ -412,7 +426,7 @@ body {
   gap: units(3);
 
   @include at-media("tablet") {
-    grid-template-columns: units("card") minmax(0, 1fr);
+    grid-template-columns: 11rem minmax(0, 1fr);
     align-items: start;
   }
 }

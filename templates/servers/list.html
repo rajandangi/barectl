@@ -3,24 +3,31 @@
 {% block content %}
   <div class="barectl-page-heading">
     <div>
+      <p class="barectl-eyebrow">Your workspace</p>
       <h1>Servers</h1>
+      <p class="barectl-note">Manage connections, open a server, and pick up where you left off.</p>
     </div>
     {% if total_count and perms.servers.add_server %}
       <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
     {% endif %}
   </div>
   {% if not total_count %}
-    <section class="barectl-card" aria-labelledby="servers-empty-heading">
-      <h2 id="servers-empty-heading">Add your first server</h2>
-      <p>
-        Barectl needs a fresh Ubuntu 26.04 server you can reach over SSH as root, or as a
-        user with passwordless sudo.
-      </p>
-      {% if perms.servers.add_server %}
-        <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
-      {% else %}
-        <p class="barectl-note">An operator with the add-server permission can add one.</p>
-      {% endif %}
+    <section class="barectl-card barectl-welcome"
+             aria-labelledby="servers-empty-heading">
+      {% include "_server_art.html" %}
+      <div class="barectl-welcome__content">
+        <p class="barectl-eyebrow">Start here</p>
+        <h2 id="servers-empty-heading">Add your first server</h2>
+        <p>
+          Barectl needs a fresh Ubuntu 26.04 server you can reach over SSH as root, or as a
+          user with passwordless sudo.
+        </p>
+        {% if perms.servers.add_server %}
+          <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
+        {% else %}
+          <p class="barectl-note">An operator with the add-server permission can add one.</p>
+        {% endif %}
+      </div>
     </section>
   {% else %}
     {% if total_count > 10 %}

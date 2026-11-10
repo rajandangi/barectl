@@ -1,32 +1,45 @@
 {% extends "base.html" %}
 {% block title %}Sign in · Barectl{% endblock %}
 {% block content %}
-  <section class="barectl-sign-in" aria-labelledby="sign-in-heading">
-    <p class="barectl-eyebrow">Server management</p>
-    <h1 id="sign-in-heading">Sign in to Barectl</h1>
-    <p>Use the account created for this Barectl installation.</p>
-    {% if form.errors %}
-      {% include "_error_summary.html" with summary_id="sign-in-errors" heading="Sign-in failed" %}
-    {% endif %}
-    <form class="usa-form barectl-card" method="post" novalidate>
-      {% csrf_token %}
-      {% for field in form.visible_fields %}
-        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                 for="{{ field.id_for_label }}">{{ field.label }}</label>
-          {% if field.errors %}
-            <span class="usa-error-message" id="{{ field.auto_id }}_error">
-              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
-            </span>
-          {% endif %}
-          {{ field }}
-        </div>
-      {% endfor %}
-      <input type="hidden" name="next" value="{{ next }}">
-      <button type="submit" class="usa-button barectl-sign-in__submit">Sign in</button>
-    </form>
-    <p class="barectl-note">
-      Forgot your password? On the controller host, set a new one with <code>manage.py changepassword</code>.
-    </p>
-  </section>
+  <div class="barectl-auth">
+    <aside class="barectl-auth__intro" aria-labelledby="auth-intro-heading">
+      <p class="barectl-eyebrow">Barectl</p>
+      <h2 id="auth-intro-heading">
+        Your servers.
+        <br>
+        Your control.
+      </h2>
+      <p>Manage sites, runtimes and changes from one workspace. Your servers keep running independently.</p>
+      {% include "_server_art.html" %}
+      <p class="barectl-auth__footnote">Connect over SSH. Keep credentials on your computer.</p>
+    </aside>
+    <section class="barectl-sign-in" aria-labelledby="sign-in-heading">
+      <p class="barectl-eyebrow">Server management</p>
+      <h1 id="sign-in-heading">Sign in to Barectl</h1>
+      <p>Use the account created for this Barectl installation.</p>
+      {% if form.errors %}
+        {% include "_error_summary.html" with summary_id="sign-in-errors" heading="Sign-in failed" %}
+      {% endif %}
+      <form class="usa-form barectl-card" method="post" novalidate>
+        {% csrf_token %}
+        {% for field in form.visible_fields %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {% if field.errors %}
+              <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+              </span>
+            {% endif %}
+            {{ field }}
+          </div>
+        {% endfor %}
+        <input type="hidden" name="next" value="{{ next }}">
+        <button type="submit" class="usa-button barectl-sign-in__submit">Sign in</button>
+      </form>
+      <p class="barectl-note">
+        Forgot your password? On the controller host, set a new one with <code>manage.py changepassword</code>.
+      </p>
+    </section>
+  </div>
 {% endblock %}
