@@ -103,14 +103,26 @@ class ActivityBrowserTests(BrowserTestCase):
         expect(page).to_have_url(f"{self.live_server_url}/runs/{run.pk}/")
 
     def test_activity_reads_without_sideways_scrolling_at_320_pixels(self) -> None:
+        long_name = "production" * 8
+        self.production.name = long_name
+        self.production.save(update_fields=["name"])
         record_attempt(self.production, DiscoveryAttempt.Status.FAILED)
         record_change(self.staging, site="shop", kind_slug="create_http_site")
         page = self.page
         self.sign_in()
         page.goto(f"{self.live_server_url}/activity/")
         page.set_viewport_size({"width": 320, "height": 740})
-        expect(page.get_by_role("row")).to_have_count(3)
-        overflow = page.evaluate(
-            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        table = page.get_by_role("table", name="Checks and changes, newest first")
+        expect(table.get_by_role("row")).to_have_count(3)
+        expect(table.get_by_role("link", name=long_name)).to_be_visible()
+        expect(table.get_by_role("cell", name="Connection failed", exact=True)).to_be_visible()
+        self.assertEqual(page.evaluate("document.documentElement.scrollWidth - innerWidth"), 0)
+        # The viewport can fit even when the table scrolls inside its own container.
+        self.assertTrue(
+            table.evaluate(
+                """table => table.getBoundingClientRect().right <= innerWidth &&
+                    Array.from(table.querySelectorAll("th, td")).every(
+                        cell => cell.scrollWidth <= cell.clientWidth
+                    )"""
+            )
         )
-        self.assertEqual(overflow, 0)

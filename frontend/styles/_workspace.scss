@@ -478,6 +478,59 @@
   }
 }
 
+.barectl-activity-table {
+  margin-block: units(2.5);
+  table-layout: fixed;
+  overflow-wrap: anywhere;
+
+  thead th:first-child {
+    width: 17%;
+  }
+
+  &__server {
+    width: 19%;
+  }
+
+  thead th:last-child {
+    width: 16%;
+  }
+
+  tbody th,
+  tbody td {
+    vertical-align: top;
+  }
+
+  tbody p {
+    margin: units(0.5) 0 0;
+  }
+
+  @include at-media-max("tablet") {
+    font-size: 0.75rem;
+
+    thead th,
+    tbody th,
+    tbody td {
+      padding: units(1) units(0.5);
+    }
+
+    thead th:first-child {
+      width: 18%;
+    }
+
+    &__server {
+      width: 26%;
+    }
+
+    thead th:last-child {
+      width: 27%;
+    }
+
+    .barectl-note {
+      font-size: inherit;
+    }
+  }
+}
+
 .barectl-auth {
   display: grid;
   gap: units(5);
