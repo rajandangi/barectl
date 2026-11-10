@@ -255,7 +255,8 @@
   }
 }
 
-.barectl-results > .usa-table-container--scrollable {
+.barectl-results > .usa-table-container--scrollable,
+.barectl-activity-table-frame {
   border: 1px solid color("base-lighter");
   border-radius: units(2);
   background: color("base-lightest");
@@ -478,8 +479,12 @@
   }
 }
 
-.barectl-activity-table {
+.barectl-activity-table-frame {
   margin-block: units(2.5);
+  overflow: clip;
+}
+
+.barectl-activity-table {
   table-layout: fixed;
   overflow-wrap: anywhere;
 
