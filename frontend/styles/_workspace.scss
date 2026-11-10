@@ -206,7 +206,7 @@
     border-radius: units(1);
   }
 
-  > .grid-container > .barectl-card + .barectl-card {
+  > .grid-container > :is(.barectl-card, .usa-alert) + .barectl-card {
     margin-top: units(3);
   }
 }

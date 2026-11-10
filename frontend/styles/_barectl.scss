@@ -140,7 +140,8 @@ body {
 }
 
 .barectl-sign-in .usa-alert,
-.barectl-form-page > .usa-alert {
+.barectl-form-page > .usa-alert,
+#next-action-region > .usa-alert {
   margin-bottom: units(3);
 }
 
