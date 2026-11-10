@@ -10,7 +10,7 @@ from playwright.sync_api import expect
 
 from servers.models import Server
 
-from .browser_testing import BrowserTestCase as BrowserTestCase
+from .browser_testing import PASSWORD, BrowserTestCase
 
 
 @tag("browser")
@@ -100,3 +100,37 @@ class ShellBrowserTests(BrowserTestCase):
         for _ in range(4):
             page.keyboard.press("Tab")
         expect(page.get_by_role("link", name="Settings", exact=True)).to_be_focused()
+
+    def test_change_password_from_settings(self) -> None:
+        self.client.force_login(self.user)
+        self.sign_in()
+        page = self.page
+        url = f"{self.live_server_url}/settings/"
+        page.goto(url)
+        current = page.get_by_label("Current password", exact=True)
+        new = page.get_by_label("New password", exact=True)
+        confirm = page.get_by_label("Confirm new password", exact=True)
+        submit = page.get_by_role("button", name="Change password")
+        new_password = "saffron-otter-river-731"  # noqa: S105 - disposable test account
+
+        current.fill("wrong-password")
+        new.fill(new_password)
+        confirm.fill("different-password")
+        submit.click()
+        expect(page.get_by_role("heading", name="Check your password details")).to_be_visible()
+        expect(current).to_have_attribute("aria-invalid", "true")
+        expect(confirm).to_have_attribute("aria-invalid", "true")
+        expect(new).to_have_value("")
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(PASSWORD))
+
+        current.fill(PASSWORD)
+        new.fill(new_password)
+        confirm.fill(new_password)
+        submit.click()
+        expect(page).to_have_url(url)
+        expect(page.get_by_role("status")).to_have_text("Password changed.")
+        expect(page.get_by_role("heading", name="Your account")).to_be_visible()
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(new_password))
+        self.assertRedirects(self.client.get("/settings/"), "/accounts/login/?next=/settings/")

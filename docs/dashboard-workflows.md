@@ -22,10 +22,13 @@ the current place. Each is one activation from any page.
 - **Sites** lists every observed site across servers and offers **Create site**.
 - **Activity** is this controller's record of checks and changes, newest first. It never
   establishes a server's current state.
-- **Settings** is installation-wide: the signed-in account and how to change its
-  password from the terminal, the controller's approved SSH keys with their public
-  halves, how to check that the background worker runs, and the Barectl version with the
-  software it offers behind **Software available in this release**. The list names each
+- **Settings** is installation-wide. Under **Your account**, enter your current password
+  and choose a new one. Barectl uses [Django's password change form and session handling](https://docs.djangoproject.com/en/6.1/topics/auth/default/#session-invalidation-on-password-change)
+  to keep this session signed in and end the account's other sessions. Recover a forgotten
+  password on the controller host. Settings also shows the controller's approved SSH keys
+  with their public halves and how to start the background worker. **View activity** opens
+  the change list for operators with server view permission. The Barectl version card lists
+  the software it offers behind **Software available in this release**. The list names each
   program and groups matching versions across server processors; it describes available
   software rather than what is installed on a server. Nothing here changes a server.
 

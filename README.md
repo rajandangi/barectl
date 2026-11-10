@@ -76,7 +76,7 @@ To remove a server, open it and choose **Remove**, then confirm. See [server rem
 
 ### Operator accounts
 
-`createsuperuser` above creates the operator account. Barectl has no public registration, email password reset or Django admin; manage accounts on the controller host. To reset a forgotten password, run:
+`createsuperuser` above creates the operator account. Barectl has no public registration, email password reset or Django admin. Use **Settings > Your account** to change your password while signed in. To reset a forgotten password, run this on the controller host:
 
 ```bash
 uv run --env-file .env python manage.py changepassword <username>

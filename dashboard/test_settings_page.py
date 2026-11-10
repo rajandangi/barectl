@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
 
-from django.test import override_settings
+from django.test import Client, override_settings
 from paramiko import ECDSAKey
 
 from servers.testing import ControllerConfigTestCase
@@ -63,11 +63,13 @@ class InstallationSettingsTests(ControllerConfigTestCase):
         response = self.client.get("/settings/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Signed in as operator")
-        self.assertContains(response, "python manage.py changepassword operator")
+        self.assertContains(response, "Change password")
+        self.assertNotContains(response, "manage.py changepassword")
         self.assertContains(response, "deploy")
         self.assertContains(response, f"{self.key.get_name()} {self.key.get_base64()}")
         self.assertNotContains(response, str(self.key_file))
         self.assertContains(response, "python manage.py db_worker")
+        self.assertContains(response, "View activity")
         self.assertContains(response, "Barectl")
         self.assertContains(response, "PHP")
         self.assertContains(response, "Software available in this release")
@@ -82,6 +84,16 @@ class InstallationSettingsTests(ControllerConfigTestCase):
         response = self.client.get("/settings/")
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Add server")
+        self.assertNotContains(response, "View activity")
+
+    def test_password_change_requires_sign_in_and_csrf(self) -> None:
+        self.assertRedirects(
+            self.client.post("/settings/"),
+            "/accounts/login/?next=/settings/",
+        )
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        self.assertEqual(client.post("/settings/").status_code, 403)
 
     def test_settings_without_approved_keys_explain_the_choice(self) -> None:
         self.client.force_login(self.user)

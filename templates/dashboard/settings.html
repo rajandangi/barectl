@@ -2,28 +2,37 @@
 {% block title %}Settings · Barectl{% endblock %}
 {% block content %}
   <div class="barectl-page-heading">
-    <div>
-      <p class="barectl-eyebrow">Your workspace</p>
-      <h1>Settings</h1>
-      <p class="barectl-note">This installation's account, keys and release. Nothing here changes a server.</p>
-    </div>
+    <h1>Settings</h1>
   </div>
   <div class="barectl-settings-grid">
     <section class="barectl-card" aria-labelledby="settings-account-heading">
       <h2 id="settings-account-heading">Your account</h2>
-      <dl class="barectl-facts">
-        <div>
-          <dt>Signed in as</dt>
-          <dd>
-            {{ user.get_username }}
-          </dd>
-        </div>
-      </dl>
-      <p>To change your password, run this on the computer that runs Barectl:</p>
-      <pre><code>python manage.py changepassword {{ user.get_username }}</code></pre>
+      <p>Signed in as <strong class="barectl-break-all">{{ user.get_username }}</strong></p>
       <p class="barectl-note">
-        Barectl sign-in is separate from the Linux accounts and SSH access on your servers.
+        Changing your Barectl password signs you out of other browsers and devices.
       </p>
+      {% if form.errors %}
+        {% include "_error_summary.html" with summary_id="password-errors" heading="Check your password details" %}
+      {% endif %}
+      <form class="usa-form" method="post" action="{% url 'settings' %}">
+        {% csrf_token %}
+        {% for field in form %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {% if field.help_text %}
+              <div class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</div>
+            {% endif %}
+            {% if field.errors %}
+              <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+              </span>
+            {% endif %}
+            {{ field }}
+          </div>
+        {% endfor %}
+        <button type="submit" class="usa-button">Change password</button>
+      </form>
     </section>
     <section class="barectl-card" aria-labelledby="settings-keys-heading">
       <h2 id="settings-keys-heading">Approved SSH keys</h2>
@@ -55,14 +64,13 @@
     <section class="barectl-card" aria-labelledby="settings-worker-heading">
       <h2 id="settings-worker-heading">Background work</h2>
       <p>
-        Barectl adds servers and changes them in a background worker, so a page never waits
-        on a server. Check that the worker is running when a change stays queued:
+        If a change stays queued, check that the worker is running on the computer that runs Barectl.
       </p>
       <pre><code>python manage.py db_worker</code></pre>
-      <p class="barectl-note">
-        This page cannot confirm whether the worker is running. A change that waits shows
-        how long it has waited on its own page.
-      </p>
+      <p class="barectl-note">Open a queued change to see how long it has been waiting.</p>
+      {% if perms.servers.view_server %}
+        <a class="usa-link" href="{% url 'activity' %}">View activity</a>
+      {% endif %}
     </section>
     <section class="barectl-card" aria-labelledby="settings-version-heading">
       <h2 id="settings-version-heading">Barectl {{ barectl_version }}</h2>
