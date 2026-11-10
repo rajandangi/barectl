@@ -4,113 +4,161 @@
   <div class="barectl-page-heading">
     <h1>Settings</h1>
   </div>
-  <div class="barectl-settings-grid">
-    <section class="barectl-card" aria-labelledby="settings-account-heading">
-      <h2 id="settings-account-heading">Your account</h2>
-      <p>Signed in as <strong class="barectl-break-all">{{ user.get_username }}</strong></p>
-      <p class="barectl-note">
-        Changing your Barectl password signs you out of other browsers and devices.
-      </p>
-      {% if form.errors %}
-        {% include "_error_summary.html" with summary_id="password-errors" heading="Check your password details" %}
-      {% endif %}
-      <form class="usa-form" method="post" action="{% url 'settings' %}">
-        {% csrf_token %}
-        {% for field in form %}
-          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                   for="{{ field.id_for_label }}">{{ field.label }}</label>
-            {% if field.help_text %}
-              <div class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</div>
-            {% endif %}
-            {% if field.errors %}
-              <span class="usa-error-message" id="{{ field.auto_id }}_error">
-                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
-              </span>
-            {% endif %}
-            {{ field }}
-          </div>
-        {% endfor %}
-        <button type="submit" class="usa-button">Change password</button>
-      </form>
-    </section>
-    <section class="barectl-card" aria-labelledby="settings-keys-heading">
-      <h2 id="settings-keys-heading">Approved SSH keys</h2>
-      <p class="barectl-note">
-        These key files live on this computer. Barectl reads them to connect to your servers.
-      </p>
-      {% if keys %}
-        <dl class="barectl-facts">
-          {% for key in keys %}
-            <div>
-              <dt>{{ key.reference }}</dt>
-              <dd>
-                {% if key.problem %}
-                  {{ key.problem }}
-                {% else %}
-                  <code class="barectl-break-all">{{ key.public_key }}</code>
-                {% endif %}
-              </dd>
+  <div class="barectl-layout barectl-settings">
+    <nav class="barectl-layout__nav" aria-label="Settings sections">
+      <ul class="usa-sidenav">
+        <li class="usa-sidenav__item">
+          <a href="#settings-account-heading">Your account</a>
+        </li>
+        <li class="usa-sidenav__item">
+          <a href="#settings-keys-heading">SSH keys</a>
+        </li>
+        <li class="usa-sidenav__item">
+          <a href="#settings-worker-heading">Background work</a>
+        </li>
+        <li class="usa-sidenav__item">
+          <a href="#settings-version-heading">About</a>
+        </li>
+      </ul>
+    </nav>
+    <div class="barectl-layout__content barectl-settings__content">
+      <section class="barectl-card barectl-settings__card"
+               aria-labelledby="settings-account-heading">
+        <header class="barectl-settings__card-header">
+          <h2 id="settings-account-heading" tabindex="-1">Your account</h2>
+          <p class="barectl-note">Signed in as <strong>{{ user.get_username }}</strong></p>
+        </header>
+        <div class="barectl-settings__section">
+          <h3 id="settings-password-heading">Change password</h3>
+          {% if form.errors %}
+            {% include "_error_summary.html" with summary_id="password-errors" heading="Check your password details" %}
+          {% endif %}
+          <form class="usa-form barectl-settings__form"
+                method="post"
+                action="{% url 'settings' %}"
+                aria-labelledby="settings-password-heading">
+            {% csrf_token %}
+            <div class="barectl-settings__fields">
+              {% for field in form %}
+                <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+                  <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                         for="{{ field.id_for_label }}">{{ field.label }}</label>
+                  {% if field.errors %}
+                    <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                      {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+                    </span>
+                  {% endif %}
+                  {{ field }}
+                  {% if field.help_text and field.name == "new_password1" %}
+                    <details class="barectl-settings__details barectl-note">
+                      <summary>Password requirements</summary>
+                      <div id="{{ field.auto_id }}_helptext">{{ field.help_text }}</div>
+                    </details>
+                  {% elif field.help_text %}
+                    <span class="usa-sr-only"
+                          id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+                  {% endif %}
+                </div>
+              {% endfor %}
             </div>
-          {% endfor %}
-        </dl>
-      {% else %}
-        <p>
-          No approved key files are configured. Add one on this computer and name it in
-          <code>BARECTL_SSH_APPROVED_KEYS</code>, or use this computer's SSH agent.
-        </p>
-      {% endif %}
-    </section>
-    <section class="barectl-card" aria-labelledby="settings-worker-heading">
-      <h2 id="settings-worker-heading">Background work</h2>
-      <p>
-        If a change stays queued, check that the worker is running on the computer that runs Barectl.
-      </p>
-      <pre><code>python manage.py db_worker</code></pre>
-      <p class="barectl-note">Open a queued change to see how long it has been waiting.</p>
-      {% if perms.servers.view_server %}
-        <a class="usa-link" href="{% url 'activity' %}">View activity</a>
-      {% endif %}
-    </section>
-    <section class="barectl-card" aria-labelledby="settings-version-heading">
-      <h2 id="settings-version-heading">Barectl {{ barectl_version }}</h2>
-      <p>This list does not show what is installed on a server.</p>
-      {% if catalog %}
-        <div class="usa-accordion">
-          <h3 class="usa-accordion__heading">
-            <button type="button"
-                    class="usa-accordion__button"
-                    aria-expanded="false"
-                    aria-controls="settings-software">Software available in this release</button>
-          </h3>
-          <div id="settings-software" class="usa-accordion__content" hidden>
-            <p>Barectl can install these software versions on your servers.</p>
-            <div class="usa-table-container--scrollable" tabindex="0">
-              <table class="usa-table">
-                <caption class="usa-sr-only">Software available in this release</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Software</th>
-                    <th scope="col">Version</th>
-                    <th scope="col">Server processors</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for row in catalog %}
-                    <tr>
-                      <th scope="row">{{ row.name }}</th>
-                      <td>{{ row.version }}</td>
-                      <td>{{ row.architecture }}</td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+            <div class="barectl-settings__actions">
+              <p class="barectl-note">Changing your password signs you out of other browsers and devices.</p>
+              <button type="submit" class="usa-button">Change password</button>
             </div>
-          </div>
+          </form>
         </div>
-      {% else %}
-        <p>The available software list could not be read.</p>
-      {% endif %}
-    </section>
+      </section>
+      <section class="barectl-card barectl-settings__card"
+               aria-labelledby="settings-installation-heading">
+        <header class="barectl-settings__card-header">
+          <h2 id="settings-installation-heading">This installation</h2>
+        </header>
+        <section class="barectl-settings__section"
+                 aria-labelledby="settings-keys-heading">
+          <h3 id="settings-keys-heading" tabindex="-1">Approved SSH keys</h3>
+          {% if keys %}
+            <p class="barectl-note">Barectl uses these keys from the controller to connect to your servers.</p>
+            {% for key in keys %}
+              <details class="barectl-settings__details"{% if key.problem %} open{% endif %}>
+                <summary>{{ key.reference }}</summary>
+                {% if key.problem %}
+                  <p class="barectl-note">{{ key.problem }}</p>
+                {% else %}
+                  <p>
+                    <code class="barectl-break-all">{{ key.public_key }}</code>
+                  </p>
+                {% endif %}
+              </details>
+            {% endfor %}
+          {% else %}
+            <p class="barectl-note">No approved key files are configured.</p>
+            <details class="barectl-settings__details">
+              <summary>Configure SSH access</summary>
+              <p class="barectl-note">
+                Add a key on the computer running Barectl and name it in
+                <code>BARECTL_SSH_APPROVED_KEYS</code>, or use that computer's SSH agent.
+              </p>
+            </details>
+          {% endif %}
+        </section>
+        <section class="barectl-settings__section"
+                 aria-labelledby="settings-worker-heading">
+          <h3 id="settings-worker-heading" tabindex="-1">Background work</h3>
+          {% if perms.servers.view_server %}
+            <p class="barectl-note">Open a queued change in Activity to see how long it has been waiting.</p>
+          {% endif %}
+          <div class="barectl-settings__worker">
+            <details class="barectl-settings__details">
+              <summary>Start the worker</summary>
+              <p class="barectl-note">Run this on the computer running Barectl.</p>
+              <pre><code>python manage.py db_worker</code></pre>
+            </details>
+            {% if perms.servers.view_server %}
+              <a class="usa-link" href="{% url 'activity' %}">View activity</a>
+            {% endif %}
+          </div>
+        </section>
+        <section class="barectl-settings__section"
+                 aria-labelledby="settings-version-heading">
+          <h3 id="settings-version-heading" tabindex="-1">Barectl {{ barectl_version }}</h3>
+          {% if catalog %}
+            <p class="barectl-note">Browse the software Barectl can install on supported servers.</p>
+            <div class="usa-accordion">
+              <h4 class="usa-accordion__heading">
+                <button type="button"
+                        class="usa-accordion__button"
+                        aria-expanded="false"
+                        aria-controls="settings-software">Software available in this release</button>
+              </h4>
+              <div id="settings-software" class="usa-accordion__content" hidden>
+                <div class="usa-table-container--scrollable" tabindex="0">
+                  <table class="usa-table">
+                    <caption class="usa-sr-only">Software available in this release</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Software</th>
+                        <th scope="col">Version</th>
+                        <th scope="col">Server processors</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for row in catalog %}
+                        <tr>
+                          <th scope="row">{{ row.name }}</th>
+                          <td>{{ row.version }}</td>
+                          <td>{{ row.architecture }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          {% else %}
+            <p class="barectl-note">The available software list could not be read.</p>
+          {% endif %}
+        </section>
+      </section>
+    </div>
   </div>
 {% endblock %}

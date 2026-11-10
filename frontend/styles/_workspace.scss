@@ -600,17 +600,139 @@
   }
 }
 
-.barectl-settings-grid {
-  display: grid;
-  gap: units(3);
-  align-items: start;
-
-  > .barectl-card {
-    min-width: 0;
+.barectl-settings {
+  &__content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: units(3);
+    max-width: 56rem;
   }
 
-  @include at-media("desktop") {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  &__card {
+    padding: 0;
+  }
+
+  &__card-header,
+  &__section {
+    padding: units(2);
+
+    @include at-media("tablet") {
+      padding: units(3);
+    }
+
+    > :first-child {
+      margin-top: 0;
+    }
+
+    > :last-child {
+      margin-bottom: 0;
+    }
+
+    h2,
+    h3 {
+      margin-bottom: units(1);
+      scroll-margin-top: units(3);
+    }
+
+    h3 {
+      font-size: 1rem;
+    }
+
+    > .barectl-note {
+      margin-top: 0;
+    }
+  }
+
+  &__section {
+    border-top: 1px solid color("base-lighter");
+  }
+
+  &__form {
+    max-width: none;
+  }
+
+  &__fields {
+    display: grid;
+    gap: units(2);
+
+    @include at-media("tablet") {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      max-width: 42rem;
+
+      > :first-child {
+        grid-column: 1 / -1;
+        width: calc((100% - #{units(2)}) / 2);
+      }
+    }
+
+    .usa-form-group,
+    .usa-label {
+      min-width: 0;
+      margin-top: 0;
+    }
+
+    .usa-input {
+      max-width: none;
+    }
+  }
+
+  &__details {
+    margin-top: units(1);
+    font-size: font-size("ui", "2xs");
+
+    summary {
+      color: color("primary");
+      cursor: pointer;
+    }
+
+    pre {
+      padding: units(1.5);
+      border: 1px solid color("base-lighter");
+      border-radius: units(1);
+    }
+  }
+
+  &__actions,
+  &__worker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: units(1) units(3);
+
+    > * {
+      min-width: 0;
+      margin: 0;
+    }
+  }
+
+  &__actions {
+    align-items: center;
+    margin-top: units(3);
+    padding-top: units(2);
+    border-top: 1px solid color("base-lighter");
+
+    .usa-button {
+      margin: 0;
+    }
+  }
+
+  @include at-media-max("tablet") {
+    .usa-sidenav {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      border: 1px solid color("base-lighter");
+      border-radius: units(1);
+      background: color("base-lightest");
+    }
+
+    .usa-sidenav__item {
+      border: 0;
+
+      a {
+        padding-inline: units(1.5);
+      }
+    }
   }
 }
 

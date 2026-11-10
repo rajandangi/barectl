@@ -73,7 +73,7 @@ class InstallationSettingsTests(ControllerConfigTestCase):
         self.assertContains(response, "Barectl")
         self.assertContains(response, "PHP")
         self.assertContains(response, "Software available in this release")
-        self.assertContains(response, "This list does not show what is installed on a server.")
+        self.assertContains(response, "software Barectl can install on supported servers")
         for name in ("Caddy", "HAProxy", "Composer", "WP-CLI", "restic", "FastCGI client"):
             self.assertContains(response, f'<th scope="row">{name}</th>', count=1, html=True)
         self.assertNotContains(response, '<th scope="row">Tool</th>', html=True)
