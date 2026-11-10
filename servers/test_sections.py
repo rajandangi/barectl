@@ -75,6 +75,8 @@ class ServerSectionTests(ControllerConfigTestCase):
         body = self.client.get(f"/servers/{server.pk}/").content.decode()
         self.assertIn("Server address unavailable", body)
         self.assertNotIn("data-copy-address", body)
+        self.assertNotIn(f'href="/servers/{server.pk}/activity/"', body)
+        self.assertIn('href="/activity/"', body)
         positions = [body.index(f">{title}</a>") for title in SECTIONS.values()]
         self.assertEqual(positions, sorted(positions))
         listing = self.client.get("/")
@@ -155,10 +157,10 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.grant("view_server")
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        response = self.client.get(f"/servers/{server.pk}/activity/")
+        response = self.client.get("/activity/", {"server": server.pk})
         self.assertContains(response, "No activity yet")
         record_attempt(server, RemoteOperation.Status.FAILED, failure="The connection failed.")
-        response = self.client.get(f"/servers/{server.pk}/activity/")
+        response = self.client.get("/activity/", {"server": server.pk})
         self.assertContains(response, "The connection failed.")
 
     def test_security_section_is_a_stored_read_with_no_score_or_native_terms(self) -> None:
@@ -230,8 +232,8 @@ class ServerPageReadCostTests(ControllerConfigTestCase):
     def test_the_server_jobs_query_count_does_not_grow_with_recorded_attempts(self) -> None:
         self.assert_flat(f"/servers/{self.server.pk}/jobs/")
 
-    def test_the_server_activity_query_count_does_not_grow_with_recorded_attempts(self) -> None:
-        self.assert_flat(f"/servers/{self.server.pk}/activity/")
+    def test_filtered_activity_query_count_does_not_grow_with_recorded_attempts(self) -> None:
+        self.assert_flat(f"/activity/?server={self.server.pk}")
 
     def test_the_site_activity_query_count_does_not_grow_with_recorded_attempts(self) -> None:
         self.assert_flat(f"/servers/{self.server.pk}/sites/alpha/activity/")

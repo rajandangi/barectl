@@ -413,7 +413,7 @@ A reviewed change that makes systemd forget retained, finished Barectl units aft
 _Avoid_: Garbage collection, reset
 
 **Activity**:
-The recorded discovery attempts, reviews and change runs across managed servers, newest first. A server's Activity shows those of its registration, and a site's Activity those recorded for its identifier; neither establishes a current resource's identity or state.
+The controller's record of discovery attempts, reviews and change runs across managed servers, newest first. Filters narrow Activity by server or site. A site's Activity shows changes recorded for its identifier. These records do not establish a resource's current identity or state.
 _Avoid_: Logs, event feed
 
 **Native server history** (planned):

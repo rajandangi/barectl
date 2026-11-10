@@ -84,7 +84,6 @@ where it starts a change.
 | Section | What it holds |
 | --- | --- |
 | Sites (default) | Observed sites led by their domains, each opening its site page, and **Create site**. |
-| Activity | This server's checks and changes, newest first. |
 | Settings | Server-wide choices: **PHP versions** with the sites using each and **Add PHP version**, **Default PHP**, **Default Node.js**, **HTTPS** with the optional certificate contact email, **Database** with the server's MariaDB or PostgreSQL engine and its install or remove review, **Object cache (Valkey)** with the installed version and the one install review, and **Remove server**. |
 | Advanced | Host checks, installed packages, web software, PHP versions, software catalog, discovery history, and **Clean up finished runs**. |
 
@@ -114,8 +113,8 @@ The disclosures use the existing [USWDS accordion](https://designsystem.digital.
 Removing a server deletes its local connection and history from this installation. It
 changes nothing on the server.
 
-The old `stack/`, `setup/` and `changes/` URLs redirect to Advanced, the server page and
-Activity.
+The old `stack/` and `setup/` URLs redirect to Advanced and the server page. The server's
+`activity/` and `changes/` URLs redirect to global Activity.
 
 <a id="site-pages"></a>
 ## Sites
@@ -264,9 +263,10 @@ Detailed causes, exits and journal lines stay in the run's Logs.
 
 **Activity** lists discovery checks and changes across servers, newest first, in plain
 words: what was checked or changed, on which server or site, when, and how it ended. Each
-row opens its confirm screen or run. Server and site filters narrow the list; a server's
-Activity and a site's Activity show the same rows filtered. Activity polls while a row is
-active. It is this controller's record and never establishes current state.
+row opens its confirm screen or run. Server and site filters narrow the list; server names
+link to global Activity filtered to that server. A site's Activity shows the same rows
+filtered to that site. Activity polls while a row is active. It is this controller's record
+and never establishes current state.
 
 ## Permissions
 

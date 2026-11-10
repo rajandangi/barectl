@@ -49,6 +49,8 @@ class ActivityPageTests(ControllerConfigTestCase):
         self.assertIn(f'href="/runs/{run.pk}/"', content)
         self.assertLess(content.index("Set up DB"), content.index("Check the connection"))
         self.assertIn("Applied", content)
+        self.assertIn(f'href="/activity/?server={self.db.pk}"', content)
+        self.assertNotIn(f'href="/servers/{self.db.pk}/activity/"', content)
 
     def test_a_change_without_a_run_links_to_its_confirm_screen(self) -> None:
         self.signed_in("view_changes")
@@ -107,14 +109,6 @@ class ActivityPageTests(ControllerConfigTestCase):
         # A check belongs to its server, never to a site.
         self.assertNotIn("Check the connection", content)
 
-    def test_a_server_s_activity_lists_the_same_rows_for_that_server(self) -> None:
-        self.signed_in("view_changes")
-        record_attempt(self.web, DiscoveryAttempt.Status.SUCCEEDED)
-        record_change(self.db)
-        content = self.client.get(f"/servers/{self.web.pk}/activity/").content.decode()
-        self.assertIn("Check the connection", content)
-        self.assertNotIn("Set up DB", content)
-
     def test_a_site_s_activity_lists_that_site_s_rows_from_the_same_list(self) -> None:
         record_http_sites(self.web)
         self.signed_in("view_changes", "view_siteobservation")
@@ -137,9 +131,6 @@ class ActivityPageTests(ControllerConfigTestCase):
     def test_activity_says_it_never_establishes_current_state(self) -> None:
         self.signed_in()
         self.assertContains(self.client.get("/activity/"), "never establishes")
-        self.assertContains(
-            self.client.get(f"/servers/{self.web.pk}/activity/"), "never establishes"
-        )
 
     def test_opening_any_activity_page_makes_no_ssh_connection(self) -> None:
         record_http_sites(self.web)
@@ -152,7 +143,7 @@ class ActivityPageTests(ControllerConfigTestCase):
         ):
             for url in (
                 "/activity/",
-                f"/servers/{self.web.pk}/activity/",
+                f"/activity/?server={self.web.pk}",
                 f"/servers/{self.web.pk}/sites/alpha/activity/",
             ):
                 with self.subTest(url=url):
@@ -194,12 +185,12 @@ class ActivityPageTests(ControllerConfigTestCase):
         self.assertEqual(after.count("1 observation warning"), 11)
         self.assertEqual(after.count("Observations collected"), 11)
 
-    def test_the_server_activity_page_reads_change_rows_once(self) -> None:
+    def test_activity_filtered_to_a_server_reads_change_rows_once(self) -> None:
         self.signed_in("view_changes")
         record_change(self.web, kind_slug="create_http_site", site="alpha")
         record_change(self.web, kind_slug="create_http_site", site="beta")
         with CaptureQueriesContext(connection) as captured:
-            response = self.client.get(f"/servers/{self.web.pk}/activity/")
+            response = self.client.get("/activity/", {"server": self.web.pk})
         self.assertEqual(response.status_code, 200)
         reads = [
             query
@@ -217,10 +208,10 @@ class ActivityPageTests(ControllerConfigTestCase):
         fragment = self.client.get("/activity/rows/", headers=HTMX_FRAGMENT)
         self.assertContains(fragment, "Connection check queued")
 
-    def test_a_server_s_activity_polls_with_its_own_scope(self) -> None:
+    def test_activity_filtered_to_a_server_polls_with_its_own_scope(self) -> None:
         self.signed_in("view_changes")
         record_attempt(self.web, DiscoveryAttempt.Status.QUEUED)
-        page = self.client.get(f"/servers/{self.web.pk}/activity/")
+        page = self.client.get("/activity/", {"server": self.web.pk})
         self.assertContains(page, f'hx-get="/activity/rows/?server={self.web.pk}&shown=')
         fragment = self.client.get(
             "/activity/rows/", {"server": self.web.pk}, headers=HTMX_FRAGMENT
@@ -248,12 +239,13 @@ class ActivityPageTests(ControllerConfigTestCase):
         changed = self.client.get("/activity/rows/", {"shown": "stale"}, headers=HTMX_FRAGMENT)
         self.assertContains(changed, "Activity updated.")
 
-    def test_the_server_changes_url_redirects_to_its_activity(self) -> None:
+    def test_removed_server_activity_urls_redirect_to_global_activity(self) -> None:
         self.signed_in("view_changes")
-        self.assertRedirects(
-            self.client.get(f"/servers/{self.web.pk}/changes/"),
-            f"/servers/{self.web.pk}/activity/",
-        )
+        for section in ("activity", "changes"):
+            with self.subTest(section=section):
+                self.assertRedirects(
+                    self.client.get(f"/servers/{self.web.pk}/{section}/"), "/activity/"
+                )
 
     def test_cleanup_of_finished_runs_is_prepared_from_advanced(self) -> None:
         self.signed_in("view_changes", "change_site")

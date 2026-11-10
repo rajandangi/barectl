@@ -149,12 +149,11 @@ def _more_options_open(form: ServerForm) -> bool:
     return (port not in (None, "", 22, "22")) or bool(alias)
 
 
-Section = Literal["sites", "security", "activity", "jobs", "settings", "advanced"]
+Section = Literal["sites", "security", "jobs", "settings", "advanced"]
 # The server sections in navigation order; the page title, navigation and tests read this.
 SECTIONS: dict[Section, str] = {
     "sites": "Sites",
     "security": "Security",
-    "activity": "Activity",
     "jobs": "Jobs",
     "settings": "Settings",
     "advanced": "Advanced",
@@ -486,16 +485,6 @@ def server_page(
         from servers.backup_storage import context_for_server as backup_storage_context
 
         context.update(backup_storage_context(state, request.user))
-    if section == "activity":
-        context.update(
-            _activity_context(
-                request,
-                server,
-                "",
-                state=state,
-                show_servers=False,
-            )
-        )
     if section == "jobs":
         _jobs_context(request, state, context)
         if _is_fragment_request(request):

@@ -1,5 +1,5 @@
 from django.contrib.auth import views as auth_views
-from django.urls import path
+from django.urls import path, reverse_lazy
 from django.views.generic import RedirectView
 
 from automation.views import prepare_schedule
@@ -150,7 +150,9 @@ urlpatterns = [
         name="server_setup",
     ),
     path(
-        "servers/<int:pk>/activity/", server_detail, {"section": "activity"}, name="server_activity"
+        "servers/<int:pk>/activity/",
+        RedirectView.as_view(url=reverse_lazy("activity"), permanent=False),
+        name="server_activity",
     ),
     path("servers/<int:pk>/jobs/", server_detail, {"section": "jobs"}, name="server_jobs"),
     path(
@@ -493,7 +495,7 @@ urlpatterns = [
     ),
     path(
         "servers/<int:pk>/changes/",
-        RedirectView.as_view(pattern_name="server_activity", permanent=False),
+        RedirectView.as_view(url=reverse_lazy("activity"), permanent=False),
         name="server_changes",
     ),
     path(

@@ -935,8 +935,8 @@ class ActivityHistoryTests(DiscoveryTestCase):
         # Newest recorded first: Web's failed refresh, DB's check, then Web's first.
         content = page.content.decode()
         failure = content.index("could not reach the SSH service")
-        db_row = content.index(f'href="/servers/{other.pk}/activity/"')
-        web_retry = content.index(f'href="/servers/{self.server.pk}/activity/"', db_row)
+        db_row = content.index(f'href="/activity/?server={other.pk}"')
+        web_retry = content.index(f'href="/activity/?server={self.server.pk}"', db_row)
         self.assertLess(failure, db_row)
         self.assertLess(db_row, web_retry)
 

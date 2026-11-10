@@ -1,6 +1,6 @@
 # Security checks
 
-A server's **Security** section, beside Sites, Activity, Settings and Advanced, reports what
+A server's **Security** section reports what
 Barectl could read about its exposure. The standard firewall can be turned on and extra
 ports allowed or removed, key sign-in required, automatic security updates turned on or
 off, Ubuntu updates checked for and installed, and the server restarted. The Web runtimes

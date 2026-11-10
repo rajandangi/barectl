@@ -58,7 +58,7 @@ class ActivityBrowserTests(BrowserTestCase):
         page.locator(f'#activity-rows a[href="/runs/{run.pk}/"]').click()
         expect(page).to_have_url(f"{self.live_server_url}/runs/{run.pk}/")
 
-    def test_the_server_filter_and_the_server_page_narrow_the_same_list(self) -> None:
+    def test_server_activity_uses_the_global_list_and_its_server_filter(self) -> None:
         record_attempt(self.production, DiscoveryAttempt.Status.SUCCEEDED)
         record_change(self.staging)
         page = self.page
@@ -70,13 +70,17 @@ class ActivityBrowserTests(BrowserTestCase):
         expect(rows).to_have_count(2)
         expect(rows.nth(1)).to_contain_text("Set up")
         expect(rows.nth(1)).not_to_contain_text("Check the connection")
-        # The server's own Activity shows the same rows, narrowed to that server.
-        page.get_by_role("navigation", name="Primary").get_by_role("link", name="Servers").click()
-        page.get_by_role("link", name="Production").click()
-        page.get_by_role("navigation", name="Server sections").get_by_role(
-            "link", name="Activity"
-        ).click()
-        rows = page.get_by_role("row")
+        page.goto(f"{self.live_server_url}/servers/{self.production.pk}/")
+        expect(
+            page.get_by_role("navigation", name="Server sections").get_by_role(
+                "link", name="Activity"
+            )
+        ).to_have_count(0)
+        page.get_by_role("navigation", name="Primary").get_by_role("link", name="Activity").click()
+        expect(page).to_have_url(f"{self.live_server_url}/activity/")
+        page.get_by_role("link", name="Production", exact=True).click()
+        expect(page).to_have_url(f"{self.live_server_url}/activity/?server={self.production.pk}")
+        expect(page.get_by_label("Server")).to_have_value(str(self.production.pk))
         expect(rows).to_have_count(2)
         expect(rows.nth(1)).to_contain_text("Check the connection")
         expect(rows.nth(1)).not_to_contain_text("Set up")

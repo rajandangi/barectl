@@ -63,13 +63,6 @@
         {% include "servers/_advanced.html" %}
       {% elif section == "security" %}
         {% include "servers/_security.html" %}
-      {% elif section == "activity" %}
-        <p id="activity-announcement" class="usa-sr-only" role="status"></p>
-        <p class="barectl-note">
-          This controller's record of checks and changes for this server, newest first. It
-          never establishes the server's current state.
-        </p>
-        {% include "servers/_activity_rows.html" %}
       {% elif section == "jobs" %}
         {% vite_entry "jobs-time.ts" %}
         {% include "servers/_jobs.html" %}

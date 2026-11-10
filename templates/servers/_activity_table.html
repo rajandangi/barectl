@@ -18,7 +18,7 @@
             </td>
             {% if show_servers %}
               <th scope="row">
-                <a href="{% url 'server_activity' row.server_id %}">{{ row.server_name }}</a>
+                <a href="{% url 'activity' %}?server={{ row.server_id }}">{{ row.server_name }}</a>
               </th>
             {% endif %}
             <td>
