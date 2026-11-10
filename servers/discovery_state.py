@@ -21,7 +21,13 @@ from discovery.presentation import (
     present_sites,
     summary_warnings,
 )
-from discovery.services import STALE_AFTER, history, latest_attempt_statuses, read_discovery
+from discovery.services import (
+    STALE_AFTER,
+    ServerCapacity,
+    history,
+    inventory_discovery,
+    read_discovery,
+)
 from discovery.snapshot import AttemptSummary, Observation, ObservedSite, Snapshot, SnapshotFacts
 from operations.check_progress import CheckView, present_check
 from operations.models import RemoteOperation
@@ -97,6 +103,11 @@ def _connection_status(attempt_status: Status | None, *, alias_usable: bool) -> 
 class ServerRow:
     server: Server
     status: Status
+    capacity: ServerCapacity | None
+
+    @property
+    def capacity_may_be_stale(self) -> bool:
+        return self.capacity is not None and self.status != Status.VERIFIED
 
 
 @dataclass(frozen=True)
@@ -377,9 +388,9 @@ def server_state(server: Server) -> DiscoveryState:
 
 def inventory(servers: QuerySet[Server]) -> list[ServerRow]:
     """Each of ``servers`` with its connection status, after recovering abandoned attempts."""
-    listed = latest_attempt_statuses(servers)
+    listed = inventory_discovery(servers)
     catalog = _catalog(
-        {server.ssh_alias for server, _ in listed if server.connection_mode == "alias"}
+        {server.ssh_alias for server, _, _ in listed if server.connection_mode == "alias"}
     )
     return [
         ServerRow(
@@ -388,8 +399,9 @@ def inventory(servers: QuerySet[Server]) -> list[ServerRow]:
                 _wording(stored) if stored else None,
                 alias_usable=server.connection_mode != "alias" or server.ssh_alias in catalog,
             ),
+            capacity,
         )
-        for server, stored in listed
+        for server, stored, capacity in listed
     ]
 
 

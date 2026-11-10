@@ -409,8 +409,9 @@ if TYPE_CHECKING:
         ChangeConfirmationForm.confirmation,
         SharedApplyForm.affected_sites,
     )
-    # Templates read each row's status.
-    _views = ServerRow(Server(), Status.NOT_VERIFIED).status
+    # The server list reads its row's status and capacity.
+    _server_row = ServerRow(Server(), Status.NOT_VERIFIED, None)
+    _views = (_server_row.status, _server_row.capacity_may_be_stale)
     # The server page reads the snapshot's presentation from its discovery state, and the
     # Sites section each site's domains, PHP version, facts and state.
     _site = ShownSite("", (), "", SiteState.MANAGED, "", "", "", (), ())

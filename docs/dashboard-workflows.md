@@ -15,8 +15,11 @@ still decide whether a change runs, and consent, admission and verification are 
 The header leads with **Servers**, **Sites**, **Activity** and **Settings**, and marks
 the current place. Each is one activation from any page.
 
-- **Servers** lists saved servers with their connection status. With no servers it asks
-  for the first one and offers **Add server**.
+- **Servers** lists saved servers with their address, CPU count, RAM, root disk capacity
+  and connection status. A legacy connection with no saved address shows its SSH alias.
+  Capacity comes from the last successful check of the current connection. If a later
+  check is pending or failed, the list shows when the capacity was last checked.
+  With no servers it asks for the first one and offers **Add server**.
   Its Actions column offers **Edit connection** to operators with permission to edit
   servers. Cancelling an edit opened there returns to the list.
 - **Sites** lists every observed site across servers and offers **Create site**.
@@ -54,9 +57,9 @@ with **Copy**, and one status line. A compact **Server details** summary above t
 navigation shows the operating system, architecture, CPUs, memory and root filesystem
 storage, including available space. It uses the last successful observation, shows when
 it was checked, and retains warnings for unreadable values and failed or running checks.
-The summary updates when **Refresh server** finishes. With no observation it explains
-how to read the details. Copy uses the browser's clipboard; if access is denied, it selects
-the address for manual copying. Alias connections show their saved target address. An
+The summary also shows when the server was added and updates when **Refresh server** finishes.
+With no observation it explains how to read the details. Copy uses the browser's clipboard.
+If access is denied, it selects the address for manual copying. Alias connections show their saved target address. An
 older registration with no saved address says it is unavailable and offers no copy
 button, so copying never substitutes the server name or SSH alias for an address.
 

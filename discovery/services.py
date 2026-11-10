@@ -8,7 +8,7 @@ No other module reads attempts or their snapshots through a server's related nam
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from django.contrib.auth.models import User
@@ -29,6 +29,7 @@ from .snapshot import (
     AttemptSummary,
     Snapshot,
     attempt_summaries,
+    capacity_columns,
     has_snapshot,
     save_snapshot,
     snapshot_of,
@@ -88,9 +89,18 @@ def read_discovery(server: Server) -> ServerDiscovery:
     )
 
 
+class ServerCapacity(NamedTuple):
+    checked_at: datetime
+    cpus: int | None
+    ram: int | None
+    storage: int | None
+
+
 @recovers_first
-def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str | None]]:
-    """Each of ``servers`` with its latest attempt's status, or None, in one query."""
+def inventory_discovery(
+    servers: QuerySet[Server],
+) -> list[tuple[Server, str | None, ServerCapacity | None]]:
+    """Read the latest attempt status and last successful capacity in the same query."""
     latest = (
         DiscoveryAttempt.objects.filter(server=OuterRef("pk"))
         .filter(
@@ -99,9 +109,28 @@ def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str
         )
         .values("status")[:1]
     )
+    capacity = capacity_columns()
+    listed = servers.annotate(
+        attempt_status=Subquery(latest),
+        capacity_checked_at=capacity.checked_at,
+        capacity_cpus=capacity.cpus,
+        capacity_ram=capacity.ram,
+        capacity_storage=capacity.storage,
+    )
     return [
-        (server, server.attempt_status)
-        for server in servers.annotate(attempt_status=Subquery(latest))
+        (
+            server,
+            server.attempt_status,
+            ServerCapacity(
+                server.capacity_checked_at,
+                server.capacity_cpus,
+                server.capacity_ram,
+                server.capacity_storage,
+            )
+            if server.capacity_checked_at is not None
+            else None,
+        )
+        for server in listed
     ]
 
 

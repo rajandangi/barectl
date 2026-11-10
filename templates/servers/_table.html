@@ -1,36 +1,73 @@
 <div id="server-results" class="barectl-results" data-uswds-fragment>
   {% if rows %}
-    <div class="usa-table-container--scrollable" tabindex="0">
-      <table class="usa-table usa-table--borderless barectl-table">
+    <div class="barectl-server-list">
+      <table class="usa-table usa-table--borderless barectl-table" role="table">
         <caption>Registered servers</caption>
-        <thead>
-          <tr>
-            <th scope="col" data-sortable>Name</th>
-            <th scope="col" data-sortable>Address or SSH alias</th>
-            <th scope="col">Status</th>
-            <th scope="col" data-sortable>Added</th>
-            {% if perms.servers.change_server %}<th scope="col">Actions</th>{% endif %}
+        <thead role="rowgroup">
+          <tr role="row">
+            <th scope="col" role="columnheader" data-sortable>Server</th>
+            <th scope="col" role="columnheader" class="barectl-server-list__capacity">Capacity</th>
+            <th scope="col" role="columnheader">Status</th>
+            {% if perms.servers.change_server %}
+              <th scope="col" role="columnheader" class="barectl-server-list__action">Actions</th>
+            {% endif %}
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {% for row in rows %}
             {% with server=row.server %}
-              <tr>
-                <th scope="row">
-                  <a class="barectl-resource-link"
-                     href="{% url 'server_detail' server.pk %}">
+              <tr role="row">
+                <th scope="row" role="rowheader" data-sort-value="{{ server.name }}">
+                  <div class="barectl-server-list__identity">
                     <span class="barectl-resource-mark"
                           aria-hidden="true"><span class="barectl-icon barectl-icon--servers"></span></span>
-                    <span>{{ server.name }}</span>
-                  </a>
+                    <div>
+                      <a class="barectl-resource-link"
+                         href="{% url 'server_detail' server.pk %}">{{ server.name }}</a>
+                      {% if server.address %}
+                        <code>{{ server.address }}</code>
+                      {% elif server.ssh_alias %}
+                        <code>{{ server.ssh_alias }}</code>
+                      {% else %}
+                        <span class="barectl-server-list__note">Address unavailable</span>
+                      {% endif %}
+                    </div>
+                  </div>
                 </th>
-                <td>{% if server.connection_mode == "alias" %}{{ server.ssh_alias|default:"None" }}{% else %}{{ server.address }} · {{ server.username }} · {{ server.port }}{% endif %}</td>
-                <td>{{ row.status }}</td>
-                <td data-sort-value="{{ server.created_at|date:'U' }}">
-                  <time datetime="{{ server.created_at|date:'c' }}">{{ server.created_at|date:'M j, Y' }}</time>
+                <td class="barectl-server-list__capacity" role="cell">
+                  {% if row.capacity %}
+                    <dl class="barectl-server-list__metrics">
+                      <div>
+                        <dt>CPU</dt>
+                        <dd>
+                          {{ row.capacity.cpus|default_if_none:"Unavailable" }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>RAM</dt>
+                        <dd>
+                          {% if row.capacity.ram is not None %}{{ row.capacity.ram|filesizeformat }}{% else %}Unavailable{% endif %}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Root disk</dt>
+                        <dd>
+                          {% if row.capacity.storage is not None %}{{ row.capacity.storage|filesizeformat }}{% else %}Unavailable{% endif %}
+                        </dd>
+                      </div>
+                    </dl>
+                    {% if row.capacity_may_be_stale %}
+                      <span class="barectl-server-list__note">Last checked <time datetime="{{ row.capacity.checked_at|date:'c' }}">{{ row.capacity.checked_at|date:'M j, Y' }}</time></span>
+                    {% endif %}
+                  {% else %}
+                    <span class="barectl-server-list__note">Not checked yet</span>
+                  {% endif %}
+                </td>
+                <td class="barectl-server-list__state" role="cell">
+                  <span class="barectl-server-list__status barectl-server-list__status--{{ row.status.name|lower }}">{{ row.status }}</span>
                 </td>
                 {% if perms.servers.change_server %}
-                  <td>
+                  <td class="barectl-server-list__action" role="cell">
                     <a href="{% url 'server_edit' server.pk %}"
                        aria-label="Edit connection for {{ server.name }}">Edit connection</a>
                   </td>
@@ -46,7 +83,7 @@
     <section class="barectl-empty" aria-labelledby="no-matches-heading">
       <h2 id="no-matches-heading">No matching servers</h2>
       <p>
-        No server name or SSH alias contains “{{ query }}”. <a href="{% url 'servers' %}">Show all servers</a>
+        No server name, address or SSH alias contains “{{ query }}”. <a href="{% url 'servers' %}">Show all servers</a>
       </p>
     </section>
   {% else %}

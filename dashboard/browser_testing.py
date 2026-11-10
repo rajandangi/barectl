@@ -35,7 +35,7 @@ from operations import preparation
 from servers.models import Server
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
-SORTABLE_COLUMNS = 3
+SORTABLE_COLUMNS = 1
 CRIMSON = "rgb(220, 20, 60)"
 PRIMARY_BLUE = "rgb(0, 56, 147)"
 PAGE_BACKGROUND = "rgb(248, 246, 240)"

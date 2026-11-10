@@ -165,7 +165,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertNotContains(page, "hx-trigger")
         # Remote output that Barectl does not display is not stored.
         self.assertNotContains(page, "Resolute Raccoon")
-        self.assertContains(self.client.get("/"), "<td>Verified</td>", html=True)
+        self.assertContains(self.client.get("/"), ">Verified</span>")
 
     def test_discovery_runs_only_read_only_commands_without_sudo(self) -> None:
         self.remote.files = {"/usr/lib/os-release": UBUNTU}
@@ -213,7 +213,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertContains(
             self.client.get(f"/servers/{server.pk}/advanced/"), "No observations yet."
         )
-        self.assertContains(self.client.get("/"), "<td>Connection failed</td>", html=True)
+        self.assertContains(self.client.get("/"), ">Connection failed</span>")
 
     def test_unexpected_errors_are_recorded_without_their_details(self) -> None:
         def broken(target: ConnectionTarget) -> Iterator[ssh.RemoteShell]:

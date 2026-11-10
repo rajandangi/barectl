@@ -83,7 +83,11 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.assertNotContains(listing, "Edit connection for Web")
         self.grant("change_server")
         listing = self.client.get("/")
-        self.assertContains(listing, '<th scope="col">Actions</th>', html=True)
+        self.assertContains(
+            listing,
+            '<th scope="col" role="columnheader" class="barectl-server-list__action">Actions</th>',
+            html=True,
+        )
         self.assertContains(listing, f"/servers/{server.pk}/edit/")
 
     def test_removed_sections_redirect_to_their_new_homes(self) -> None:

@@ -8,7 +8,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, NamedTuple
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Q, QuerySet
+from django.db.models import OuterRef, Q, QuerySet, Subquery
+from django.db.models.expressions import BaseExpression
 
 from automation.observation import ObservedSchedule
 from automation.worker_observation import ObservedWorker
@@ -941,7 +942,7 @@ _OBSERVATION_ROWS = (
 def current_snapshot(server: Server) -> Snapshot | None:
     row = (
         DiscoverySnapshot.objects.filter(server=server)
-        .filter(_current_connection(server))
+        .filter(_current_connection(server.connection_revision))
         .select_related("attempt", "attempt__connection")
         .prefetch_related(*_OBSERVATION_ROWS)
         .first()
@@ -962,13 +963,43 @@ def snapshot_of(attempt: DiscoveryAttempt) -> Snapshot | None:
 
 def has_snapshot(server: Server) -> bool:
     return (
-        DiscoverySnapshot.objects.filter(server=server).filter(_current_connection(server)).exists()
+        DiscoverySnapshot.objects.filter(server=server)
+        .filter(_current_connection(server.connection_revision))
+        .exists()
     )
 
 
-def _current_connection(server: Server) -> Q:
-    return Q(attempt__connection__revision=server.connection_revision) | Q(
+def _current_connection(revision: int | OuterRef) -> Q:
+    return Q(attempt__connection__revision=revision) | Q(
         attempt__connection__isnull=True, server__connection_revision=0
+    )
+
+
+class CapacityColumns(NamedTuple):
+    checked_at: BaseExpression
+    cpus: BaseExpression
+    ram: BaseExpression
+    storage: BaseExpression
+
+
+def capacity_columns() -> CapacityColumns:
+    """Project the current snapshot's capacity onto a query of registered servers."""
+    current = DiscoverySnapshot.objects.filter(server=OuterRef("pk")).filter(
+        _current_connection(OuterRef("connection_revision"))
+    )
+    return CapacityColumns(
+        checked_at=Subquery(current.values("collected_at")[:1]),
+        cpus=Subquery(
+            current.filter(cpu_status=ObservationOutcome.OBSERVED).values("cpu_count")[:1]
+        ),
+        ram=Subquery(
+            current.filter(memory_status=ObservationOutcome.OBSERVED).values("memory_bytes")[:1]
+        ),
+        storage=Subquery(
+            current.filter(filesystem_status=ObservationOutcome.OBSERVED).values(
+                "filesystem_size_bytes"
+            )[:1]
+        ),
     )
 
 

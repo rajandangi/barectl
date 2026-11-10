@@ -2,11 +2,7 @@
 {% block title %}Servers · Barectl{% endblock %}
 {% block content %}
   <div class="barectl-page-heading">
-    <div>
-      <p class="barectl-eyebrow">Your workspace</p>
-      <h1>Servers</h1>
-      <p class="barectl-note">Manage connections, open a server, and pick up where you left off.</p>
-    </div>
+    <h1>Servers</h1>
     {% if total_count and perms.servers.add_server %}
       <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
     {% endif %}

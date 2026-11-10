@@ -31,5 +31,6 @@
     {% else %}
       <p class="barectl-note">No observations yet. Server details appear after the first successful check.</p>
     {% endif %}
+    <p class="barectl-note">Added <time datetime="{{ server.created_at|date:'c' }}">{{ server.created_at|date:'M j, Y' }}</time></p>
   </section>
 {% endwith %}

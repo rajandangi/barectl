@@ -90,10 +90,21 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
             "link", name="Servers", exact=True
         ).click()
         expect(page.get_by_role("columnheader", name="Actions", exact=True)).to_be_visible()
+        row = page.get_by_role("row").filter(has_text="Production")
+        expect(row).to_contain_text("203.0.113.10")
+        expect(row).to_contain_text("3.8 GB")
+        expect(row).to_contain_text("50.0 GB")
         page.get_by_role("link", name="Edit connection for Production", exact=True).click()
         expect(page.get_by_role("heading", name="Edit Production", level=1)).to_be_visible()
         page.get_by_role("link", name="Cancel", exact=True).click()
         expect(page.get_by_role("heading", name="Servers", level=1)).to_be_visible()
+        page.set_viewport_size({"width": 320, "height": 800})
+        expect(row.get_by_text("Root disk", exact=True)).to_be_visible()
+        expect(row.get_by_role("link", name="Edit connection for Production")).to_be_visible()
+        self.assertEqual(
+            page.evaluate("document.documentElement.scrollWidth"),
+            page.evaluate("window.innerWidth"),
+        )
 
     def test_advanced_is_two_activations_from_the_server(self) -> None:
         page = self.page

@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 from datetime import timedelta
 from typing import ClassVar, override
 from unittest import mock
@@ -6,10 +7,12 @@ from unittest import mock
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client
+from django.utils import timezone
 
-from discovery.fakes import STALE, record_attempt
-from discovery.models import DiscoveryAttempt
+from discovery.fakes import COLLECTED, STALE, record_attempt
+from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.services import INTERRUPTED_FAILURE
+from discovery.snapshot import Observation, save_snapshot
 
 from .forms import ServerForm
 from .models import Server
@@ -58,7 +61,8 @@ class InventoryTests(ControllerConfigTestCase):
         self.assertContains(response, "web.example.com")
         self.assertContains(response, "stage.example.net")
         # Registration alone never claims connectivity.
-        self.assertContains(response, "<td>Not verified</td>", count=2, html=True)
+        self.assertContains(response, ">Not verified</span>", count=2)
+        self.assertContains(response, ">Not checked yet</span>", count=2)
         self.assertNotContains(response, "Connected")
         self.assertContains(response, "2 servers.")
         self.assertContains(response, 'aria-current="page"')
@@ -82,8 +86,34 @@ class InventoryTests(ControllerConfigTestCase):
         self.grant_view()
         self.client.force_login(self.user)
         response = self.client.get("/")
-        self.assertContains(response, "<td>SSH alias unavailable</td>", html=True)
-        self.assertContains(response, "<td>Not verified</td>", html=True)
+        self.assertContains(response, ">SSH alias unavailable</span>")
+        self.assertContains(response, ">Not verified</span>")
+
+    def test_capacity_uses_the_last_success_for_the_current_connection(self) -> None:
+        self.server.address = "2001:db8::42"
+        self.server.save(update_fields=["address"])
+        attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
+        collected = replace(
+            COLLECTED, cpu_count=Observation(ObservationOutcome.OBSERVED, ("nproc",), "", 8)
+        )
+        save_snapshot(attempt, collected, timezone.now())
+        record_attempt(self.server, DiscoveryAttempt.Status.FAILED)
+        self.grant_view()
+        self.client.force_login(self.user)
+
+        response = self.client.get("/", {"q": "web.example.com"}, headers=HTMX_FRAGMENT)
+        self.assertContains(response, "<code>2001:db8::42</code>", html=True)
+        self.assertContains(response, "<dd>8</dd>", html=True)
+        self.assertContains(response, "3.8\xa0GB")
+        self.assertContains(response, "50.0\xa0GB")
+        self.assertContains(response, "Last checked")
+        self.assertContains(response, "Connection failed")
+
+        self.server.connection_revision = 1
+        self.server.save(update_fields=["connection_revision"])
+        response = self.client.get("/", {"q": "2001:db8::42"}, headers=HTMX_FRAGMENT)
+        self.assertContains(response, ">Not checked yet</span>")
+        self.assertNotContains(response, "<dd>8</dd>", html=True)
 
     def test_empty_inventory_explains_the_next_step(self) -> None:
         Server.objects.all().delete()
