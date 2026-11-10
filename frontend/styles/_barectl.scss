@@ -139,6 +139,16 @@ body {
   }
 }
 
+.usa-alert {
+  border-radius: units(1);
+
+  // USWDS paints the alert body separately from the wrapper and its status bar.
+  > .usa-alert__body {
+    border-top-right-radius: inherit;
+    border-bottom-right-radius: inherit;
+  }
+}
+
 .barectl-sign-in .usa-alert,
 .barectl-form-page > .usa-alert,
 #next-action-region > .usa-alert {
