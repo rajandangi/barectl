@@ -21,6 +21,8 @@ from discovery.services import read_discovery
 from discovery.snapshot import CollectedSnapshot
 from operations.models import ChangePreparation, ChangeReview, ChangeRun, Result, Verification
 from runtimes import change as runtime_change
+from runtimes.catalog import architecture_of
+from runtimes.catalog import load as load_catalog
 from runtimes.observation import RuntimeObservation
 from servers.models import Server
 
@@ -221,8 +223,16 @@ class HostFoundation(ScenarioTestCase):
                         + self.native(foundation.READ_COMMAND)
                         + self.native("getent passwd nixbld1; getent group nixbld"),
                     )
+                    architecture = architecture_of(self.native("uname -m").strip())
+                    if architecture is None:
+                        self.fail("Unsupported native architecture.")
+                    haproxy = next(
+                        build
+                        for build in load_catalog().offered(architecture)
+                        if build.entry == "haproxy"
+                    )
                     self.assertIn(
-                        "HAProxy version 3.3.11",
+                        f"HAProxy version {haproxy.version}",
                         self.native("/nix/var/nix/profiles/barectl/haproxy/bin/haproxy -v"),
                     )
                     self.native('[ -z "$(pgrep -x haproxy || true)" ]')
@@ -570,7 +580,6 @@ class FoundationSudoDiscovery(ScenarioTestCase):
                     evidence.standing.standing, Standing.TARGET_STACK, evidence.standing.reasons
                 )
             self.assertTrue(foundation.review(evidence).no_changes)
-            from runtimes.catalog import architecture_of
             from sites import node_change
 
             architecture = architecture_of(self.native("uname -m").strip())

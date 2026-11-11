@@ -19,6 +19,24 @@
         "restic": { "kind": "tool", "attribute": "restic" },
         "wp-cli": { "kind": "tool", "attribute": "wp-cli" }
       }
+    },
+    {
+      "nixpkgs": "ac588ef1c914865dad517b337ea0eb9694a4021c",
+      "sha256": "1sxd2sqlpy1bx6b5xiwy1pbyygazl9d1a5yy0rvqfsihqpcibq2y",
+      "entries": {
+        "caddy": { "kind": "tool", "attribute": "caddy" },
+        "fcgi": { "kind": "tool", "attribute": "fcgi" },
+        "haproxy": { "kind": "tool", "attribute": "haproxy" },
+        "composer": { "kind": "tool", "attribute": "php84Packages.composer" },
+        "nodejs_22": { "kind": "node", "attribute": "nodejs_22" },
+        "nodejs_24": { "kind": "node", "attribute": "nodejs_24" },
+        "php84": { "kind": "php", "attribute": "php84" },
+        "php84_redis": { "kind": "extension", "attribute": "php84.extensions.redis" },
+        "php85": { "kind": "php", "attribute": "php85" },
+        "php85_redis": { "kind": "extension", "attribute": "php85.extensions.redis" },
+        "restic": { "kind": "tool", "attribute": "restic" },
+        "wp-cli": { "kind": "tool", "attribute": "wp-cli" }
+      }
     }
   ]
 }

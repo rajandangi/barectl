@@ -40,6 +40,8 @@ jobs:
         with:
           path: ~/.cache/barectl/native/mirror
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+          restore-keys: |
+            native-mirror-${{ runner.os }}-${{ runner.arch }}-
       # The upstream snapshot can be unavailable; the lane still proves the real reboot
       # and the restart body from the restored cache. The native mirror lane owns package
       # serving, and the VM smoke test skips the mirror fetch when no index is cached.

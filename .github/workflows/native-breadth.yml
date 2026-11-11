@@ -29,6 +29,8 @@ jobs:
         with:
           path: ~/.cache/barectl/native/mirror
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+          restore-keys: |
+            native-mirror-${{ runner.os }}-${{ runner.arch }}-
       - run: docker/disposable-server/mirror.sh -- fetch
       - id: keys
         run: |

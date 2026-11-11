@@ -148,8 +148,8 @@ class CatalogLookupTests(SimpleTestCase):
     def test_haproxy_is_a_pinned_infrastructure_tool_on_both_architectures(self) -> None:
         catalog = load()
         for architecture, path in (
-            (Architecture.AARCH64, "/nix/store/pjgrjkh9g0nhp9jzzcxg7l6gwvlslh7y-haproxy-3.3.11"),
-            (Architecture.X86_64, "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11"),
+            (Architecture.AARCH64, "/nix/store/3lxnnlgsv36dp21111azpbi0jg7r3vyq-haproxy-3.3.17"),
+            (Architecture.X86_64, "/nix/store/y47qcl5i3dd56bsjs4l5x1vm67lafb4z-haproxy-3.3.17"),
         ):
             with self.subTest(architecture=architecture):
                 build = catalog.identify(architecture, path)
@@ -157,7 +157,7 @@ class CatalogLookupTests(SimpleTestCase):
                 if build is not None:
                     self.assertEqual(
                         (build.entry, build.kind, build.version, build.retired),
-                        ("haproxy", Kind.TOOL, "3.3.11", False),
+                        ("haproxy", Kind.TOOL, "3.3.17", False),
                     )
 
     def test_committed_lock_offers_every_pinned_entry_on_both_architectures(self) -> None:

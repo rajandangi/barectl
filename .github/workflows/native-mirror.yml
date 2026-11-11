@@ -25,6 +25,8 @@ jobs:
             ~/.cache/barectl/native/mirror
             !~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+          restore-keys: |
+            native-mirror-${{ runner.os }}-${{ runner.arch }}-
       - id: ca-key
         run: echo "key=$(uv run python -m disposable.mirror fixture-ca-key)" >> "$GITHUB_OUTPUT"
       - name: Restore the fixture CA

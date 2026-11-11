@@ -41,15 +41,13 @@ class FoundationReviewTests(TestCase):
         draft = foundation.review(evidence)
         profiles = draft.document["profiles"]
         self.assertIsInstance(profiles, dict)
-        if isinstance(profiles, dict):
-            self.assertEqual(
-                profiles.get("haproxy"),
-                "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11",
-            )
-        native = foundation.body(draft.document, BodyContext("", "", 0))
-        self.assertIn(
-            "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11", native.arguments
+        haproxy = next(
+            build for build in load().offered(Architecture.X86_64) if build.entry == "haproxy"
         )
+        if isinstance(profiles, dict):
+            self.assertEqual(profiles.get("haproxy"), haproxy.path)
+        native = foundation.body(draft.document, BodyContext("", "", 0))
+        self.assertIn(haproxy.path, native.arguments)
 
     def test_missing_profiles_select_only_offered_builds(self) -> None:
         evidence = foundation.FoundationEvidence(

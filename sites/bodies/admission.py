@@ -252,7 +252,9 @@ def hap_validate(identifier: str) -> None:
                 "",
             )
             or re.fullmatch(
-                r"\[NOTICE\]\s+\([0-9]+\) : haproxy version is 3\.3\.11[-A-Za-z0-9.]*", line
+                r"\[NOTICE\]\s+\([0-9]+\) : haproxy version is "
+                r"[0-9]+\.[0-9]+\.[0-9]+[-A-Za-z0-9.]*",
+                line,
             )
             or re.fullmatch(
                 r"\[NOTICE\]\s+\([0-9]+\) : path to executable is "
