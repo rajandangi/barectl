@@ -54,6 +54,8 @@ jobs:
             ~/.cache/barectl/native/mirror
             !~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           key: ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+          restore-keys: |
+            ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-
       - id: ca-key
         env:
           CACHE_NAMESPACE: ${{ inputs.cache-namespace }}
@@ -471,6 +473,8 @@ jobs:
             ~/.cache/barectl/native/mirror
             !~/.cache/barectl/native/mirror/barectl-native-fixture-ca
           key: ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+          restore-keys: |
+            ${{ inputs.cache-namespace }}native-mirror-${{ runner.os }}-${{ runner.arch }}-
       - name: Use this run's shared fixture CA
         uses: actions/download-artifact@v8.0.2
         with:

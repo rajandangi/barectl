@@ -327,7 +327,7 @@
     "disposable/test_locking.py": "b709d928befd18b5a5efc6ec35d1ef876dd19e0ed9d00c4a16d5d2d46c62215a",
     "disposable/test_logs_journal.py": "95d105e7fcb244a7e7eb27db867faa3677525c0cbc5c9ffa3b05d582733ab6d6",
     "disposable/test_logs_validators.py": "bb1356b3a55fa8588aeb7576fa2d7298b89afaa4a0a6cc799ff3abca4183f95c",
-    "disposable/test_mirror.py": "f842f92476b2e6fddface9636e9c4c3f26a3cdbe61d4f7e3df80b841027d0aea",
+    "disposable/test_mirror.py": "bb3df633ced8769d36cd7f72a71cc9a7a267457947542f3ad5182469c978fc09",
     "disposable/test_mirror_nix.py": "47005ef659002f8fc70d6bfe4c257dd71608e8cb8ecb87ec90dd764450d3af73",
     "disposable/test_native_fixtures.py": "470b2f356b98dc9e2956bfbaab52cae3e4193cb10fbc511dbaa90b4d7fdcd248",
     "disposable/test_native_mirror.py": "7fbc827cc4b241cbd583448c7e09eeff7c694051a86a93a83b65661716c97104",
@@ -714,11 +714,11 @@
     "wordpress/convention.py": "a25e359d7d788d9b82163b6effc17f5a4a3558d9125dd7cc93cd838bc9520472"
   },
   "capture_pins": {
-    "catalog-sha256": "4d619aee18282b32ad8e84d8e4851af9682bb2dafff71ff9d444d9f46c4f82e5",
+    "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
+    "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78",
     "nix-version": "2.35.2",
     "nixpkgs": "ac588ef1c914865dad517b337ea0eb9694a4021c",
-    "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
-    "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
+    "catalog-sha256": "4d619aee18282b32ad8e84d8e4851af9682bb2dafff71ff9d444d9f46c4f82e5"
   },
   "capture_states": {
     "apache-26.04": "222f189f70f6f6333d6c9a8d7dc2cff871c6868cea8bdacf5f0af07e4f3eca50",

@@ -640,6 +640,30 @@ class FixtureCAWorkflowTests(SimpleTestCase):
         )
         self.assertEqual(guard["if"], "inputs.cache-namespace != ''")
 
+    def test_every_mirror_restore_falls_back_to_an_earlier_manifest(self) -> None:
+        for name in (
+            "native-breadth.yml",
+            "native-mirror.yml",
+            "native-scenarios.yml",
+            "native-vm.yml",
+        ):
+            workflow = yaml.safe_load((mirror.REPOSITORY / ".github/workflows" / name).read_text())
+            with self.subTest(workflow=name):
+                restores = [
+                    step
+                    for job in workflow["jobs"].values()
+                    for step in job.get("steps", ())
+                    if "native-mirror-" in step.get("with", {}).get("key", "")
+                ]
+                self.assertTrue(restores)
+                for step in restores:
+                    key = step["with"]["key"]
+                    prefix = key.partition("native-mirror-")[0] + "native-mirror-"
+                    self.assertEqual(
+                        step["with"].get("restore-keys", "").strip(),
+                        prefix + "${{ runner.os }}-${{ runner.arch }}-",
+                    )
+
     def test_cold_mode_refuses_a_restored_cache(self) -> None:
         workflow = yaml.safe_load(
             (mirror.REPOSITORY / ".github/workflows/native-scenarios.yml").read_text()
