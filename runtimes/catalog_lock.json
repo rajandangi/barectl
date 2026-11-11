@@ -3,15 +3,15 @@
     "caddy": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 100680568,
-          "download_size": 27189211,
-          "path": "/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7",
+          "closure_size": 100536120,
+          "download_size": 27111578,
+          "path": "/nix/store/75g0h1z9yrdi8hjzb645zp8sl5cr26l5-caddy-2.11.7",
           "version": "2.11.7"
         },
         "x86_64-linux": {
-          "closure_size": 92697904,
-          "download_size": 29216724,
-          "path": "/nix/store/q52hb25vh6yizlnccb35343xv5mxj38f-caddy-2.11.7",
+          "closure_size": 92553456,
+          "download_size": 29112631,
+          "path": "/nix/store/ab61h0mbs9yr6n9558pi0lq0c2fj5i77-caddy-2.11.7",
           "version": "2.11.7"
         }
       },
@@ -20,15 +20,15 @@
     "composer": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 375838800,
-          "download_size": 113965715,
-          "path": "/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3",
+          "closure_size": 376513408,
+          "download_size": 114260537,
+          "path": "/nix/store/iscfrcak025m0cyhpi9ns8lv9m7nzgmv-composer-2.10.3",
           "version": "2.10.3"
         },
         "x86_64-linux": {
-          "closure_size": 362768880,
-          "download_size": 115467094,
-          "path": "/nix/store/w5j1nh81nx9aijzmnhzljiam6hqy010y-composer-2.10.3",
+          "closure_size": 363528528,
+          "download_size": 115704849,
+          "path": "/nix/store/v0wnqj3l6kvwrhsm0wkxxmmghqnjsldz-composer-2.10.3",
           "version": "2.10.3"
         }
       },
@@ -37,15 +37,15 @@
     "fcgi": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 59537408,
-          "download_size": 14023657,
-          "path": "/nix/store/lrj0c678ng6kyjrbs2r3xdj4cmzdsvly-fcgi-2.4.7",
+          "closure_size": 59537352,
+          "download_size": 14044608,
+          "path": "/nix/store/07qn5rwy0lhah8xg3rw6pb759n7ycxwq-fcgi-2.4.7",
           "version": "2.4.7"
         },
         "x86_64-linux": {
-          "closure_size": 48400224,
-          "download_size": 14534900,
-          "path": "/nix/store/jxd8imhp6yzwwdjjsz9gmsryjkv8j171-fcgi-2.4.7",
+          "closure_size": 48400168,
+          "download_size": 14528917,
+          "path": "/nix/store/g5rj6y01h2x33g1kpj3z5kzw7imsnhp8-fcgi-2.4.7",
           "version": "2.4.7"
         }
       },
@@ -54,16 +54,16 @@
     "haproxy": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 80051864,
-          "download_size": 20485574,
-          "path": "/nix/store/pjgrjkh9g0nhp9jzzcxg7l6gwvlslh7y-haproxy-3.3.11",
-          "version": "3.3.11"
+          "closure_size": 80136952,
+          "download_size": 20530357,
+          "path": "/nix/store/3lxnnlgsv36dp21111azpbi0jg7r3vyq-haproxy-3.3.17",
+          "version": "3.3.17"
         },
         "x86_64-linux": {
-          "closure_size": 65639792,
-          "download_size": 20459888,
-          "path": "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11",
-          "version": "3.3.11"
+          "closure_size": 65699808,
+          "download_size": 20479571,
+          "path": "/nix/store/y47qcl5i3dd56bsjs4l5x1vm67lafb4z-haproxy-3.3.17",
+          "version": "3.3.17"
         }
       },
       "kind": "tool"
@@ -71,16 +71,16 @@
     "nodejs_22": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 274687312,
-          "download_size": 74090061,
-          "path": "/nix/store/sqlzha196wsz4ihj6cmmjhm27dp0hks7-nodejs-22.23.3",
-          "version": "22.23.3"
+          "closure_size": 274986272,
+          "download_size": 74291934,
+          "path": "/nix/store/c2isl8fyylgp71i5liy4h55afznv41nj-nodejs-22.23.4",
+          "version": "22.23.4"
         },
         "x86_64-linux": {
-          "closure_size": 258714072,
-          "download_size": 74556449,
-          "path": "/nix/store/r8avny0rl4kpc9zig9ar8i9ny7mw0lxz-nodejs-22.23.3",
-          "version": "22.23.3"
+          "closure_size": 259023816,
+          "download_size": 74682504,
+          "path": "/nix/store/id0zg9wx26z88apwg2sbr77lilkvbcxa-nodejs-22.23.4",
+          "version": "22.23.4"
         }
       },
       "kind": "node"
@@ -88,16 +88,16 @@
     "nodejs_24": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 278363832,
-          "download_size": 75383342,
-          "path": "/nix/store/19airavsc0s9i3yqfciiwi82filqblh0-nodejs-24.21.0",
-          "version": "24.21.0"
+          "closure_size": 279067664,
+          "download_size": 75717138,
+          "path": "/nix/store/48fr9l2vscwdfyj19bqzic8kgl8qamim-nodejs-24.22.1",
+          "version": "24.22.1"
         },
         "x86_64-linux": {
-          "closure_size": 262606688,
-          "download_size": 75951796,
-          "path": "/nix/store/q3ydkdhaj4y6k9pbpnriv5miqdgs1gsf-nodejs-24.21.0",
-          "version": "24.21.0"
+          "closure_size": 263179208,
+          "download_size": 76261479,
+          "path": "/nix/store/709kghqbswlhrfshjmrh9sn566gjbwdd-nodejs-24.22.1",
+          "version": "24.22.1"
         }
       },
       "kind": "node"
@@ -105,16 +105,16 @@
     "php84": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 270004320,
-          "download_size": 80424139,
-          "path": "/nix/store/gchpkav1f33vkglhl0qv1m8jin8a3r2y-php-with-extensions-8.4.26",
-          "version": "8.4.26"
+          "closure_size": 270211776,
+          "download_size": 80654483,
+          "path": "/nix/store/xmnb1ssr66rqnymh5azrhd0f6z142mh1-php-with-extensions-8.4.27",
+          "version": "8.4.27"
         },
         "x86_64-linux": {
-          "closure_size": 261185120,
-          "download_size": 81661792,
-          "path": "/nix/store/x7xv32zhi5cfbbl7kq75rqx6r70dzcbw-php-with-extensions-8.4.26",
-          "version": "8.4.26"
+          "closure_size": 261469424,
+          "download_size": 81844464,
+          "path": "/nix/store/1si82c0hc3nrdmikgjfv3lkbddxa82dn-php-with-extensions-8.4.27",
+          "version": "8.4.27"
         }
       },
       "kind": "php"
@@ -122,15 +122,15 @@
     "php84_redis": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 50074912,
-          "download_size": 11275675,
-          "path": "/nix/store/ghx7d2mxgylh5mc1fli23riji47glcq7-php-redis-6.3.0",
+          "closure_size": 50074872,
+          "download_size": 11296075,
+          "path": "/nix/store/97dqnybwrsb7g2k4rnd5xm5xckq80cd6-php-redis-6.3.0",
           "version": "6.3.0"
         },
         "x86_64-linux": {
-          "closure_size": 38488296,
-          "download_size": 11550461,
-          "path": "/nix/store/q7p0d2m8r320z5nn9296vabkxmrbw781-php-redis-6.3.0",
+          "closure_size": 38488248,
+          "download_size": 11544931,
+          "path": "/nix/store/9sbb8ihx7rpj80nn0yxhj1mj54zn497a-php-redis-6.3.0",
           "version": "6.3.0"
         }
       },
@@ -139,16 +139,16 @@
     "php85": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 292455576,
-          "download_size": 85014631,
-          "path": "/nix/store/ibhs1rpwy0glzsbf9whmmpblm9xldafm-php-with-extensions-8.5.11",
-          "version": "8.5.11"
+          "closure_size": 292663200,
+          "download_size": 85242661,
+          "path": "/nix/store/1kg29lm7n91zsk3x2ws2i1q3m82s71iq-php-with-extensions-8.5.12",
+          "version": "8.5.12"
         },
         "x86_64-linux": {
-          "closure_size": 288968984,
-          "download_size": 86430167,
-          "path": "/nix/store/ib1b9sjjg4xhlqjyycigzgmg9b8j1q7r-php-with-extensions-8.5.11",
-          "version": "8.5.11"
+          "closure_size": 289228984,
+          "download_size": 86621246,
+          "path": "/nix/store/zwbl4wkcpd68ailpvr1rjkipf5z1v7pf-php-with-extensions-8.5.12",
+          "version": "8.5.12"
         }
       },
       "kind": "php"
@@ -156,15 +156,15 @@
     "php85_redis": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 50074912,
-          "download_size": 11275666,
-          "path": "/nix/store/gk5x050bdr7y5c4qlr77z7l6gfwr37vv-php-redis-6.3.0",
+          "closure_size": 50074872,
+          "download_size": 11296091,
+          "path": "/nix/store/5j9mm45qqn7s29ml5dnjxbg2y031xv90-php-redis-6.3.0",
           "version": "6.3.0"
         },
         "x86_64-linux": {
-          "closure_size": 38488296,
-          "download_size": 11550451,
-          "path": "/nix/store/wq7hgm50i8mwf88sp1gdz5y8k3q8bf77-php-redis-6.3.0",
+          "closure_size": 38488248,
+          "download_size": 11544889,
+          "path": "/nix/store/z9z3r1prc2isp285snwlrpi3670pbqps-php-redis-6.3.0",
           "version": "6.3.0"
         }
       },
@@ -173,15 +173,15 @@
     "restic": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 274619224,
-          "download_size": 76959084,
-          "path": "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1",
+          "closure_size": 275322632,
+          "download_size": 77178783,
+          "path": "/nix/store/l06wl22rbv8qss1j418nssg6w5gv1nl9-restic-0.18.1",
           "version": "0.18.1"
         },
         "x86_64-linux": {
-          "closure_size": 262355320,
-          "download_size": 81124739,
-          "path": "/nix/store/ffg41qplkng3m78p3r9n00721b56fc2v-restic-0.18.1",
+          "closure_size": 263107048,
+          "download_size": 81322604,
+          "path": "/nix/store/rqzv1nw84hnin8m9gvchi4zq9dkihiz0-restic-0.18.1",
           "version": "0.18.1"
         }
       },
@@ -190,15 +190,15 @@
     "wp-cli": {
       "builds": {
         "aarch64-linux": {
-          "closure_size": 277150264,
-          "download_size": 81940601,
-          "path": "/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0",
+          "closure_size": 277357720,
+          "download_size": 82170944,
+          "path": "/nix/store/q2mwh6xd0xlpfh99fi68p7mmvm2qiin8-wp-cli-2.12.0",
           "version": "2.12.0"
         },
         "x86_64-linux": {
-          "closure_size": 268331064,
-          "download_size": 83178254,
-          "path": "/nix/store/v9f1910fn7gadj7spzhavcpsxl0ipanz-wp-cli-2.12.0",
+          "closure_size": 268615368,
+          "download_size": 83360927,
+          "path": "/nix/store/9sglc5412sdnqgqzdyv01jkyj0b53jfx-wp-cli-2.12.0",
           "version": "2.12.0"
         }
       },
@@ -219,6 +219,247 @@
     },
     "version": "2.35.2"
   },
-  "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
-  "retired": []
+  "nixpkgs": "ac588ef1c914865dad517b337ea0eb9694a4021c",
+  "retired": [
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 278363832,
+      "download_size": 75383342,
+      "entry": "nodejs_24",
+      "kind": "node",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/19airavsc0s9i3yqfciiwi82filqblh0-nodejs-24.21.0",
+      "version": "24.21.0"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 375838800,
+      "download_size": 113965715,
+      "entry": "composer",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3",
+      "version": "2.10.3"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 277150264,
+      "download_size": 81940601,
+      "entry": "wp-cli",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0",
+      "version": "2.12.0"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 270004320,
+      "download_size": 80424139,
+      "entry": "php84",
+      "kind": "php",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/gchpkav1f33vkglhl0qv1m8jin8a3r2y-php-with-extensions-8.4.26",
+      "version": "8.4.26"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 50074912,
+      "download_size": 11275675,
+      "entry": "php84_redis",
+      "kind": "extension",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/ghx7d2mxgylh5mc1fli23riji47glcq7-php-redis-6.3.0",
+      "version": "6.3.0"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 50074912,
+      "download_size": 11275666,
+      "entry": "php85_redis",
+      "kind": "extension",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/gk5x050bdr7y5c4qlr77z7l6gfwr37vv-php-redis-6.3.0",
+      "version": "6.3.0"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 292455576,
+      "download_size": 85014631,
+      "entry": "php85",
+      "kind": "php",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/ibhs1rpwy0glzsbf9whmmpblm9xldafm-php-with-extensions-8.5.11",
+      "version": "8.5.11"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 59537408,
+      "download_size": 14023657,
+      "entry": "fcgi",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/lrj0c678ng6kyjrbs2r3xdj4cmzdsvly-fcgi-2.4.7",
+      "version": "2.4.7"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 80051864,
+      "download_size": 20485574,
+      "entry": "haproxy",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/pjgrjkh9g0nhp9jzzcxg7l6gwvlslh7y-haproxy-3.3.11",
+      "version": "3.3.11"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 274619224,
+      "download_size": 76959084,
+      "entry": "restic",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1",
+      "version": "0.18.1"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 274687312,
+      "download_size": 74090061,
+      "entry": "nodejs_22",
+      "kind": "node",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/sqlzha196wsz4ihj6cmmjhm27dp0hks7-nodejs-22.23.3",
+      "version": "22.23.3"
+    },
+    {
+      "architecture": "aarch64-linux",
+      "closure_size": 100680568,
+      "download_size": 27189211,
+      "entry": "caddy",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7",
+      "version": "2.11.7"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 262355320,
+      "download_size": 81124739,
+      "entry": "restic",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/ffg41qplkng3m78p3r9n00721b56fc2v-restic-0.18.1",
+      "version": "0.18.1"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 65639792,
+      "download_size": 20459888,
+      "entry": "haproxy",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11",
+      "version": "3.3.11"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 288968984,
+      "download_size": 86430167,
+      "entry": "php85",
+      "kind": "php",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/ib1b9sjjg4xhlqjyycigzgmg9b8j1q7r-php-with-extensions-8.5.11",
+      "version": "8.5.11"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 48400224,
+      "download_size": 14534900,
+      "entry": "fcgi",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/jxd8imhp6yzwwdjjsz9gmsryjkv8j171-fcgi-2.4.7",
+      "version": "2.4.7"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 262606688,
+      "download_size": 75951796,
+      "entry": "nodejs_24",
+      "kind": "node",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/q3ydkdhaj4y6k9pbpnriv5miqdgs1gsf-nodejs-24.21.0",
+      "version": "24.21.0"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 92697904,
+      "download_size": 29216724,
+      "entry": "caddy",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/q52hb25vh6yizlnccb35343xv5mxj38f-caddy-2.11.7",
+      "version": "2.11.7"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 38488296,
+      "download_size": 11550461,
+      "entry": "php84_redis",
+      "kind": "extension",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/q7p0d2m8r320z5nn9296vabkxmrbw781-php-redis-6.3.0",
+      "version": "6.3.0"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 258714072,
+      "download_size": 74556449,
+      "entry": "nodejs_22",
+      "kind": "node",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/r8avny0rl4kpc9zig9ar8i9ny7mw0lxz-nodejs-22.23.3",
+      "version": "22.23.3"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 268331064,
+      "download_size": 83178254,
+      "entry": "wp-cli",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/v9f1910fn7gadj7spzhavcpsxl0ipanz-wp-cli-2.12.0",
+      "version": "2.12.0"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 362768880,
+      "download_size": 115467094,
+      "entry": "composer",
+      "kind": "tool",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/w5j1nh81nx9aijzmnhzljiam6hqy010y-composer-2.10.3",
+      "version": "2.10.3"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 38488296,
+      "download_size": 11550451,
+      "entry": "php85_redis",
+      "kind": "extension",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/wq7hgm50i8mwf88sp1gdz5y8k3q8bf77-php-redis-6.3.0",
+      "version": "6.3.0"
+    },
+    {
+      "architecture": "x86_64-linux",
+      "closure_size": 261185120,
+      "download_size": 81661792,
+      "entry": "php84",
+      "kind": "php",
+      "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+      "path": "/nix/store/x7xv32zhi5cfbbl7kq75rqx6r70dzcbw-php-with-extensions-8.4.26",
+      "version": "8.4.26"
+    }
+  ]
 }

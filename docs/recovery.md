@@ -92,7 +92,7 @@ The site's **Settings** in Barectl is the readable answer: it shows the recorded
 
 | `srv_op_state` `srv_admin_state` | Meaning |
 | --- | --- |
-| `2 4` | Serves requests. `2` is `SRV_ST_RUNNING`. `4` is `SRV_ADMF_CMAINT` alone: the configuration declares the server disabled, which HAProxy keeps as a separate flag, and no forced maintenance is set ([3.3.11 source](https://git.haproxy.org/?p=haproxy-3.3.git;a=blob;f=include/haproxy/server-t.h;hb=refs/tags/v3.3.11)). |
+| `2 4` | Serves requests. `2` is `SRV_ST_RUNNING`. `4` is `SRV_ADMF_CMAINT` alone: the configuration declares the server disabled, which HAProxy keeps as a separate flag, and no forced maintenance is set ([3.3.17 source](https://git.haproxy.org/?p=haproxy-3.3.git;a=blob;f=include/haproxy/server-t.h;hb=refs/tags/v3.3.17)). |
 | `0 5` | Receives nothing. `0` is `SRV_ST_STOPPED`, and `5` adds `SRV_ADMF_FMAINT`, forced maintenance, to `SRV_ADMF_CMAINT`. |
 
 One runtime at `2 4` and the other at `0 5` is a completed selection. Both at `2 4` in the live state means a switch stopped while both masters were admitted; the persisted file then still names the previous selection, which a restart of `haproxy-site@<id>` would restore. The convention uses no other pair.
