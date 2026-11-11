@@ -65,7 +65,9 @@ jobs:
       - run: uv sync --locked
       - run: npm ci
       - run: npm run build
-      - run: uv run playwright install --with-deps chromium
+      # A Canonical archive outage must not block the browser suite when the runner image
+      # already provides Chromium's libraries.
+      - run: uv run playwright install --with-deps chromium || uv run playwright install chromium
       - run: uv run python manage.py test --tag browser
   dependency-audit:
     runs-on: ubuntu-26.04
