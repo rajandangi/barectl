@@ -8,7 +8,7 @@ Barectl is an open-source hosting panel for PHP, WordPress, and Laravel. If you 
 
 [Run Barectl locally](#run-locally) · [See how recovery is tested](docs/recovery-guarantees.md#matrix)
 
-**First official release** · [v1.0.0](https://github.com/rajandangi/barectl/releases/tag/v1.0.0)
+**Latest release** · [v1.0.1](https://github.com/rajandangi/barectl/releases/tag/v1.0.1)
 
 ## Current status
 
@@ -18,11 +18,11 @@ Barectl supports fresh Ubuntu 26.04 LTS servers on amd64 and arm64, and servers 
 - Run Laravel queues and schedulers, WordPress cron, and per-site Valkey. Inspect logs, server jobs, and security settings.
 - Schedule encrypted restic backups, copy them to S3-compatible storage, and restore site files or databases.
 
-The [v1.0 qualification record](docs/v1.0-qualification.md) describes the tested environments and recovery procedures.
+The [v1.0 qualification record](docs/v1.0-qualification.md) describes the tested environments and recovery procedures. The [v1.0.1 record](docs/v1.0.1-qualification.md) covers this patch.
 
 ## Run locally
 
-Use [uv](https://docs.astral.sh/uv/getting-started/installation/), Python 3.14, and Node.js 24. The commands below run the development branch. For a stable install, add `--branch v1.0.0` to `git clone`.
+Use [uv](https://docs.astral.sh/uv/getting-started/installation/), Python 3.14, and Node.js 24. The commands below run the development branch. For a stable install, add `--branch v1.0.1` to `git clone`.
 
 ```bash
 git clone https://github.com/rajandangi/barectl.git

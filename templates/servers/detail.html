@@ -27,46 +27,51 @@
     </div>
     {% include "servers/_refresh.html" %}
   </div>
-  {% include "servers/_summary.html" %}
-  {# Announces connection check progress, which the status poll updates. #}
-  <p id="discovery-announcement" class="usa-sr-only" role="status"></p>
-  {% include "servers/_next_action.html" %}
-  <div class="barectl-layout">
-    {% include "servers/_navigation.html" %}
-    <div class="barectl-layout__content">
-      <h2 class="usa-sr-only">{{ section_title }}</h2>
-      {% if section == "sites" %}
-        {% if sites_forbidden %}
-          <p class="barectl-note">Your account may manage this server but not view its sites.</p>
-        {% else %}
-          {% if site_creation_can_prepare %}
-            <p>
-              <a class="usa-button" href="{% url 'server_site_create' server.pk %}">Create site</a>
-            </p>
+  <div class="barectl-server-page">
+    {% include "servers/_summary.html" %}
+    <div class="barectl-server-page__content">
+      {# Announces connection check progress, which the status poll updates. #}
+      <p id="discovery-announcement" class="usa-sr-only" role="status"></p>
+      {% include "servers/_next_action.html" %}
+      <div class="barectl-layout">
+        {% include "servers/_navigation.html" %}
+        <div class="barectl-layout__content">
+          <h2 class="usa-sr-only">{{ section_title }}</h2>
+          {% if section == "sites" %}
+            {% if sites_forbidden %}
+              <p class="barectl-note">Your account may manage this server but not view its sites.</p>
+            {% else %}
+              {% if site_creation_can_prepare %}
+                <p>
+                  <a class="usa-button"
+                     href="{% url 'server_site_create' server.pk %}">Create site</a>
+                </p>
+              {% endif %}
+              {% include "servers/_sites.html" %}
+            {% endif %}
+          {% elif section == "settings" %}
+            {% include "servers/_settings.html" %}
+            <section class="margin-top-4" aria-labelledby="settings-remove-heading">
+              <h2 id="settings-remove-heading">Remove server</h2>
+              <p class="barectl-note">
+                Removing the server deletes its local connection and history from this
+                installation. It changes nothing on the server.
+              </p>
+              {% if perms.servers.delete_server %}
+                <a class="usa-button usa-button--outline barectl-button--destructive-outline"
+                   href="{% url 'server_remove' server.pk %}">Remove {{ server.name }}</a>
+              {% endif %}
+            </section>
+          {% elif section == "advanced" %}
+            {% include "servers/_advanced.html" %}
+          {% elif section == "security" %}
+            {% include "servers/_security.html" %}
+          {% elif section == "jobs" %}
+            {% vite_entry "jobs-time.ts" %}
+            {% include "servers/_jobs.html" %}
           {% endif %}
-          {% include "servers/_sites.html" %}
-        {% endif %}
-      {% elif section == "settings" %}
-        {% include "servers/_settings.html" %}
-        <section class="margin-top-4" aria-labelledby="settings-remove-heading">
-          <h2 id="settings-remove-heading">Remove server</h2>
-          <p class="barectl-note">
-            Removing the server deletes its local connection and history from this
-            installation. It changes nothing on the server.
-          </p>
-          {% if perms.servers.delete_server %}
-            <a class="usa-button usa-button--outline barectl-button--destructive-outline"
-               href="{% url 'server_remove' server.pk %}">Remove {{ server.name }}</a>
-          {% endif %}
-        </section>
-      {% elif section == "advanced" %}
-        {% include "servers/_advanced.html" %}
-      {% elif section == "security" %}
-        {% include "servers/_security.html" %}
-      {% elif section == "jobs" %}
-        {% vite_entry "jobs-time.ts" %}
-        {% include "servers/_jobs.html" %}
-      {% endif %}
+        </div>
+      </div>
     </div>
   </div>
 {% endblock %}

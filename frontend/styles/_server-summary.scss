@@ -53,31 +53,55 @@
   mask: url("@uswds/uswds/img/usa-icons/content_copy.svg") center / contain no-repeat;
 }
 
+.barectl-server-page {
+  display: grid;
+  gap: units(3);
+  align-items: start;
+
+  @include at-media("desktop") {
+    grid-template-columns: minmax(0, 1fr) clamp(10%, 11rem, 15%);
+    grid-template-areas: "content summary";
+  }
+}
+
+.barectl-server-page__content {
+  min-width: 0;
+
+  @include at-media("desktop") {
+    grid-area: content;
+  }
+}
+
 .barectl-server-summary {
-  margin-bottom: units(3);
+  min-width: 0;
   overflow: hidden;
   border: units(1px) solid color("base-lighter");
   border-radius: units(1.5);
   background-color: color("base-lightest");
   box-shadow: 0 units(0.5) units(2) rgb(color("ink"), 0.04);
 
+  @include at-media("desktop") {
+    grid-area: summary;
+  }
+
   > .barectl-note {
     margin: 0;
-    padding: units(1.5) units(3);
+    padding: units(1.5);
     border-top: units(1px) solid color("base-lighter");
     font-size: font-size("ui", "3xs");
+    overflow-wrap: anywhere;
   }
 }
 
 .barectl-server-summary__facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: units(3) 0;
+  gap: units(1.5) 0;
   margin: 0;
-  padding: units(3) 0;
+  padding: units(1.5) 0;
 
   > div {
-    padding: 0 units(3);
+    padding: 0 units(1.5);
 
     &:nth-child(even) {
       border-left: units(1px) solid color("base-lighter");
@@ -92,16 +116,28 @@
     }
   }
 
+  @include at-media("desktop") {
+    grid-template-columns: minmax(0, 1fr);
+
+    > div + div {
+      padding-top: units(1.5);
+      border-top: units(1px) solid color("base-lighter");
+      border-left: 0;
+    }
+  }
+
   dt {
-    margin-bottom: units(1);
+    margin-bottom: units(0.5);
     color: color("base-dark");
     font-size: font-size("ui", "3xs");
+    overflow-wrap: anywhere;
   }
 
   dd {
     margin: 0;
     overflow-wrap: anywhere;
-    font-weight: font-weight("semibold");
+    font-size: font-size("ui", "2xs");
+    font-weight: font-weight("medium");
     line-height: line-height("body", 3);
   }
 }

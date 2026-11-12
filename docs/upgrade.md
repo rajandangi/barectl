@@ -1,7 +1,7 @@
 # Upgrading Barectl
 
-This guide moves a Barectl installation on 0.4.x to 1.0 in place. It covers the supported
-versions, the stop and backup, the install and migration, post-upgrade verification and
+This guide upgrades Barectl 0.4.x or 1.0.0 to the selected 1.0.x release in place. It covers
+the supported versions, the stop and backup, the install and migration, post-upgrade verification and
 rollback. A database older than 0.4.0 cannot be upgraded this way.
 
 ## Supported versions
@@ -9,6 +9,7 @@ rollback. A database older than 0.4.0 cannot be upgraded this way.
 | From | To | In place |
 | --- | --- | --- |
 | 0.4.0 and later 0.4.x | 1.0.x | Yes |
+| 1.0.0 | 1.0.1 | Yes, with the same procedure |
 | 0.3.x or earlier | 1.0.x | No |
 
 Barectl 0.4.0 replaced the Nginx, Certbot and APT PHP stack and stopped keeping the
@@ -31,6 +32,9 @@ exits, because the active-worker check runs immediately before the backup.
 
 `python manage.py barectl_upgrade --check` reports the installed version and the database
 schema without changing anything. Use it first.
+
+Record `git rev-parse HEAD` before checking out the new release. Keep that revision with
+the database backup so rollback restores the matching code and database.
 
 ## Back up
 
@@ -57,11 +61,15 @@ cp .env .env.before-upgrade
 
 ```bash
 git fetch --tags
-git checkout v1.0.0
+git checkout v1.0.1
 uv sync --locked
 npm ci
 npm run build
 ```
+
+The commands select 1.0.1. Compared with 1.0.0, it adds one controller database migration,
+`operations.0008_check_progress`, for connection-check progress. The native contract stays
+at version 1. Run the same stop, backup, upgrade and verification procedure.
 
 If you track a branch or use another release channel, check out the revision you intend to
 run and run the same install steps. The migration is part of the new code, so install it
@@ -103,7 +111,7 @@ uv run --env-file .env python manage.py runserver 127.0.0.1:8000
 
 Then:
 
-- sign in and open each server's **Overview**; a queued discovery becomes a fresh snapshot
+- sign in and open each server's page; a queued discovery becomes a fresh snapshot
   with a new collection time;
 - check **Activity** for the new discovery attempts;
 - confirm the command named no unreadable server, or investigate the ones it named;
@@ -114,21 +122,24 @@ with its notice, and the server page names the connection or permission problem 
 
 ## Roll back
 
-Rollback restores the database from before the migration. Stop the dashboard and worker
-first, then:
+Rollback restores the database from before the migration together with its original code
+revision. Stop the dashboard and worker first. For an upgrade from v1.0.0, use the matching
+backup directory and the recorded revision:
 
 ```bash
 rm -f db.sqlite3-wal db.sqlite3-shm
 cp upgrade-backups/20261109T120000Z/db.sqlite3 db.sqlite3
 cp upgrade-backups/20261109T120000Z/.env .env
-git checkout v0.4.0
+git checkout v1.0.0
 uv sync --locked
 npm ci
 npm run build
 ```
 
-Start the 0.4.0 dashboard and worker again. Do not start the older code against the
-migrated database: an older release does not know the newer migration records.
+For an upgrade from 0.4.x or a development checkout, replace `v1.0.0` with the revision
+recorded before that upgrade. Start the restored version's dashboard and worker again.
+Do not start the older code against the migrated database: an older release does not know
+the newer migration records.
 
 ## The unsupported 0.3.0 case
 

@@ -4,7 +4,7 @@
 
 ## Next
 
-**1.1** includes the planned dashboard setting for journald log retention, deferred from 1.0 in [ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md). See [Unreleased changes](CHANGELOG.md#unreleased) for dashboard updates already in development.
+**1.1** includes the planned dashboard setting for journald log retention, deferred from 1.0 in [ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md).
 
 ## Later
 
@@ -13,6 +13,8 @@
 - Tested team hosting with credential management.
 
 ## Released
+
+[v1.0.1](https://github.com/rajandangi/barectl/releases/tag/v1.0.1) includes dashboard improvements, a runtime catalog refresh, and shared development setup. [Release notes](CHANGELOG.md#101---2026-11-13) · [Qualification](docs/v1.0.1-qualification.md)
 
 [v1.0.0](https://github.com/rajandangi/barectl/releases/tag/v1.0.0) is the first official release. It delivers the capabilities below on the [supported hosting stack](docs/target-architecture.md), with stable configuration contracts and tested recovery procedures. [1.0 specification](https://github.com/rajandangi/barectl/issues/528) · [1.0 qualification](docs/v1.0-qualification.md)
 

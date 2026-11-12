@@ -28,8 +28,10 @@ jobs:
           python-version: "3.14"
       - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y shellcheck
       - run: uv sync --locked
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - run: uv run python .ai/cli.py setup
+      - run: uv run python .ai/cli.py setup --check
+      - run: uv run ruff check . .ai
+      - run: uv run ruff format --check . .ai
       - run: shellcheck $(git ls-files '*/bodies/*.sh')
       - run: uv run mypy
       - run: uv run vulture

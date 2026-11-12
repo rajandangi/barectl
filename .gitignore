@@ -17,6 +17,12 @@ static/dist/
 *.pem
 *.key
 /.codex/
+/.agents
+/.claude
+/.opencode
+/CLAUDE.md
+/evals
+/.eval-*
 
 # Local eval cases, prompts and results stay off GitHub (docs/agents/evals.md).
 /evals/cases/
