@@ -53,8 +53,11 @@ Credentials and host trust stay on the controller host; Barectl offers no browse
 upload or host-trust bypass.
 
 A server page opens on **Sites**. Every server section starts with the name, the address
-with **Copy**, and one status line. A compact **Server details** summary above the section
-navigation shows the operating system, architecture, CPUs, memory and root filesystem
+with **Copy**, and one status line. A compact **Server details** summary occupies the right
+10% to 15% of the desktop workspace, using CSS `clamp()` with an 11rem preferred width.
+Notices, section navigation and actions use the remaining space on the left.
+On smaller screens the summary remains fully visible above the remaining server layout. It shows
+the operating system, architecture, CPUs, memory and root filesystem
 storage, including available space. It uses the last successful observation, shows when
 it was checked, and retains warnings for unreadable values and failed or running checks.
 The summary also shows when the server was added and updates when **Refresh server** finishes.
