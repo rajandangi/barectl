@@ -1,7 +1,7 @@
 # Upgrading Barectl
 
-This guide upgrades Barectl 0.4.x or 1.0.0 to the selected 1.0.x release in place. It covers the supported
-versions, the stop and backup, the install and migration, post-upgrade verification and
+This guide upgrades Barectl 0.4.x or 1.0.0 to the selected 1.0.x release in place. It covers
+the supported versions, the stop and backup, the install and migration, post-upgrade verification and
 rollback. A database older than 0.4.0 cannot be upgraded this way.
 
 ## Supported versions
@@ -9,7 +9,7 @@ rollback. A database older than 0.4.0 cannot be upgraded this way.
 | From | To | In place |
 | --- | --- | --- |
 | 0.4.0 and later 0.4.x | 1.0.x | Yes |
-| 1.0.0 | 1.0.1 | Yes, with the same procedure when 1.0.1 is published |
+| 1.0.0 | 1.0.1 | Yes, with the same procedure |
 | 0.3.x or earlier | 1.0.x | No |
 
 Barectl 0.4.0 replaced the Nginx, Certbot and APT PHP stack and stopped keeping the
@@ -58,14 +58,13 @@ cp .env .env.before-upgrade
 
 ```bash
 git fetch --tags
-git checkout v1.0.0
+git checkout v1.0.1
 uv sync --locked
 npm ci
 npm run build
 ```
 
-The commands select the latest published release, 1.0.0. Once 1.0.1 is published, use
-`git checkout v1.0.1` for that patch. It adds one controller database migration,
+The commands select 1.0.1. Compared with 1.0.0, it adds one controller database migration,
 `operations.0008_check_progress`, for connection-check progress. The native contract stays
 at version 1. Run the same stop, backup, upgrade and verification procedure.
 
