@@ -43,13 +43,14 @@ cases. That rule is what makes the loop self-improving rather than self-flatteri
 
 ## What is tracked
 
-The repository tracks only the runner (`evals/runner.py`) and this contract. Cases, prompts,
+The repository tracks only the runner (`.ai/evals/runner.py`) and this contract. Cases, prompts,
 ground truth, results and traces stay local under `~/.local/share/barectl/evals/` by default;
 set `BARECTL_EVAL_HOME` to choose another directory. A case is not committed because it names
 a past ticket, a pinned commit and a local budget. A result is not committed because it is a
 record of one machine's trial.
 
-The workflow wrappers are tracked too: `.opencode/skills/barectl-implement-spec`,
+Run `uv run python .ai/cli.py setup` after cloning to prepare the provider layouts and
+the local `evals/` import link. The workflow wrappers are tracked too: `.ai/skills/barectl-implement-spec`,
 `barectl-code-review` and `barectl-retro`. They call the global `implement-spec`, `code-review`
 and `retro` skills and add the shared-seam, triage and eval rules for this repository. They
 never edit the global skill files.
@@ -74,7 +75,7 @@ A case file is one JSON object:
 
 `oracle_tests` may be empty for a review case. `ground_truth` is a list of finding IDs for a
 review case. `harness_skills` names the skill directories the arm installs into
-`.opencode/skills`; leave it empty for a repository-only change.
+`.ai/skills`; leave it empty for a repository-only change.
 
 The deterministic transcript-manifest case is
 `discovery/test_source_manifest.py::ManifestMergeTests`, which runs in the fast gate; no
@@ -93,7 +94,7 @@ cp -R ~/.agents/skills/implement-spec ~/.agents/skills/code-review \
 ```
 
 Prepare each arm. `prepare` creates an isolated worktree, copies the arm's skills into
-`.opencode/skills` (project skills override global ones), writes `.eval-prompt.md` and starts
+`.ai/skills` (project skills override global ones), writes `.eval-prompt.md` and starts
 the clock:
 
 ```bash

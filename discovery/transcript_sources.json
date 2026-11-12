@@ -393,8 +393,6 @@
     "docker/disposable-server/pins.json": "0d33acb107ed4be8d490303fddafdc9b0af4c7b6866467fe550f1ae99df6c376",
     "docker/disposable-server/quiet-run.sh": "efe6bfc45e989627cce4104138fa672ef3da0d37f4902fb9fdc20428bfa43ab6",
     "docker/disposable-server/run-scenarios.sh": "198016520d4df2c2c4ac402af087bd10fa8d75e2a3f6604fac724d5fb369787a",
-    "evals/__init__.py": "20efc30f2f548124da85662a8780c4edf89dcafc949786d61bf5bca8d7c5185a",
-    "evals/runner.py": "e23e8fa99deabf04c6430c5a6104f7c6e9a8378b366d92b6c50ac83e22a2c961",
     "jobs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "jobs/apps.py": "77c0484267262d0a7ebb74d64f859fe46531f772c1c7aa8669d5073fa6328ffd",
     "jobs/automatic.py": "60630f2f33fba64545c6f14ca55d4163969ff1af01258e1938625654e49881ad",

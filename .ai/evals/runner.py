@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
-REPOSITORY: Final = Path(__file__).resolve().parent.parent
+REPOSITORY: Final = Path(__file__).resolve().parents[2]
 DEFAULT_HOME: Final = Path.home() / ".local/share/barectl/evals"
 DEFAULT_WORKTREES: Final = REPOSITORY.parent / "barectl-worktrees"
 RESULT_KEYS: Final = (
@@ -139,7 +139,8 @@ def _install_harness(target: Path, harness: Path, skills: tuple[str, ...]) -> in
         if not source.is_dir():
             print(f"{source} is not a skill directory.", file=sys.stderr)
             return 2
-        destination = target / ".opencode" / "skills" / skill
+        skills_root = ".ai" if (target / ".ai" / "skills").is_dir() else ".opencode"
+        destination = target / skills_root / "skills" / skill
         if destination.exists():
             shutil.rmtree(destination)
         shutil.copytree(source, destination)
@@ -194,6 +195,8 @@ def _copy_oracle(case: Case, target: Path) -> int:
     for module in case.oracle_tests:
         relative = module.replace(".", "/") + ".py"
         result = _run(["git", "show", f"{case.oracle_ref}:{relative}"], cwd=REPOSITORY)
+        if result.returncode != 0 and relative.startswith("evals/"):
+            result = _run(["git", "show", f"{case.oracle_ref}:.ai/{relative}"], cwd=REPOSITORY)
         if result.returncode != 0:
             print(f"Cannot read {relative} from {case.oracle_ref}.", file=sys.stderr)
             print(result.stderr.strip(), file=sys.stderr)

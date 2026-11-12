@@ -54,8 +54,10 @@ Do not blindly enable every optional rule. For example, global `disallow_any_exp
 
 ```bash
 uv sync --locked
-uv run ruff check .
-uv run ruff format --check .
+uv run python .ai/cli.py setup
+uv run python .ai/cli.py setup --check
+uv run ruff check . .ai
+uv run ruff format --check . .ai
 uv run --env-file .env mypy
 uv run vulture
 uv run djlint templates --lint --check
