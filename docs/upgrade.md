@@ -1,6 +1,6 @@
 # Upgrading Barectl
 
-This guide moves a Barectl installation on 0.4.x to 1.0 in place. It covers the supported
+This guide upgrades Barectl 0.4.x or 1.0.0 to the selected 1.0.x release in place. It covers the supported
 versions, the stop and backup, the install and migration, post-upgrade verification and
 rollback. A database older than 0.4.0 cannot be upgraded this way.
 
