@@ -74,7 +74,12 @@ The `{% vite_entry %}` tag follows the Vite guide's order: stylesheets, the entr
 Server headings use the browser's [Clipboard.writeText API](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText)
 from an explicit Copy button. Clipboard permission or secure-context failures select the
 visible address and offer manual copying. This adds no dependency. Basic server capacity
-stays above the section navigation, following the detected server details in
+appears in a compact right column on desktop and above the section navigation on smaller
+screens, with all details visible at every screen size. The desktop column uses
+[`clamp()`](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Values/clamp)
+to keep its preferred 11rem width between 10% and 15% of the workspace, with smaller values
+and padded rows for readability. The layout uses the USWDS desktop breakpoint.
+The detected server details follow
 [Coolify's server guidance](https://coolify.io/docs/core/infrastructure/servers/manage-server#server-details).
 
 Server and site section navigation uses the `usa-sidenav` Sass module in

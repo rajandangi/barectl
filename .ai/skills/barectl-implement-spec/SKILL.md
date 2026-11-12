@@ -1,10 +1,10 @@
 ---
-name: Barectl implement spec
+name: barectl-implement-spec
 description: Deliver a Barectl GitHub spec and its tickets end to end. Wraps the global implement-spec skill with this repo's shared-seam, review-triage and eval rules.
 disable-model-invocation: true
 ---
 
-Call the Skill tool with `implement-spec` first. Follow that skill in full, then apply these
+Read and follow the global `implement-spec` skill first. Follow that skill in full, then apply these
 Barectl rules on top of it.
 
 ## Shared seam

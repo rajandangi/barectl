@@ -47,14 +47,18 @@ select = [
 max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
+# Executed directly so a fresh checkout needs no generated import layout.
+".ai/cli.py" = ["INP001", "T201"]
 # Django generates class-level migration lists; preserve that framework format.
 "**/migrations/*.py" = ["RUF012"]
 # The eval runner is a command-line entry point; its output is the operator's report.
-"evals/runner.py" = ["T201"]
+".ai/evals/runner.py" = ["T201"]
 
 [tool.mypy]
 python_version = "3.14"
-files = ["."]
+files = [".", ".ai/cli.py", ".ai/evals"]
+exclude = ["^evals/"]
+mypy_path = [".ai"]
 plugins = ["mypy_django_plugin.main"]
 strict = true
 disallow_any_explicit = true

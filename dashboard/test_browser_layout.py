@@ -52,11 +52,18 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
         expect(summary).to_contain_text("Ubuntu 26.04.1 LTS")
         expect(summary).to_contain_text("Memory")
         expect(summary).to_contain_text("Storage")
-        summary_box = summary.bounding_box()
-        navigation_box = page.get_by_role("navigation", name="Server sections").bounding_box()
-        if summary_box is None or navigation_box is None:
-            self.fail("The server summary and navigation must be visible.")
-        self.assertLess(summary_box["y"] + summary_box["height"], navigation_box["y"])
+        for width in (1024, 1280, 1920):
+            page.set_viewport_size({"width": width, "height": 900})
+            summary_box = summary.bounding_box()
+            content_box = page.locator(".barectl-server-page__content").bounding_box()
+            workspace_box = page.locator(".barectl-server-page").bounding_box()
+            if summary_box is None or content_box is None or workspace_box is None:
+                self.fail("The server summary and content must be visible.")
+            self.assertGreater(summary_box["x"], content_box["x"] + content_box["width"])
+            fraction = summary_box["width"] / workspace_box["width"]
+            self.assertGreaterEqual(fraction, 0.10)
+            self.assertLessEqual(fraction, 0.15)
+        page.set_viewport_size({"width": 1280, "height": 900})
         self.context.grant_permissions(["clipboard-read", "clipboard-write"])
         copy_address = page.get_by_role("button", name="Copy server address", exact=True)
         copy_address.focus()
@@ -191,6 +198,12 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
     def test_narrow_layout_and_keyboard_order(self) -> None:
         page = self.page
         page.set_viewport_size({"width": 320, "height": 740})
+        expect(page.locator("#server-summary dl")).to_be_visible()
+        summary_box = page.get_by_role("region", name="Server details", exact=True).bounding_box()
+        content_box = page.locator(".barectl-server-page__content").bounding_box()
+        if summary_box is None or content_box is None:
+            self.fail("The server summary and content must be visible.")
+        self.assertLess(summary_box["y"] + summary_box["height"], content_box["y"])
         self.assertEqual(
             page.evaluate(
                 "document.documentElement.scrollWidth - document.documentElement.clientWidth"
@@ -198,6 +211,7 @@ class ResourceLayoutBrowserTests(BrowserTestCase):
             0,
         )
         page.set_viewport_size({"width": 1280, "height": 900})
+        expect(page.locator("#server-summary dl")).to_be_visible()
         page.reload()
         page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name="Sites"

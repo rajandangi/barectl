@@ -25,6 +25,9 @@ fi
 
 cd "$worktree"
 uv sync --locked
+if [ -f .ai/cli.py ]; then
+    uv run python .ai/cli.py setup
+fi
 if [ -d node_modules ]; then
     printf 'worktree-setup: node_modules is already present.\n'
 else

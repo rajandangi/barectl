@@ -1,10 +1,10 @@
 ---
-name: Barectl retro
+name: barectl-retro
 description: Run a Barectl retrospective with the global retro skill and turn accepted candidates into local eval cases.
 disable-model-invocation: true
 ---
 
-Call the Skill tool with `retro` first. Follow that skill in full, then apply these Barectl
+Read and follow the global `retro` skill first. Follow that skill in full, then apply these Barectl
 rules on top of it.
 
 - When a candidate is accepted, turn it into an **eval case** before implementing it. Name the

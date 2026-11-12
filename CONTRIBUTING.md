@@ -1,5 +1,9 @@
 # Contributing
 
+AI instructions and project skills have one tracked source under `.ai/`. After cloning, run
+`uv run python .ai/cli.py setup` to link them into Codex, Claude Code and OpenCode. Provider
+directories are ignored; edit the common sources instead. See [shared AI setup](.ai/README.md).
+
 Follow the [local setup](README.md#run-locally) to run the app. Run the [development checks](docs/quality.md#local-commands) before opening a pull request, and enable the pre-push quality gate with `git config core.hooksPath .githooks`. Complete the repository checks locally before pushing. A linked worktree starts without the untracked `.env` and the installed dependencies; run `scripts/worktree-setup.sh` inside it once to copy `.env` from the main checkout and install both locked dependency sets. For native-affecting changes, also run the native scenarios locally, for example `docker/disposable-server/run-scenarios.sh --env-file .env`, and fix failures before pushing; the `Native` workflow then runs the required `native` check on the pull request, no label needed ([native layer](docs/quality.md#native-layer)). Include migrations for model changes and tests for changed behavior, especially authorization and remote execution boundaries. Test modules never import other test modules: support that tests share lives in non-test modules grouped by concept, such as `servers/testing.py` for the controller SSH configuration and `discovery/fakes.py` for `FakeServer`, recorded attempts and a stored snapshot.
 
 Follow `docs/quality.md` for strict typing and static analysis. Check official framework and package documentation before proposing new dependencies or recommendations. Cite compatibility guidance and distinguish upstream recommendations from project-specific choices.

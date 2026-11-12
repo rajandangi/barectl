@@ -1,9 +1,9 @@
 ---
-name: Barectl code review
+name: barectl-code-review
 description: Review a Barectl diff with the global code-review skill and this repo's must-fix/judgement triage. Use when reviewing a branch, PR, work-in-progress or a spec delivery.
 ---
 
-Call the Skill tool with `code-review` first. Follow that skill in full, then apply these
+Read and follow the global `code-review` skill first. Follow that skill in full, then apply these
 Barectl rules on top of it.
 
 - Tag every finding **must-fix** or **judgement**. A documented standard or a spec line that
