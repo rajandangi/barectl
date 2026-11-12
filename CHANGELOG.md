@@ -2,12 +2,26 @@
 
 ## Unreleased
 
+Planned patch release: **1.0.1**. These changes are implemented on `main` and await
+publication. See the [release qualification](docs/v1.0.1-qualification.md).
+
 ### Dashboard
 
 - Servers open on **Sites**. Each server page shows its address and last checked details, with a **Refresh server** action. Edit saved connections from the server list.
 - Find connection checks and changes across servers in **Activity**, with a filter for individual servers.
 - Change your password in **Settings > Your account**. Settings also shows approved SSH keys, instructions for starting the worker, and the software Barectl offers.
 - Updated navigation, table spacing, and alert styling for narrow screens.
+- Connection checks show their progress. Upgrade the controller database with
+  `python manage.py barectl_upgrade` before restarting the dashboard and worker
+  ([upgrade guide](docs/upgrade.md)).
+
+### Runtime catalog
+
+- Refresh the catalog from the pinned NixOS 26.05 channel, including PHP 8.4.27 and
+  8.5.12, Node.js 22.23.4 and 24.22.1, and HAProxy 3.3.17. Earlier builds remain
+  recognized. Installing this release does not update a managed server; apply catalog
+  updates through the dashboard's existing review workflow
+  ([#546](https://github.com/rajandangi/barectl/pull/546)).
 
 ## 1.0.0 - 2026-11-09
 

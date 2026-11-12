@@ -9,6 +9,7 @@ rollback. A database older than 0.4.0 cannot be upgraded this way.
 | From | To | In place |
 | --- | --- | --- |
 | 0.4.0 and later 0.4.x | 1.0.x | Yes |
+| 1.0.0 | 1.0.1 | Yes, with the same procedure when 1.0.1 is published |
 | 0.3.x or earlier | 1.0.x | No |
 
 Barectl 0.4.0 replaced the Nginx, Certbot and APT PHP stack and stopped keeping the
@@ -63,6 +64,11 @@ npm ci
 npm run build
 ```
 
+The commands select the latest published release, 1.0.0. Once 1.0.1 is published, use
+`git checkout v1.0.1` for that patch. It adds one controller database migration,
+`operations.0008_check_progress`, for connection-check progress. The native contract stays
+at version 1. Run the same stop, backup, upgrade and verification procedure.
+
 If you track a branch or use another release channel, check out the revision you intend to
 run and run the same install steps. The migration is part of the new code, so install it
 before running the upgrade command.
@@ -103,7 +109,7 @@ uv run --env-file .env python manage.py runserver 127.0.0.1:8000
 
 Then:
 
-- sign in and open each server's **Overview**; a queued discovery becomes a fresh snapshot
+- sign in and open each server's page; a queued discovery becomes a fresh snapshot
   with a new collection time;
 - check **Activity** for the new discovery attempts;
 - confirm the command named no unreadable server, or investigate the ones it named;

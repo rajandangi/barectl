@@ -4,7 +4,9 @@
 
 ## Next
 
-**1.1** includes the planned dashboard setting for journald log retention, deferred from 1.0 in [ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md). See [Unreleased changes](CHANGELOG.md#unreleased) for dashboard updates already in development.
+**1.0.1** is the planned patch release for the dashboard improvements and runtime catalog refresh already implemented on `main`. These changes await publication. See [Unreleased changes](CHANGELOG.md#unreleased) and the [release qualification](docs/v1.0.1-qualification.md).
+
+**1.1** includes the planned dashboard setting for journald log retention, deferred from 1.0 in [ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md).
 
 ## Later
 
