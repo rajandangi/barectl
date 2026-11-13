@@ -108,6 +108,12 @@ class JournalRetentionLifecycle(ScenarioTestCase):
                 + "; chmod 0644 "
                 + LATER_DROP_IN
             )
+            with self.shell() as fresh:
+                observed = collect(fresh, sites=False).journal_retention
+            if observed is None:
+                self.fail("The later drop-in was not reconstructed.")
+            self.assertEqual(observed.state, journal_retention.OUTSIDE, observed.reason)
+            self.assertIn("later configuration overrides", observed.reason)
             submitted = submit_draft(self, shell, SET_JOURNAL_RETENTION, draft)
             self.assertFalse(submitted.no_changes)
             wait_result(self, submitted, expected="refused", reason="precondition")

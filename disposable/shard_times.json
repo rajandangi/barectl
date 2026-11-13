@@ -160,7 +160,7 @@
     "disposable.test_http_site_transactions.HttpSiteTransactions": 26.2,
     "disposable.test_http_sites.HttpSiteNativeBehavior": 121.4,
     "disposable.test_https.HttpsSite": 102.1,
-    "disposable.test_journal_retention.JournalRetentionLifecycle": 10.4,
+    "disposable.test_journal_retention.JournalRetentionLifecycle": 11.0,
     "disposable.test_l0_discovery.PlainL0Discovery": 15.7,
     "disposable.test_laravel_create.LaravelCreateMariaDB": 85.8,
     "disposable.test_laravel_deploy.LaravelDeployBootFailure": 78.0,

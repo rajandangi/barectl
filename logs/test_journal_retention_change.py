@@ -3,6 +3,7 @@
 docs/adr/0044-own-journald-log-retention-in-a-separate-drop-in.md.
 """
 
+import hashlib
 import io
 import os
 import stat
@@ -21,7 +22,6 @@ from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
 from logs import journal_retention_change
 from logs.bodies import journal_retention as native
-from logs.bodies.reasons import JOURNAL_RETENTION_REASONS
 from logs.journal_retention import (
     DISK_CAP_CHOICES,
     MANAGED,
@@ -32,10 +32,19 @@ from logs.journal_retention import (
     RetentionObservation,
     render,
 )
+from operations import engine
 from operations.consent import Scope
 from operations.engine import BodyContext
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
-from operations.models import ChangeReview
+from operations.models import (
+    ChangePreparation,
+    ChangeReview,
+    ChangeRun,
+    Consent,
+    RemoteOperation,
+    Result,
+)
+from operations.recovery_testing import assert_policy_failure
 
 from .journal_retention_change import (
     BODY_SHA256,
@@ -216,16 +225,19 @@ class ReviewTests(SimpleTestCase):
         self.assertFalse(draft.eligible)
         self.assertIn("larger than one change", " ".join(draft.refusals))
 
-    def test_the_inspection_uses_the_foundation_read_and_its_raw_values(self) -> None:
+    def test_the_inspection_reconstructs_the_review_from_one_foundation_read(self) -> None:
         collected: CollectedSnapshot = replace(
             COLLECTED,
             standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
-            journal_retention=RetentionObservation(MANAGED, "", "2G", "3months"),
+            # A torn earlier collect must not supply the review's previous facts.
+            journal_retention=RetentionObservation(MANAGED, "", "1G", "1month"),
         )
         values = {
             "boot": BOOT,
             "uptime": "2500",
-            "journal_retention_file": "0 0 644 1 file " + "0" * 64,
+            "journal_retention_file": (
+                "0 0 644 1 file " + hashlib.sha256(render("2G", "3months").encode()).hexdigest()
+            ),
             "journal_system_max_use": "2G",
             "journal_max_retention": "3months",
         }
@@ -239,6 +251,7 @@ class ReviewTests(SimpleTestCase):
         self.assertEqual(observed.standing, Standing.TARGET_STACK)
         self.assertEqual(observed.boot_id, BOOT)
         self.assertEqual(observed.uptime_centiseconds, 2500)
+        self.assertEqual(observed.observation, RetentionObservation(MANAGED, "", "2G", "3months"))
         self.assertEqual(observed.previous, render("2G", "3months"))
         self.assertEqual(observed.previous_disk_cap, "2G")
         self.assertEqual(observed.previous_max_age, "3months")
@@ -419,11 +432,24 @@ class NativeBodyTests(SimpleTestCase):
         )
         self.assertIn('"class": "partial"', result)
         self.assertIn('"reason": "journal_retention"', result)
-        sentence = (
-            "The reviewed log retention setting could not be verified, and Barectl could not "
-            "restore the previous setting, so the change is partly applied."
+        sentence = engine.reason_text(Result.PARTIAL, "journal_retention")
+        preparation = ChangePreparation(pk=1, kind_slug=SLUG)
+        review = ChangeReview(
+            preparation=preparation,
+            kind_slug=SLUG,
+            consent=Consent.SHARED,
+            document={"stages": list(journal_retention_change.STAGES)},
         )
-        self.assertIn(sentence, str(JOURNAL_RETENTION_REASONS))
+        run = ChangeRun(
+            pk=1,
+            review=review,
+            status=RemoteOperation.Status.FAILED,
+            execution=Result.PARTIAL,
+            result_reason="journal_retention",
+            server_name="Contract server",
+            failure=sentence,
+        )
+        assert_policy_failure(self, run, sentence=sentence)
 
     def test_a_forged_argument_prints_only_a_refusal_and_writes_nothing(self) -> None:
         output = io.StringIO()

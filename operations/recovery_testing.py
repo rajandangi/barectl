@@ -12,6 +12,7 @@ from unittest import TestCase
 
 from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils.html import escape
 
 from .engine import ResultLine
 from .models import (
@@ -169,3 +170,35 @@ def assert_abrupt_run(
         test.assertNotIn("stopped before making any requested change", page)
     else:
         test.assertIn("nothing changed", page)
+
+
+def assert_policy_failure(
+    test: TestCase,
+    run: ChangeRun,
+    *,
+    sentence: str,
+) -> None:
+    """Render a failed non-access run and check its complete reason and retry action.
+
+    A policy failure has no access window: the page must show the reason's whole sentence
+    and one "Try again" action, never claim that nothing changed.
+    """
+    view = run_view(run)
+    page = " ".join(
+        render_to_string("operations/_run_status.html", {"run": view, "plain": view.plain}).split()
+    )
+    test.assertEqual(view.plain.result, "Stopped")
+    test.assertEqual(view.plain.sentence, sentence)
+    test.assertIn(escape(sentence), page)
+    test.assertNotIn("Nothing changed", page)
+    next_action = view.plain.next
+    if next_action is None:
+        test.fail("A stopped policy run has no recovery action.")
+    test.assertEqual(next_action.label, "Try again")
+    test.assertEqual(next_action.kind, "again")
+    preparation_id = run.review.preparation_id
+    if preparation_id is None:
+        test.fail("A stopped policy run has no preparation to retry.")
+    retry_url = reverse("change_prepare_again", args=[preparation_id])
+    test.assertEqual(next_action.url, retry_url)
+    test.assertIn(f'<form class="usa-form" method="post" action="{retry_url}">', page)
