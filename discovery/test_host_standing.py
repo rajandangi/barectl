@@ -4,6 +4,7 @@ from typing import ClassVar
 from unittest import TestCase
 
 from bootstrap.standing import Standing
+from logs.journal_retention import NOT_CONFIGURED
 
 from . import recorded
 from .models import ObservationOutcome
@@ -76,6 +77,10 @@ class RecordedHostStandingTests(TestCase):
                     # Every recorded foundation has no certificate contact email line.
                     self.assertEqual(snapshot.certificate_email_state, "absent")
                     self.assertEqual(snapshot.certificate_email, "")
+                    # Its one foundation read found no retention drop-in.
+                    self.assertIsNotNone(snapshot.journal_retention)
+                    if snapshot.journal_retention is not None:
+                        self.assertEqual(snapshot.journal_retention.state, NOT_CONFIGURED)
                 else:
                     self.assertEqual(snapshot.certificate_email_state, "")
                 for fragment in reason_fragments:
@@ -90,3 +95,14 @@ class RecordedHostStandingTests(TestCase):
         self.assertEqual(snapshot.sites.outcome, ObservationOutcome.ABSENT)
         self.assertEqual(snapshot.sites.value, ())
         self.assertFalse([command for command in shell.commands if "/etc/nginx" in command])
+
+    def test_a_target_stack_collection_issues_one_foundation_read(self) -> None:
+        shell = ReplayShell(recorded.load("foundation-26.04"))
+        snapshot = collect(shell)
+        reads = [command for command in shell.commands if "journal_retention_file" in command]
+        self.assertEqual(len(reads), 1)
+        self.assertIsNotNone(snapshot.journal_retention)
+
+    def test_an_unread_foundation_is_not_checked_rather_than_not_configured(self) -> None:
+        snapshot = collect(ReplayShell(recorded.load("pristine-26.04")))
+        self.assertIsNone(snapshot.journal_retention)

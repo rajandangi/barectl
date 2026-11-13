@@ -14,6 +14,7 @@ from backups.observation import (
 from bootstrap.standing import HostJudgment, Standing
 from jobs.models import JobObservation
 from jobs.observation import JobReading, ObservedChange, ProviderCoverage
+from logs.journal_retention import MANAGED, RetentionObservation
 from servers.models import Server
 
 from .fakes import COLLECTED, COLLECTED_AT
@@ -152,6 +153,22 @@ class SnapshotStorageTests(TestCase):
         if stored is None:
             self.fail("The snapshot was stored.")
         self.assertEqual(stored.collected.standing, standing)
+
+    def test_the_retention_observation_reads_back_from_typed_columns(self) -> None:
+        retention = RetentionObservation(MANAGED, "", "2G", "3months")
+        collected = replace(COLLECTED, journal_retention=retention)
+        save_snapshot(self.attempt(), collected, COLLECTED_AT)
+        stored = current_snapshot(self.server)
+        if stored is None:
+            self.fail("The snapshot was stored.")
+        self.assertEqual(stored.collected.journal_retention, retention)
+
+    def test_a_snapshot_without_a_retention_read_reads_back_not_checked(self) -> None:
+        save_snapshot(self.attempt(), COLLECTED, COLLECTED_AT)
+        stored = current_snapshot(self.server)
+        if stored is None:
+            self.fail("The snapshot was stored.")
+        self.assertIsNone(stored.collected.journal_retention)
 
     def test_settings_keys_and_values_read_back(self) -> None:
         settings = (

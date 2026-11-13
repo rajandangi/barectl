@@ -158,6 +158,7 @@ if TYPE_CHECKING:
     from laravel.bodies import settings as laravel_settings_body
     from laravel.bodies.common import laravel_read
     from logs.apps import LogsConfig
+    from logs.journal_retention_views import JournalRetentionPanel
     from operations.activity import ActivityRow
     from operations.apps import OperationsConfig
     from operations.forms import (
@@ -373,6 +374,12 @@ if TYPE_CHECKING:
     _settings_runtimes = (
         ShownPhpVersion("", "", "", (), False, False).sites_phrase,
         ShownPhpAddition("", "", 0).download_phrase,
+    )
+    # The Server logs card reads these panel fields and properties in its template.
+    _journal_retention_panel = (
+        JournalRetentionPanel(True, "").disk_cap_label,
+        JournalRetentionPanel(True, "").max_age_label,
+        JournalRetentionPanel(True, "").not_configured,
     )
     # The Status poll token keys the discovery fragment.
     _discovery_views = (DiscoveryState.poll_token,)

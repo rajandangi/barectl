@@ -299,7 +299,16 @@
     "journald": {
       "contents": "[Journal]\nStorage=persistent\n",
       "mode": "0644",
-      "path": "/etc/systemd/journald.conf.d/50-barectl.conf"
+      "path": "/etc/systemd/journald.conf.d/50-barectl.conf",
+      "retention": {
+        "disk_cap_choices": ["250M", "500M", "1G", "2G", "4G"],
+        "group": "root",
+        "max_age_choices": ["1week", "1month", "3months", "6months", "1year"],
+        "mode": "0644",
+        "owner": "root",
+        "path": "/etc/systemd/journald.conf.d/60-barectl-log-retention.conf",
+        "shape": "[Journal]\nSystemMaxUse=<disk-cap>\nMaxRetentionSec=<max-age>\n"
+      }
     },
     "native_execution": {
       "exit": {

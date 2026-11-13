@@ -56,6 +56,26 @@ foundation_read() {
   printf 'socket\t%s\n' "$(stat -c '%a' /run/caddy/admin.sock 2>/dev/null || true)"
   printf 'runtime\t%s\n' "$(stat -c '%a' /run/caddy 2>/dev/null || true)"
   printf 'journal\t%s\n' "$(systemd-analyze cat-config systemd/journald.conf | sed -n 's/^Storage=//p' | tail -1)"
+  printf 'journal_system_max_use\t%s\n' "$(systemd-analyze cat-config systemd/journald.conf | sed -n 's/^SystemMaxUse=//p' | tail -1)"
+  printf 'journal_max_retention\t%s\n' "$(systemd-analyze cat-config systemd/journald.conf | sed -n 's/^MaxRetentionSec=//p' | tail -1)"
+  retention=/etc/systemd/journald.conf.d/60-barectl-log-retention.conf
+  printf 'journal_retention_file\t%s\n' "$(
+    if [ ! -e "$retention" ] && [ ! -L "$retention" ]; then
+      printf 'missing'
+    else
+      kind=other
+      if [ -L "$retention" ]; then kind=symlink
+      elif [ -d "$retention" ]; then kind=directory
+      elif [ -f "$retention" ]; then kind='file'
+      fi
+      metadata=$(stat -c '%u %g %a %h' "$retention" 2>/dev/null || true)
+      if [ "$kind" = 'file' ] && [ -n "$metadata" ]; then
+        printf '%s file %s' "$metadata" "$(sha256sum "$retention" | cut -d' ' -f1)"
+      else
+        printf '%s %s' "$metadata" "$kind"
+      fi
+    fi
+  )"
   shape=absent
   if [ -e /etc/caddy ] || [ -e /etc/systemd/system/caddy.service ] || \
     getent passwd caddy >/dev/null || getent group caddy >/dev/null; then shape=partial; fi

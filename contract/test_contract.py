@@ -13,6 +13,9 @@ from typing import cast
 
 from django.test import SimpleTestCase
 
+from logs import journal_retention
+
+from . import foundation
 from .manifest import SECTIONS, VERSION, manifest
 
 PINNED = Path(__file__).with_name("manifest.json")
@@ -102,6 +105,23 @@ class DifferenceTest(SimpleTestCase):
         )
         self.assertEqual(differences({"a": 1}, {}), ["$.a: removed"])
         self.assertEqual(differences({}, {"a": 1}), ["$.a: added"])
+
+
+class FoundationRetentionContractTests(SimpleTestCase):
+    def test_the_foundation_section_pins_the_retention_drop_in(self) -> None:
+        journald = foundation.build()["journald"]
+        if not isinstance(journald, dict):
+            self.fail("The foundation journald section is not a mapping.")
+        retention = journald["retention"]
+        if not isinstance(retention, dict):
+            self.fail("The foundation retention section is not a mapping.")
+        self.assertEqual(retention["path"], journal_retention.RETENTION_PATH)
+        self.assertEqual(retention["owner"], "root")
+        self.assertEqual(retention["group"], "root")
+        self.assertEqual(retention["mode"], "0644")
+        self.assertEqual(retention["shape"], journal_retention.SHAPE)
+        self.assertEqual(retention["disk_cap_choices"], list(journal_retention.DISK_CAP_CHOICES))
+        self.assertEqual(retention["max_age_choices"], list(journal_retention.MAX_AGE_CHOICES))
 
 
 class ManifestContractTest(SimpleTestCase):
