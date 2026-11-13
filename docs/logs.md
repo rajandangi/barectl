@@ -213,11 +213,12 @@ Barectl owns `/etc/systemd/journald.conf.d/60-barectl-log-retention.conf` as `ro
 keeps `50-barectl.conf` with `Storage=persistent`; the `60-` file sorts after it and
 overrides only the two retention keys ([ADR 0044](adr/0044-own-journald-log-retention-in-a-separate-drop-in.md)).
 
-The card reads the latest observation only. It says **Not configured** when the file is
-absent, **Managed** with both effective values when the file and the merged configuration
-match, and **Outside supported settings** with a plain reason for a hand edit, a wrong
-owner or mode, or a later drop-in that overrides either value. Barectl never adopts an
-outside file. Deleting the file by hand returns the card to Not configured.
+The card reads the latest observation only. It says **Not checked yet** when there is no
+current, complete observation; **Not configured** when the file is absent; **Managed** with
+both effective values when the file and the merged configuration match; and **Outside
+supported settings** with a plain reason for a hand edit, a wrong owner or mode, or a later
+drop-in that overrides either value. Barectl never adopts an outside file. Deleting the
+file by hand returns the card to Not configured.
 
 **Change log retention** is one reviewed Shared change. It names the file, the previous and
 new values, the journald restart, and that no logs are deleted and no vacuum runs. Applying

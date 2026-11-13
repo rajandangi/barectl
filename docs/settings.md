@@ -51,7 +51,9 @@ that grammar is reported as unsupported and is never rewritten.
 
 Server **Settings > Server logs** shows the journald retention policy read from the last
 observation, and offers one reviewed **Shared** change with two fixed choices: a disk cap
-(`250M` to `4G`) and a maximum age (`1week` to `1year`). Both are written together to
+(`250M` to `4G`) and a maximum age (`1week` to `1year`). It says **Not checked yet** until a
+current, complete observation exists, then **Not configured**, **Managed** or **Outside
+supported settings**. Both values are written together to
 `/etc/systemd/journald.conf.d/60-barectl-log-retention.conf` as `root:root 0644`. The
 current pair is preselected when the policy is managed; a server with no file preselects
 `1G` and `3months`. There is no free-text size or age field and no reset action.
