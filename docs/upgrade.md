@@ -16,6 +16,14 @@ Barectl 0.4.0 replaced the Nginx, Certbot and APT PHP stack and stopped keeping 
 migration history of earlier builds. A 0.3.x database therefore has neither the tables nor
 the recorded migrations 1.0 expects. The upgrade command refuses it with one sentence.
 
+## Mixed controller versions
+
+After a 1.1 controller sets log retention, the server's result lines carry contract version
+2. A 1.0.1 controller reads that newer version as **Outside supported settings**, withholds
+every change card for the server and refuses a direct preparation. Upgrade every controller
+before using the [log retention setting](logs.md#retention); do not mix 1.0.1 and 1.1
+controllers against a server whose retention policy was set by 1.1.
+
 ## Before you start
 
 Run every command from the Barectl checkout on the controller host, as the account that owns

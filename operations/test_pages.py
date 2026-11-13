@@ -184,6 +184,7 @@ class PlainWordTests(SimpleTestCase):
             "create_laravel_site",
             "check_for_ubuntu_updates",
             "install_ubuntu_updates",
+            "set_journal_retention",
         ):
             with self.subTest(kind=slug):
                 words = plain_words.words_for(slug)

@@ -126,6 +126,33 @@ def selection_label(selection: str) -> str:
 
 
 _WORDS: Final[dict[str, ChangeWords]] = {
+    "set_journal_retention": ChangeWords(
+        title="Change log retention on {server}",
+        summary=(
+            (
+                "Barectl writes this server's log retention policy: a disk cap and a "
+                "maximum age, set together."
+            ),
+            (
+                "It restarts the log service so the policy takes effect and checks the "
+                "values it reads back."
+            ),
+            (
+                "No logs are deleted and no vacuum runs. The service reclaims space itself "
+                "under this policy."
+            ),
+            ("If the reviewed setting cannot be verified, Barectl puts the previous setting back."),
+        ),
+        action="Change retention",
+        steps={
+            "preflight": "Checking the server",
+            "publish": "Writing the retention policy",
+            "verify": "Restarting and checking",
+        },
+        home=Home.SERVER_SETTINGS,
+        after="Back to Server Settings",
+        after_home=Home.SERVER_SETTINGS,
+    ),
     "set_up_log_rotation": ChangeWords(
         title="Set up log rotation for {site}",
         summary=(

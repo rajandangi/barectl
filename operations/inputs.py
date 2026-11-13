@@ -38,6 +38,7 @@ class InputShape(StrEnum):
     BACKUP_SCHEDULE = "backup_schedule"
     LARAVEL_QUEUE_WORKERS = "laravel_queue_workers"
     SITE_LOG_ROTATION = "site_log_rotation"
+    JOURNAL_RETENTION = "journal_retention"
     OFFSITE_STORAGE = "offsite_storage"
     SITE_BACKUP_POINT = "site_backup_point"
     BACKUP_RETENTION = "backup_retention"
@@ -136,6 +137,9 @@ class PreparationInputs:
     port: str = ""
     protocol: str = ""
     network: str = ""
+    # The server's reviewed journald retention pair (#551), both always set together.
+    disk_cap: str = ""
+    max_age: str = ""
 
     def _settings_document(self) -> dict[str, object]:
         return {
@@ -171,6 +175,8 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:  # noqa: C901 - every reviewed shape
+        if self.disk_cap or self.max_age:
+            return {"version": 1, "disk_cap": self.disk_cap, "max_age": self.max_age}
         if self.firewall:
             firewall: dict[str, object] = {"version": 1, "selection": self.selection}
             if self.selection != "on":
@@ -1006,6 +1012,28 @@ def _site_log_rotation_inputs(
     return PreparationInputs("", identifier)
 
 
+def _journal_retention_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    from logs.journal_retention import DISK_CAP_CHOICES, MAX_AGE_CHOICES
+
+    if (
+        set(value) != {"version", "disk_cap", "max_age"}
+        or type(value.get("version")) is not int
+        or value["version"] != 1
+    ):
+        raise ValueError(INVALID_INPUTS)
+    disk_cap, max_age = value["disk_cap"], value["max_age"]
+    if (
+        not isinstance(disk_cap, str)
+        or disk_cap not in DISK_CAP_CHOICES
+        or not isinstance(max_age, str)
+        or max_age not in MAX_AGE_CHOICES
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(disk_cap=disk_cap, max_age=max_age)
+
+
 def _offsite_storage_inputs(
     value: dict[str, object], _choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -1189,6 +1217,7 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.BACKUP_SCHEDULE: _backup_schedule_inputs,
     InputShape.LARAVEL_QUEUE_WORKERS: _worker_inputs,
     InputShape.SITE_LOG_ROTATION: _site_log_rotation_inputs,
+    InputShape.JOURNAL_RETENTION: _journal_retention_inputs,
     InputShape.OFFSITE_STORAGE: _offsite_storage_inputs,
     InputShape.SITE_BACKUP_POINT: _site_backup_point_inputs,
     InputShape.BACKUP_RETENTION: _backup_retention_inputs,

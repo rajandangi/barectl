@@ -26,3 +26,22 @@ LOG_ROTATION_REASONS: Final = (
         },
     ),
 )
+
+JOURNAL_RETENTION_REASONS: Final = (
+    ResultReason(
+        "journal_retention",
+        {
+            Result.REFUSED: (
+                "The reviewed log retention setting could not be verified, so the server "
+                "keeps its previous setting and nothing changed. Check the run's journal on "
+                "the server, then prepare a new review."
+            ),
+            Result.PARTIAL: (
+                "The reviewed log retention setting could not be verified, and Barectl could "
+                "not restore the previous setting, so the change is partly applied. Check "
+                "the server's journald configuration through ordinary administration before "
+                "preparing a new review."
+            ),
+        },
+    ),
+)

@@ -27,9 +27,9 @@ class ChangeRequirementRegistryTests(SimpleTestCase):
         )
         self.assertEqual(
             sorted(mapped - registered),
-            sorted(change_requirements.PENDING_KINDS),
-            "the requirement registry may name only registered kinds and the documented "
-            "forward declarations in operations/change_requirements.PENDING_KINDS",
+            [],
+            "the requirement registry names only registered change kinds; a registered kind "
+            "declares its card requirements in operations/change_requirements.py",
         )
 
     def test_a_site_requirement_names_the_site_permission(self) -> None:

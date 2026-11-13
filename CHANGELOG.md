@@ -2,7 +2,15 @@
 
 ## Unreleased
 
-No changes yet.
+### Server settings
+
+- Set journald log retention from **Server Settings > Server logs**: one reviewed Shared
+  change writes a disk cap (`SystemMaxUse`) and maximum age (`MaxRetentionSec`) together,
+  restarts journald and verifies both effective values. Discovery reports Not configured,
+  Managed or Outside supported settings, and Barectl never deletes logs or runs
+  `journalctl --vacuum-*`. The native contract moves to version 2; upgrade every controller
+  before using the setting ([log retention](docs/logs.md#retention),
+  [upgrade guide](docs/upgrade.md#mixed-controller-versions)).
 
 ## 1.0.1 - 2026-11-13
 

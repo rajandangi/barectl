@@ -1,7 +1,7 @@
 # Native contract
 
 Barectl publishes one versioned native contract for the shapes it reads and writes on a
-managed server. The current contract version is **1**. The decision is
+managed server. The current contract version is **2**. The decision is
 [ADR 0042](adr/0042-version-the-native-contract-without-a-server-marker.md), which amends
 [ADR 0015](adr/0015-recognize-only-the-convention.md) and
 [ADR 0026](adr/0026-manage-fresh-hosts-on-one-target-stack.md) with one version number and
@@ -10,7 +10,7 @@ one change policy.
 The contract is not a marker, inventory or journal on the server. A managed server stays
 the source of truth, and a fresh controller recognizes its native shapes without a Barectl
 database ([state and discovery](architecture.md#state-and-discovery)). The version travels
-in every change's `barectl-result` line as `"contract": 1`; the line is native evidence,
+in every change's `barectl-result` line as `"contract": 2`; the line is native evidence,
 not a tracking record.
 
 `contract/` owns the machine-readable manifest and its test. `contract/manifest.json` is
@@ -109,11 +109,18 @@ those modules and does not keep a second list:
 
 - the `barectl-result ` line and its `barectl-stage ` progress prefix;
 - every wire field: `class`, `reason`, `change_kind`, `sites` and the contract version
-  field `contract`, whose current value is 1;
+  field `contract`, whose current value is 2;
 - the result classes `succeeded`, `refused`, `partial`, `failed`, `lock_busy` and
   `timed_out`, and the site identifier grammar the `sites` field accepts;
 - the engine's admission reasons, the shared body reasons, every registered kind's and
   non-kind body's reasons, and the retired names that stay readable as older evidence.
+
+Version 2 adds the `set_journal_retention` kind and its `journal_retention` reason (with a
+refused and a partial sentence) and the `journal_retention_prepare` route. It changes no
+version-1 native shape, so no native migration is needed. A 1.0.1 controller reads the
+newer result line as **Outside supported settings** after a 1.1 run, withholds every
+change card and refuses a direct preparation: the upgrade notes tell operators to upgrade
+every controller before using log retention.
 
 Jobs keeps the `contract` value on each observed result line. A controller compares it
 with its own contract version before it offers a change. A recorded version newer than the
