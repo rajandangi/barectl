@@ -87,6 +87,27 @@ def record_log_site(
     )
 
 
+def record_outside_site(server: Server, *, identifier: str = "alpha") -> None:
+    """A stored site whose native file is outside Barectl's Caddy convention."""
+    record_log_site(server, identifier=identifier)
+    snapshot = current_snapshot(server)
+    if snapshot is None:
+        raise AssertionError("No snapshot.")
+    sites = tuple(
+        replace(row, file=f"/etc/nginx/sites-enabled/{row.identifier}")
+        if row.identifier == identifier
+        else row
+        for row in snapshot.collected.sites.value
+    )
+    attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+    attach_current_connection(server, attempt)
+    save_snapshot(
+        attempt,
+        replace(snapshot.collected, sites=replace(snapshot.collected.sites, value=sites)),
+        timezone.now(),
+    )
+
+
 def php_error_page(*lines: str) -> LogPage:
     return LogPage(
         "observed",

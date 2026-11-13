@@ -22,6 +22,7 @@ from jobs.observation import (
     ProviderCoverage,
     stored_result_evidence,
 )
+from logs.journal_retention import RetentionObservation
 from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
@@ -259,6 +260,8 @@ class CollectedSnapshot:
     # Caddy's optional certificate contact email, from the main configuration (docs/tls.md).
     certificate_email: str = ""
     certificate_email_state: str = ""
+    # The journal retention policy reconstructed from fixed native evidence (#549).
+    journal_retention: RetentionObservation | None = None
     # The server's own Barectl change runs and their coverage (Phase E #285).
     jobs: Observation[JobReading] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", JobReading())
@@ -287,6 +290,7 @@ def save_snapshot(
     """
     os, fs = collected.os, collected.filesystem
     os_value = os.value or OsRelease("", "", "", "")
+    retention = collected.journal_retention
     snapshot = DiscoverySnapshot.objects.create(
         server=attempt.server,
         attempt=attempt,
@@ -379,6 +383,10 @@ def save_snapshot(
         ),
         certificate_email=collected.certificate_email,
         certificate_email_state=collected.certificate_email_state,
+        journal_retention_state=retention.state if retention else "",
+        journal_retention_reason=retention.reason if retention else "",
+        journal_retention_disk_cap=retention.disk_cap if retention else "",
+        journal_retention_max_age=retention.max_age if retention else "",
     )
     RuntimeObservation.objects.bulk_create(
         RuntimeObservation(
@@ -1214,6 +1222,16 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
         ),
         certificate_email=row.certificate_email,
         certificate_email_state=row.certificate_email_state,
+        journal_retention=(
+            RetentionObservation(
+                row.journal_retention_state,
+                row.journal_retention_reason,
+                row.journal_retention_disk_cap,
+                row.journal_retention_max_age,
+            )
+            if row.journal_retention_state
+            else None
+        ),
     )
     return Snapshot(collected, row.collected_at, ssh_alias, row.pk)
 

@@ -9,6 +9,7 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from bootstrap.standing import HostJudgment, Standing
+from contract.version import VERSION
 from discovery.fakes import COLLECTED, COLLECTED_AT
 from discovery.models import ObservationOutcome
 from discovery.snapshot import Observation, Snapshot
@@ -135,7 +136,7 @@ class StoredServerFactsTests(SimpleTestCase):
         self.assertEqual(decision.reason and decision.reason.name, ReasonName.HOST_NOT_MANAGEABLE)
 
     def test_a_newer_contract_is_outside_supported_settings(self) -> None:
-        current = state(AttemptStatus.SUCCEEDED, snapshot=with_jobs(2))
+        current = state(AttemptStatus.SUCCEEDED, snapshot=with_jobs(VERSION + 1))
         facts = stored_server_facts(current)
 
         self.assertTrue(facts.outside_contract)
@@ -145,12 +146,12 @@ class StoredServerFactsTests(SimpleTestCase):
         self.assertIn("outside supported settings", decision.sentence)
 
     def test_the_server_page_reports_an_unrecognized_contract(self) -> None:
-        current = state(AttemptStatus.SUCCEEDED, snapshot=with_jobs(2))
+        current = state(AttemptStatus.SUCCEEDED, snapshot=with_jobs(VERSION + 1))
 
         self.assertEqual(status_line(current), OUTSIDE_CONTRACT)
 
     def test_a_result_line_at_this_contract_is_compatible(self) -> None:
-        for contracts in ((1,), (0,), ()):
+        for contracts in ((VERSION,), (0,), ()):
             with self.subTest(contracts=contracts):
                 current = state(AttemptStatus.SUCCEEDED, snapshot=with_jobs(*contracts))
                 facts = stored_server_facts(current)
@@ -161,7 +162,7 @@ class StoredServerFactsTests(SimpleTestCase):
     def test_a_not_manageable_host_keeps_its_own_refusal(self) -> None:
         current = state(
             AttemptStatus.SUCCEEDED,
-            snapshot=with_jobs(2, standing=Standing.NOT_MANAGEABLE),
+            snapshot=with_jobs(VERSION + 1, standing=Standing.NOT_MANAGEABLE),
         )
         decision = decide(stored_server_facts(current), None, SERVER)
 

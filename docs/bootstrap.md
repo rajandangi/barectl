@@ -39,6 +39,9 @@ The run is one transient systemd unit under the shared mutation lock. It reports
 3. **Catalog** realises the exact store paths of Caddy, Composer, WP-CLI and HAProxy with `nix-store --realise` and sets each as a profile under `/nix/var/nix/profiles/barectl/`. Nothing is evaluated on the server.
 4. **Caddy** creates the `caddy` system user, `/etc/caddy/Caddyfile`, the `/etc/caddy/sites/` directory and `caddy.service`, and installs the per-site templates `haproxy-site@.service`, `php-fpm-site-php84@.service` and `php-fpm-site-php85@.service`.
 5. **journald** writes `/etc/systemd/journald.conf.d/50-barectl.conf` with `Storage=persistent`.
+   Log retention is a separate `60-barectl-log-retention.conf` that only the
+   [Server logs setting](logs.md#retention) writes; it sorts after the foundation's file
+   and overrides only `SystemMaxUse` and `MaxRetentionSec`.
 6. **Verify** checks each stage against its supported form: the daemon active and admitting only root, Caddy running its configuration, the admin socket private, no listener on port 2019, unknown hosts answered with 404, and persistent journal storage.
 
 `caddy.service` follows upstream's unit: it runs `/nix/var/nix/profiles/barectl/caddy/bin/caddy run` as the `caddy` user with `Type=notify`, reloads through `caddy reload`, and keeps its state in `/var/lib/caddy`. The main configuration sets the admin endpoint to the Unix socket `/run/caddy/admin.sock` (mode 0600 in a 0700 runtime directory), so it never listens on TCP; leaves automatic HTTPS on and adds the optional certificate contact email when one is set ([HTTPS](tls.md#certificate-contact-email)); enables strict SNI host matching; imports `/etc/caddy/sites/*.caddy`; and answers 404 on port 80 for any host no site claims.

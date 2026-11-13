@@ -29,6 +29,7 @@ from dashboard.settings_views import settings_page
 from databases.site_views import prepare_site_database
 from databases.views import database_prepare
 from laravel.settings_views import prepare_environment
+from logs.journal_retention_views import prepare_journal_retention
 from logs.views import live_log, log_page, prepare_rotation, read_log
 from operations.views import (
     change_apply,
@@ -217,6 +218,11 @@ urlpatterns = [
         "servers/<int:pk>/settings/certificate-email/prepare/",
         prepare_certificate_email,
         name="certificate_email_prepare",
+    ),
+    path(
+        "servers/<int:pk>/settings/journal-retention/prepare/",
+        prepare_journal_retention,
+        name="journal_retention_prepare",
     ),
     path(
         "servers/<int:pk>/settings/backup-storage/prepare/",

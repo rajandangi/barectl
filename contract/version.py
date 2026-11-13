@@ -6,4 +6,4 @@ the version without loading the manifest's section builders.
 
 from typing import Final
 
-VERSION: Final = 1
+VERSION: Final = 2

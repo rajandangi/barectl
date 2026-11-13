@@ -17,6 +17,7 @@ from cache import instance as cache_instance
 from jobs import observation as jobs_observation
 from jobs.observation import JobReading
 from laravel import observation as laravel_observation
+from logs import journal_retention
 from operations import native
 from operations.check_progress import CheckStage
 from runtimes import defaults as runtime_defaults
@@ -42,7 +43,7 @@ from ..ssh import RemoteShell
 from . import caddy_email
 from .components import _collect_web_stack
 from .probes import _Failed, _read_file, _run
-from .standing import collect as collect_standing
+from .standing import collect_with_foundation
 
 __all__ = ["collect"]
 
@@ -93,7 +94,18 @@ def collect(
     if progress is not None:
         progress(CheckStage.SOFTWARE)
     components, installed_packages = _collect_web_stack(shell, release)
-    standing = collect_standing(shell, os_release, architecture, filesystem, installed_packages)
+    standing, foundation_values = collect_with_foundation(
+        shell, os_release, architecture, filesystem, installed_packages
+    )
+    journal_retention_observation = (
+        journal_retention.reconstruct(
+            foundation_values.get("journal_retention_file", ""),
+            foundation_values.get("journal_system_max_use", ""),
+            foundation_values.get("journal_max_retention", ""),
+        )
+        if foundation_values is not None
+        else None
+    )
     runtime_architecture = architecture_of(architecture.value or "")
     runtimes: tuple[runtime_observation.RuntimeObservation, ...] = ()
     runtime_warning = ""
@@ -172,6 +184,7 @@ def collect(
         workers=workers,
         certificate_email=certificate_email,
         certificate_email_state=certificate_email_state,
+        journal_retention=journal_retention_observation,
         security=security,
         jobs=jobs,
     )

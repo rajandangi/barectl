@@ -47,6 +47,22 @@ writes the configuration atomically as the site user at 0600. WordPress's extra 
 must follow a strict uppercase key grammar and a single-quoted string value; a line outside
 that grammar is reported as unsupported and is never rewritten.
 
+## Log retention
+
+Server **Settings > Server logs** shows the journald retention policy read from the last
+observation, and offers one reviewed **Shared** change with two fixed choices: a disk cap
+(`250M` to `4G`) and a maximum age (`1week` to `1year`). It says **Not checked yet** until a
+current, complete observation exists, then **Not configured**, **Managed** or **Outside
+supported settings**. Both values are written together to
+`/etc/systemd/journald.conf.d/60-barectl-log-retention.conf` as `root:root 0644`. The
+current pair is preselected when the policy is managed; a server with no file preselects
+`1G` and `3months`. There is no free-text size or age field and no reset action.
+
+A viewer sees the state without a control, and a site operator without
+`operations.change_shared` gets the gate's one sentence. An outside state keeps its plain
+reason and no form, and a direct preparation request is refused. The review and apply never
+delete logs and never run `journalctl --vacuum-*`; see [site logs](logs.md#retention).
+
 ## Scheduled tasks
 
 A site's **Settings > Scheduled tasks** shows the same state line as its Overview, including **Paused by an unfinished change** and **Background work is off while the site is in maintenance**, with one next action: choosing the state the work should have (the change asks; it never restores a remembered set). A Laravel site's card turns its scheduler on or off and offers **Run now**. Turning on and Run now need a verified Deploy or Roll back outcome for the current release, with no maintenance gate and no pending migrations; turning off is always available. The review states the one-hour run limit, the no-catch-up behaviour and the sub-minute and `runInBackground` limits in plain words ([automation](automation.md#turning-the-laravel-scheduler-on-and-off-and-run-now)).

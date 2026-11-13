@@ -245,6 +245,10 @@ _Avoid_: Log streaming, tail -f, real-time monitoring
 The root-owned `/etc/logrotate.d/barectl-site-<identifier>` file that rotates the logs Barectl creates in a site's log directory daily or at 20 MiB, keeping five compressed files for 14 days. Caddy and Laravel rotate their own logs.
 _Avoid_: Log cleanup, truncation
 
+**Journal retention setting**:
+The server-wide `SystemMaxUse` and `MaxRetentionSec` pair Barectl manages in its own journald drop-in, distinct from the foundation's persistent-storage setting and from the manual `journalctl --vacuum-*` commands. It bounds disk use and age; journald still rotates and reclaims.
+_Avoid_: Log cleanup, journal vacuum, log size
+
 **Site observation**:
 The observation of one site in a discovery snapshot, carrying exactly one state: managed, partly applied, or not following the convention. Only accounts allowed to view site observations see them.
 _Avoid_: Site health, managed site

@@ -77,6 +77,11 @@ JOURNAL_CONFIG: Final = (
 ).replace("\\n", "\n")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _BOOT = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+_RETENTION_FILE = re.compile(
+    r"missing|[0-9]{1,10} [0-9]{1,10} [0-7]{3,4} [0-9]{1,10} "
+    r"(?:file [0-9a-f]{64}|directory|symlink|other)"
+)
+_JOURNAL_VALUE = re.compile(r"[A-Za-z0-9.%:+-]{0,32}")
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,9 @@ def read(shell: RemoteShell) -> dict[str, str] | None:
         "socket",
         "runtime",
         "journal",
+        "journal_system_max_use",
+        "journal_max_retention",
+        "journal_retention_file",
         "caddy_valid",
         "caddy_json",
         "caddy_version",
@@ -137,6 +145,11 @@ def read(shell: RemoteShell) -> dict[str, str] | None:
         return None
     if not re.fullmatch(r"[0-9]{1,16}", values.get("uptime", "")):
         return None
+    if not _RETENTION_FILE.fullmatch(values.get("journal_retention_file", "")):
+        return None
+    for name in ("journal_system_max_use", "journal_max_retention"):
+        if name not in values or not _JOURNAL_VALUE.fullmatch(values[name]):
+            return None
     return values
 
 

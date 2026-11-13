@@ -1,8 +1,20 @@
 # Changelog
 
-## Unreleased
+## 1.1 - 2026-11-14
 
-No changes yet.
+Dashboard control for journald log retention, with a reviewed server-wide change and
+native reconstruction. See the [journal retention setting](docs/logs.md#retention) and the
+[upgrade guide](docs/upgrade.md#mixed-controller-versions).
+
+### Server settings
+
+- Set journald log retention from **Server Settings > Server logs**: one reviewed Shared
+  change writes a disk cap (`SystemMaxUse`) and maximum age (`MaxRetentionSec`) together,
+  restarts journald and verifies both effective values. Discovery reports Not configured,
+  Managed or Outside supported settings, and Barectl never deletes logs or runs
+  `journalctl --vacuum-*`. The native contract moves to version 2; upgrade every controller
+  before using the setting ([ADR 0044](docs/adr/0044-own-journald-log-retention-in-a-separate-drop-in.md),
+  [upgrade guide](docs/upgrade.md#mixed-controller-versions)).
 
 ## 1.0.1 - 2026-11-13
 

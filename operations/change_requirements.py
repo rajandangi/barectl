@@ -32,6 +32,9 @@ ADD_RUNTIME = TARGET_SERVER
 RUNTIME_DEFAULTS = TARGET_SERVER
 OBJECT_CACHE = replace(TARGET_SERVER, needs=TARGET_SERVER.needs | {preparation.Need.SHARED})
 SECURITY = OBJECT_CACHE
+# The log retention change is server-wide and Shared: its card and prepare read one
+# constant (ADR 0044).
+JOURNAL_RETENTION = replace(TARGET_SERVER, needs=TARGET_SERVER.needs | {preparation.Need.SHARED})
 BACKUP_STORAGE = replace(
     TARGET_SERVER,
     needs=frozenset({preparation.Need.CHANGE, preparation.Need.SITE, preparation.Need.SECRET}),
@@ -168,6 +171,7 @@ REQUIREMENTS: Mapping[str, preparation.Requirements] = {
     "set_backup_schedule": BACKUP_BASE,
     # Logs.
     "set_up_log_rotation": LOG_ROTATION,
+    "set_journal_retention": JOURNAL_RETENTION,
 }
 
 
