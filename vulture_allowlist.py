@@ -96,6 +96,7 @@ if TYPE_CHECKING:
     from disposable.test_http_site_validators import HttpSiteValidators
     from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_https import HttpsSite
+    from disposable.test_journal_retention import JournalRetentionLifecycle
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_laravel_create import LaravelCreateMariaDB
     from disposable.test_laravel_deploy import (
@@ -466,6 +467,7 @@ if TYPE_CHECKING:
         VmReboot,
         VmRestart,
         HostFoundation,
+        JournalRetentionLifecycle,
         RuntimeNativeBehavior,
         RuntimeDefaultValidators,
         ServerRuntimeDefaults,
