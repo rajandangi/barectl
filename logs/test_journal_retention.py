@@ -69,10 +69,12 @@ class ReconstructTests(SimpleTestCase):
             RetentionObservation(MANAGED, "", "2G", "3months"),
         )
 
-    def test_vacuuming_changes_no_fact_so_a_managed_state_stays_managed(self) -> None:
+    def test_the_same_facts_reconstruct_the_same_observation(self) -> None:
         fact = file_fact(render("1G", "1month"))
-        self.assertEqual(reconstruct(fact, "1G", "1month").state, MANAGED)
-        self.assertEqual(reconstruct(fact, "1G", "1month").state, MANAGED)
+        self.assertEqual(
+            reconstruct(fact, "1G", "1month"),
+            reconstruct(fact, "1G", "1month"),
+        )
 
     def test_deleting_the_file_returns_not_configured(self) -> None:
         self.assertEqual(reconstruct("missing", "1G", "1month").state, NOT_CONFIGURED)

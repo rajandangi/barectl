@@ -5,6 +5,7 @@
       Reading this site's logs needs the logs permission. Ask an administrator to grant it
       to your account. Your account can still view the site and its recorded state.
     </p>
+    {% include "logs/_server_logs_pointer.html" %}
   </section>
 {% elif not logs_target %}
   <section class="barectl-card" aria-labelledby="site-logs-heading">
@@ -13,6 +14,7 @@
       Barectl reads logs for a site it manages. This site is not served from Barectl's site
       configuration, so there is no log catalogue to read.
     </p>
+    {% include "logs/_server_logs_pointer.html" %}
   </section>
 {% else %}
   <section class="barectl-card" aria-labelledby="site-logs-heading">
@@ -38,10 +40,7 @@
     {% if logs_selected %}
       {% include "logs/_viewer.html" %}
     {% endif %}
-    <p class="barectl-note">
-      Server-wide log retention is in
-      <a href="{% url 'server_settings' server.pk %}#journal-retention">Server Settings &gt; Server logs</a>.
-    </p>
+    {% include "logs/_server_logs_pointer.html" %}
   </section>
 {% endif %}
 <details class="margin-top-4">

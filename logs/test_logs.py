@@ -15,7 +15,7 @@ from logs.change import RotationEvidence, body, review
 from logs.models import LogOutcome, LogRead
 from logs.read import LogLine, LogPage
 from logs.read import command as log_command
-from logs.testing import php_error_page, record_log_site
+from logs.testing import php_error_page, record_log_site, record_outside_site
 from operations.engine import BodyContext, ReviewDraft
 from operations.inputs import PreparationInputs
 from operations.lifecycle import OperationRefused
@@ -46,7 +46,15 @@ class LogsPageTests(ControllerConfigTestCase):
             response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "logs permission")
+        self.assertContains(response, "Server Settings &gt; Server logs")
         self.assertNotContains(response, "PHP errors")
+
+    def test_a_site_outside_barectl_still_links_to_the_server_log_setting(self) -> None:
+        self.grant("view_server", "view_siteobservation", "view_changes", "view_evidence")
+        record_outside_site(self.server)
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/logs/")
+        self.assertContains(response, "not served from Barectl")
+        self.assertContains(response, "Server Settings &gt; Server logs")
 
     def test_the_logs_page_query_count_does_not_grow_with_recorded_attempts(self) -> None:
         self.grant("view_server", "view_siteobservation", "view_changes", "view_evidence")

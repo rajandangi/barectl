@@ -27,6 +27,7 @@ from logs.journal_retention import (
     OUTSIDE,
     RETENTION_PATH,
     RetentionObservation,
+    reconstruct,
     render,
 )
 from operations.consent import DeclaredEffect, Scope
@@ -86,21 +87,25 @@ class JournalRetentionEvidence:
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> JournalRetentionEvidence:
-    """The target-stack judgment, the reconstructed state and the raw effective values.
+    """The target-stack judgment and the review's one reconstructed previous state.
 
-    Discovery's one-read rule does not apply to a preparation: the fixed foundation read is
-    made once for standing and reconstruction, and once more for the review's previous
-    effective values, because ``collect`` keeps no raw values.
+    ``collect`` establishes standing only. The fixed foundation read supplies both the
+    reconstructed observation and the previous effective values, so a review cannot pair a
+    file from one read with effective values from another.
     """
     from bootstrap import foundation
     from discovery.observations import collect
 
     observed = collect(shell, sites=False)
     values = foundation.read(shell)
-    observation = observed.journal_retention
     standing = observed.standing.standing if observed.standing else None
-    if values is None or observation is None:
+    if values is None:
         return JournalRetentionEvidence(standing, "", None, None, None, "", "")
+    observation = reconstruct(
+        values.get("journal_retention_file", ""),
+        values.get("journal_system_max_use", ""),
+        values.get("journal_max_retention", ""),
+    )
     uptime = values.get("uptime", "")
     return JournalRetentionEvidence(
         standing=standing,
