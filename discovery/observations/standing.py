@@ -81,6 +81,24 @@ def collect(
     installed_packages: frozenset[str] | None,
 ) -> HostJudgment:
     """Judge the current host from fixed observations; failed reads remain unknown."""
+    judgment, _ = collect_with_foundation(
+        shell, os_release, architecture, filesystem, installed_packages
+    )
+    return judgment
+
+
+def collect_with_foundation(
+    shell: RemoteShell,
+    os_release: Observation[OsRelease | None],
+    architecture: Observation[str | None],
+    filesystem: Observation[FilesystemSize | None],
+    installed_packages: frozenset[str] | None,
+) -> tuple[HostJudgment, dict[str, str] | None]:
+    """The host judgment and the fixed foundation read it already made, if any.
+
+    Discovery reconstructs the journal retention observation from the same read, so one
+    collection issues one foundation read.
+    """
     series = {name: _series(shell, command, pattern) for name, command, pattern in _VERSIONS}
     user_id = _integer(shell, "id -u")
     privileged = user_id == 0 if user_id is not None else None
@@ -133,30 +151,32 @@ def collect(
             listeners_readable=listeners is not None,
         )
     )
+    foundation_values: dict[str, str] | None = None
     if nix_shape == "supported":
         from bootstrap import foundation as host_foundation
         from runtimes.catalog import architecture_of, load
 
-        values = host_foundation.read(shell)
+        foundation_values = host_foundation.read(shell)
         catalog_architecture = architecture_of(machine or "")
-        if values and catalog_architecture:
-            exact = host_foundation.complete(values, catalog_architecture)
+        if foundation_values and catalog_architecture:
+            exact = host_foundation.complete(foundation_values, catalog_architecture)
             observed_stages = (
-                "present" if values.get("daemon") == "active" else "incomplete",
+                "present" if foundation_values.get("daemon") == "active" else "incomplete",
                 "present"
                 if all(
-                    values.get(entry, "").startswith("/nix/store/")
+                    foundation_values.get(entry, "").startswith("/nix/store/")
                     for entry in host_foundation.PROFILES
                 )
                 else "incomplete",
                 "present"
-                if values.get("caddy_valid") == "yes" and values.get("caddy_state") == "active"
+                if foundation_values.get("caddy_valid") == "yes"
+                and foundation_values.get("caddy_state") == "active"
                 else "incomplete",
-                "present" if values.get("journal") == "persistent" else "incomplete",
+                "present" if foundation_values.get("journal") == "persistent" else "incomplete",
                 "present" if exact else "incomplete",
             )
-            own_pid = values.get("caddy_pid", "")
-            own_executable = values.get("caddy_executable", "")
+            own_pid = foundation_values.get("caddy_pid", "")
+            own_executable = foundation_values.get("caddy_executable", "")
             known = load().identify(catalog_architecture, own_executable.removesuffix("/bin/caddy"))
             foreign = tuple(
                 line
@@ -195,17 +215,23 @@ def collect(
                 judgment,
                 evidence=(
                     *judgment.evidence,
-                    ("Caddy version", values.get("caddy_version", "Could not be read")),
-                    ("Caddy state", values.get("caddy_state", "Could not be read")),
-                    ("Caddy configuration", values.get("caddy_valid", "Could not be read")),
-                    ("Nix daemon", values.get("daemon", "Could not be read")),
-                    ("Journal storage", values.get("journal", "Could not be read")),
+                    (
+                        "Caddy version",
+                        foundation_values.get("caddy_version", "Could not be read"),
+                    ),
+                    ("Caddy state", foundation_values.get("caddy_state", "Could not be read")),
+                    (
+                        "Caddy configuration",
+                        foundation_values.get("caddy_valid", "Could not be read"),
+                    ),
+                    ("Nix daemon", foundation_values.get("daemon", "Could not be read")),
+                    ("Journal storage", foundation_values.get("journal", "Could not be read")),
                 ),
                 profiles=tuple(
-                    (entry, values.get(entry, "")) for entry in host_foundation.PROFILES
+                    (entry, foundation_values.get(entry, "")) for entry in host_foundation.PROFILES
                 ),
             )
-    return judgment
+    return judgment, foundation_values
 
 
 def _series(shell: RemoteShell, command: str, pattern: re.Pattern[str]) -> str | None:

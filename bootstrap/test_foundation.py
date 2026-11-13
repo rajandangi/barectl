@@ -2,6 +2,8 @@ import json
 from dataclasses import replace
 from unittest import TestCase
 
+from discovery.ssh import CommandResult
+from logs.journal_retention import OUTSIDE, reconstruct
 from operations.consent import consent_of
 from operations.engine import BodyContext
 from operations.models import Consent
@@ -10,6 +12,100 @@ from runtimes.catalog import Architecture, load
 from . import foundation
 from .standing import judge
 from .standing_testing import fresh_evidence
+
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+class _ReadShell:
+    """A privileged shell whose fixed read returns the supplied native facts."""
+
+    def __init__(self, stdout: str) -> None:
+        self.stdout = stdout
+
+    @property
+    def host_key(self) -> str:
+        return ""
+
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
+        if command == "id -u":
+            return CommandResult(0, "0")
+        return CommandResult(0, self.stdout)
+
+
+def _facts(*, omit: str = "", **overrides: str) -> str:
+    values = {
+        "digest": "a" * 64,
+        "boot": "12345678-1234-1234-1234-123456789abc",
+        "uptime": "1000",
+        "journal_retention_file": "missing",
+        "journal_system_max_use": "4G",
+        "journal_max_retention": "1week",
+    }
+    values.update(overrides)
+    values.pop(omit, None)
+    return "".join(f"{name}\t{value}\n" for name, value in values.items())
+
+
+class FoundationReadTests(TestCase):
+    def read(self, stdout: str) -> dict[str, str] | None:
+        return foundation.read(_ReadShell(stdout))
+
+    def test_the_read_returns_the_retention_facts(self) -> None:
+        values = self.read(_facts())
+        self.assertIsNotNone(values)
+        if values is not None:
+            self.assertEqual(values["journal_retention_file"], "missing")
+            self.assertEqual(values["journal_system_max_use"], "4G")
+            self.assertEqual(values["journal_max_retention"], "1week")
+        present = self.read(_facts(journal_retention_file="0 0 644 1 file " + "b" * 64))
+        self.assertIsNotNone(present)
+
+    def test_a_present_object_outside_the_choices_is_readable_and_outside(self) -> None:
+        cases = (
+            ("0 0 644 1 file " + EMPTY_SHA256, "1G", "1month"),
+            ("0 0 755 2 directory", "1G", "1month"),
+            ("0 0 777 1 symlink", "1G", "1month"),
+            ("0 0 600 1 other", "1G", "1month"),
+            ("0 0 644 1 file " + EMPTY_SHA256, "10%", "1month"),
+            ("0 0 644 1 file " + EMPTY_SHA256, "0", "1month"),
+        )
+        for fact, disk_cap, max_age in cases:
+            with self.subTest(fact=fact, disk_cap=disk_cap, max_age=max_age):
+                values = self.read(
+                    _facts(
+                        journal_retention_file=fact,
+                        journal_system_max_use=disk_cap,
+                        journal_max_retention=max_age,
+                    )
+                )
+                self.assertIsNotNone(values)
+                if values is not None:
+                    observation = reconstruct(
+                        values["journal_retention_file"],
+                        values["journal_system_max_use"],
+                        values["journal_max_retention"],
+                    )
+                    self.assertEqual(observation.state, OUTSIDE)
+
+    def test_an_empty_effective_value_is_readable_but_outside(self) -> None:
+        values = self.read(_facts(journal_system_max_use=""))
+        self.assertIsNotNone(values)
+
+    def test_a_malformed_duplicate_or_missing_retention_key_fails_the_read(self) -> None:
+        for stdout in (
+            _facts(journal_retention_file="garbage"),
+            _facts(journal_retention_file="0 0 644 1 regular file " + "b" * 64),
+            _facts(journal_retention_file="0 0 644 1 file not-a-digest"),
+            _facts(journal_system_max_use="4 G"),
+            _facts(journal_max_retention="\x00"),
+            _facts(omit="journal_retention_file"),
+            _facts(omit="journal_system_max_use"),
+            _facts(omit="journal_max_retention"),
+            _facts() + "journal_retention_file\tmissing\n",
+            _facts() + "unknown\tvalue\n",
+        ):
+            with self.subTest(stdout=stdout):
+                self.assertIsNone(self.read(stdout))
 
 
 class FoundationReviewTests(TestCase):

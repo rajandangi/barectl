@@ -68,7 +68,9 @@ covers:
   profiles, plus the catalog's runtime entries and the Nix configuration;
 - the catalog lock's path, format, architectures and entry pattern;
 - the main Caddy configuration, its unit, its sites directory and its private admin
-  socket, and the persistent-journal drop-in;
+  socket, the persistent-journal drop-in, and the separate retention drop-in's path,
+  `root:root` ownership, `0644` mode, rendered `[Journal]` shape and fixed disk-cap and
+  maximum-age choices;
 - the runtime master unit template and the per-site PHP-FPM templates;
 - the root-controlled mutation lock directory and file; and
 - the transient unit prefix and name pattern, the payload and staged-body limits, the

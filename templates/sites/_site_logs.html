@@ -38,6 +38,10 @@
     {% if logs_selected %}
       {% include "logs/_viewer.html" %}
     {% endif %}
+    <p class="barectl-note">
+      Server-wide log retention is in
+      <a href="{% url 'server_settings' server.pk %}#journal-retention">Server Settings &gt; Server logs</a>.
+    </p>
   </section>
 {% endif %}
 <details class="margin-top-4">

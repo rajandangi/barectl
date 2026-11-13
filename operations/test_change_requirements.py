@@ -27,8 +27,9 @@ class ChangeRequirementRegistryTests(SimpleTestCase):
         )
         self.assertEqual(
             sorted(mapped - registered),
-            [],
-            "the requirement registry names a kind that is no longer registered",
+            sorted(change_requirements.PENDING_KINDS),
+            "the requirement registry may name only registered kinds and the documented "
+            "forward declarations in operations/change_requirements.PENDING_KINDS",
         )
 
     def test_a_site_requirement_names_the_site_permission(self) -> None:
@@ -46,6 +47,13 @@ class ChangeRequirementRegistryTests(SimpleTestCase):
                 continue
             with self.subTest(slug=slug):
                 self.assertIn(Need.SECRET, change_requirements.requirements_for(slug).needs)
+
+    def test_the_journal_retention_entry_declares_the_shared_need_for_551(self) -> None:
+        requirements = change_requirements.requirements_for("set_journal_retention")
+        self.assertEqual(requirements, change_requirements.JOURNAL_RETENTION)
+        self.assertIn(Need.SHARED, requirements.needs)
+        self.assertIn(Need.CHANGE, requirements.needs)
+        self.assertTrue(requirements.target_stack)
 
     def test_the_cache_off_card_keeps_its_own_completion_rule(self) -> None:
         on = change_requirements.requirements_for("set_site_object_cache", {"object_cache": True})

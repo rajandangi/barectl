@@ -1,19 +1,26 @@
 """Journey: a PHP error line from the site page in two activations (Phase C #389)."""
 
 import tempfile
+from dataclasses import replace
 from time import sleep
 from typing import override
 
 from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.test import override_settings, tag
+from django.utils import timezone
 from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
+from discovery.fakes import record_attempt
+from discovery.models import DiscoveryAttempt
+from discovery.snapshot import current_snapshot, save_snapshot
+from logs.journal_retention import MANAGED, RetentionObservation
 from logs.models import LogRead
 from logs.read import LogLine, LogPage
 from logs.testing import record_background_site, record_log_site
 from servers.models import Server
+from sites.ui_testing import record_http_sites
 
 
 @tag("browser")
@@ -112,4 +119,75 @@ class SiteLogsBrowserTests(BrowserTestCase):
         )
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+
+@tag("browser")
+class JournalRetentionBrowserTests(BrowserTestCase):
+    @classmethod
+    @override
+    def serve_assets(cls) -> None:
+        static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
+        cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
+        call_command("collectstatic", interactive=False, verbosity=0)
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        for codename in (
+            "view_server",
+            "view_siteobservation",
+            "view_changes",
+            "view_evidence",
+            "change_site",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.server = Server.objects.get(name="Production")
+
+    def store_retention(self, retention: RetentionObservation) -> None:
+        record_http_sites(self.server)
+        snapshot = current_snapshot(self.server)
+        if snapshot is None:
+            raise AssertionError("No setup snapshot.")
+        attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
+        save_snapshot(
+            attempt,
+            replace(snapshot.collected, journal_retention=retention),
+            timezone.now(),
+        )
+
+    def test_the_card_shows_the_managed_policy_at_320_pixels(self) -> None:
+        self.store_retention(RetentionObservation(MANAGED, "", "2G", "3months"))
+        self.sign_in()
+        page = self.page
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/settings/")
+        expect(page.get_by_role("heading", name="Log retention", level=3)).to_be_visible()
+        expect(page.get_by_text("2 GiB (2G)")).to_be_visible()
+        expect(page.get_by_text("3 months (3months)")).to_be_visible()
+        self.assert_no_native_terms()
+        self.assertEqual(page.locator("#journal-retention form").count(), 0)
+        self.assertEqual(
+            page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+    def test_the_site_logs_pointer_reaches_the_server_setting_at_320_pixels(self) -> None:
+        record_log_site(self.server)
+        self.sign_in()
+        page = self.page
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/sites/alpha/")
+        page.get_by_role("navigation", name="Site sections").get_by_role(
+            "link", name="Logs", exact=True
+        ).click()
+        pointer = page.get_by_role("link", name="Server Settings > Server logs")
+        expect(pointer).to_be_visible()
+        self.assert_no_native_terms()
+        pointer.click()
+        expect(page).to_have_url(
+            f"{self.live_server_url}/servers/{self.server.pk}/settings/#journal-retention"
+        )
+        expect(page.get_by_role("heading", name="Log retention", level=3)).to_be_visible()
+        self.assertEqual(
+            page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )

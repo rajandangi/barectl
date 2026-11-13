@@ -183,3 +183,43 @@
     {% endif %}
   {% endif %}
 </section>
+<section class="margin-top-4" aria-labelledby="settings-server-logs-heading">
+  <h2 id="settings-server-logs-heading">Server logs</h2>
+  <div class="barectl-card" id="journal-retention">
+    <h3>Log retention</h3>
+    {% if journal_retention_panel.managed %}
+      <dl class="barectl-facts">
+        <div>
+          <dt>Disk cap</dt>
+          <dd>
+            {{ journal_retention_panel.disk_cap_label }} ({{ journal_retention_panel.disk_cap }})
+          </dd>
+        </div>
+        <div>
+          <dt>Maximum age</dt>
+          <dd>
+            {{ journal_retention_panel.max_age_label }} ({{ journal_retention_panel.max_age }})
+          </dd>
+        </div>
+      </dl>
+      <p class="barectl-note">
+        Barectl manages this policy. Journald keeps logs within it and reclaims space itself; Barectl does not delete logs.
+      </p>
+    {% elif journal_retention_panel.outside %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">Outside supported settings.</p>
+          <p class="usa-alert__text">{{ journal_retention_panel.reason }}</p>
+        </div>
+      </div>
+    {% elif journal_retention_panel.not_configured %}
+      <p>Not configured. Barectl has no retention configuration on this server.</p>
+      <p class="barectl-note">Journald keeps its own defaults until Barectl sets a policy.</p>
+    {% else %}
+      <p>Not checked yet. Run a connection check to read the server's log retention policy.</p>
+    {% endif %}
+    {% if journal_retention_panel.checked and journal_retention_panel.gate_reason %}
+      <p class="barectl-note">{{ journal_retention_panel.gate_reason }}</p>
+    {% endif %}
+  </div>
+</section>

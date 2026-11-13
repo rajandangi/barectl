@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Final
 
 from bootstrap import foundation
+from logs import journal_retention
 from operations import native
 from runtimes import catalog, configuration
 from runtimes.bodies import defaults
@@ -87,6 +88,23 @@ def _runtime_templates() -> dict[str, object]:
     }
 
 
+def _journald() -> dict[str, object]:
+    return {
+        "path": JOURNAL_DROP_IN,
+        "mode": "0644",
+        "contents": foundation.JOURNAL_CONFIG,
+        "retention": {
+            "path": journal_retention.RETENTION_PATH,
+            "owner": "root",
+            "group": "root",
+            "mode": "0644",
+            "shape": journal_retention.SHAPE,
+            "disk_cap_choices": list(journal_retention.DISK_CAP_CHOICES),
+            "max_age_choices": list(journal_retention.MAX_AGE_CHOICES),
+        },
+    }
+
+
 def _native_execution() -> dict[str, object]:
     from operations import engine
 
@@ -125,11 +143,7 @@ def build() -> dict[str, object]:
         "nix": _nix(),
         "catalog_lock": _catalog_lock(),
         "caddy": _caddy(),
-        "journald": {
-            "path": JOURNAL_DROP_IN,
-            "mode": "0644",
-            "contents": foundation.JOURNAL_CONFIG,
-        },
+        "journald": _journald(),
         "runtime_templates": _runtime_templates(),
         "native_execution": _native_execution(),
     }

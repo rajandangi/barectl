@@ -463,10 +463,14 @@ def server_page(
         from cache.presentation import panel as cache_panel
         from databases import engine as database_engine
         from databases.presentation import panel
+        from logs.journal_retention_views import (
+            context_for_server as journal_retention_context_for_server,
+        )
         from runtimes.defaults_views import context_for_server as runtime_context_for_server
 
         context.update(context_for_server(state, request.user))
         context.update(runtime_context_for_server(state, request.user))
+        context.update(journal_retention_context_for_server(state, request.user))
         context["database_panel"] = (
             panel(state.snapshot.collected) if state.snapshot is not None else None
         )
