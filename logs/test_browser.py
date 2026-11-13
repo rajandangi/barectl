@@ -15,10 +15,11 @@ from dashboard.browser_testing import BrowserTestCase
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.snapshot import current_snapshot, save_snapshot
-from logs.journal_retention import MANAGED, RetentionObservation
+from logs.journal_retention import MANAGED, OUTSIDE, RetentionObservation
 from logs.models import LogRead
 from logs.read import LogLine, LogPage
 from logs.testing import record_background_site, record_log_site
+from operations.models import ChangePreparation
 from servers.models import Server
 from sites.ui_testing import record_http_sites
 
@@ -140,6 +141,7 @@ class JournalRetentionBrowserTests(BrowserTestCase):
             "view_changes",
             "view_evidence",
             "change_site",
+            "change_shared",
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         self.server = Server.objects.get(name="Production")
@@ -166,10 +168,55 @@ class JournalRetentionBrowserTests(BrowserTestCase):
         expect(page.get_by_text("2 GiB (2G)")).to_be_visible()
         expect(page.get_by_text("3 months (3months)")).to_be_visible()
         self.assert_no_native_terms()
-        self.assertEqual(page.locator("#journal-retention form").count(), 0)
+        expect(page.locator("#journal-retention form")).to_have_count(1)
+        expect(page.get_by_label("Disk cap")).to_have_value("2G")
+        expect(page.get_by_label("Maximum age")).to_have_value("3months")
         self.assertEqual(
             page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
+
+    def test_the_form_at_320_pixels_submits_the_chosen_pair(self) -> None:
+        self.store_retention(RetentionObservation(MANAGED, "", "2G", "3months"))
+        self.sign_in()
+        page = self.page
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/settings/")
+        expect(page.get_by_role("heading", name="Log retention", level=3)).to_be_visible()
+        page.get_by_label("Disk cap").select_option("500M")
+        page.get_by_label("Maximum age").select_option("1month")
+        self.assert_no_native_terms()
+        page.get_by_role("button", name="Change log retention").click()
+        preparation = ChangePreparation.objects.get()
+        self.assertEqual(
+            preparation.inputs,
+            {"version": 1, "disk_cap": "500M", "max_age": "1month"},
+        )
+        expect(page).to_have_url(f"{self.live_server_url}/changes/{preparation.pk}/")
+
+    def test_an_outside_state_renders_the_reason_and_refuses_a_direct_post(self) -> None:
+        self.store_retention(
+            RetentionObservation(OUTSIDE, "A later configuration overrides the retention setting.")
+        )
+        self.sign_in()
+        page = self.page
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/settings/")
+        expect(page.get_by_text("Outside supported settings.")).to_be_visible()
+        expect(
+            page.get_by_text("A later configuration overrides the retention setting.")
+        ).to_be_visible()
+        self.assert_no_native_terms()
+        expect(page.locator("#journal-retention form")).to_have_count(0)
+        self.assertEqual(
+            page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/servers/{self.server.pk}/settings/journal-retention/prepare/",
+            {"disk_cap": "1G", "max_age": "3months"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ChangePreparation.objects.count(), 0)
 
     def test_the_site_logs_pointer_reaches_the_server_setting_at_320_pixels(self) -> None:
         record_log_site(self.server)

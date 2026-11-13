@@ -51,6 +51,7 @@
       "change_detail",
       "change_prepare_again",
       "database_prepare",
+      "journal_retention_prepare",
       "login",
       "logout",
       "object_cache_prepare",
@@ -375,7 +376,7 @@
   },
   "results": {
     "classes": ["failed", "lock_busy", "partial", "refused", "succeeded", "timed_out"],
-    "contract": 1,
+    "contract": 2,
     "fields": ["class", "reason", "change_kind", "sites", "contract"],
     "prefix": "barectl-result ",
     "reasons": {
@@ -855,6 +856,7 @@
         "set_certificate_email": ["certificate_email"],
         "set_default_node": ["runtime_config"],
         "set_default_php": ["runtime_config"],
+        "set_journal_retention": ["journal_retention"],
         "set_laravel_queue_workers": [
           "automation_fence",
           "automation_restore",
@@ -1256,5 +1258,5 @@
       "target_pattern": "releases/[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
     }
   },
-  "version": 1
+  "version": 2
 }

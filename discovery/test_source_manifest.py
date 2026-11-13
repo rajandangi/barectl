@@ -229,6 +229,14 @@ class SourceManifestTests(SimpleTestCase):
             "SOURCES; changing one would leave recorded transcripts silently current",
         )
 
+    def test_the_journal_retention_body_and_change_module_are_shared_sources(self) -> None:
+        for path in (
+            "logs/bodies/journal_retention.py",
+            "logs/journal_retention_change.py",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(path, source_manifest.SOURCES)
+
     def test_every_shared_source_exists(self) -> None:
         missing = [path for path in source_manifest.SOURCES if not (REPOSITORY / path).is_file()]
         self.assertEqual(missing, [])

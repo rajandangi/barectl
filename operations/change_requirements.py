@@ -32,12 +32,9 @@ ADD_RUNTIME = TARGET_SERVER
 RUNTIME_DEFAULTS = TARGET_SERVER
 OBJECT_CACHE = replace(TARGET_SERVER, needs=TARGET_SERVER.needs | {preparation.Need.SHARED})
 SECURITY = OBJECT_CACHE
-# The journal retention kind lands with #551; the shared requirement is declared now so its
-# card and prepare read one constant.
+# The log retention change is server-wide and Shared: its card and prepare read one
+# constant (ADR 0044).
 JOURNAL_RETENTION = replace(TARGET_SERVER, needs=TARGET_SERVER.needs | {preparation.Need.SHARED})
-# Registry entries whose kind is not registered yet, so the registry test names exactly the
-# forward declaration rather than allowing any unknown slug (#549 lands the entry, #551 the kind).
-PENDING_KINDS: frozenset[str] = frozenset({"set_journal_retention"})
 BACKUP_STORAGE = replace(
     TARGET_SERVER,
     needs=frozenset({preparation.Need.CHANGE, preparation.Need.SITE, preparation.Need.SECRET}),

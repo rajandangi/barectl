@@ -218,6 +218,24 @@
     {% else %}
       <p>Not checked yet. Run a connection check to read the server's log retention policy.</p>
     {% endif %}
+    {% if journal_retention_panel.can_prepare %}
+      <form method="post"
+            action="{% url 'journal_retention_prepare' server.pk %}"
+            class="usa-form">
+        {% csrf_token %}
+        <label class="usa-label"
+               for="{{ journal_retention_form.disk_cap.id_for_label }}">{{ journal_retention_form.disk_cap.label }}</label>
+        {{ journal_retention_form.disk_cap }}
+        <label class="usa-label"
+               for="{{ journal_retention_form.max_age.id_for_label }}">{{ journal_retention_form.max_age.label }}</label>
+        {{ journal_retention_form.max_age }}
+        <p class="barectl-note">
+          Both values are set together. Journald reclaims space under this policy; Barectl deletes no logs and runs no vacuum.
+        </p>
+        <button type="submit"
+                class="usa-button usa-button--outline margin-top-2">Change log retention</button>
+      </form>
+    {% endif %}
     {% if journal_retention_panel.checked and journal_retention_panel.gate_reason %}
       <p class="barectl-note">{{ journal_retention_panel.gate_reason }}</p>
     {% endif %}

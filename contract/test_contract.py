@@ -124,6 +124,19 @@ class FoundationRetentionContractTests(SimpleTestCase):
         self.assertEqual(retention["max_age_choices"], list(journal_retention.MAX_AGE_CHOICES))
 
 
+class JournalRetentionContractTests(SimpleTestCase):
+    def test_version_two_pins_the_new_url_kind_and_reason(self) -> None:
+        pinned = json.loads(PINNED.read_text(encoding="utf-8"))
+        self.assertEqual(pinned["version"], 2)
+        application = cast(dict[str, object], pinned["application"])
+        self.assertIn("journal_retention_prepare", cast(list[str], application["url_names"]))
+        results = cast(dict[str, object], pinned["results"])
+        self.assertEqual(results["contract"], 2)
+        reasons = cast(dict[str, object], results["reasons"])
+        kinds = cast(dict[str, list[str]], reasons["kinds"])
+        self.assertIn("journal_retention", kinds["set_journal_retention"])
+
+
 class ManifestContractTest(SimpleTestCase):
     def test_pinned_manifest_matches_the_owning_modules(self) -> None:
         pinned = json.loads(PINNED.read_text(encoding="utf-8"))
