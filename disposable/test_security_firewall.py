@@ -39,11 +39,11 @@ def _remove(port: str, protocol: str = "tcp", network: str = "") -> PreparationI
     return PreparationInputs("remove", firewall=True, port=port, protocol=protocol, network=network)
 
 
-@tag(SCENARIO_TAG)
-class FirewallLifecycle(ScenarioTestCase):
+class FirewallScenario(ScenarioTestCase):
+    """The shared reset, probes and submission for the two firewall items."""
+
     layer = "L1"
     exclusive = True
-    prefix = "sfirewall"
 
     @override
     def setUp(self) -> None:
@@ -81,6 +81,11 @@ class FirewallLifecycle(ScenarioTestCase):
         submitted = submit_change(self, MANAGE_FIREWALL, inputs)
         wait_result(self, submitted, timeout=90, expected=expected, reason=reason)
         return submitted
+
+
+@tag(SCENARIO_TAG)
+class FirewallLifecycle(FirewallScenario):
+    prefix = "sfirewall"
 
     def test_1_turns_on_adds_and_removes_and_a_fresh_controller_reconstructs(self) -> None:
         opened = self._run(_on())
@@ -155,6 +160,11 @@ class FirewallLifecycle(ScenarioTestCase):
         self.assertIn(window, {revert.Window.PUT_BACK, revert.Window.NOT_KNOWN})
         self.assertIs(wait_window(self, opened), revert.Window.PUT_BACK)
         self.assertIn("Status: inactive", self._status())
+
+
+@tag(SCENARIO_TAG)
+class FirewallRevert(FirewallScenario):
+    prefix = "sfirevert"
 
     def test_4_the_revert_waits_for_a_held_lock(self) -> None:
         opened = self._run(_on())

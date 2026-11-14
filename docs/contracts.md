@@ -19,7 +19,8 @@ modules and fails when a promised shape changes, is removed or is renamed withou
 the version and the pinned file together. `contract/history.json` records the canonical
 SHA-256 of every released version's section shapes, so a shape change also fails unless
 `contract/version.py` is bumped and the new history entry names its migration and
-deprecation window. Each section is one module registered in `contract/manifest.py`; a
+deprecation window. A version enters the history when it is released, and an existing entry
+is never edited; a later shape change needs a new version and a new entry. Each section is one module registered in `contract/manifest.py`; a
 later area adds one module and one registry entry.
 
 ## Change policy

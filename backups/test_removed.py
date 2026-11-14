@@ -66,7 +66,6 @@ class RemovedRepositoryReadTests(SimpleTestCase):
             )
         )
         self.assertEqual(observation.removed(shell, ("alpha",)), ("beta",))
-        self.assertEqual(observation.removed(shell, ("alpha",)), ("beta",))
 
     def test_an_unreadable_or_invalid_answer_lists_nothing(self) -> None:
         for answer in ("", "Beta\n", "beta\nalpha\n", "a\nb\nc\nd\ne\nf\ng\nh\ni\n"):

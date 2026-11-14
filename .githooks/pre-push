@@ -37,6 +37,7 @@ uv run --env-file .env python manage.py check --fail-level WARNING
 uv run --env-file .env python manage.py makemigrations --check --dry-run
 uv run --env-file .env python -m discovery.source_manifest \
     || { echo "pre-push: stale transcript sources; run scripts/record-all-transcripts.sh" >&2; exit 1; }
+uv run python scripts/check_module_map.py
 uv run --env-file .env python manage.py test --exclude-tag browser --exclude-tag scenario --parallel
 npm run check
 
