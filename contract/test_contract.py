@@ -24,6 +24,11 @@ HISTORY_NOTICE = (
     "Bump contract/version.py and add a contract/history.json entry for the new version "
     "with a migration/dual-read and a deprecation window."
 )
+# A version enters this record when it is released. An existing entry is never edited: a
+# changed shape needs a new version and a new history entry (docs/contracts.md, ADR 0042).
+RELEASED_HISTORY = {
+    "1": "6635196b2c4e0db8c9e964e56c1da2bbe04c72f3409754eb833205a2a1c61153",
+}
 
 
 def shapes_digest(built: dict[str, object]) -> str:
@@ -50,6 +55,19 @@ def history_problems(built: dict[str, object], history: dict[str, str], version:
             f"contract/history.json version {version} records {recorded!r}, but the built "
             f"shapes hash to {digest}. {HISTORY_NOTICE}"
         )
+    return problems
+
+
+def released_history_problems(history: dict[str, str]) -> list[str]:
+    """Every released version whose recorded digest is missing or was rewritten."""
+    problems: list[str] = []
+    for version, digest in RELEASED_HISTORY.items():
+        recorded = history.get(version)
+        if recorded != digest:
+            problems.append(
+                f"contract/history.json version {version} was released with {digest!r} but "
+                f"records {recorded!r}; a released entry is never edited. {HISTORY_NOTICE}"
+            )
     return problems
 
 
@@ -156,6 +174,20 @@ class ManifestContractTest(SimpleTestCase):
     def test_history_records_every_released_contract_shape(self) -> None:
         history = json.loads(HISTORY.read_text(encoding="utf-8"))
         self.assertEqual(history_problems(manifest(), history, VERSION), [])
+
+    def test_released_history_is_append_only(self) -> None:
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+        self.assertEqual(released_history_problems(history), [])
+
+    def test_a_rewritten_released_entry_fails(self) -> None:
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+        history["1"] = "0" * 64
+
+        problems = released_history_problems(history)
+
+        self.assertTrue(problems)
+        self.assertIn("version 1", " ".join(problems))
+        self.assertIn("never edited", " ".join(problems))
 
     def test_a_changed_shape_without_a_history_entry_fails(self) -> None:
         built = manifest()

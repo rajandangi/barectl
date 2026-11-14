@@ -14,6 +14,7 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Python static analysis | Ruff | Errors, imports, annotations, Django rules, bug patterns, security patterns, modernization, simplification |
 | Python formatting | Ruff formatter | First-party Python |
 | Python dead code | Vulture at 60% confidence | First-party Python, including functions, classes, tests and migrations |
+| Architecture map | `scripts/check_module_map.py` | Added first-party Python modules named in their `docs/architecture.md` app row |
 | Django templates | djLint Django profile | Template formatting and lint rules |
 | Frontend types | TypeScript strict, including checked JavaScript, type-checked by Vite+'s tsgolint in `vp check` | First-party tooling (`tsconfig.json`) and browser source (`frontend/tsconfig.json`); declaration checking enabled |
 | Frontend formatting | Oxfmt through `vp check` | First-party TypeScript, JavaScript, JSON and Sass; templates, Markdown, TOML and generated files keep their own tools |
@@ -60,6 +61,7 @@ uv run ruff check . .ai
 uv run ruff format --check . .ai
 uv run --env-file .env mypy
 uv run vulture
+uv run python scripts/check_module_map.py
 uv run djlint templates --lint --check
 shellcheck $(git ls-files '*/bodies/*.sh')
 uv run --env-file .env python manage.py check
