@@ -39,8 +39,10 @@ Opening any page reads stored observations and local records. Only a CSRF-protec
 queues work, and no page makes an SSH connection.
 
 Server, site and run side navigation updates the main content without a full page reload.
-The selected section, keyboard focus and URL update together. Direct visits work with or
-without JavaScript, and Back and Forward reload the requested page with fresh access checks.
+The selected section, keyboard focus, URL and document scroll position update together: each
+section opens at the top of the page with the global header in place, as a full navigation
+would. Direct visits work with or without JavaScript, and Back and Forward reload the
+requested page with fresh access checks.
 
 ## Servers
 

@@ -213,10 +213,13 @@ class ConfirmAndRunBrowserTests(BrowserTestCase):
         logs = self.page.get_by_role("navigation", name="Run sections").get_by_role(
             "link", name="Logs", exact=True
         )
+        self.page.evaluate("window.scrollTo(0, 400)")
         logs.focus()
         self.page.keyboard.press("Enter")
         expect(self.page.get_by_role("heading", name="Logs", level=2)).to_be_visible()
         self.assertEqual(self.page.evaluate("window.barectlNavigationTest"), "same-document")
+        self.assertEqual(self.page.evaluate("window.scrollY"), 0)
+        expect(self.page.locator(".barectl-header")).to_be_visible()
         expect(logs).to_be_focused()
         expect(self.page.get_by_text("Systemd unit")).to_be_visible()
         self.assertIn(run.unit_name, self.page.content())

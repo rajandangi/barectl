@@ -178,6 +178,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             page.evaluate("window.barectlNavigationTest = 'same-document'")
             self.requests.clear()
             link = nav.get_by_role("link", name=section, exact=True)
+            page.evaluate("window.scrollTo(0, 400)")
             link.focus()
             page.keyboard.press("Enter")
             expect(nav.get_by_role("link", name=section, exact=True)).to_have_attribute(
@@ -185,6 +186,10 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             )
             expect(page.get_by_role("heading", name="Production", level=1)).to_be_visible()
             self.assertEqual(page.evaluate("window.barectlNavigationTest"), "same-document")
+            # Each section opens at the document top with the global header in place,
+            # as a full navigation would; the main region's own top is below the header.
+            self.assertEqual(page.evaluate("window.scrollY"), 0)
+            expect(page.locator(".barectl-header")).to_be_visible()
             expect(link).to_be_focused()
             self.assertFalse([r.url for r in self.requests if r.is_navigation_request()])
             if section == "Jobs":
