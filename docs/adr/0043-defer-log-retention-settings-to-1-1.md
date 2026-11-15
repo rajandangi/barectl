@@ -2,7 +2,7 @@
 
 Accepted on 2026-11-09 for [#530](https://github.com/rajandangi/barectl/issues/530) under the
 1.0 specification [#528](https://github.com/rajandangi/barectl/issues/528). It closes the
-last Phase E gap named by [logs#later-retention](../logs.md#later-retention) by removing it
+last Phase E gap named by [the 1.0 retention gap](https://github.com/rajandangi/barectl/blob/v1.0.0/docs/logs.md#later-retention) by removing it
 from Phase E and 1.0 scope. No application behavior changes.
 
 ## Context

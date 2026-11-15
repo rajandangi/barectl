@@ -600,7 +600,7 @@
     "sites/settings_forms.py": "0466abbe80d34ef32a16498afd17f180494dc1ab909f8a8cb648c0af2e8fd097",
     "sites/ui_testing.py": "cda3e79b1c191ce033485616bb31e5fcde7d4e49293ca21b5394e01aad87cb4a",
     "sites/views.py": "73bd30db9181206e386acd0024fbc7938f1f9f1bfcb5233db114906bd3cf2444",
-    "uv.lock": "20cdf431ab75ed5e0f705c47b0c9ecc5bfc7784b40317749b20cfa3e17011a49",
+    "uv.lock": "42645595fb92eb170319e8b657325d64924ee373185b22d938e0590e5d38f3d6",
     "vulture_allowlist.py": "c65de0e433933a45d19209c2bf8af945b5bc633032ee619a49462b80eb0cccbf",
     "wordpress/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "wordpress/actions.py": "a82c8c0f8f3d6a3cebba674c6077d13b87928f708de9f678009c2c2743d2ebe2",
@@ -726,11 +726,11 @@
     "wordpress/convention.py": "a25e359d7d788d9b82163b6effc17f5a4a3558d9125dd7cc93cd838bc9520472"
   },
   "capture_pins": {
-    "catalog-sha256": "4d619aee18282b32ad8e84d8e4851af9682bb2dafff71ff9d444d9f46c4f82e5",
+    "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
+    "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78",
     "nix-version": "2.35.2",
     "nixpkgs": "ac588ef1c914865dad517b337ea0eb9694a4021c",
-    "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
-    "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
+    "catalog-sha256": "4d619aee18282b32ad8e84d8e4851af9682bb2dafff71ff9d444d9f46c4f82e5"
   },
   "capture_states": {
     "apache-26.04": "e1523b014f2e699d81e1f348d28782c35d4525c33abe4d5d090fcac62513b2ed",

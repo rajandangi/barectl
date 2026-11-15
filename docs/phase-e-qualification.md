@@ -11,6 +11,11 @@ passing is not qualified. The Security and Server Jobs slices are released in
 settings are deferred from Phase E and 1.0 to 1.1
 ([ADR 0043](adr/0043-defer-log-retention-settings-to-1-1.md)).
 
+That deferral describes the Phase E and 1.0 releases. Journal retention was delivered
+afterward; its current release evidence is recorded separately in the
+[v1.1.0 qualification](v1.1.0-qualification.md). The historical limitations below continue
+to describe only the revisions this record tested.
+
 ## Revisions
 
 The integration branch is `feat/301-phase-e-security`. It merged #305 at `4969b7ea` and #414

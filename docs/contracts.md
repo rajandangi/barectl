@@ -27,7 +27,7 @@ later area adds one module and one registry entry.
 
 - **Additive change.** A new optional field, site, runtime, command or permission that
   leaves every existing promised shape unchanged is compatible. It may ship within
-  version 1 when every reader in the previous release ignores it safely. The manifest
+  the current contract version when every reader in the previous release ignores it safely. The manifest
   gains the entry, and the contract test records it.
 - **Breaking change.** Removing, renaming, retyping or meaningfully changing a promised
   shape requires a new contract version. The release must carry a discovery migration or
@@ -118,10 +118,12 @@ those modules and does not keep a second list:
 
 Version 2 adds the `set_journal_retention` kind and its `journal_retention` reason (with a
 refused and a partial sentence) and the `journal_retention_prepare` route. It changes no
-version-1 native shape, so no native migration is needed. A 1.0.1 controller reads the
-newer result line as **Outside supported settings** after a 1.1 run, withholds every
-change card and refuses a direct preparation: the upgrade notes tell operators to upgrade
-every controller before using log retention.
+version-1 native shape, so the new setting needs no server-configuration migration.
+Every change run by 1.1.0 writes contract 2. A 1.0.1 controller reads that newer result
+as **Outside supported settings**, withholds every change card and refuses direct
+preparation. Upgrade every controller before applying any 1.1.0 change.
+
+### Retained result lines
 
 Jobs keeps the `contract` value on each observed result line. A controller compares it
 with its own contract version before it offers a change. A recorded version newer than the
@@ -131,6 +133,10 @@ direct preparation request is refused. A line written before the field existed r
 `0`; v0.4.0 wrote no field and is contract 1, so `0` is compatible. No result lines
 establish no version and are not by themselves unrecognized. Discovery stays read-only:
 it reads the retained line and never writes a version marker on the server.
+
+Consequently, retained explicit contract-1 results can block changes after a controller
+database upgrade to 1.1.0, despite the unchanged native configuration shapes. There is no
+in-app result-line migration or override. See the [upgrade compatibility limits](upgrade.md#mixed-controller-versions).
 
 ## Application surface
 

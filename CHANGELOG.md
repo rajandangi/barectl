@@ -1,9 +1,11 @@
 # Changelog
 
-## 1.1 - 2026-11-14
+## 1.1.0 - 2026-11-15
 
 Dashboard control for journald log retention, with a reviewed server-wide change and
-native reconstruction. See the [journal retention setting](docs/logs.md#retention) and the
+native reconstruction, plus faster discovery and controller queries. See the
+[release qualification](docs/v1.1.0-qualification.md),
+[journal retention setting](docs/logs.md#retention) and
 [upgrade guide](docs/upgrade.md#mixed-controller-versions).
 
 ### Server settings
@@ -13,8 +15,32 @@ native reconstruction. See the [journal retention setting](docs/logs.md#retentio
   restarts journald and verifies both effective values. Discovery reports Not configured,
   Managed or Outside supported settings, and Barectl never deletes logs or runs
   `journalctl --vacuum-*`. The native contract moves to version 2; upgrade every controller
-  before using the setting ([ADR 0044](docs/adr/0044-own-journald-log-retention-in-a-separate-drop-in.md),
+  before applying any 1.1.0 change ([ADR 0044](docs/adr/0044-own-journald-log-retention-in-a-separate-drop-in.md),
   [upgrade guide](docs/upgrade.md#mixed-controller-versions)).
+
+### Upgrade compatibility
+
+- Controller database migration from 0.4.x and 1.0.x remains supported, but native
+  admission is separate: a retained explicit contract-1 result makes 1.1.0 report
+  Outside supported settings and refuse changes. There is no in-app result migration
+  or override. Review the [mixed-controller and retained-history limits](docs/upgrade.md#mixed-controller-versions)
+  before upgrading an active 1.0.1 installation.
+
+### Performance and navigation
+
+- Read the log catalogue with one consistent query selection and batch snapshot integrity
+  writes. The benchmark reports include small and large workloads:
+  [log catalogue](notes/performance-log-catalogue.md),
+  [snapshot writes](notes/performance-refresh-server.md).
+- Combine required-tool lookups, each fixed root read's fresh identity and exact sudo
+  authorization, and the one Nix binary presence/ancestor probe into fewer SSH calls.
+  Read permissions and observation classifications are preserved. Controlled comparisons
+  and the separate registered-server measurement are recorded in
+  [tool lookups](notes/performance-installed-software.md),
+  [security and backups](notes/performance-security-backups.md) and
+  [the Nix binary probe](notes/performance-nix-binary-probe.md).
+- Avoid stale-operation recovery writes when no operation is old enough to need recovery.
+- Scroll server section navigation to the document top.
 
 ## 1.0.1 - 2026-11-13
 
@@ -164,7 +190,7 @@ Barectl 0.4.0 replaces the Nginx, Certbot and APT PHP stack with the [target sta
 - Add **Scheduled tasks**, **Queue workers** and **Object cache** to a site's **Logs**, read from the journal of the units their own conventions name: the WordPress `wpcron` or Laravel `schedule` unit, every installed `queue1`…`queueN` worker in process order, and the site's packaged `valkey-server@<identifier>` instance. Each source keeps the same 500-line and 256 KiB bounds, server-side secret replacement and controller second pass as the file logs, continues older pages by cursor, and offers a live panel that polls `--after-cursor` only while it is visible, appends without moving focus and announces new lines through the Logs status region. A source whose unit is not installed reads as **not configured**, distinct from an empty, missing or unreadable log, and Barectl never classifies an outcome from these lines ([logs](docs/logs.md#live-view), [#397](https://github.com/rajandangi/barectl/issues/397)).
 - Install Valkey from Server **Settings > Object cache (Valkey)** as one reviewed APT transaction that names the package, its exact version and APT's download size. The run installs exactly those packages under the inline `DPkg::Pre-Install-Pkgs` guard, stops and masks the distribution's shared `valkey-server.service` so nothing listens on TCP 6379, and restarts the running PHP masters and site proxies so a package transaction's `daemon-reload` leaves them verifiable (#428). It is Shared consent, so a Site operator is refused in the page and on a direct POST; an installed and masked Valkey proposes no changes, and discovery reconstructs the package, version and masked unit from the server alone ([object cache](docs/object-cache.md)).
 
-- Turn on a WordPress site's **Settings > Object cache** for that site alone. One Site review creates the packaged `valkey-server@<identifier>.service` with a root-owned drop-in and configuration, running as the site account over a private `0600` Unix socket with no TCP, password or persistence, `allkeys-lru` and a reviewed memory limit; writes the reserved `WP_REDIS_SCHEME`, `WP_REDIS_PATH` and `WP_REDIS_PREFIX` constants; installs the pinned Redis Object Cache plugin from its checked archive and enables its drop-in; and proves the plugin reports Connected through phpredis. Another site's account can neither open the socket nor read the configuration, and the cache refuses administrative commands while ordinary flushes work. Turning it off disables the drop-in and clears the constants before stopping and removing the instance. The site screen offers **Install Valkey** first and refuses with a reason when Valkey, WordPress or the site's PHP client is missing. Overview shows one cache line, and **Check the cache** reads used memory against the limit, evictions and connected clients on demand through the worker, keeping nothing beyond the request. Discovery reconstructs the instance, its wiring and a supported in-bounds memory edit; a changed `User`, `ExecStart` or socket is reported once and blocks turning it on. Site removal removes the cache with the site ([object cache](docs/object-cache.md#a-sites-own-cache-implemented-392), [#392](https://github.com/rajandangi/barectl/issues/392)).
+- Turn on a WordPress site's **Settings > Object cache** for that site alone. One Site review creates the packaged `valkey-server@<identifier>.service` with a root-owned drop-in and configuration, running as the site account over a private `0600` Unix socket with no TCP, password or persistence, `allkeys-lru` and a reviewed memory limit; writes the reserved `WP_REDIS_SCHEME`, `WP_REDIS_PATH` and `WP_REDIS_PREFIX` constants; installs the pinned Redis Object Cache plugin from its checked archive and enables its drop-in; and proves the plugin reports Connected through phpredis. Another site's account can neither open the socket nor read the configuration, and the cache refuses administrative commands while ordinary flushes work. Turning it off disables the drop-in and clears the constants before stopping and removing the instance. The site screen offers **Install Valkey** first and refuses with a reason when Valkey, WordPress or the site's PHP client is missing. Overview shows one cache line, and **Check the cache** reads used memory against the limit, evictions and connected clients on demand through the worker, keeping nothing beyond the request. Discovery reconstructs the instance, its wiring and a supported in-bounds memory edit; a changed `User`, `ExecStart` or socket is reported once and blocks turning it on. Site removal removes the cache with the site ([object cache](docs/object-cache.md#a-sites-own-cache-implemented-392-and-393), [#392](https://github.com/rajandangi/barectl/issues/392)).
 - Pause a site's background work around every change that alters its code, schema, runtime, settings or files, and start exactly the reviewed work again only after the change verifies. The review records the plan once; the body runtime-masks each timer and service, stops the slice and proves it empty within a budget derived from the units' own stop budgets, and removes boot activation while a maintenance gate is up so a reboot cannot bypass the fence. A unit added, removed or enabled since the review refuses the change with nothing done, and turning work back on is the ordinary Scheduled tasks or Queue workers review, which asks rather than guessing ([automation](docs/automation.md#fencing-site-changes), [ADR 0036](docs/adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md), [#395](https://github.com/rajandangi/barectl/issues/395)).
 - Qualify Phase C and add the scheduled breadth job: a userspace reboot with no controller, a maintenance gate kept off across that boot, a scheduler tick longer than a calendar minute, and the memory of a cache instance and its workers inside 1, 2 and 4 GiB memory cgroups. The job is never a required check and adds no time to a merge build ([qualification record](docs/phase-c-qualification.md), [test time budget](docs/quality.md#the-scheduled-breadth-job), [#398](https://github.com/rajandangi/barectl/issues/398)).
 

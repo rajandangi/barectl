@@ -23,7 +23,7 @@ enables its drop-in. The review refuses when Valkey is not installed, the site i
 verified WordPress installation, or the site does not load phpredis; turning off disables
 the drop-in and clears the constants before the instance stops. Discovery recognizes the
 state from the instance, the constants and the plugin files; a fresh controller
-reconstructs it without a Barectl marker ([object cache](object-cache.md#a-sites-own-cache-implemented-392)).
+reconstructs it without a Barectl marker ([object cache](object-cache.md#a-sites-own-cache-implemented-392-and-393)).
 
 ## Actions
 

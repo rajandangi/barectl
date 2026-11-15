@@ -465,16 +465,16 @@ The site's own evidence that a change fenced its background work and did not fin
 _Avoid_: Fenced flag, disabled flag, stale change
 
 **Object cache instance**:
-One site's own `valkey-server@<identifier>` process, running as that site's account on a private Unix socket with its own memory limit, eviction policy and no persistence or TCP. Other sites cannot reach or flush it, and pausing the site's automation never stops it ([object cache](docs/object-cache.md#a-sites-own-cache-implemented-392)).
+One site's own `valkey-server@<identifier>` process, running as that site's account on a private Unix socket with its own memory limit, eviction policy and no persistence or TCP. Other sites cannot reach or flush it, and pausing the site's automation never stops it ([object cache](docs/object-cache.md#a-sites-own-cache-implemented-392-and-393)).
 _Avoid_: Shared cache, Redis server, cache cluster
 
 **Log page**:
 One bounded, scrubbed read of one of a site's logs, requested explicitly and kept only on that request for 24 hours or until the next read of the same log. A page names its cursor for older lines and its live continuation for newer ones, and a missing, empty, unreadable or rotated log is described as exactly that ([logs](docs/logs.md)).
 _Avoid_: Log download, log export, log tail
 
-### Later phases
+### Security and server Jobs
 
-Terms for planned Phase E operations are defined in the [ROADMAP](../ROADMAP.md). Delivered Phase B, Phase C and Phase D terms are defined in the [Phase B qualification record](docs/phase-b-qualification.md), the [Phase C qualification record](docs/phase-c-qualification.md) and the [Phase D qualification record](docs/phase-d-qualification.md).
+The following terms cover security and server Jobs. See the [roadmap](ROADMAP.md) for future scope.
 
 **Security checks** (implemented):
 A server's plain-language, read-only findings about its firewall, public ports, SSH sign-in, automatic security updates, pending updates and restart requirement, reconstructed from native evidence with its collection time ([security](docs/security.md)). It reports what Barectl could read; it is not a score or a statement that the server is secure.

@@ -155,7 +155,7 @@ set on the new environment; `cache/test_laravel_cache.py` pins both the order an
 
 ## Memory
 
-Measured on the local arm64 build in the [scheduled breadth job](#the-scheduled-breadth-job),
+Measured on the local arm64 build in the [scheduled breadth job](quality.md#the-scheduled-breadth-job),
 one container per class capped at 1, 2 and 4 GiB. Each class starts from L5, turns the site's
 object cache on, requests the page once and waits two seconds before reading cgroup
 `memory.current`/`memory.peak`, the instance's own unit cgroup and each worker's unit cgroup.

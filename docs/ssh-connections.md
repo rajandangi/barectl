@@ -15,7 +15,8 @@ The server page polls while an attempt is queued or running and announces change
 
 The worker records check progress in the local operation row before connecting, between
 the groups in `operations/check_progress.py`, and after each remote read returns. The page
-shows the current group, completed groups, the number of finished reads and elapsed time.
+shows the current group, completed groups, the number of finished reads and total elapsed
+time for the operation, rather than time spent in the current group.
 Queued work says it is waiting for the worker. A read that has not returned recently says
 it is waiting for the server. Progress is feedback about collection, not a claim that the
 server passed a check. It contains no commands, remote output or credentials. Discovery
@@ -240,4 +241,16 @@ Django's own task backends are for development and testing; the documentation di
 
 ## Target foundation reads and privilege
 
-The target foundation on Ubuntu 26.04 accepts root or authorized passwordless sudo. Only its fixed foundation read, privilege check and privileged listener read use `discovery/root_read.py`. It reuses `operations/native.py` to check root, authorize the exact fixed argv without prompting, and run that argv on the existing `RemoteShell` from pyinfra. A denied or truncated authorization produces unavailable evidence, never guessed absence. This bounded reuse and the owning requirements are recorded on [#336](https://github.com/rajandangi/barectl/issues/336#issuecomment-6171527420).
+The target foundation on Ubuntu 26.04 accepts root or authorized passwordless sudo.
+Fixed target-stack and security reads use `discovery/root_read.py`. It reuses
+`operations/native.py` to check fresh identity, authorize the exact fixed argv without
+prompting, and execute it in the same SSH call through the existing pyinfra `RemoteShell`.
+Authorization output is discarded. Failed identity or denied authorization produces
+unavailable evidence, never guessed absence. Permissions are checked for every read.
+
+Software discovery combines the fixed required-tool lookups and the one Nix binary
+presence/ancestor probe into bounded reads. Other filesystem probes retain their own
+checks. These changes reduce SSH round trips without caching permissions or observations;
+the [tool lookup](../notes/performance-installed-software.md) and
+[Nix binary](../notes/performance-nix-binary-probe.md) reports distinguish controlled
+benchmarks from registered-server measurements.
