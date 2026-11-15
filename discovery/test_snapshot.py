@@ -1,14 +1,24 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import override
+from unittest import mock
 
+from django.db import connection, transaction
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 
-from backups.models import BackupObservation, BackupRunObservation, BackupTimerObservation
+from backups import integrity
+from backups.models import (
+    BackupIntegrity,
+    BackupObservation,
+    BackupRunObservation,
+    BackupTimerObservation,
+)
 from backups.observation import (
     BackupRun,
     BackupTimer,
     CleanupCounts,
+    IntegrityFinding,
     ObservedBackup,
 )
 from bootstrap.standing import HostJudgment, Standing
@@ -122,6 +132,71 @@ class SnapshotStorageTests(TestCase):
         self.assertFalse(observation.timers_truncated)
         self.assertEqual(BackupRunObservation.objects.get().onsite_failed, 4)
         self.assertTrue(BackupTimerObservation.objects.get().on)
+
+    def test_snapshot_integrity_writes_are_batched_and_preserve_other_evidence(self) -> None:
+        previous = IntegrityFinding(
+            "onsite", "succeeded", "", "2026-11-01T00:00:00+00:00", "a" * 16, 1, 2, 4096, "1/20"
+        )
+        updated = IntegrityFinding(
+            "onsite",
+            "failed",
+            "integrity_pack",
+            "2026-11-15T00:00:00+00:00",
+            "b" * 16,
+            3,
+            4,
+            8192,
+            "2/20",
+        )
+        other = Server.objects.create(name="Other", ssh_alias="other.example.com")
+        integrity.record(other, "site0", (previous,))
+        integrity.record(self.server, "unobserved", (previous,))
+        backups: list[ObservedBackup] = []
+        for index in range(8):
+            identifier = f"site{index}"
+            if index < 7:
+                integrity.record(
+                    self.server, identifier, (previous, replace(previous, location="offsite"))
+                )
+            findings = (
+                ()
+                if index % 3 == 0
+                else (updated,)
+                if index % 3 == 1
+                else (updated, replace(updated, location="offsite"))
+            )
+            backups.append(ObservedBackup(identifier, integrity=findings))
+        existing = {
+            (row.identifier, row.location): row.pk
+            for row in BackupIntegrity.objects.filter(server=self.server)
+        }
+        collected = replace(
+            COLLECTED, backups=Observation(OBSERVED, ("journalctl",), "", tuple(backups))
+        )
+        attempt = self.attempt()
+        with (
+            mock.patch("django.utils.timezone.now", return_value=COLLECTED_AT),
+            transaction.atomic(),
+            CaptureQueriesContext(connection) as captured,
+        ):
+            save_snapshot(attempt, collected, COLLECTED_AT)
+
+        for backup in backups:
+            self.assertEqual(
+                integrity.stored(self.server, backup.identifier),
+                tuple(sorted(backup.integrity, key=lambda finding: finding.location)),
+            )
+        for row in BackupIntegrity.objects.filter(server=self.server).exclude(
+            identifier="unobserved"
+        ):
+            self.assertEqual(row.checked_at, COLLECTED_AT)
+            key = (row.identifier, row.location)
+            if key in existing:
+                self.assertEqual(row.pk, existing[key])
+        self.assertEqual(integrity.stored(other, "site0"), (previous,))
+        self.assertEqual(integrity.stored(self.server, "unobserved"), (previous,))
+        writes = [query for query in captured if "backups_backupintegrity" in query["sql"]]
+        self.assertLessEqual(len(writes), 2)
 
     def test_a_components_profile_state_reads_back(self) -> None:
         deviation = "nginx 1.2 is installed but is not one of the profile's packages."

@@ -781,7 +781,7 @@ def _read_offsite(value: dict[str, object]) -> "OffsiteStorage | None":  # noqa:
 
 
 def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ...]) -> None:
-    from backups.integrity import record as record_integrity
+    from backups.integrity import record_many as record_integrity
     from backups.models import BackupObservation, BackupRunObservation, BackupTimerObservation
 
     created = BackupObservation.objects.bulk_create(
@@ -863,8 +863,7 @@ def _save_backups(snapshot: DiscoverySnapshot, backups: tuple[ObservedBackup, ..
         )
     BackupRunObservation.objects.bulk_create(run_rows)
     BackupTimerObservation.objects.bulk_create(timer_rows)
-    for backup in backups:
-        record_integrity(snapshot.server, backup.identifier, backup.integrity)
+    record_integrity(snapshot.server, {backup.identifier: backup.integrity for backup in backups})
 
 
 @dataclass(frozen=True)

@@ -2,10 +2,12 @@
 
 import importlib.resources
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
 
-from django.test import Client, SimpleTestCase
+from django.db import IntegrityError
+from django.test import Client, SimpleTestCase, TestCase
 
 from discovery import ssh
 from discovery.models import ObservationOutcome, SiteState
@@ -13,6 +15,7 @@ from discovery.recorded import Recorded, ReplayShell, Transcript
 from discovery.snapshot import ObservedSite
 from operations.fakes import ChangeTestCase
 from operations.inputs import PreparationInputs
+from servers.models import Server
 
 from . import change, check, convention, integrity, observation, presentation
 from .bodies import integrity as integrity_body
@@ -42,6 +45,19 @@ def replay(text: str) -> ReplayShell:
             ),
         )
     )
+
+
+class IntegrityStorageTests(TestCase):
+    def test_replacing_findings_rolls_back_when_a_location_is_invalid(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        onsite = finding(point=POINT)
+        offsite = replace(onsite, location="offsite")
+        integrity.record(server, "alpha", (onsite, offsite))
+
+        with self.assertRaises(IntegrityError):
+            integrity.record(server, "alpha", (replace(offsite, checked=-1),))
+
+        self.assertEqual(integrity.stored(server, "alpha"), (offsite, onsite))
 
 
 class RecordedIntegrityTests(SimpleTestCase):

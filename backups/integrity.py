@@ -11,7 +11,12 @@ Passive discovery reads those lines from the native journal and stores the findi
 """
 
 import json
+from collections.abc import Mapping
 from typing import Final
+
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
 
 from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
@@ -129,34 +134,62 @@ def parse_results(text: str, identifier: str) -> tuple[IntegrityFinding, ...]:
 
 
 def record(server: Server, identifier: str, findings: tuple[IntegrityFinding, ...]) -> None:
-    from django.utils import timezone
+    record_many(server, {identifier: findings})
 
+
+def record_many(
+    server: Server, findings_by_site: Mapping[str, tuple[IntegrityFinding, ...]]
+) -> None:
     from .models import BackupIntegrity
 
-    now = timezone.now()
-    by_location = {finding.location: finding for finding in findings}
-    for location in ("onsite", "offsite"):
-        finding = by_location.get(location)
-        if finding is None:
-            BackupIntegrity.objects.filter(
-                server=server, identifier=identifier, location=location
-            ).delete()
-            continue
-        BackupIntegrity.objects.update_or_create(
-            server=server,
-            identifier=identifier,
-            location=location,
-            defaults={
-                "result_class": finding.result_class,
-                "reason": finding.reason,
-                "at": finding.at,
-                "point": finding.point,
-                "checked": finding.checked,
-                "snapshots": finding.snapshots,
-                "bytes": finding.size,
-                "subset": finding.subset,
-                "checked_at": now,
-            },
+    if not findings_by_site:
+        return
+    rows: list[BackupIntegrity] = []
+    missing: dict[str, list[str]] = {"onsite": [], "offsite": []}
+    for identifier, findings in findings_by_site.items():
+        now = timezone.now()
+        by_location = {finding.location: finding for finding in findings}
+        for location, identifiers in missing.items():
+            finding = by_location.get(location)
+            if finding is None:
+                identifiers.append(identifier)
+                continue
+            rows.append(
+                BackupIntegrity(
+                    server=server,
+                    identifier=identifier,
+                    location=location,
+                    result_class=finding.result_class,
+                    reason=finding.reason,
+                    at=finding.at,
+                    point=finding.point,
+                    checked=finding.checked,
+                    snapshots=finding.snapshots,
+                    bytes=finding.size,
+                    subset=finding.subset,
+                    checked_at=now,
+                )
+            )
+    with transaction.atomic():
+        BackupIntegrity.objects.filter(server=server).filter(
+            Q(location="onsite", identifier__in=missing["onsite"])
+            | Q(location="offsite", identifier__in=missing["offsite"])
+        ).delete()
+        BackupIntegrity.objects.bulk_create(
+            rows,
+            update_conflicts=True,
+            unique_fields=("server", "identifier", "location"),
+            update_fields=(
+                "result_class",
+                "reason",
+                "at",
+                "point",
+                "checked",
+                "snapshots",
+                "bytes",
+                "subset",
+                "checked_at",
+            ),
         )
 
 
