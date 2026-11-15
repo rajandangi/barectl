@@ -19,6 +19,7 @@ from bootstrap.standing import Standing
 from discovery import ssh
 from discovery.models import ObservationOutcome
 from discovery.recorded import Recorded, ReplayShell, Transcript
+from discovery.root_read import read_command
 from discovery.snapshot import Observation
 from operations import engine
 from operations.consent import Scope, consent_of
@@ -54,10 +55,7 @@ def recorded(identifier: str = IDENTIFIER) -> tuple[ObservedSchedule, ReplayShel
             "26.04",
             "x86_64",
             "ssh-ed25519 SHA256:x",
-            (
-                ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
-                (command, Recorded(ssh.CommandResult(0, text))),
-            ),
+            ((read_command(command), Recorded(ssh.CommandResult(0, text))),),
         )
     )
     rows = schedule.read(shell, (identifier,))
@@ -175,10 +173,7 @@ class FixedUnitTests(ChangeTestCase):
                 "26.04",
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
-                (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
-                    (command, Recorded(ssh.CommandResult(0, json.dumps(document)))),
-                ),
+                ((read_command(command), Recorded(ssh.CommandResult(0, json.dumps(document)))),),
             )
         )
         rows = schedule.read(shell, (IDENTIFIER,))
@@ -202,10 +197,7 @@ class FixedUnitTests(ChangeTestCase):
                 "26.04",
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
-                (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
-                    (command, Recorded(ssh.CommandResult(0, json.dumps(document)))),
-                ),
+                ((read_command(command), Recorded(ssh.CommandResult(0, json.dumps(document)))),),
             )
         )
         rows = schedule.read(shell, (IDENTIFIER,))
@@ -236,10 +228,7 @@ class FixedUnitTests(ChangeTestCase):
                 "26.04",
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
-                (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
-                    (command, Recorded(ssh.CommandResult(0, json.dumps(document)))),
-                ),
+                ((read_command(command), Recorded(ssh.CommandResult(0, json.dumps(document)))),),
             )
         )
         rows = schedule.read(shell, (IDENTIFIER,))
@@ -261,10 +250,7 @@ class FixedUnitTests(ChangeTestCase):
                 "26.04",
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
-                (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
-                    (command, Recorded(ssh.CommandResult(0, json.dumps(document)))),
-                ),
+                ((read_command(command), Recorded(ssh.CommandResult(0, json.dumps(document)))),),
             )
         )
         rows = schedule.read(shell, (IDENTIFIER,))

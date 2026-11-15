@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 from bootstrap.standing import Standing
 from discovery import ssh
 from discovery.recorded import Recorded, ReplayShell, Transcript
+from discovery.root_read import read_command
 from operations import engine
 from operations.consent import Scope, consent_of
 from operations.engine import BodyContext, ReviewDraft
@@ -160,8 +161,10 @@ class RestorePointTests(SimpleTestCase):
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
                 (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
-                    (command, Recorded(ssh.CommandResult(0, fixture("restic-dump-mariadb.txt")))),
+                    (
+                        read_command(command),
+                        Recorded(ssh.CommandResult(0, fixture("restic-dump-mariadb.txt"))),
+                    ),
                 ),
             )
         )
@@ -299,16 +302,16 @@ class RestoreRecordedTests(SimpleTestCase):
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
                 (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
                     (
-                        restore.point_listing_command(IDENTIFIER),
+                        read_command(restore.point_listing_command(IDENTIFIER)),
                         Recorded(
                             ssh.CommandResult(0, fixture("restic-full-snapshots.txt")),
                         ),
                     ),
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
                     (
-                        restore.header_command(IDENTIFIER, self.DATABASE, "salpha.sql"),
+                        read_command(
+                            restore.header_command(IDENTIFIER, self.DATABASE, "salpha.sql")
+                        ),
                         Recorded(ssh.CommandResult(0, fixture("restic-dump-mariadb.txt"))),
                     ),
                 ),

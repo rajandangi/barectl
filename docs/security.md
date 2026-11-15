@@ -11,6 +11,9 @@ check links to the existing catalog update in Advanced.
 Discovery reads the checks through the fixed root path (`discovery/root_read.py`): root, or
 the exact passwordless sudo authorization. Without either, every check says "Could not
 check" with that reason. It never prompts and never falls back to an unprivileged guess.
+Each fixed read checks identity and, when needed, lists authorization for that exact read
+and executes it in one SSH call. Identity and sudo permission are checked afresh for every
+read. Authorization output is discarded so it cannot consume the read's output budget.
 
 | Check | Evidence |
 | --- | --- |

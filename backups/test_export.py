@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from django.test.client import _MonkeyPatchedWSGIResponse
 
 from bootstrap.standing import Standing
+from discovery.fakes import root_read_payload
 from discovery.ssh import CommandResult
 from operations import engine
 from operations.consent import consent_of
@@ -344,6 +345,7 @@ class StageShell:
         self.manifest.write_text(json.dumps(document))
 
     def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
+        command = root_read_payload(command) or command
         self.commands.append(command)
         if command == "id -u":
             return CommandResult(0, "0\n")

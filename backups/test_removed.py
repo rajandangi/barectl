@@ -18,6 +18,7 @@ from django.test import Client, SimpleTestCase
 from bootstrap.standing import Standing
 from discovery import ssh
 from discovery.recorded import Recorded, ReplayShell, Transcript
+from discovery.root_read import read_command
 from operations.consent import consent_of
 from operations.engine import BodyContext, ReviewDraft
 from operations.inputs import PreparationInputs
@@ -47,7 +48,7 @@ def transcript(entries: tuple[tuple[str, Recorded], ...]) -> ReplayShell:
             "26.04",
             "x86_64",
             "ssh-ed25519 SHA256:x",
-            (("id -u", Recorded(ssh.CommandResult(0, "0\n"))), *entries),
+            tuple((read_command(command), result) for command, result in entries),
         )
     )
 

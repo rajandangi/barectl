@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 from bootstrap.standing import Standing
 from discovery import ssh
 from discovery.recorded import Recorded, ReplayShell, Transcript
+from discovery.root_read import read_command
 from operations import engine
 from operations.consent import Scope, consent_of
 from operations.engine import BodyContext, ReviewDraft
@@ -136,14 +137,12 @@ class RecordedRetentionTests(SimpleTestCase):
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
                 (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
                     (
-                        snapshot_command,
+                        read_command(snapshot_command),
                         Recorded(ssh.CommandResult(0, fixture("restic-retention-snapshots.txt"))),
                     ),
                     (
-                        forget_command,
+                        read_command(forget_command),
                         Recorded(ssh.CommandResult(0, fixture("restic-forget-dry-run.txt"))),
                     ),
                 ),
@@ -163,9 +162,8 @@ class RecordedRetentionTests(SimpleTestCase):
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
                 (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
                     (
-                        retention.clock_command(),
+                        read_command(retention.clock_command()),
                         Recorded(ssh.CommandResult(0, fixture("timedatectl-ntp-synchronized.txt"))),
                     ),
                 ),

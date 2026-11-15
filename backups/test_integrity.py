@@ -12,6 +12,7 @@ from django.test import Client, SimpleTestCase, TestCase
 from discovery import ssh
 from discovery.models import ObservationOutcome, SiteState
 from discovery.recorded import Recorded, ReplayShell, Transcript
+from discovery.root_read import read_command
 from discovery.snapshot import ObservedSite
 from operations.fakes import ChangeTestCase
 from operations.inputs import PreparationInputs
@@ -39,10 +40,7 @@ def replay(text: str) -> ReplayShell:
             "26.04",
             "x86_64",
             "ssh-ed25519 SHA256:x",
-            (
-                ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
-                (command, Recorded(ssh.CommandResult(0, text))),
-            ),
+            ((read_command(command), Recorded(ssh.CommandResult(0, text))),),
         )
     )
 

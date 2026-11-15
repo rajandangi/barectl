@@ -52,6 +52,7 @@ from .observations.components import version_query
 from .observations.standing import _TOOLS_COMMAND
 from .presentation import present
 from .recorded import ReplayShell, load
+from .root_read import read_command
 from .services import STALE_AFTER
 from .snapshot import (
     CollectedSnapshot,
@@ -289,6 +290,14 @@ READ_ONLY = re.compile(
 )
 
 
+def root_read_payload(command: str) -> str | None:
+    if not command.startswith("set -- "):
+        return None
+    parts = shlex.split(command)
+    payload = parts[2].removesuffix(";")
+    return payload if read_command(payload) == command else None
+
+
 @dataclass
 class FakeServer:
     """A managed server as seen through ``RemoteShell``, recording every command."""
@@ -394,6 +403,19 @@ class FakeServer:
     def run(self, command: str, stdin: bytes | None = None) -> ssh.CommandResult:
         """Answer a probe as a POSIX shell does (checked by test_fake_server.py)."""
         self.commands.append(command)
+        if (payload := root_read_payload(command)) is not None:
+            identity = self._run(native.USER_ID)
+            if identity.exit_status != 0 or identity.truncated:
+                return _FAILED
+            if identity.stdout.strip() != "0":
+                argv = ["/usr/bin/sh", "-c", payload]
+                if self._run(native.authorization(argv)).exit_status != 0:
+                    return _FAILED
+                payload = native.privileged(argv, root=False)
+            return self._run(payload)
+        return self._run(command, stdin)
+
+    def _run(self, command: str, stdin: bytes | None = None) -> ssh.CommandResult:
         self.current_stdin = stdin
         try:
             for answer in self.answers:
@@ -658,7 +680,7 @@ class FakeServerMixin(SimpleTestCase):
 
     def assert_read_only(self) -> None:
         for command in self.remote.commands:
-            self.assertRegex(command, READ_ONLY)
+            self.assertRegex(root_read_payload(command) or command, READ_ONLY)
 
 
 class CollectedSnapshotMixin(SimpleTestCase):
@@ -766,7 +788,7 @@ class ReplayObservationTestCase(CollectedSnapshotMixin):
 
     def assert_read_only(self) -> None:
         for command in self.shell.commands:
-            self.assertRegex(command, READ_ONLY)
+            self.assertRegex(root_read_payload(command) or command, READ_ONLY)
 
 
 class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):

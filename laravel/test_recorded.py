@@ -12,6 +12,7 @@ from django.test import SimpleTestCase
 
 from discovery import ssh
 from discovery.recorded import Recorded, ReplayShell, Transcript, load
+from discovery.root_read import read_command
 from laravel import observation
 
 IDENTIFIER = "slcalpha"
@@ -38,9 +39,8 @@ class LaravelPendingMigrationTests(SimpleTestCase):
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
                 (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
                     (
-                        observation.pending_command(self.IDENTIFIER),
+                        read_command(observation.pending_command(self.IDENTIFIER)),
                         Recorded(
                             ssh.CommandResult(0, '["' + self.MIGRATION + '"]'),
                         ),
@@ -59,9 +59,8 @@ class LaravelPendingMigrationTests(SimpleTestCase):
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
                 (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
                     (
-                        observation.pending_command(self.IDENTIFIER),
+                        read_command(observation.pending_command(self.IDENTIFIER)),
                         Recorded(ssh.CommandResult(0, "null")),
                     ),
                 ),
@@ -76,9 +75,8 @@ class LaravelPendingMigrationTests(SimpleTestCase):
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
                 (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
                     (
-                        observation.pending_command(self.IDENTIFIER),
+                        read_command(observation.pending_command(self.IDENTIFIER)),
                         Recorded(ssh.CommandResult(0, '["..\\u0000bad"]')),
                     ),
                 ),

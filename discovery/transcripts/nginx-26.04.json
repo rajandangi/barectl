@@ -11,7 +11,7 @@
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:GfA8jPHdiE2HOQd7LOGWyYr/LuITcuTDDVkvUR6qQhQ"
+    "host_key": "ssh-ed25519 SHA256:0qm2MAH5k7QcDidgwlUi9G3zYMUS9XuYD9duiiQojeM"
   },
   "commands": [
     {
@@ -38,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:        11431328 kB\nMemAvailable:   13932404 kB\nBuffers:             132 kB\nCached:           786644 kB\nSwapCached:           36 kB\nActive:           670996 kB\nInactive:        1574712 kB\nActive(anon):     614816 kB\nInactive(anon):   858592 kB\nActive(file):      56180 kB\nInactive(file):   716120 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17458740 kB\nDirty:              1556 kB\nWriteback:             0 kB\nAnonPages:       1432088 kB\nMapped:           143152 kB\nShmem:             14280 kB\nKReclaimable:    1985952 kB\nSlab:            2321216 kB\nSReclaimable:    1985952 kB\nSUnreclaim:       335264 kB\nKernelStack:       11168 kB\nPageTables:       145612 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3732108 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71844 kB\nVmallocChunk:          0 kB\nPercpu:            14280 kB\nAnonHugePages:     34816 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:        11644288 kB\nMemAvailable:   13892984 kB\nBuffers:             144 kB\nCached:           505060 kB\nSwapCached:           52 kB\nActive:           997088 kB\nInactive:         977240 kB\nActive(anon):     884080 kB\nInactive(anon):   599576 kB\nActive(file):     113008 kB\nInactive(file):   377664 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17458740 kB\nDirty:              1572 kB\nWriteback:             0 kB\nAnonPages:       1442344 kB\nMapped:           142220 kB\nShmem:             14328 kB\nKReclaimable:    2015200 kB\nSlab:            2347984 kB\nSReclaimable:    2015200 kB\nSUnreclaim:       332784 kB\nKernelStack:       11248 kB\nPageTables:       155116 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3750176 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71748 kB\nVmallocChunk:          0 kB\nPercpu:            13048 kB\nAnonHugePages:     36864 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n588209192960 468665077760 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n588074975232 468540178432 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -101,33 +101,19 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:        11378512 kB\nMemAvailable:   13884800 kB\nBuffers:             132 kB\nCached:           791548 kB\nSwapCached:           36 kB\nActive:           684136 kB\nInactive:        1579876 kB\nActive(anon):     627956 kB\nInactive(anon):   858592 kB\nActive(file):      56180 kB\nInactive(file):   721284 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17458740 kB\nDirty:              4960 kB\nWriteback:             0 kB\nAnonPages:       1444820 kB\nMapped:           145892 kB\nShmem:             14280 kB\nKReclaimable:    1986000 kB\nSlab:            2321232 kB\nSReclaimable:    1986000 kB\nSUnreclaim:       335232 kB\nKernelStack:       11136 kB\nPageTables:       151772 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3771132 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71844 kB\nVmallocChunk:          0 kB\nPercpu:            14336 kB\nAnonHugePages:     38912 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:        11609736 kB\nMemAvailable:   13863828 kB\nBuffers:             144 kB\nCached:           510368 kB\nSwapCached:           52 kB\nActive:          1008528 kB\nInactive:         982572 kB\nActive(anon):     895520 kB\nInactive(anon):   599576 kB\nActive(file):     113008 kB\nInactive(file):   382996 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17458740 kB\nDirty:              4976 kB\nWriteback:             0 kB\nAnonPages:       1453596 kB\nMapped:           144228 kB\nShmem:             14328 kB\nKReclaimable:    2015264 kB\nSlab:            2348240 kB\nSReclaimable:    2015264 kB\nSUnreclaim:       332976 kB\nKernelStack:       11152 kB\nPageTables:       160836 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3783676 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71748 kB\nVmallocChunk:          0 kB\nPercpu:            13048 kB\nAnonHugePages:     43008 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "python3 -c 'import base64,gzip; exec(gzip.decompress(base64.b64decode('\"'\"'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'\"'\"')))'",
+      "command": "set -- 'python3 -c '\"'\"'import base64,gzip; exec(gzip.decompress(base64.b64decode('\"'\"'\"'\"'\"'\"'\"'\"'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'\"'\"'\"'\"'\"'\"'\"'\"')))'\"'\"''; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "[]\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ss -Hlnpt '( sport = :80 or sport = :443 )'",
+      "command": "set -- 'ss -Hlnpt '\"'\"'( sport = :80 or sport = :443 )'\"'\"''; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "",
       "truncated": false,
@@ -827,112 +813,56 @@
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
+      "command": "set -- 'id -u'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "0\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
+      "command": "set -- 'ss -Hlnptu'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
-      "stdout": "0\n",
+      "stdout": "udp UNCONN 0      0      127.0.0.11:53667 0.0.0.0:*                                                      \ntcp LISTEN 0      4096   127.0.0.11:43635 0.0.0.0:*                                                      \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=114,fd=3),(\"systemd\",pid=1,fd=61))\ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=114,fd=4),(\"systemd\",pid=1,fd=62))\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ss -Hlnptu",
-      "exit": 0,
-      "stdout": "udp UNCONN 0      0      127.0.0.11:44321 0.0.0.0:*                                                      \ntcp LISTEN 0      4096   127.0.0.11:41217 0.0.0.0:*                                                      \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=115,fd=3),(\"systemd\",pid=1,fd=63))\ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=115,fd=4),(\"systemd\",pid=1,fd=64))\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "sshd -T",
+      "command": "set -- 'sshd -T'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "port 22\naddressfamily any\nlistenaddress [::]:22\nlistenaddress 0.0.0.0:22\nusepam yes\npamservicename sshd\nlogingracetime 120\nx11displayoffset 10\nmaxauthtries 6\nmaxsessions 10\nclientaliveinterval 0\nclientalivecountmax 3\nrequiredrsasize 1024\nstreamlocalbindmask 0177\nunusedconnectiontimeout none\npermitrootlogin prohibit-password\nignorerhosts yes\nignoreuserknownhosts no\nhostbasedauthentication no\nhostbasedusesnamefrompacketonly no\npubkeyauthentication yes\nkerberosauthentication no\nkerberosorlocalpasswd yes\nkerberosticketcleanup yes\ngssapiauthentication no\ngssapicleanupcredentials yes\ngssapistrictacceptorcheck yes\ngssapikeyexchange no\ngssapistorecredentialsonrekey no\ngssapikexalgorithms gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-\npasswordauthentication yes\nkbdinteractiveauthentication no\nprintmotd no\nprintlastlog yes\nx11forwarding yes\nx11uselocalhost yes\npermittty yes\npermituserrc yes\nstrictmodes yes\ntcpkeepalive yes\npermitemptypasswords no\ncompression yes\ngatewayports no\nusedns no\nallowtcpforwarding yes\nallowagentforwarding yes\ndisableforwarding no\nallowstreamlocalforwarding yes\nstreamlocalbindunlink no\nfingerprinthash SHA256\nexposeauthinfo no\nrefuseconnection no\ndebianbanner yes\npidfile /run/sshd.pid\nmodulifile /etc/ssh/moduli\nxauthlocation /usr/bin/xauth\nciphers chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr\nmacs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1\nbanner none\nforcecommand none\nchrootdirectory none\ntrustedusercakeys none\nrevokedkeys none\nsecuritykeyprovider internal\nauthorizedprincipalsfile none\nversionaddendum none\nauthorizedkeyscommand none\nauthorizedkeyscommanduser none\nauthorizedprincipalscommand none\nauthorizedprincipalscommanduser none\nhostkeyagent none\nkexalgorithms mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521\ncasignaturealgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostbasedacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\npubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nsshdsessionpath /usr/lib/openssh/sshd-session\nsshdauthpath /usr/lib/openssh/sshd-auth\npersourcepenaltyexemptlist none\nloglevel INFO\nsyslogfacility AUTH\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\nhostkey /etc/ssh/ssh_host_rsa_key\nhostkey /etc/ssh/ssh_host_ecdsa_key\nhostkey /etc/ssh/ssh_host_ed25519_key\nacceptenv LANG\nacceptenv LC_*\nacceptenv COLORTERM\nacceptenv NO_COLOR\nauthenticationmethods any\nchanneltimeout none\nsubsystem sftp /usr/lib/openssh/sftp-server\nmaxstartups 10:30:100\npersourcemaxstartups none\npersourcenetblocksize 32:128\npermittunnel no\nipqos ef cs0\nrekeylimit 0 0\npermitopen any\npermitlisten any\npermituserenvironment no\npubkeyauthoptions none\npersourcepenalties crash:90 authfail:5 noauth:1 grace-exceeded:10 refuseconnection:10 max:600 min:15 max-sources4:65536 max-sources6:65536 overflow:permissive overflow6:permissive\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "[ -r /etc/ssh/sshd_config ] || exit 1; for file in /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf; do [ -e \"$file\" ] || [ -L \"$file\" ] || continue; awk 'tolower($1)==\"include\" || tolower($1)==\"match\" {print}' \"$file\" || exit 1; done",
+      "command": "set -- '[ -r /etc/ssh/sshd_config ] || exit 1; for file in /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf; do [ -e \"$file\" ] || [ -L \"$file\" ] || continue; awk '\"'\"'tolower($1)==\"include\" || tolower($1)==\"match\" {print}'\"'\"' \"$file\" || exit 1; done'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "Include /etc/ssh/sshd_config.d/*.conf\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "systemctl show ssh.socket -p ListenStream",
+      "command": "set -- 'systemctl show ssh.socket -p ListenStream'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "getent passwd",
+      "command": "set -- 'getent passwd'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nsync:x:4:65534:sync:/bin:/bin/sync\ngames:x:5:60:games:/usr/games:/usr/sbin/nologin\nman:x:6:12:man:/var/cache/man:/usr/sbin/nologin\nlp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin\nmail:x:8:8:mail:/var/mail:/usr/sbin/nologin\nnews:x:9:9:news:/var/spool/news:/usr/sbin/nologin\nuucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin\nproxy:x:13:13:proxy:/bin:/usr/sbin/nologin\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nbackup:x:34:34:backup:/var/backups:/usr/sbin/nologin\nlist:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin\nirc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin\n_apt:x:42:65534::/nonexistent:/usr/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\nubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash\nsystemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin\nmessagebus:x:997:997:System Message Bus:/nonexistent:/usr/sbin/nologin\nsyslog:x:100:101::/nonexistent:/usr/sbin/nologin\nsshd:x:996:65534:sshd user:/run/sshd:/usr/sbin/nologin\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "cat /etc/shells",
+      "command": "set -- 'cat /etc/shells'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "# /etc/shells: valid login shells\n/bin/sh\n/usr/bin/sh\n/bin/bash\n/usr/bin/bash\n/bin/rbash\n/usr/bin/rbash\n/usr/bin/dash\n/usr/bin/screen\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "getent passwd | while IFS=: read -r name pass uid gid gecos home shell; do if runuser -u \"$name\" -- test -r \"$home/.ssh/authorized_keys\" 2>/dev/null; then printf '%s\\n' \"$home/.ssh/authorized_keys\"; fi; done",
+      "command": "set -- 'getent passwd | while IFS=: read -r name pass uid gid gecos home shell; do if runuser -u \"$name\" -- test -r \"$home/.ssh/authorized_keys\" 2>/dev/null; then printf '\"'\"'%s\\n'\"'\"' \"$home/.ssh/authorized_keys\"; fi; done'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "/root/.ssh/authorized_keys\n",
       "truncated": false,
@@ -941,341 +871,173 @@
     {
       "command": "printenv SSH_CONNECTION",
       "exit": 0,
-      "stdout": "192.168.107.7 49022 192.168.107.6 22\n",
+      "stdout": "192.168.107.7 51422 192.168.107.6 22\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "sshd -T -C user=root,host=192.168.107.7,addr=192.168.107.7,laddr=192.168.107.6,lport=22",
+      "command": "set -- 'sshd -T -C user=root,host=192.168.107.7,addr=192.168.107.7,laddr=192.168.107.6,lport=22'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "port 22\naddressfamily any\nlistenaddress [::]:22\nlistenaddress 0.0.0.0:22\nusepam yes\npamservicename sshd\nlogingracetime 120\nx11displayoffset 10\nmaxauthtries 6\nmaxsessions 10\nclientaliveinterval 0\nclientalivecountmax 3\nrequiredrsasize 1024\nstreamlocalbindmask 0177\nunusedconnectiontimeout none\npermitrootlogin prohibit-password\nignorerhosts yes\nignoreuserknownhosts no\nhostbasedauthentication no\nhostbasedusesnamefrompacketonly no\npubkeyauthentication yes\nkerberosauthentication no\nkerberosorlocalpasswd yes\nkerberosticketcleanup yes\ngssapiauthentication no\ngssapicleanupcredentials yes\ngssapistrictacceptorcheck yes\ngssapikeyexchange no\ngssapistorecredentialsonrekey no\ngssapikexalgorithms gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-\npasswordauthentication yes\nkbdinteractiveauthentication no\nprintmotd no\nprintlastlog yes\nx11forwarding yes\nx11uselocalhost yes\npermittty yes\npermituserrc yes\nstrictmodes yes\ntcpkeepalive yes\npermitemptypasswords no\ncompression yes\ngatewayports no\nusedns no\nallowtcpforwarding yes\nallowagentforwarding yes\ndisableforwarding no\nallowstreamlocalforwarding yes\nstreamlocalbindunlink no\nfingerprinthash SHA256\nexposeauthinfo no\nrefuseconnection no\ndebianbanner yes\npidfile /run/sshd.pid\nmodulifile /etc/ssh/moduli\nxauthlocation /usr/bin/xauth\nciphers chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr\nmacs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1\nbanner none\nforcecommand none\nchrootdirectory none\ntrustedusercakeys none\nrevokedkeys none\nsecuritykeyprovider internal\nauthorizedprincipalsfile none\nversionaddendum none\nauthorizedkeyscommand none\nauthorizedkeyscommanduser none\nauthorizedprincipalscommand none\nauthorizedprincipalscommanduser none\nhostkeyagent none\nkexalgorithms mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521\ncasignaturealgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostbasedacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\npubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nsshdsessionpath /usr/lib/openssh/sshd-session\nsshdauthpath /usr/lib/openssh/sshd-auth\npersourcepenaltyexemptlist none\nloglevel INFO\nsyslogfacility AUTH\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\nhostkey /etc/ssh/ssh_host_rsa_key\nhostkey /etc/ssh/ssh_host_ecdsa_key\nhostkey /etc/ssh/ssh_host_ed25519_key\nacceptenv LANG\nacceptenv LC_*\nacceptenv COLORTERM\nacceptenv NO_COLOR\nauthenticationmethods any\nchanneltimeout none\nsubsystem sftp /usr/lib/openssh/sftp-server\nmaxstartups 10:30:100\npersourcemaxstartups none\npersourcenetblocksize 32:128\npermittunnel no\nipqos ef cs0\nrekeylimit 0 0\npermitopen any\npermitlisten any\npermituserenvironment no\npubkeyauthoptions none\npersourcepenalties crash:90 authfail:5 noauth:1 grace-exceeded:10 refuseconnection:10 max:600 min:15 max-sources4:65536 max-sources6:65536 overflow:permissive overflow6:permissive\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "sshd -T -C user=ubuntu,host=192.168.107.7,addr=192.168.107.7,laddr=192.168.107.6,lport=22",
+      "command": "set -- 'sshd -T -C user=ubuntu,host=192.168.107.7,addr=192.168.107.7,laddr=192.168.107.6,lport=22'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "port 22\naddressfamily any\nlistenaddress [::]:22\nlistenaddress 0.0.0.0:22\nusepam yes\npamservicename sshd\nlogingracetime 120\nx11displayoffset 10\nmaxauthtries 6\nmaxsessions 10\nclientaliveinterval 0\nclientalivecountmax 3\nrequiredrsasize 1024\nstreamlocalbindmask 0177\nunusedconnectiontimeout none\npermitrootlogin prohibit-password\nignorerhosts yes\nignoreuserknownhosts no\nhostbasedauthentication no\nhostbasedusesnamefrompacketonly no\npubkeyauthentication yes\nkerberosauthentication no\nkerberosorlocalpasswd yes\nkerberosticketcleanup yes\ngssapiauthentication no\ngssapicleanupcredentials yes\ngssapistrictacceptorcheck yes\ngssapikeyexchange no\ngssapistorecredentialsonrekey no\ngssapikexalgorithms gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-\npasswordauthentication yes\nkbdinteractiveauthentication no\nprintmotd no\nprintlastlog yes\nx11forwarding yes\nx11uselocalhost yes\npermittty yes\npermituserrc yes\nstrictmodes yes\ntcpkeepalive yes\npermitemptypasswords no\ncompression yes\ngatewayports no\nusedns no\nallowtcpforwarding yes\nallowagentforwarding yes\ndisableforwarding no\nallowstreamlocalforwarding yes\nstreamlocalbindunlink no\nfingerprinthash SHA256\nexposeauthinfo no\nrefuseconnection no\ndebianbanner yes\npidfile /run/sshd.pid\nmodulifile /etc/ssh/moduli\nxauthlocation /usr/bin/xauth\nciphers chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr\nmacs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1\nbanner none\nforcecommand none\nchrootdirectory none\ntrustedusercakeys none\nrevokedkeys none\nsecuritykeyprovider internal\nauthorizedprincipalsfile none\nversionaddendum none\nauthorizedkeyscommand none\nauthorizedkeyscommanduser none\nauthorizedprincipalscommand none\nauthorizedprincipalscommanduser none\nhostkeyagent none\nkexalgorithms mlkem768x25519-sha256,sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521\ncasignaturealgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostbasedacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\npubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nsshdsessionpath /usr/lib/openssh/sshd-session\nsshdauthpath /usr/lib/openssh/sshd-auth\npersourcepenaltyexemptlist none\nloglevel INFO\nsyslogfacility AUTH\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\nhostkey /etc/ssh/ssh_host_rsa_key\nhostkey /etc/ssh/ssh_host_ecdsa_key\nhostkey /etc/ssh/ssh_host_ed25519_key\nacceptenv LANG\nacceptenv LC_*\nacceptenv COLORTERM\nacceptenv NO_COLOR\nauthenticationmethods any\nchanneltimeout none\nsubsystem sftp /usr/lib/openssh/sftp-server\nmaxstartups 10:30:100\npersourcemaxstartups none\npersourcenetblocksize 32:128\npermittunnel no\nipqos ef cs0\nrekeylimit 0 0\npermitopen any\npermitlisten any\npermituserenvironment no\npubkeyauthoptions none\npersourcepenalties crash:90 authfail:5 noauth:1 grace-exceeded:10 refuseconnection:10 max:600 min:15 max-sources4:65536 max-sources6:65536 overflow:permissive overflow6:permissive\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "dpkg-query -W -f='${Status}\\t${Version}\\n' ufw",
+      "command": "set -- 'dpkg-query -W -f='\"'\"'${Status}\\t${Version}\\n'\"'\"' ufw'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "install ok installed\t0.36.2-9build1\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ufw status verbose",
+      "command": "set -- 'ufw status verbose'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "Status: inactive\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ufw show added",
+      "command": "set -- 'ufw show added'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "Added user rules (see 'ufw status' for running firewall):\n(None)\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "cat /etc/ufw/ufw.conf",
+      "command": "set -- 'cat /etc/ufw/ufw.conf'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "# /etc/ufw/ufw.conf\n#\n\n# Set to yes to start on boot. If setting this remotely, be sure to add a rule\n# to allow your remote connection before starting ufw. Eg: 'ufw allow 22/tcp'\nENABLED=no\n\n# Please use the 'ufw' command to set the loglevel. Eg: 'ufw logging medium'.\n# See 'man ufw' for details.\nLOGLEVEL=low\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "cat /etc/default/ufw",
+      "command": "set -- 'cat /etc/default/ufw'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "# /etc/default/ufw\n#\n\n# Set to yes to apply rules to support IPv6 (no means only IPv6 on loopback\n# accepted). You will need to 'disable' and then 'enable' the firewall for\n# the changes to take affect.\nIPV6=yes\n\n# Set the default input policy to ACCEPT, DROP, or REJECT. Please note that if\n# you change this you will most likely want to adjust your rules.\nDEFAULT_INPUT_POLICY=\"DROP\"\n\n# Set the default output policy to ACCEPT, DROP, or REJECT. Please note that if\n# you change this you will most likely want to adjust your rules.\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n\n# Set the default forward policy to ACCEPT, DROP or REJECT.  Please note that\n# if you change this you will most likely want to adjust your rules\nDEFAULT_FORWARD_POLICY=\"DROP\"\n\n# Set the default application policy to ACCEPT, DROP, REJECT or SKIP. Please\n# note that setting this to ACCEPT may be a security risk. See 'man ufw' for\n# details\nDEFAULT_APPLICATION_POLICY=\"SKIP\"\n\n# By default, ufw only touches its own chains. Set this to 'yes' to have ufw\n# manage the built-in chains too. Warning: setting this to 'yes' will break\n# non-ufw managed firewall rules\nMANAGE_BUILTINS=no\n\n#\n# IPT backend\n#\n# only enable if using iptables backend\nIPT_SYSCTL=/etc/ufw/sysctl.conf\n\n# Extra connection tracking modules to load. IPT_MODULES should typically be\n# empty for new installations and modules added only as needed. See\n# 'CONNECTION HELPERS' from 'man ufw-framework' for details. Complete list can\n# be found in net/netfilter/Kconfig of your kernel source. Some common modules:\n# nf_conntrack_irc, nf_nat_irc: DCC (Direct Client to Client) support\n# nf_conntrack_netbios_ns: NetBIOS (samba) client support\n# nf_conntrack_pptp, nf_nat_pptp: PPTP over stateful firewall/NAT\n# nf_conntrack_ftp, nf_nat_ftp: active FTP support\n# nf_conntrack_tftp, nf_nat_tftp: TFTP support (server side)\n# nf_conntrack_sane: sane support\nIPT_MODULES=\"\"\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "systemctl is-active firewalld",
+      "command": "set -- 'systemctl is-active firewalld'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 4,
       "stdout": "inactive\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "systemctl is-active docker",
+      "command": "set -- 'systemctl is-active docker'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 4,
       "stdout": "inactive\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "nft list ruleset",
+      "command": "set -- 'nft list ruleset'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 127,
       "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
+      "command": "set -- iptables-save; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
-      "stdout": "0\n",
+      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Sun Nov 15 07:37:23 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:43635\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:53667\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 43635 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 53667 -j SNAT --to-source :53\nCOMMIT\n# Completed on Sun Nov 15 07:37:23 2026\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "iptables-save",
-      "exit": 0,
-      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Sun Nov 15 05:44:20 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:41217\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:44321\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 41217 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 44321 -j SNAT --to-source :53\nCOMMIT\n# Completed on Sun Nov 15 05:44:20 2026\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "sha256sum /etc/ufw/before.rules /etc/ufw/after.rules",
+      "command": "set -- 'sha256sum /etc/ufw/before.rules /etc/ufw/after.rules'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "d63bc8bb2df0d20909267b7b40cb5cc187baba6e0baf95bbf71ac14f92df8e6c  /etc/ufw/before.rules\nc1be61c17e850ea16dc5a02be22e0ec79b631904c2383353da360bce2dfc6b64  /etc/ufw/after.rules\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "dpkg-query -W -f='${Conffiles}\\n' ufw",
+      "command": "set -- 'dpkg-query -W -f='\"'\"'${Conffiles}\\n'\"'\"' ufw'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": " /etc/default/ufw a921dd9d167380b04de4bc911915ea44\n /etc/init.d/ufw f68c845ae88149c45d0d938394d7832f\n /etc/logrotate.d/ufw 969308e0ddfb74505f0da47b49ada218\n /etc/rsyslog.d/20-ufw.conf 98e2f72c9c65ca8d6299886b524e80d1\n /etc/ufw/sysctl.conf 7723079fc108eda8f57eddab3079c70a\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "apt-config dump",
+      "command": "set -- 'apt-config dump'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "APT \"\";\nAPT::Architecture \"arm64\";\nAPT::Build-Essential \"\";\nAPT::Build-Essential:: \"build-essential\";\nAPT::Install-Recommends \"1\";\nAPT::Install-Suggests \"0\";\nAPT::Key \"\";\nAPT::Key::Assert-Pubkey-Algo \">=rsa2048,ed25519,ed448,nistp256,nistp384,nistp512,brainpoolP256r1,brainpoolP320r1,brainpoolP384r1,brainpoolP512r1,secp256k1\";\nAPT::Key::Assert-Pubkey-Algo::Next \">=rsa2048,ed25519,ed448,nistp256,nistp384,nistp512\";\nAPT::Key::Assert-Pubkey-Algo::Future \">=rsa3072,ed25519,ed448\";\nAPT::Sandbox \"\";\nAPT::Sandbox::User \"_apt\";\nAPT::NeverAutoRemove \"\";\nAPT::NeverAutoRemove:: \"^firmware-linux.*\";\nAPT::NeverAutoRemove:: \"^linux-firmware$\";\nAPT::NeverAutoRemove:: \"^linux-image-[a-z0-9]*$\";\nAPT::NeverAutoRemove:: \"^linux-image-[a-z0-9]*-[a-z0-9]*$\";\nAPT::VersionedKernelPackages \"\";\nAPT::VersionedKernelPackages:: \"linux-.*\";\nAPT::VersionedKernelPackages:: \"kfreebsd-.*\";\nAPT::VersionedKernelPackages:: \"gnumach-.*\";\nAPT::VersionedKernelPackages:: \".*-modules\";\nAPT::VersionedKernelPackages:: \".*-kernel\";\nAPT::Never-MarkAuto-Sections \"\";\nAPT::Never-MarkAuto-Sections:: \"metapackages\";\nAPT::Never-MarkAuto-Sections:: \"tasks\";\nAPT::Move-Autobit-Sections \"\";\nAPT::Move-Autobit-Sections:: \"oldlibs\";\nAPT::Periodic \"\";\nAPT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Download-Upgradeable-Packages \"0\";\nAPT::Periodic::AutocleanInterval \"0\";\nAPT::Periodic::Unattended-Upgrade \"1\";\nAPT::Periodic::Enable \"0\";\nAPT::Update \"\";\nAPT::Update::Post-Invoke-Success \"\";\nAPT::Update::Post-Invoke-Success:: \"touch /var/lib/apt/periodic/update-success-stamp 2>/dev/null || true\";\nAPT::Update::Post-Invoke-Success:: \"/usr/lib/update-notifier/update-motd-updates-available 2>/dev/null || true\";\nAPT::Update::Pre-Invoke \"\";\nAPT::Update::Pre-Invoke:: \"[ ! -e /run/systemd/system ] || [ $(id -u) -ne 0 ] || systemctl start --no-block apt-news.service esm-cache.service >/dev/null 2>&1 || true\";\nAPT::Archives \"\";\nAPT::Archives::MaxAge \"30\";\nAPT::Archives::MinAge \"2\";\nAPT::Archives::MaxSize \"500\";\nAPT::AutoRemove \"\";\nAPT::AutoRemove::SuggestsImportant \"false\";\nAPT::Solver \"3.0\";\nAPT::Architectures \"\";\nAPT::Architectures:: \"arm64\";\nAPT::Compressor \"\";\nAPT::Compressor::. \"\";\nAPT::Compressor::.::Name \".\";\nAPT::Compressor::.::Extension \"\";\nAPT::Compressor::.::Binary \"\";\nAPT::Compressor::.::Cost \"0\";\nAPT::Compressor::zstd \"\";\nAPT::Compressor::zstd::Name \"zstd\";\nAPT::Compressor::zstd::Extension \".zst\";\nAPT::Compressor::zstd::Binary \"false\";\nAPT::Compressor::zstd::Cost \"60\";\nAPT::Compressor::lz4 \"\";\nAPT::Compressor::lz4::Name \"lz4\";\nAPT::Compressor::lz4::Extension \".lz4\";\nAPT::Compressor::lz4::Binary \"false\";\nAPT::Compressor::lz4::Cost \"50\";\nAPT::Compressor::gzip \"\";\nAPT::Compressor::gzip::Name \"gzip\";\nAPT::Compressor::gzip::Extension \".gz\";\nAPT::Compressor::gzip::Binary \"gzip\";\nAPT::Compressor::gzip::Cost \"100\";\nAPT::Compressor::gzip::CompressArg \"\";\nAPT::Compressor::gzip::CompressArg:: \"-6n\";\nAPT::Compressor::gzip::UncompressArg \"\";\nAPT::Compressor::gzip::UncompressArg:: \"-d\";\nAPT::Compressor::xz \"\";\nAPT::Compressor::xz::Name \"xz\";\nAPT::Compressor::xz::Extension \".xz\";\nAPT::Compressor::xz::Binary \"xz\";\nAPT::Compressor::xz::Cost \"200\";\nAPT::Compressor::xz::CompressArg \"\";\nAPT::Compressor::xz::CompressArg:: \"-6\";\nAPT::Compressor::xz::UncompressArg \"\";\nAPT::Compressor::xz::UncompressArg:: \"-d\";\nAPT::Compressor::bzip2 \"\";\nAPT::Compressor::bzip2::Name \"bzip2\";\nAPT::Compressor::bzip2::Extension \".bz2\";\nAPT::Compressor::bzip2::Binary \"false\";\nAPT::Compressor::bzip2::Cost \"300\";\nAPT::Compressor::lzma \"\";\nAPT::Compressor::lzma::Name \"lzma\";\nAPT::Compressor::lzma::Extension \".lzma\";\nAPT::Compressor::lzma::Binary \"xz\";\nAPT::Compressor::lzma::Cost \"400\";\nAPT::Compressor::lzma::CompressArg \"\";\nAPT::Compressor::lzma::CompressArg:: \"--format=lzma\";\nAPT::Compressor::lzma::CompressArg:: \"-6\";\nAPT::Compressor::lzma::UncompressArg \"\";\nAPT::Compressor::lzma::UncompressArg:: \"--format=lzma\";\nAPT::Compressor::lzma::UncompressArg:: \"-d\";\nDir \"/\";\nDir::State \"var/lib/apt\";\nDir::State::lists \"lists/\";\nDir::State::cdroms \"cdroms.list\";\nDir::State::extended_states \"extended_states\";\nDir::State::status \"/var/lib/dpkg/status\";\nDir::Cache \"var/cache/apt\";\nDir::Cache::archives \"archives/\";\nDir::Cache::srcpkgcache \"srcpkgcache.bin\";\nDir::Cache::pkgcache \"pkgcache.bin\";\nDir::Etc \"etc/apt\";\nDir::Etc::sourcelist \"sources.list\";\nDir::Etc::sourceparts \"sources.list.d\";\nDir::Etc::main \"apt.conf\";\nDir::Etc::netrc \"auth.conf\";\nDir::Etc::netrcparts \"auth.conf.d\";\nDir::Etc::parts \"apt.conf.d\";\nDir::Etc::preferences \"preferences\";\nDir::Etc::preferencesparts \"preferences.d\";\nDir::Etc::trustedparts \"trusted.gpg.d\";\nDir::Boot \"boot\";\nDir::Usr \"usr\";\nDir::Bin \"\";\nDir::Bin::methods \"/usr/lib/apt/methods\";\nDir::Bin::solvers \"\";\nDir::Bin::solvers:: \"/usr/lib/apt/solvers\";\nDir::Bin::planners \"\";\nDir::Bin::planners:: \"/usr/lib/apt/planners\";\nDir::Bin::dpkg \"/usr/bin/dpkg\";\nDir::Bin::gzip \"/bin/gzip\";\nDir::Bin::bzip2 \"/bin/bzip2\";\nDir::Bin::xz \"/usr/bin/xz\";\nDir::Bin::lz4 \"/usr/bin/lz4\";\nDir::Bin::zstd \"/usr/bin/zstd\";\nDir::Bin::lzma \"/usr/bin/xz\";\nDir::Media \"\";\nDir::Media::MountPath \"/media/apt\";\nDir::Log \"var/log/apt\";\nDir::Log::Terminal \"term.log\";\nDir::Log::History \"history.log\";\nDir::Log::Planner \"eipp.log.xz\";\nDir::Ignore-Files-Silently \"\";\nDir::Ignore-Files-Silently:: \"~$\";\nDir::Ignore-Files-Silently:: \"\\.disabled$\";\nDir::Ignore-Files-Silently:: \"\\.bak$\";\nDir::Ignore-Files-Silently:: \"\\.dpkg-[a-z]+$\";\nDir::Ignore-Files-Silently:: \"\\.ucf-[a-z]+$\";\nDir::Ignore-Files-Silently:: \"\\.save$\";\nDir::Ignore-Files-Silently:: \"\\.orig$\";\nDir::Ignore-Files-Silently:: \"\\.distUpgrade$\";\nAcquire \"\";\nAcquire::AllowInsecureRepositories \"0\";\nAcquire::AllowWeakRepositories \"0\";\nAcquire::AllowDowngradeToInsecureRepositories \"0\";\nAcquire::cdrom \"\";\nAcquire::cdrom::mount \"/media/cdrom/\";\nAcquire::IndexTargets \"\";\nAcquire::IndexTargets::deb \"\";\nAcquire::IndexTargets::deb::Packages \"\";\nAcquire::IndexTargets::deb::Packages::MetaKey \"$(COMPONENT)/binary-$(ARCHITECTURE)/Packages\";\nAcquire::IndexTargets::deb::Packages::flatMetaKey \"Packages\";\nAcquire::IndexTargets::deb::Packages::ShortDescription \"Packages\";\nAcquire::IndexTargets::deb::Packages::Description \"$(RELEASE)/$(COMPONENT) $(ARCHITECTURE) Packages\";\nAcquire::IndexTargets::deb::Packages::flatDescription \"$(RELEASE) Packages\";\nAcquire::IndexTargets::deb::Packages::Optional \"0\";\nAcquire::IndexTargets::deb::Translations \"\";\nAcquire::IndexTargets::deb::Translations::MetaKey \"$(COMPONENT)/i18n/Translation-$(LANGUAGE)\";\nAcquire::IndexTargets::deb::Translations::flatMetaKey \"$(LANGUAGE)\";\nAcquire::IndexTargets::deb::Translations::ShortDescription \"Translation-$(LANGUAGE)\";\nAcquire::IndexTargets::deb::Translations::Description \"$(RELEASE)/$(COMPONENT) Translation-$(LANGUAGE)\";\nAcquire::IndexTargets::deb::Translations::flatDescription \"$(RELEASE) Translation-$(LANGUAGE)\";\nAcquire::IndexTargets::deb-src \"\";\nAcquire::IndexTargets::deb-src::Sources \"\";\nAcquire::IndexTargets::deb-src::Sources::MetaKey \"$(COMPONENT)/source/Sources\";\nAcquire::IndexTargets::deb-src::Sources::flatMetaKey \"Sources\";\nAcquire::IndexTargets::deb-src::Sources::ShortDescription \"Sources\";\nAcquire::IndexTargets::deb-src::Sources::Description \"$(RELEASE)/$(COMPONENT) Sources\";\nAcquire::IndexTargets::deb-src::Sources::flatDescription \"$(RELEASE) Sources\";\nAcquire::IndexTargets::deb-src::Sources::Optional \"0\";\nAcquire::Changelogs \"\";\nAcquire::Changelogs::URI \"\";\nAcquire::Changelogs::URI::Origin \"\";\nAcquire::Changelogs::URI::Origin::Debian \"https://metadata.ftp-master.debian.org/changelogs/@CHANGEPATH@_changelog\";\nAcquire::Changelogs::URI::Origin::Ubuntu \"https://changelogs.ubuntu.com/changelogs/pool/@CHANGEPATH@/changelog\";\nAcquire::Changelogs::AlwaysOnline \"true\";\nAcquire::Changelogs::AlwaysOnline::Origin \"\";\nAcquire::Changelogs::AlwaysOnline::Origin::Ubuntu \"1\";\nAcquire::Snapshots \"\";\nAcquire::Snapshots::URI \"\";\nAcquire::Snapshots::URI::Origin \"\";\nAcquire::Snapshots::URI::Origin::Debian \"https://snapshot.debian.org/archive/debian/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Origin::Ubuntu \"https://snapshot.ubuntu.com/ubuntu/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Override \"\";\nAcquire::Snapshots::URI::Override::Label \"\";\nAcquire::Snapshots::URI::Override::Label::Debian-Security \"https://snapshot.debian.org/archive/debian-security/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host \"\";\nAcquire::Snapshots::URI::Host::archive.ubuntu.com \"https://snapshot.ubuntu.com/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::deb.debian.org \"https://snapshot.debian.org/archive/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::.archive.ubuntu.com \"https://snapshot.ubuntu.com/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::security.ubuntu.com \"https://snapshot.ubuntu.com/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::ppa.launchpadcontent.net \"https://snapshot.ppa.launchpadcontent.net/@PATH@/@SNAPSHOTID@/\";\nAcquire::Snapshots::URI::Host::ppa.launchpad.net \"https://snapshot.ppa.launchpadcontent.net/@PATH@/@SNAPSHOTID@/\";\nAcquire::http \"\";\nAcquire::http::User-Agent-Non-Interactive \"true\";\nAcquire::GzipIndexes \"true\";\nAcquire::CompressionTypes \"\";\nAcquire::CompressionTypes::Order \"\";\nAcquire::CompressionTypes::Order:: \"gz\";\nAcquire::CompressionTypes::xz \"xz\";\nAcquire::CompressionTypes::bz2 \"bzip2\";\nAcquire::CompressionTypes::lzma \"lzma\";\nAcquire::CompressionTypes::gz \"gzip\";\nAcquire::CompressionTypes::lz4 \"lz4\";\nAcquire::CompressionTypes::zst \"zstd\";\nAcquire::Languages \"\";\nAcquire::Languages:: \"none\";\nDPkg \"\";\nDPkg::Path \"/usr/sbin:/usr/bin:/sbin:/bin\";\nDPkg::Pre-Install-Pkgs \"\";\nDPkg::Pre-Install-Pkgs:: \"/usr/sbin/dpkg-preconfigure --apt || true\";\nDPkg::Post-Invoke \"\";\nDPkg::Post-Invoke:: \"test -x /usr/lib/needrestart/apt-pinvoke && /usr/lib/needrestart/apt-pinvoke -m u || true\";\nDPkg::Post-Invoke:: \"if [ -d /var/lib/update-notifier ]; then touch /var/lib/update-notifier/dpkg-run-stamp; fi; /usr/lib/update-notifier/update-motd-updates-available 2>/dev/null || true\";\nbinary \"apt-config\";\nbinary::apt \"\";\nbinary::apt::AptCli \"\";\nbinary::apt::AptCli::Hooks \"\";\nbinary::apt::AptCli::Hooks::Upgrade \"\";\nbinary::apt::AptCli::Hooks::Upgrade:: \"[ ! -f /usr/lib/ubuntu-advantage/apt-esm-json-hook ] || [ $(id -u) -ne 0 ] || /usr/lib/ubuntu-advantage/apt-esm-json-hook 2>> /var/log/ubuntu-advantage-apt-hook.log || true\";\nbinary::apt-cdrom \"\";\nbinary::apt-cdrom::APT \"\";\nbinary::apt-cdrom::APT::Internal \"\";\nbinary::apt-cdrom::APT::Internal::OpProgress \"\";\nbinary::apt-cdrom::APT::Internal::OpProgress::EraseLines \"0\";\nUnattended-Upgrade \"\";\nUnattended-Upgrade::Allowed-Origins \"\";\nUnattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}\";\nUnattended-Upgrade::Allowed-Origins:: \"${distro_id}:${distro_codename}-security\";\nUnattended-Upgrade::Allowed-Origins:: \"${distro_id}ESMApps:${distro_codename}-apps-security\";\nUnattended-Upgrade::Allowed-Origins:: \"${distro_id}ESM:${distro_codename}-infra-security\";\nUnattended-Upgrade::DevRelease \"auto\";\nVersion \"\";\nVersion::1.2 \"\";\nVersion::1.2::APT \"\";\nVersion::1.2::APT::Color \"1\";\nVersion::1.2::APT::Keep-Downloaded-Packages \"0\";\nVersion::1.2::DPkg \"\";\nVersion::1.2::DPkg::Progress-Fancy \"1\";\nVersion::3.0 \"\";\nVersion::3.0::APT \"\";\nVersion::3.0::APT::Output-Version \"30\";\nVersion::3.0::Pager \"1\";\nVersion::1.1 \"\";\nVersion::1.1::APT \"\";\nVersion::1.1::APT::Cache \"\";\nVersion::1.1::APT::Cache::Show \"\";\nVersion::1.1::APT::Cache::Show::Version \"2\";\nVersion::1.1::APT::Cache::AllVersions \"0\";\nVersion::1.1::APT::Cache::ShowVirtuals \"1\";\nVersion::1.1::APT::Cache::Search \"\";\nVersion::1.1::APT::Cache::Search::Version \"2\";\nVersion::1.1::APT::Cache::ShowDependencyType \"1\";\nVersion::1.1::APT::Cache::ShowVersion \"1\";\nVersion::1.1::APT::Get \"\";\nVersion::1.1::APT::Get::Upgrade-Allow-New \"1\";\nVersion::1.1::APT::Cmd \"\";\nVersion::1.1::APT::Cmd::Show-Update-Stats \"1\";\nVersion::1.5 \"\";\nVersion::1.5::APT \"\";\nVersion::1.5::APT::Get \"\";\nVersion::1.5::APT::Get::Update \"\";\nVersion::1.5::APT::Get::Update::InteractiveReleaseInfoChanges \"1\";\nVersion::2.0 \"\";\nVersion::2.0::APT \"\";\nVersion::2.0::APT::Cmd \"\";\nVersion::2.0::APT::Cmd::Pattern-Only \"1\";\nVersion::2.0::Dpkg \"\";\nVersion::2.0::Dpkg::Lock \"\";\nVersion::2.0::Dpkg::Lock::Timeout \"120\";\nVersion::0.31 \"\";\nVersion::1.21 \"\";\nVersion::1.21::APT \"\";\nVersion::1.21::APT::Solver \"3.0\";\nVersion::2.11 \"\";\nVersion::2.11::APT \"\";\nVersion::2.11::APT::Solver \"3.0\";\nVersion::3.1 \"\";\nVersion::3.1::APT \"\";\nVersion::3.1::APT::Solver \"3.0\";\nCommandLine \"\";\nCommandLine::AsString \"apt-config dump\";\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "systemctl show apt-daily.timer apt-daily-upgrade.timer -p Id -p UnitFileState -p ActiveState",
+      "command": "set -- 'systemctl show apt-daily.timer apt-daily-upgrade.timer -p Id -p UnitFileState -p ActiveState'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "Id=apt-daily.timer\nActiveState=active\nUnitFileState=enabled\n\nId=apt-daily-upgrade.timer\nActiveState=active\nUnitFileState=enabled\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "sha256sum /etc/apt/apt.conf.d/50unattended-upgrades",
+      "command": "set -- 'sha256sum /etc/apt/apt.conf.d/50unattended-upgrades'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "88fb5cc2a1bbe749468213f6a9d351a8b668760d8a4c94eef5ad7f4723f19a6e  /etc/apt/apt.conf.d/50unattended-upgrades\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "dpkg-query -W -f='${Conffiles}\\n' unattended-upgrades",
+      "command": "set -- 'dpkg-query -W -f='\"'\"'${Conffiles}\\n'\"'\"' unattended-upgrades'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": " /etc/init.d/unattended-upgrades 290829a5efc55b7c435de0bb769f217b\n /etc/kernel/postinst.d/unattended-upgrades f296826482cb797aeef13554e093dbca\n /etc/logrotate.d/unattended-upgrades e45049ee847f069a99e3e6ec39155d4a\n /etc/pm/sleep.d/10_unattended-upgrades-hibernate 0f5d54aa2dd322c805c90e409fc2724a\n /etc/update-motd.d/92-unattended-upgrades afa7546d3fe561e1f5783f7b9cf72096\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
+      "command": "set -- 'find /var/log/unattended-upgrades -maxdepth 1 -type f -printf '\"'\"'%T@ %p\\n'\"'\"' 2>/dev/null | sort -nr | head -n 1'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
-      "stdout": "0\n",
+      "stdout": "1794728238.2579008950 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "find /var/log/unattended-upgrades -maxdepth 1 -type f -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1",
+      "command": "set -- 'tail -n 60 '\"'\"'/var/log/unattended-upgrades/unattended-upgrades-shutdown.log'\"'\"''; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
-      "stdout": "1794721455.7861587430 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
+      "stdout": "2026-11-15 07:37:18,258 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-11-15 07:37:18,258 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "tail -n 60 '/var/log/unattended-upgrades/unattended-upgrades-shutdown.log'",
-      "exit": 0,
-      "stdout": "2026-11-15 05:44:15,786 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-11-15 05:44:15,786 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "apt-get -s -o APT::Get::Show-Versions=1 upgrade --with-new-pkgs",
+      "command": "set -- 'apt-get -s -o APT::Get::Show-Versions=1 upgrade --with-new-pkgs'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "Reading package lists...\nBuilding dependency tree...\nReading state information...\nCalculating upgrade...\nThe following packages were automatically installed and are no longer required:\n   libapr1t64 (1.7.6-3)\n   libaprutil1-dbd-sqlite3 (1.6.3-3ubuntu3.1)\n   libaprutil1-ldap (1.6.3-3ubuntu3.1)\n   libaprutil1t64 (1.6.3-3ubuntu3.1)\n   libargon2-1 (0~20190702+dfsg-5)\n   libbrotli1 (1.2.0-3ubuntu0.1)\n   libcurl4t64 (8.18.0-1ubuntu2.8)\n   libgnutls30t64 (3.8.12-2ubuntu1.1)\n   libhogweed6t64 (3.10.2-1)\n   libjansson4 (2.14-2build4)\n   libldap-common (2.6.10+dfsg-1ubuntu5)\n   libldap2 (2.6.10+dfsg-1ubuntu5)\n   liblua5.4-0 (5.4.8-1build1)\n   libnettle8t64 (3.10.2-1)\n   libnghttp2-14 (1.68.0-2ubuntu0.2)\n   libp11-kit0 (0.26.2-2)\n   libpsl5t64 (0.21.2-1.1build2)\n   librtmp1 (2.4+20151223.gitfa8646d.1-3)\n   libsasl2-2 (2.1.28+dfsg1-9ubuntu3)\n   libsasl2-modules-db (2.1.28+dfsg1-9ubuntu3)\n   libsodium23 (1.0.18-2)\n   libssh2-1t64 (1.11.1-1ubuntu0.26.04.4)\n   libtasn1-6 (4.21.0-2)\n   libxml2-16 (2.15.2+dfsg-0.1ubuntu0.3)\nUse 'apt autoremove' to remove them.\n0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "apt-mark showhold",
+      "command": "set -- 'apt-mark showhold'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "find /var/lib/apt/lists -name '*InRelease' -printf '%T@\\n' 2>/dev/null | sort -n | tail -n 1",
+      "command": "set -- 'find /var/lib/apt/lists -name '\"'\"'*InRelease'\"'\"' -printf '\"'\"'%T@\\n'\"'\"' 2>/dev/null | sort -n | tail -n 1'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 0,
       "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "cat /run/reboot-required",
+      "command": "set -- 'cat /run/reboot-required'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 1,
       "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "id -u",
-      "exit": 0,
-      "stdout": "0\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "cat /run/reboot-required.pkgs",
+      "command": "set -- 'cat /run/reboot-required.pkgs'; barectl_read_uid=$(id -u && printf .) || exit 1; [ \"${#barectl_read_uid}\" -le 65537 ] || exit 1; barectl_read_uid=$(printf %s \"${barectl_read_uid%.}\" | tr -d '[:space:]') || exit 1; if [ \"$barectl_read_uid\" = 0 ]; then sh -c \"$1\"; else sudo -n -l /usr/bin/sh -c \"$1\" >/dev/null 2>&1 || exit 1; sudo -n /usr/bin/sh -c \"$1\"; fi",
       "exit": 1,
       "stdout": "",
       "truncated": false,

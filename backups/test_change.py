@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from discovery import ssh
 from discovery.recorded import Recorded, ReplayShell, Transcript
+from discovery.root_read import read_command
 
 if TYPE_CHECKING:
     from django.test.client import _MonkeyPatchedWSGIResponse
@@ -700,9 +701,8 @@ class FullReviewTests(ChangeTestCase):
                 "x86_64",
                 "ssh-ed25519 SHA256:x",
                 (
-                    ("id -u", Recorded(ssh.CommandResult(0, "0\n"))),
                     (
-                        command,
+                        read_command(command),
                         Recorded(
                             ssh.CommandResult(
                                 0,
