@@ -49,6 +49,7 @@ from .observations import (
     collect,
 )
 from .observations.components import version_query
+from .observations.standing import _TOOLS_COMMAND
 from .presentation import present
 from .recorded import ReplayShell, load
 from .services import STALE_AFTER
@@ -272,9 +273,7 @@ READ_ONLY = re.compile(
     r"|\Asystemctl --version\Z"
     r"|\Agetent passwd\Z"
     r"|\Agetent group 30000\Z"
-    r"|\Acommand -v (apt-get|dpkg-query|df|systemctl|ss|timedatectl|getent|id|curl|sha256sum|"
-    r"tar|xz|flock|journalctl|systemd-analyze|readlink|stat|awk|sed|grep|"
-    r"/usr/sbin/(useradd|groupadd|runuser))\Z"
+    rf"|\A{re.escape(_TOOLS_COMMAND)}\Z"
     rf"|\A{re.escape(PROCESS_COMMAND)}\Z"
     r"|\Atimedatectl show -p NTPSynchronized --value\Z"
     r"|\Ass -Hlnpt '\( sport = :80 or sport = :443 \)'\Z"
@@ -330,6 +329,7 @@ class FakeServer:
             ARCH_COMMAND: ssh.CommandResult(0, _RECORDED[ARCH_COMMAND].result.stdout),
             CPU_COMMAND: ssh.CommandResult(0, _RECORDED[CPU_COMMAND].result.stdout),
             FILESYSTEM_COMMAND: ssh.CommandResult(0, _RECORDED[FILESYSTEM_COMMAND].result.stdout),
+            _TOOLS_COMMAND: _RECORDED[_TOOLS_COMMAND].result,
             PACKAGE_QUERY: ssh.CommandResult(0, DPKG_OUTPUT),
             UNIT_QUERY.format("nginx.service"): ssh.CommandResult(0, unit_report("nginx.service")),
             UNIT_QUERY.format("php8.5-fpm.service"): ssh.CommandResult(
@@ -469,9 +469,6 @@ class FakeServer:
             return ssh.CommandResult(0, answers[command])
         if command == "getent passwd":
             return ssh.CommandResult(0, "")
-        if command.startswith("command -v "):
-            name = command.partition("command -v ")[2]
-            return ssh.CommandResult(0, f"/usr/bin/{name}\n")
         return None
 
     def _resolve(self, path: str) -> str:

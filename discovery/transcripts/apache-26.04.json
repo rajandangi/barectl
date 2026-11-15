@@ -11,7 +11,7 @@
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:4a81uZwnWV/fEYLf1O7kq65DzwoGSD3EyXHVrz1is5c"
+    "host_key": "ssh-ed25519 SHA256:VUBvsgYaIqU2V8SDCkxk3FnUVqKkvUKgO3NFw2xNoUI"
   },
   "commands": [
     {
@@ -38,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:        12301416 kB\nMemAvailable:   14017280 kB\nBuffers:             172 kB\nCached:           450420 kB\nSwapCached:           28 kB\nActive:           895416 kB\nInactive:         982904 kB\nActive(anon):     870724 kB\nInactive(anon):   571324 kB\nActive(file):      24692 kB\nInactive(file):   411580 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17459740 kB\nDirty:              1556 kB\nWriteback:             0 kB\nAnonPages:       1402856 kB\nMapped:           157824 kB\nShmem:             14380 kB\nKReclaimable:    1536768 kB\nSlab:            1827744 kB\nSReclaimable:    1536768 kB\nSUnreclaim:       290976 kB\nKernelStack:        9888 kB\nPageTables:       134956 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3678916 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71632 kB\nVmallocChunk:          0 kB\nPercpu:            10640 kB\nAnonHugePages:     38912 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:        11778452 kB\nMemAvailable:   13951888 kB\nBuffers:             168 kB\nCached:           456740 kB\nSwapCached:           36 kB\nActive:           781304 kB\nInactive:        1139964 kB\nActive(anon):     733812 kB\nInactive(anon):   744796 kB\nActive(file):      47492 kB\nInactive(file):   395168 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17458740 kB\nDirty:              1528 kB\nWriteback:             0 kB\nAnonPages:       1436176 kB\nMapped:           152572 kB\nShmem:             14280 kB\nKReclaimable:    1987952 kB\nSlab:            2325808 kB\nSReclaimable:    1987952 kB\nSUnreclaim:       337856 kB\nKernelStack:        9424 kB\nPageTables:       124244 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3746396 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71756 kB\nVmallocChunk:          0 kB\nPercpu:            13048 kB\nAnonHugePages:     36864 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n590356676608 478028546048 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n588276301824 468731219968 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -94,7 +94,7 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424164 kB\nMemFree:        12282196 kB\nMemAvailable:   14003204 kB\nBuffers:             172 kB\nCached:           455560 kB\nSwapCached:           28 kB\nActive:           906628 kB\nInactive:         988048 kB\nActive(anon):     881936 kB\nInactive(anon):   571324 kB\nActive(file):      24692 kB\nInactive(file):   416724 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17459740 kB\nDirty:              4944 kB\nWriteback:             0 kB\nAnonPages:       1413688 kB\nMapped:           160740 kB\nShmem:             14380 kB\nKReclaimable:    1536768 kB\nSlab:            1827744 kB\nSReclaimable:    1536768 kB\nSUnreclaim:       290976 kB\nKernelStack:        9888 kB\nPageTables:       140120 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3712592 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71632 kB\nVmallocChunk:          0 kB\nPercpu:            10640 kB\nAnonHugePages:     43008 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424164 kB\nMemFree:        11763464 kB\nMemAvailable:   13942088 kB\nBuffers:             168 kB\nCached:           461892 kB\nSwapCached:           36 kB\nActive:           787264 kB\nInactive:        1145152 kB\nActive(anon):     739772 kB\nInactive(anon):   744796 kB\nActive(file):      47492 kB\nInactive(file):   400356 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472732 kB\nSwapFree:       17458740 kB\nDirty:              4912 kB\nWriteback:             0 kB\nAnonPages:       1441832 kB\nMapped:           154064 kB\nShmem:             14280 kB\nKReclaimable:    1987952 kB\nSlab:            2326096 kB\nSReclaimable:    1987952 kB\nSUnreclaim:       338144 kB\nKernelStack:        9488 kB\nPageTables:       129448 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684812 kB\nCommitted_AS:    3761856 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71756 kB\nVmallocChunk:          0 kB\nPercpu:            13048 kB\nAnonHugePages:     36864 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -463,163 +463,9 @@
       "stdin_sha256": null
     },
     {
-      "command": "command -v apt-get",
+      "command": "for tool in apt-get dpkg-query df systemctl ss timedatectl getent id curl sha256sum tar xz flock journalctl systemd-analyze readlink stat awk sed grep /usr/sbin/useradd /usr/sbin/groupadd /usr/sbin/runuser; do\n  output=$(command -v \"$tool\"); status=$?\n  if [ \"$status\" -eq 0 ]; then\n    case \"$output\" in *[![:space:]]*) printf \"present\\n\";; *) printf \"missing\\n\";; esac\n  elif [ \"$status\" -eq 127 ]; then printf \"missing\\n\"\n  else printf \"unreadable\\n\"; fi\ndone",
       "exit": 0,
-      "stdout": "/usr/bin/apt-get\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v dpkg-query",
-      "exit": 0,
-      "stdout": "/usr/bin/dpkg-query\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v df",
-      "exit": 0,
-      "stdout": "/usr/bin/df\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v systemctl",
-      "exit": 0,
-      "stdout": "/usr/bin/systemctl\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v ss",
-      "exit": 0,
-      "stdout": "/usr/bin/ss\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v timedatectl",
-      "exit": 0,
-      "stdout": "/usr/bin/timedatectl\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v getent",
-      "exit": 0,
-      "stdout": "/usr/bin/getent\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v id",
-      "exit": 0,
-      "stdout": "/usr/bin/id\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v curl",
-      "exit": 127,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v sha256sum",
-      "exit": 0,
-      "stdout": "/usr/bin/sha256sum\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v tar",
-      "exit": 0,
-      "stdout": "/usr/bin/tar\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v xz",
-      "exit": 0,
-      "stdout": "/usr/bin/xz\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v flock",
-      "exit": 0,
-      "stdout": "/usr/bin/flock\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v journalctl",
-      "exit": 0,
-      "stdout": "/usr/bin/journalctl\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v systemd-analyze",
-      "exit": 0,
-      "stdout": "/usr/bin/systemd-analyze\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v readlink",
-      "exit": 0,
-      "stdout": "/usr/bin/readlink\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v stat",
-      "exit": 0,
-      "stdout": "/usr/bin/stat\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v awk",
-      "exit": 0,
-      "stdout": "/usr/bin/awk\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v sed",
-      "exit": 0,
-      "stdout": "/usr/bin/sed\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v grep",
-      "exit": 0,
-      "stdout": "/usr/bin/grep\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v /usr/sbin/useradd",
-      "exit": 0,
-      "stdout": "/usr/sbin/useradd\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v /usr/sbin/groupadd",
-      "exit": 0,
-      "stdout": "/usr/sbin/groupadd\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "command -v /usr/sbin/runuser",
-      "exit": 0,
-      "stdout": "/usr/sbin/runuser\n",
+      "stdout": "present\npresent\npresent\npresent\npresent\npresent\npresent\npresent\nmissing\npresent\npresent\npresent\npresent\npresent\npresent\npresent\npresent\npresent\npresent\npresent\npresent\npresent\npresent\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -997,7 +843,7 @@
     {
       "command": "ss -Hlnptu",
       "exit": 0,
-      "stdout": "udp UNCONN 0      0      127.0.0.11:42548 0.0.0.0:*                                                      \ntcp LISTEN 0      4096   127.0.0.11:40047 0.0.0.0:*                                                      \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=111,fd=3),(\"systemd\",pid=1,fd=90))\ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=111,fd=4),(\"systemd\",pid=1,fd=93))\n",
+      "stdout": "udp UNCONN 0      0      127.0.0.11:48212 0.0.0.0:*                                                      \ntcp LISTEN 0      4096      0.0.0.0:22    0.0.0.0:* users:((\"sshd\",pid=117,fd=3),(\"systemd\",pid=1,fd=96))\ntcp LISTEN 0      4096   127.0.0.11:33955 0.0.0.0:*                                                      \ntcp LISTEN 0      4096         [::]:22       [::]:* users:((\"sshd\",pid=117,fd=4),(\"systemd\",pid=1,fd=97))\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1088,7 +934,7 @@
     {
       "command": "printenv SSH_CONNECTION",
       "exit": 0,
-      "stdout": "192.168.107.7 48760 192.168.107.6 22\n",
+      "stdout": "192.168.107.7 33916 192.168.107.6 22\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1242,7 +1088,7 @@
     {
       "command": "iptables-save",
       "exit": 0,
-      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Fri Nov 13 21:57:19 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:40047\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:42548\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 40047 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 42548 -j SNAT --to-source :53\nCOMMIT\n# Completed on Fri Nov 13 21:57:19 2026\n",
+      "stdout": "# Generated by iptables-save v1.8.11 (nf_tables) on Sun Nov 15 05:36:09 2026\n*nat\n:PREROUTING ACCEPT [0:0]\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [2:134]\n:POSTROUTING ACCEPT [3:201]\n:DOCKER_OUTPUT - [0:0]\n:DOCKER_POSTROUTING - [0:0]\n-A OUTPUT -d 127.0.0.11/32 -j DOCKER_OUTPUT\n-A POSTROUTING -d 127.0.0.11/32 -j DOCKER_POSTROUTING\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p tcp -m tcp --dport 53 -j DNAT --to-destination 127.0.0.11:33955\n-A DOCKER_OUTPUT -d 127.0.0.11/32 -p udp -m udp --dport 53 -j DNAT --to-destination 127.0.0.11:48212\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p tcp -m tcp --sport 33955 -j SNAT --to-source :53\n-A DOCKER_POSTROUTING -s 127.0.0.11/32 -p udp -m udp --sport 48212 -j SNAT --to-source :53\nCOMMIT\n# Completed on Sun Nov 15 05:36:09 2026\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1340,7 +1186,7 @@
     {
       "command": "find /var/log/unattended-upgrades -maxdepth 1 -type f -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -n 1",
       "exit": 0,
-      "stdout": "1794607034.5030801270 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
+      "stdout": "1794720963.9819076750 /var/log/unattended-upgrades/unattended-upgrades-shutdown.log\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -1354,7 +1200,7 @@
     {
       "command": "tail -n 60 '/var/log/unattended-upgrades/unattended-upgrades-shutdown.log'",
       "exit": 0,
-      "stdout": "2026-11-13 21:57:14,503 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-11-13 21:57:14,503 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
+      "stdout": "2026-11-15 05:36:03,982 WARNING - Unable to monitor PrepareForShutdown() signal, polling instead.\n2026-11-15 05:36:03,982 WARNING - To enable monitoring the PrepareForShutdown() signal instead of polling please install the python3-gi package\n",
       "truncated": false,
       "stdin_sha256": null
     },

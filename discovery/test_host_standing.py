@@ -1,15 +1,68 @@
 """Host-standing judgments replayed from the native transcript set."""
 
+import subprocess
 from typing import ClassVar
-from unittest import TestCase
+from unittest import TestCase, mock
 
 from bootstrap.standing import Standing
 from logs.journal_retention import NOT_CONFIGURED
 
 from . import recorded
 from .models import ObservationOutcome
-from .observations import collect
+from .observations import collect, standing
 from .recorded import ReplayShell
+from .ssh import CommandResult, RemoteShell
+
+
+class RequiredToolsTests(TestCase):
+    def test_the_fixed_shell_read_preserves_lookup_classifications(self) -> None:
+        script = (
+            """
+command() {
+    case "$2" in
+        apt-get) printf /usr/bin/apt-get; return 0;;
+        dpkg-query) printf ' \\t\\n'; return 0;;
+        df) return 127;;
+        systemctl) return 126;;
+        *) return 1;;
+    esac
+}
+"""
+            + standing._TOOLS_COMMAND
+        )
+        completed = subprocess.run(  # noqa: S603 - the fixed read and test-only shell function.
+            ["/bin/sh", "-c", script], check=True, capture_output=True, text=True
+        )
+        shell = mock.Mock(spec=RemoteShell)
+        shell.run.return_value = CommandResult(completed.returncode, completed.stdout)
+        self.assertEqual(
+            standing._required_tools(shell),
+            tuple(
+                zip(
+                    standing._TOOLS,
+                    (True, False, False, *(None for _ in standing._TOOLS[3:])),
+                    strict=True,
+                )
+            ),
+        )
+        shell.run.assert_called_once_with(standing._TOOLS_COMMAND)
+
+    def test_an_incomplete_or_unreadable_batch_never_confirms_tools(self) -> None:
+        shell = mock.Mock(spec=RemoteShell)
+        valid = "present\n" * len(standing._TOOLS)
+        for result in (
+            CommandResult(1, valid),
+            CommandResult(0, valid, truncated=True),
+            CommandResult(0, ""),
+            CommandResult(0, "present\n" * (len(standing._TOOLS) - 1)),
+            CommandResult(0, valid + "present\n"),
+            CommandResult(0, valid.replace("present", "invalid", 1)),
+        ):
+            with self.subTest(result=result):
+                shell.run.return_value = result
+                self.assertEqual(
+                    standing._required_tools(shell), tuple((tool, None) for tool in standing._TOOLS)
+                )
 
 
 class RecordedHostStandingTests(TestCase):
@@ -102,6 +155,14 @@ class RecordedHostStandingTests(TestCase):
         reads = [command for command in shell.commands if "journal_retention_file" in command]
         self.assertEqual(len(reads), 1)
         self.assertIsNotNone(snapshot.journal_retention)
+
+    def test_required_tool_checks_use_one_bounded_remote_read(self) -> None:
+        shell = ReplayShell(recorded.load("foundation-26.04"))
+        snapshot = collect(shell)
+        self.assertEqual(
+            snapshot.standing.standing if snapshot.standing else None, Standing.TARGET_STACK
+        )
+        self.assertEqual(sum("command -v" in command for command in shell.commands), 1)
 
     def test_an_unread_foundation_is_not_checked_rather_than_not_configured(self) -> None:
         snapshot = collect(ReplayShell(recorded.load("pristine-26.04")))

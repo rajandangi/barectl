@@ -2,6 +2,7 @@
 
 import json
 import re
+import shlex
 from dataclasses import replace
 
 from bootstrap.standing import HostEvidence, HostJudgment, judge
@@ -64,6 +65,16 @@ _TOOLS = (
     "/usr/sbin/groupadd",
     "/usr/sbin/runuser",
 )
+_TOOLS_COMMAND = (
+    "for tool in " + shlex.join(_TOOLS) + "; do\n"
+    '  output=$(command -v "$tool"); status=$?\n'
+    '  if [ "$status" -eq 0 ]; then\n'
+    '    case "$output" in *[![:space:]]*) printf "present\\n";; *) printf "missing\\n";; esac\n'
+    f'  elif [ "$status" -eq {COMMAND_NOT_FOUND} ]; then printf "missing\\n"\n'
+    '  else printf "unreadable\\n"; fi\n'
+    "done"
+)
+_TOOL_STATES: dict[str, bool | None] = {"present": True, "missing": False, "unreadable": None}
 _FOUNDATION_PATHS = (
     ("Nix", ("/nix/var/nix/profiles/default/bin/nix", "/etc/nix/nix.conf")),
     ("Catalog realisation", ("/nix/var/nix/profiles/per-user/root/profile/bin/caddy",)),
@@ -114,7 +125,7 @@ def collect_with_foundation(
     panels = tuple(path for path, state in panel_states if state is True)
     nix_shape = _nix_shape(shell)
     nix_ids_free = _nix_ids_free(shell)
-    tool_status = tuple((tool, _command_exists(shell, tool)) for tool in _TOOLS)
+    tool_status = _required_tools(shell)
     missing_tools = tuple(tool for tool, available in tool_status if available is False)
     clock = _boolean_command(shell, "timedatectl show -p NTPSynchronized --value", "yes", "no")
     apt_active = _apt_active(shell)
@@ -384,13 +395,17 @@ def _nix_ids_free(shell: RemoteShell) -> bool | None:
     )
 
 
-def _command_exists(shell: RemoteShell, name: str) -> bool | None:
-    result = shell.run(f"command -v {name}")
-    if result.exit_status == 0:
-        return bool(result.stdout.strip())
-    if result.exit_status == COMMAND_NOT_FOUND:
-        return False
-    return None
+def _required_tools(shell: RemoteShell) -> tuple[tuple[str, bool | None], ...]:
+    result = shell.run(_TOOLS_COMMAND)
+    states = result.stdout.splitlines()
+    if (
+        result.exit_status
+        or result.truncated
+        or len(states) != len(_TOOLS)
+        or any(state not in _TOOL_STATES for state in states)
+    ):
+        return tuple((tool, None) for tool in _TOOLS)
+    return tuple((tool, _TOOL_STATES[state]) for tool, state in zip(_TOOLS, states, strict=True))
 
 
 def _boolean_command(shell: RemoteShell, command: str, yes: str, no: str) -> bool | None:
