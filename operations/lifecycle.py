@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, OperationalError, transaction
-from django.db.models import F, QuerySet
+from django.db.models import F, Q, QuerySet
 from django.tasks import TaskResultStatus
 from django.utils import timezone
 from django_tasks_db.models import DBTaskResult, DBTaskResultQuerySet
@@ -126,6 +126,17 @@ def _tasks(operation_ids: Iterable[int] | None = None) -> DBTaskResultQuerySet:
 
 def _recover_stale_operations() -> int:
     now = timezone.now()
+    limits = [policy.stale_after for policy in _POLICIES.values() if policy.stale_after]
+    if not limits:
+        return 0
+    # Every entry runs this sweep, and most find nothing abandoned. Nothing can be stale
+    # before the shortest limit, so one cheap read skips the per-kind writes in that case.
+    cutoff = now - min(limits)
+    if not RemoteOperation.objects.filter(
+        Q(status=Status.RUNNING, started_at__lt=cutoff)
+        | Q(status=Status.QUEUED, queued_at__lt=cutoff)
+    ).exists():
+        return 0
     recovered = 0
     for kind, policy in _POLICIES.items():
         if policy.stale_after is None:
