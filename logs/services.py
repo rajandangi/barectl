@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 
 from django.contrib.auth.models import AnonymousUser, User
 from django.db import transaction
+from django.db.models import Subquery, Window
+from django.db.models.functions import RowNumber
 from django.utils import timezone
 
 from discovery.presentation import VIEW_SITES
@@ -86,11 +88,12 @@ def context_for_site(
     target = site is not None and site.file.startswith("/etc/caddy/sites/")
     application = _application(state, identifier, site)
     sources = catalogue(site, application) if allowed and target else ()
+    latest = _latest_for_sources(server, identifier, sources)
     snapshot = state.snapshot
     views = tuple(
         SourceView(
             entry,
-            _latest(server, identifier, entry.slug),
+            latest.get(entry.slug),
             _configured(snapshot.collected if snapshot is not None else None, identifier, entry),
         )
         for entry in sources
@@ -270,6 +273,24 @@ def rotation_decision(
         change_requirements.LOG_ROTATION,
         rotation=rotation,
     )
+
+
+def _latest_for_sources(
+    server: Server, identifier: str, sources: tuple[LogSource, ...]
+) -> dict[str, LogRead]:
+    latest = (
+        LogRead.objects.filter(
+            server=server, identifier=identifier, source__in=[entry.slug for entry in sources]
+        )
+        .alias(
+            source_rank=Window(RowNumber(), partition_by="source", order_by=("-queued_at", "-pk"))
+        )
+        .filter(source_rank=1)
+        .order_by()
+        .values("pk")
+    )
+    reads = LogRead.objects.filter(pk__in=Subquery(latest)).order_by()
+    return {read.source: read for read in reads}
 
 
 def _latest(server: Server, identifier: str, source: str) -> LogRead | None:

@@ -7,7 +7,9 @@ from typing import cast, override
 from unittest import mock
 
 from django.contrib.auth.models import Group, Permission
+from django.db import connection
 from django.test import SimpleTestCase, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from logs import services
@@ -15,11 +17,18 @@ from logs.change import RotationEvidence, body, review
 from logs.models import LogOutcome, LogRead
 from logs.read import LogLine, LogPage
 from logs.read import command as log_command
-from logs.testing import php_error_page, record_log_site, record_outside_site
+from logs.sources import catalogue
+from logs.testing import (
+    php_error_page,
+    record_background_site,
+    record_log_site,
+    record_outside_site,
+)
 from operations.engine import BodyContext, ReviewDraft
 from operations.inputs import PreparationInputs
 from operations.lifecycle import OperationRefused
 from operations.models import RemoteOperation
+from servers.discovery_state import server_state
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 from sites.bodies.logrotate import (
@@ -64,6 +73,81 @@ class LogsPageTests(ControllerConfigTestCase):
             f"/servers/{self.server.pk}/sites/alpha/logs/",
             lambda: record_older_snapshots(self.server, 3),
         )
+
+    def test_the_catalogue_reads_the_latest_sources_in_one_query(self) -> None:
+        self.grant("view_server", "view_siteobservation", "view_changes", "view_evidence")
+        record_background_site(self.server, workers=2)
+        state = server_state(self.server)
+        entries = catalogue(state.site("alpha"), "laravel")
+        now = timezone.now()
+        expected: dict[str, int | None] = {}
+        for entry in entries:
+            if entry.slug == "visits":
+                expected[entry.slug] = None
+                continue
+            older = LogRead.objects.create(
+                server=self.server,
+                identifier="alpha",
+                source=entry.slug,
+                status=RemoteOperation.Status.SUCCEEDED,
+                page=php_error_page("older").document(),
+            )
+            latest = LogRead.objects.create(
+                server=self.server,
+                identifier="alpha",
+                source=entry.slug,
+                status=(
+                    RemoteOperation.Status.RUNNING
+                    if entry.slug == "queue_workers"
+                    else RemoteOperation.Status.FAILED
+                ),
+                term=entry.slug,
+            )
+            RemoteOperation.objects.filter(pk__in=(older.pk, latest.pk)).update(queued_at=now)
+            expected[entry.slug] = latest.pk
+            delayed = LogRead.objects.create(
+                server=self.server,
+                identifier="alpha",
+                source=entry.slug,
+                status=RemoteOperation.Status.SUCCEEDED,
+            )
+            RemoteOperation.objects.filter(pk=delayed.pk).update(
+                queued_at=now - timedelta(seconds=1)
+            )
+        LogRead.objects.create(
+            server=self.server,
+            identifier="beta",
+            source=entries[0].slug,
+            status=RemoteOperation.Status.SUCCEEDED,
+            page=php_error_page("another site").document(),
+        )
+        other = Server.objects.create(name="Other", ssh_alias="other.example.com")
+        LogRead.objects.create(
+            server=other,
+            identifier="alpha",
+            source=entries[0].slug,
+            status=RemoteOperation.Status.SUCCEEDED,
+            page=php_error_page("another server").document(),
+        )
+        self.user.has_perm("operations.view_evidence")
+
+        with CaptureQueriesContext(connection) as captured:
+            context = services.context_for_site(state, "alpha", self.user, selected="php_errors")
+        views = context["logs_sources"]
+        if not isinstance(views, tuple):
+            self.fail("The log catalogue did not return its source views.")
+        self.assertEqual(
+            [(view.source.slug, view.read.pk if view.read else None) for view in views],
+            list(expected.items()),
+        )
+        self.assertTrue(all(view.page is None for view in views))
+        self.assertEqual([view.source.slug for view in views if view.active], ["queue_workers"])
+        self.assertTrue(context["logs_active"])
+        selected = context["logs_selected"]
+        if not isinstance(selected, services.SourceView):
+            self.fail("The selected PHP error source was not returned.")
+        self.assertEqual(selected.read.term if selected.read else None, "php_errors")
+        self.assertEqual(len(captured), 3, "Expiry, latest catalogue reads, and rotation evidence")
 
     def test_a_site_operator_lists_every_log_and_the_wordpress_debug_only_when_present(
         self,
