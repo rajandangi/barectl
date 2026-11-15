@@ -14,6 +14,31 @@ from .recorded import ReplayShell
 from .ssh import CommandResult, RemoteShell
 
 
+class NixBinaryProbeTests(TestCase):
+    def test_a_missing_nix_binary_does_not_walk_its_parents_over_ssh(self) -> None:
+        from .fakes import FakeServer
+
+        shell = FakeServer()
+        self.assertEqual(standing._nix_shape(shell), "absent")
+        self.assertEqual(len(shell.commands), 9)
+
+    def test_an_unreadable_or_malformed_reply_never_proves_nix_absent(self) -> None:
+        from .fakes import FakeServer
+
+        for result in (
+            CommandResult(1, "missing\n"),
+            CommandResult(0, "missing\n", truncated=True),
+            CommandResult(0, "unreadable\n"),
+            CommandResult(0, ""),
+            CommandResult(0, "invalid\n"),
+            CommandResult(0, "missing\npresent\n"),
+        ):
+            with self.subTest(result=result):
+                shell = FakeServer()
+                shell.results[standing._NIX_BINARY_COMMAND] = result
+                self.assertIsNone(standing._nix_shape(shell))
+
+
 class RequiredToolsTests(TestCase):
     def test_the_fixed_shell_read_preserves_lookup_classifications(self) -> None:
         script = (

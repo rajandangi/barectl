@@ -40,6 +40,16 @@ _PANEL_PATHS = (
     "/home/clp",
 )
 _LISTENERS = "ss -Hlnpt '( sport = :80 or sport = :443 )'"
+_NIX_BINARY_PATH = "/nix/var/nix/profiles/default/bin/nix"
+_NIX_BINARY_COMMAND = (
+    f"path={shlex.quote(_NIX_BINARY_PATH)}; "
+    'if test -e "$path"; then printf "present\\n"; exit 0; fi; '
+    'while [ "$path" != / ]; do '
+    'path=${path%/*}; [ -n "$path" ] || path=/; '
+    'if test -x "$path"; then printf "missing\\n"; exit 0; fi; '
+    'if test -e "$path"; then printf "unreadable\\n"; exit 0; fi; '
+    'done; printf "missing\\n"'
+)
 _TOOLS = (
     "apt-get",
     "dpkg-query",
@@ -316,8 +326,13 @@ def _listeners(shell: RemoteShell) -> tuple[str, ...] | None:
 
 
 def _nix_shape(shell: RemoteShell) -> str | None:
-    binary_path = "/nix/var/nix/profiles/default/bin/nix"
-    binary = _path_state(shell, binary_path)
+    binary_path = _NIX_BINARY_PATH
+    result = shell.run(_NIX_BINARY_COMMAND)
+    binary = (
+        None
+        if result.exit_status or result.truncated
+        else {"present\n": True, "missing\n": False}.get(result.stdout)
+    )
     store = _path_state(shell, "/nix/store")
     config = _path_state(shell, "/etc/nix/nix.conf")
     if None in (binary, store, config):

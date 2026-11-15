@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from unittest import SkipTest, TestCase
 
 from .fakes import FakeServer
+from .observations.standing import _NIX_BINARY_COMMAND, _NIX_BINARY_PATH, _path_state
 
 TESTS = ("-e", "-r", "-x", "-L", "-d")
 LISTINGS = ("ls -1b", "ls -1bA")
@@ -199,6 +200,49 @@ def _gnu_coreutils() -> bool:
 
 
 class FakeServerContractTests(TestCase):
+    def test_the_nix_binary_probe_preserves_filesystem_classifications(self) -> None:
+        for name, scenario, token, state in (
+            ("absent tree", Scenario(), "missing\n", False),
+            ("present", Scenario(files={_NIX_BINARY_PATH: ""}), "present\n", True),
+            ("dead link", Scenario(dead_links={_NIX_BINARY_PATH}), "missing\n", False),
+            (
+                "hidden by an unsearchable parent",
+                Scenario(files={_NIX_BINARY_PATH: ""}, unsearchable={"/nix/var/nix"}),
+                "unreadable\n",
+                None,
+            ),
+            (
+                "hidden by an unreadable parent",
+                Scenario(files={_NIX_BINARY_PATH: ""}, unreadable={"/nix/var/nix"}),
+                "unreadable\n",
+                None,
+            ),
+            (
+                "a file blocks the path",
+                Scenario(files={"/nix/var": ""}),
+                "unreadable\n",
+                None,
+            ),
+        ):
+            with self.subTest(scenario=name):
+                if scenario.uses_permissions and os.geteuid() == 0:
+                    self.skipTest("Permissions do not restrict root.")
+                fake = scenario.fake()
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory).resolve()
+                    scenario.build(root)
+                    try:
+                        command = _NIX_BINARY_COMMAND.replace(
+                            shlex.quote(_NIX_BINARY_PATH),
+                            shlex.quote(str(_under(root, _NIX_BINARY_PATH))),
+                            1,
+                        )
+                        self.assertEqual(_shell(command), (True, token))
+                        self.assertEqual(self.fake_answer(fake, _NIX_BINARY_COMMAND), (True, token))
+                        self.assertIs(_path_state(fake, _NIX_BINARY_PATH), state)
+                    finally:
+                        _restore_modes(root)
+
     def test_probes_agree_with_a_posix_shell(self) -> None:
         if not _gnu_coreutils():
             msg = "Managed servers use GNU coreutils; run the contract where ls is GNU ls"

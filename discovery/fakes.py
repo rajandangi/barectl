@@ -49,7 +49,7 @@ from .observations import (
     collect,
 )
 from .observations.components import version_query
-from .observations.standing import _TOOLS_COMMAND
+from .observations.standing import _NIX_BINARY_COMMAND, _NIX_BINARY_PATH, _TOOLS_COMMAND
 from .presentation import present
 from .recorded import ReplayShell, load
 from .root_read import read_command
@@ -243,6 +243,7 @@ READ_ONLY = re.compile(
     r"|\Auname -m\Z"
     r"|\Atest -[ex] /nix(?:/[A-Za-z0-9._-]+)*\Z"
     r"|\Atest -[ex] /etc/nix(?:/[A-Za-z0-9._-]+)*\Z"
+    rf"|\A{re.escape(_NIX_BINARY_COMMAND)}\Z"
     r"|\Atest -[ex] (/usr|/usr/local|/home|/www|/etc/systemd|/etc/systemd/system|"
     r"/etc/systemd/journald\.conf\.d|/etc/caddy|/etc/nix|/nix|/nix/var|/nix/var/nix|"
     r"/nix/var/nix/profiles|/nix/var/nix/profiles/default|/nix/var/nix/profiles/per-user|"
@@ -461,6 +462,17 @@ class FakeServer:
         """A recorded result, or a host-standing or package-name read."""
         if command in self.results:
             return self.results[command]
+        if command == _NIX_BINARY_COMMAND:
+            path = _NIX_BINARY_PATH
+            if self._run(f"test -e {path}").exit_status == 0:
+                return ssh.CommandResult(0, "present\n")
+            while path != "/":
+                path = path.rpartition("/")[0] or "/"
+                if self._run(f"test -x {path}").exit_status == 0:
+                    return ssh.CommandResult(0, "missing\n")
+                if self._run(f"test -e {path}").exit_status == 0:
+                    return ssh.CommandResult(0, "unreadable\n")
+            return ssh.CommandResult(0, "missing\n")
         if (standing := self._standing_command(command)) is not None:
             return standing
         if command == PACKAGE_NAMES_QUERY:
