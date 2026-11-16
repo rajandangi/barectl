@@ -370,7 +370,7 @@
     "disposable/wordpress_testing.py": "0c45819ec8595cebfea317045309a11135ef94b5d6fd30e22a97bd6590f09249",
     "docker/disposable-server/Dockerfile": "e460664041c8f6a01c38a545af7eea5640e5d8e18c96777331036bb0a6076870",
     "docker/disposable-server/build.sh": "afb538f4ab2a802fbe42fa5f3b9ebe7c9a2758c1df961ddfc4c0e3f5e091365d",
-    "docker/disposable-server/cloud-image.json": "dadce2fbdff25bc71c9f92c74a359ef633fe8f0b4ccabe9e77e4a7febe2f1024",
+    "docker/disposable-server/cloud-image.json": "55e7c27525b1e5a1129ef71795f3e5d230f747f96e0b7c8fc695b6bb906edc8a",
     "docker/disposable-server/fixture.Dockerfile": "3730dfe5b862cc3d6f8f1933ae975d7a5bfd9d03e9774e7222b21a72dce9ebf0",
     "docker/disposable-server/fixtures/laravel-app/.env.example": "cc816d67d5b55939f8f282b56d46445c148fc96262eb6eb19ff8ae9d437676da",
     "docker/disposable-server/fixtures/laravel-app/README.md": "1ed7f729d514ddbddaac5944a07298c3c896099ae3cab8667030145cf8ff0e47",

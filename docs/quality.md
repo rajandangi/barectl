@@ -216,11 +216,11 @@ job prints one `BREADTH_MEMORY` line per class and copies it into the run summar
 ### The cloud-image VM lane
 
 `Native VM` (`.github/workflows/native-vm.yml`) runs weekly and on dispatch. It boots the
-official Ubuntu 26.04 cloud image, pinned by SHA-256 and size in
-`docker/disposable-server/cloud-image.json`, under QEMU and drives it over SSH with the same
-`BARECTL_SSH_TEST_*` contract the native scenarios use. It is the only lane with a real
-kernel reboot and real cloud-image defaults; a container shares its host's kernel, so its
-boot ID cannot change. The image is fetched into
+official Ubuntu 26.04 cloud image, pinned to a dated Ubuntu image directory by URL, SHA-256
+and size in `docker/disposable-server/cloud-image.json`. It boots the image under QEMU and
+drives it over SSH with the same `BARECTL_SSH_TEST_*` contract the native scenarios use.
+It is the only lane with a real kernel reboot and real cloud-image defaults; a container
+shares its host's kernel, so its boot ID cannot change. The image is fetched into
 `~/.cache/barectl/native/cloud-images` and verified before use.
 
 The guest is real but isolated. A NoCloud seed served from the host installs the lane's
