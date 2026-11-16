@@ -46,6 +46,17 @@ Rules a review applies to a diff. `AGENTS.md` keeps the architectural boundaries
 
 Comment only business logic the code cannot make clear. Do not restate what code does, narrate steps or repeat names. Business rules belong in `docs/adr/` and the other Markdown docs; a necessary comment points to the owning document instead of explaining the rule again. See [code comments](docs/quality.md#code-comments).
 
+## Python style
+
+Barectl applies these rules from the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html), not the whole guide; Ruff and mypy enforce the rest of what the guide asks. Cite the section in a finding.
+
+- Keep a `try` block to the call that can raise ([§2.4](https://google.github.io/styleguide/pyguide.html#24-exceptions)). A wide block can swallow an unexpected error or report it as the wrong `Result`.
+- Avoid power features: metaclasses, `getattr` reflection, monkey-patching and import hooks ([§2.19](https://google.github.io/styleguide/pyguide.html#219-power-features)).
+- Keep module-level state immutable ([§2.5](https://google.github.io/styleguide/pyguide.html#25-mutable-global-state)); web and `db_worker` processes import the same modules.
+- Use a property only for cheap, obvious access ([§2.13](https://google.github.io/styleguide/pyguide.html#213-properties)). A property never runs SSH, a database query or other I/O.
+- Prefer functions under about 40 lines ([§3.18](https://google.github.io/styleguide/pyguide.html#318-function-length)). This is a review prompt, not a limit.
+- A docstring, when [code comments](#code-comments) call for one, uses the Google layout: a summary, then `Args:`, `Returns:` and `Raises:` sections as needed ([§3.8](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)). Ruff checks the layout; it does not require docstrings, and a summary may wrap or be a bare pointer to the owning document.
+
 ## Public documentation
 
 Keep personal filesystem paths, private project names, internal source references and proprietary implementation details out of the repository. Describe approved design choices as Barectl requirements. Preserve required third-party license notices and public repository identifiers.

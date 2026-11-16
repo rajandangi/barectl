@@ -1,9 +1,9 @@
-"""Generate, check and watch the runtime catalog lock with Nix.
+r"""Generate, check and watch the runtime catalog lock with Nix.
 
 docs/quality.md#runtime-catalog-lock. Runs only where Nix is installed (CI); the
 application reads the committed lock through :mod:`runtimes.catalog`.
 
-    python -m runtimes.lock_generation generate | check | drift | freshness \\
+    python -m runtimes.lock_generation generate | check | drift | freshness \
         | realise <architecture> | installer <architecture>
 """
 
@@ -319,7 +319,8 @@ def drift(catalog: Catalog) -> list[str]:
 
 def freshness(pins: Pins, lock: Catalog, fetch: Callable[[str], str]) -> str:
     """The lock's age against the pinned channel's head, from channel and commit
-    metadata only; refused when the lock falls behind by more than the limit."""
+    metadata only; refused when the lock falls behind by more than the limit.
+    """
     head = _fetched(f"{CHANNELS}/{pins.channel}/git-revision", fetch).strip()
     if _COMMIT.fullmatch(head) is None:
         raise GenerationError(f"The {pins.channel} channel did not name a revision.")
@@ -372,7 +373,8 @@ def realise(
     now: Callable[[], float],
 ) -> str:
     """One line per offered build plus totals, after realising the catalog the way a
-    server does: ``nix-store --realise`` with ``max-jobs = 0``, so nothing is built."""
+    server does: ``nix-store --realise`` with ``max-jobs = 0``, so nothing is built.
+    """
     builds = catalog.offered(architecture)
     paths = [b.path for b in builds]
     started = now()
@@ -481,7 +483,8 @@ def trusted_installer(
     published: Callable[[str], str],
 ) -> Installer:
     """The lock's Nix installer, once its digest is the base lock's or, for a new Nix
-    release, the one ``published`` returns from the release's ``.sha256`` URL."""
+    release, the one ``published`` returns from the release's ``.sha256`` URL.
+    """
     installer = lock.installer(architecture)
     before = base.installer(architecture) if base is not None else None
     if before is not None and before.version == installer.version:

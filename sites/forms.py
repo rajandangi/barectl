@@ -141,7 +141,8 @@ class HttpSiteForm(forms.Form):
 
 def _derive_identifier(domain: str) -> str:
     """The identifier the create form derives from the primary domain and lets the operator
-    edit under More options (the same rule as ``frontend/site-identifier.ts``)."""
+    edit under More options (the same rule as ``frontend/site-identifier.ts``).
+    """
     value = domain.lower().removeprefix("www.").split(".")[0]
     value = re.sub(r"[^a-z0-9]", "", value)[:24]
     if value and not value[0].isalpha():

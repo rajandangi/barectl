@@ -197,7 +197,8 @@ class TwoControllerNativeLock(ScenarioTestCase):
 
     def record_refused_run(self, unit: str) -> None:
         """The server and the refused run's native evidence, as the losing controller reads them
-        after the race."""
+        after the race.
+        """
         from contract.version import VERSION
         from discovery.observations import collect
         from operations import engine, native

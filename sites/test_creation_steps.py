@@ -1,5 +1,6 @@
 """Create site's Step 1: a missing runtime or database engine is installed first
-(docs/sites.md#step-1-a-missing-runtime-or-database-engine)."""
+(docs/sites.md#step-1-a-missing-runtime-or-database-engine).
+"""
 
 from typing import override
 from unittest import mock

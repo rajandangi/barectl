@@ -41,7 +41,8 @@ CLEANUP_BATCH: Final = CLEANUP_CEILING + 10
 
 class Exit(IntEnum):
     """docs/adr/0006-use-native-bootstrap-execution.md#payload: the codes the lock probe
-    and the staged-body digest recheck return; the change engine uses :class:`Code`."""
+    and the staged-body digest recheck return; the change engine uses :class:`Code`.
+    """
 
     LOCK_CONFLICT = 10
     UNSAFE_LOCK = 11
@@ -51,7 +52,8 @@ class Exit(IntEnum):
 class Code(IntEnum):
     """docs/adr/0035-one-change-engine-with-effect-derived-consent.md: the change engine's
     whole exit contract. A payload reports one structured ``barectl-result`` journal line
-    and exits with one of these classes; kinds never add codes of their own."""
+    and exits with one of these classes; kinds never add codes of their own.
+    """
 
     SUCCESS = 0
     REFUSED = 1
@@ -97,7 +99,6 @@ def lock_steps(unsafe: str, conflict: str) -> list[str]:
     """docs/adr/0006-use-native-bootstrap-execution.md#payload: take the mutation lock on
     descriptor 9 without waiting, running ``unsafe`` or ``conflict`` when it cannot.
     """
-
     return [
         "export LC_ALL=C",
         f"d={LOCK_DIRECTORY}",
@@ -171,7 +172,8 @@ def parse_probe(text: str) -> ProbeEvidence:
 @dataclass(frozen=True)
 class Limits:
     """Native limits a reviewed action sets on its transient unit's processes, which every
-    child inherits (docs/adr/0006-use-native-bootstrap-execution.md#submission)."""
+    child inherits (docs/adr/0006-use-native-bootstrap-execution.md#submission).
+    """
 
     file_bytes: int
     memory_bytes: int
@@ -193,7 +195,6 @@ def staged(body: str) -> list[str]:
 
     The body must not end with a newline: command substitution would strip it.
     """
-
     raw = body.encode()
     if not raw or len(raw) > MAX_BODY or b"\0" in raw or body.endswith("\n"):
         raise ValueError("Not a valid staged body.")

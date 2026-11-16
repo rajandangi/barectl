@@ -1,5 +1,6 @@
 """docs/adr/0035-one-change-engine-with-effect-derived-consent.md: consent is derived from
-the effects a review declares, never chosen by the kind that declares them."""
+the effects a review declares, never chosen by the kind that declares them.
+"""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -75,7 +76,8 @@ CONSENT_PERMISSIONS: dict[Consent, tuple[str, ...]] = {
 def permissions_for(consent: Consent, *, writes_secrets: bool = False) -> tuple[str, ...]:
     """The permissions applying a review needs: its consent's, plus manage-secrets when
     the change writes a secret through the confidential input channel.
-    (docs/adr/0032-keep-secrets-in-private-native-files.md)"""
+    (docs/adr/0032-keep-secrets-in-private-native-files.md)
+    """
     permissions = CONSENT_PERMISSIONS[consent]
     return (*permissions, MANAGE_SECRETS) if writes_secrets else permissions
 

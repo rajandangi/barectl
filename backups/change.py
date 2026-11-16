@@ -852,7 +852,7 @@ def sites_read(identifier: str) -> str:
 
 
 def restic_time(at: str) -> str:
-    """restic's ``--time`` takes ``YYYY-MM-DD HH:MM:SS``; the result keeps RFC 3339."""
+    """Restic's ``--time`` takes ``YYYY-MM-DD HH:MM:SS``; the result keeps RFC 3339."""
     return at.replace("T", " ").removesuffix("+00:00")
 
 

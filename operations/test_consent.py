@@ -1,5 +1,6 @@
 """Consent is derived from declared effects, never chosen by a kind
-(docs/adr/0035-one-change-engine-with-effect-derived-consent.md)."""
+(docs/adr/0035-one-change-engine-with-effect-derived-consent.md).
+"""
 
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase

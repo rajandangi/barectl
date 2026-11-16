@@ -61,7 +61,8 @@ def _is_fragment_request(request: HttpRequest) -> bool:
 
 def creation_section(user: User | AnonymousUser) -> Literal["sites", "advanced"]:
     """Creation begins from Sites; an account that may not view site observations keeps the
-    Advanced copy of the form."""
+    Advanced copy of the form.
+    """
     return "sites" if user.has_perm(VIEW_SITES) else "advanced"
 
 
