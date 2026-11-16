@@ -412,7 +412,6 @@ def record_wordpress_sites(
     installed_php: bool = True,
 ) -> None:
     """A target host whose site can receive a Create WordPress site review."""
-
     sites = (
         ObservedSite(
             "shop",

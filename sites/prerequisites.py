@@ -144,7 +144,8 @@ def installable(choices: tuple[PhpChoice, ...]) -> tuple[tuple[str, int], ...]:
 
 def preselected(state: DiscoveryState, choices: tuple[PhpChoice, ...]) -> str:
     """The PHP version Create site preselects: the server default, else the newest
-    installed, else the newest offered (docs/dashboard-workflows.md)."""
+    installed, else the newest offered (docs/dashboard-workflows.md).
+    """
     snapshot = state.snapshot
     defaults = snapshot.collected.runtime_defaults if snapshot is not None else None
     installed = [choice.entry for choice in choices if choice.installed]

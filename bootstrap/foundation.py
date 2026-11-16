@@ -226,7 +226,8 @@ def supported_caddy(text: str) -> bool:
 
 def recognized_caddy(text: str) -> bool:
     """The recognized convention, including the earlier main configuration that turned
-    automatic HTTPS off, so Set up server can finish it (docs/tls.md)."""
+    automatic HTTPS off, so Set up server can finish it (docs/tls.md).
+    """
     servers = _caddy_servers(text)
     return servers is not None and all(_supported_server(server) for server in servers.values())
 

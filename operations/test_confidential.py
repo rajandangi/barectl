@@ -1,5 +1,6 @@
 """Sealing, opening and scrubbing for the confidential input channel
-(docs/adr/0032-keep-secrets-in-private-native-files.md)."""
+(docs/adr/0032-keep-secrets-in-private-native-files.md).
+"""
 
 import tempfile
 from pathlib import Path

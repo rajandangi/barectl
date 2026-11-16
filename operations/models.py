@@ -142,7 +142,8 @@ class RemoteOperation(models.Model):
 
 class Consent(models.TextChoices):
     """docs/adr/0035-one-change-engine-with-effect-derived-consent.md: what applying a
-    review needs. Derived from the declared effects, never chosen by a kind."""
+    review needs. Derived from the declared effects, never chosen by a kind.
+    """
 
     READ = "read", "Read"
     SITE = "site", "Site"
@@ -153,7 +154,8 @@ class Consent(models.TextChoices):
 class Result(models.TextChoices):
     """The change engine's one small outcome contract: a payload reports one structured
     result line in the journal and exits in one of these classes
-    (docs/adr/0035-one-change-engine-with-effect-derived-consent.md)."""
+    (docs/adr/0035-one-change-engine-with-effect-derived-consent.md).
+    """
 
     NOT_SUBMITTED = "not_submitted", "Not submitted"
     SUBMITTED = "submitted", "Submitted; not yet confirmed on the server"
@@ -265,7 +267,8 @@ class ChangePreparation(RemoteOperation):
 
 class ChangeReview(ChangeRecord):
     """One stored review: a typed core every change shares, plus the kind's versioned
-    document. A run references it; nothing copies it."""
+    document. A run references it; nothing copies it.
+    """
 
     preparation = models.OneToOneField(
         ChangePreparation,
@@ -358,7 +361,8 @@ class ChangeReview(ChangeRecord):
 class ChangeRun(RemoteOperation):
     """docs/adr/0035-one-change-engine-with-effect-derived-consent.md: a run refers to the
     one stored review it applies, and its protected reference keeps that review for the
-    run's audit."""
+    run's audit.
+    """
 
     KIND: ClassVar[str] = RemoteOperation.Kind.CHANGE_APPLY
 

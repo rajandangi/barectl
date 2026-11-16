@@ -1,5 +1,6 @@
 """The confirm screen and the run page in a browser: plain words by default, the full
-record under Show details and Logs, and keyboard-only confirmation (#179, #364)."""
+record under Show details and Logs, and keyboard-only confirmation (#179, #364).
+"""
 
 import tempfile
 from datetime import timedelta

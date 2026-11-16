@@ -54,7 +54,8 @@ def _site_file(site: ObservedSite) -> RecognizedFile:
 
 def site_pools(collected: CollectedSnapshot) -> tuple[RecognizedFile, ...]:
     """The reader checks a pool only after the site's account, layout and commands, so a
-    site stopped by another finding leaves its pool unconfirmed."""
+    site stopped by another finding leaves its pool unconfirmed.
+    """
     return tuple(_site_pool(site) for site in target_sites(collected) if site.php_version)
 
 

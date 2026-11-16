@@ -269,7 +269,8 @@ CLOSURE_UNREADABLE = (
 @dataclass(frozen=True)
 class ReviewDraft:
     """A review before it is stored: what the kind read, what it proposes and what it
-    declares. Consent is not among the fields; the engine derives it from ``effects``."""
+    declares. Consent is not among the fields; the engine derives it from ``effects``.
+    """
 
     kind: str
     intent: str
@@ -323,7 +324,8 @@ class NativeBody:
 class ChangeKind:
     """A kind of change behind the engine's four-member seam: an inspection of current
     evidence, a pure review of it, the native body that runs under the mutation lock once
-    the engine has admitted the review, and the verification of its postconditions."""
+    the engine has admitted the review, and the verification of its postconditions.
+    """
 
     slug: str
     label: str
@@ -994,7 +996,8 @@ def _authorized(user: User | None, review: ChangeReview) -> bool:
 
 def _root(shell: RemoteShell) -> bool | None:
     """Whether the connection is root: ``True`` for root, ``False`` for a sudo user,
-    ``None`` when the user cannot be read."""
+    ``None`` when the user cannot be read.
+    """
     root = native.is_root(shell)
     if root is None:
         raise OperationRefused(UNREADABLE_FAILURE)
@@ -1400,7 +1403,7 @@ def _reconcile_unreadable(run: ChangeRun, stage: str) -> None:
 
 
 def _conclude_rejected(run: ChangeRun) -> None:
-    """systemd refused the submission and created no unit: nothing ran."""
+    """Systemd refused the submission and created no unit: nothing ran."""
     with transaction.atomic():
         if lifecycle.finish(run.pk, Status.RUNNING, succeeded=False, failure=REJECTED_FAILURE):
             ChangeRun.objects.filter(pk=run.pk).update(
@@ -1588,7 +1591,8 @@ def _refresh_discovery(run: ChangeRun) -> None:
 
 def _check(run: ChangeRun) -> None:
     """Establish a reconciling run's outcome from native evidence, and close it as
-    outcome unknown only with the proofs of ``_close_unknown``."""
+    outcome unknown only with the proofs of ``_close_unknown``.
+    """
     revision = run.revision
     closing = run.closure_requested_at
     review = run.review
@@ -1688,7 +1692,8 @@ def _check_missing(
     closing: bool,
 ) -> None:
     """The unit is gone: its journal's result line settles the outcome, and an
-    acknowledgement may close it as unknown once the proofs hold."""
+    acknowledgement may close it as unknown once the proofs hold.
+    """
     journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
     if _missing_journal(shell, run, kind, journal, revision, closing):
         return

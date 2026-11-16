@@ -1,5 +1,6 @@
 """The change engine's pages: prepare, review, apply, check and close
-(docs/adr/0035-one-change-engine-with-effect-derived-consent.md)."""
+(docs/adr/0035-one-change-engine-with-effect-derived-consent.md).
+"""
 
 import json
 from dataclasses import replace

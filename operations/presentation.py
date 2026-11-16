@@ -1,6 +1,7 @@
 """Templates receive view dataclasses and never read stored states or decide themselves
 whether a review is eligible or expired, what a run's result established, or what consent
-applying needs."""
+applying needs.
+"""
 
 import re
 from collections.abc import Mapping

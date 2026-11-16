@@ -1,5 +1,6 @@
 """The change engine's application services: what views call and what the worker runs
-(docs/adr/0035-one-change-engine-with-effect-derived-consent.md)."""
+(docs/adr/0035-one-change-engine-with-effect-derived-consent.md).
+"""
 
 from collections.abc import Mapping
 from dataclasses import dataclass

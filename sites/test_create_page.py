@@ -1,5 +1,6 @@
 """Journey 3: create a site from one page, with Add runtime first when PHP is missing
-(docs/dashboard-workflows.md, docs/sites.md#creating-a-site)."""
+(docs/dashboard-workflows.md, docs/sites.md#creating-a-site).
+"""
 
 import re
 from dataclasses import replace

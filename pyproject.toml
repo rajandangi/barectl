@@ -38,10 +38,17 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
-    "A", "ANN", "ASYNC", "B", "C4", "C90", "DJ", "DTZ", "E", "EXE", "F",
+    "A", "ANN", "ASYNC", "B", "C4", "C90", "D", "DJ", "DTZ", "E", "EXE", "F",
     "FA", "FURB", "G", "I", "ICN", "INP", "ISC", "LOG", "PERF", "PIE",
     "PLE", "PLW", "RET", "RUF", "S", "SIM", "T10", "T20", "UP", "YTT",
 ]
+
+# Docstring layout only (#560): the comment policy decides whether a docstring is needed (D1),
+# and summaries may wrap or be a bare docs/ pointer (D205, D415).
+ignore = ["D1", "D205", "D415"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -51,6 +58,11 @@ max-complexity = 10
 ".ai/cli.py" = ["INP001", "T201"]
 # Django generates class-level migration lists; preserve that framework format.
 "**/migrations/*.py" = ["RUF012"]
+# Payloads embed these sources byte for byte, so a docstring edit changes recorded commands
+# (docs/quality.md#recorded-transcripts).
+"**/bodies/*.py" = ["D"]
+"databases/packages.py" = ["D"]
+"wordpress/convention.py" = ["D"]
 # The eval runner is a command-line entry point; its output is the operator's report.
 ".ai/evals/runner.py" = ["T201"]
 

@@ -47,7 +47,8 @@ class ShownCatalog:
 
 def shown_catalog(*, checked: bool, machine: str | None) -> ShownCatalog:
     """What this Barectl release offers a server whose ``uname -m`` reported ``machine``;
-    ``checked`` is whether any connection check has published an observation."""
+    ``checked`` is whether any connection check has published an observation.
+    """
     catalog = load()
     if not machine:
         return ShownCatalog(
