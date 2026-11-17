@@ -283,13 +283,16 @@ def read_refresh(operation_id: int, *, user: User) -> RefreshStatus:
     if operation.status == RemoteOperation.Status.SUCCEEDED:
         snapshot = basic_snapshot_of(attempt, connection_current=connection_current)
         snapshot_availability = "retained" if snapshot is not None else "replaced"
-    code = (
-        "failed"
-        if operation.status == RemoteOperation.Status.FAILED
-        else "succeeded"
-        if operation.status == RemoteOperation.Status.SUCCEEDED
-        else "in_progress"
-    )
+    if operation.status == RemoteOperation.Status.FAILED:
+        code = (
+            "stale_connection"
+            if operation.failure == "The saved connection changed; request a new check."
+            else "failed"
+        )
+    elif operation.status == RemoteOperation.Status.SUCCEEDED:
+        code = "succeeded"
+    else:
+        code = "in_progress"
     return {
         "version": 1,
         "code": code,
@@ -313,9 +316,13 @@ def read_refresh(operation_id: int, *, user: User) -> RefreshStatus:
         },
         "snapshot": snapshot,
         "snapshot_availability": snapshot_availability,
-        "message": "The refresh failed. Check the dashboard for details."
-        if code == "failed"
-        else None,
+        "message": (
+            "The saved connection changed; request a new check."
+            if code == "stale_connection"
+            else "The refresh failed. Check the dashboard for details."
+            if code == "failed"
+            else None
+        ),
     }
 
 

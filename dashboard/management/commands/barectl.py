@@ -12,6 +12,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from discovery.services import RefreshNotFound, RefreshStatus, read_refresh, request_refresh
+from operations.lifecycle import OperationRefused
 
 
 class Command(BaseCommand):
@@ -111,15 +112,19 @@ class Command(BaseCommand):
             payload = read_refresh(operation_id, user=user)
         return payload
 
-    @override
-    def handle(self, *args: object, **options: object) -> None:
-        machine = options["json"] is True
+    def _timeout(self, options: dict[str, object], machine: bool) -> int:
         timeout_option = options["timeout"]
         if timeout_option is not None and options["wait"] is not True:
             self._fail(machine, "invalid_input", "--timeout requires --wait.", 2)
         timeout = 120 if timeout_option is None else timeout_option
         if not isinstance(timeout, int) or timeout <= 0 or timeout > 600:
             self._fail(machine, "invalid_input", "Timeout must be between 1 and 600 seconds.", 2)
+        return timeout
+
+    @override
+    def handle(self, *args: object, **options: object) -> None:
+        machine = options["json"] is True
+        timeout = self._timeout(options, machine)
         user = self._actor(options, machine)
 
         operation_id: int | None = None
@@ -128,6 +133,8 @@ class Command(BaseCommand):
             payload = self._poll(operation_id, user, options["wait"] is True, timeout)
         except RefreshNotFound:
             self._fail(machine, "not_found", "Server or refresh operation was not found.", 4)
+        except OperationRefused:
+            self._fail(machine, "stale_connection", "The connection changed; reload and retry.", 6)
         except PermissionDenied:
             self._fail(
                 machine,
@@ -152,7 +159,7 @@ class Command(BaseCommand):
         else:
             status = payload["operation"]["status"]
             self.stdout.write(f"Operation {operation_id}: {payload['code']} ({status})")
-        if payload["code"] == "failed":
+        if payload["code"] in ("failed", "stale_connection"):
             raise CommandError("Refresh failed.", returncode=6)
         if payload["code"] == "client_timeout":
             raise CommandError("Wait timed out; the operation continues.", returncode=7)
