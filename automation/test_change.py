@@ -6,8 +6,10 @@ import hashlib
 import html
 import io
 import json
+import os
 import pathlib
 import subprocess
+import tempfile
 from contextlib import ExitStack, redirect_stdout
 from types import SimpleNamespace
 from unittest import mock
@@ -499,9 +501,10 @@ class RecoveryTests(SimpleTestCase):
             self.fail("The interrupted cron change has no recovery action.")
         self.assertEqual(action.label, "Try again")
         self.assertEqual(action.kind, "again")
-        self.assertIn('method="post" action="' + action.url + '"', page)
+        self.assertEqual(action.url, "/changes/1/again/")
+        self.assertIn('method="post" action="/changes/1/again/"', page)
         self.assertIn('<button type="submit" class="usa-button">Try again</button>', page)
-        self.assertIn('<h2 id="run-status-heading">' + view.plain.result + "</h2>", page)
+        self.assertIn('<h2 id="run-status-heading">Stopped</h2>', page)
         self.assertIn(run.failure, html.unescape(page))
         self.assertIn("This stopped after", page)
         return emitted.result_class + ":" + emitted.reason, html.unescape(page)
@@ -613,6 +616,62 @@ class RecoveryTests(SimpleTestCase):
                     body.main(document)
                 self.assertEqual(publication.call_count, 1 if failure_at == "later" else 0)
                 self.assertIn(f'"class":"{expected_class}"', output.getvalue())
+
+    def test_first_existing_unit_changed_during_staging_refuses_without_replacement(self) -> None:
+        before = "reviewed private configuration"
+        existing = "reviewed slice unit\n"
+        draft = change.review(evidence(), ON)
+        document = {
+            **draft.document,
+            "configuration_digest": hashlib.sha256(before.encode()).hexdigest(),
+            "units": {
+                "slice": convention.digest(existing),
+                "service": "absent",
+                "timer": "absent",
+            },
+        }
+        output = io.StringIO()
+        reads: list[str] = []
+        staged: list[pathlib.Path] = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            slice_path = pathlib.Path(directory) / convention.slice_name("shop")
+            slice_path.write_text(existing)
+
+            def racing_read(path: pathlib.Path) -> str:
+                self.assertEqual(path, slice_path)
+                reads.append(path.read_text())
+                if len(reads) == 1:
+                    return existing
+                candidates = list(path.parent.glob(".*.stage"))
+                self.assertEqual(len(candidates), 1)
+                staged.extend(candidates)
+                self.assertEqual(candidates[0].read_text(), convention.render_slice("shop"))
+                return "changed during staging"
+
+            with (
+                mock.patch.object(body, "open_site_lock", return_value=3),
+                mock.patch.object(body, "_read_configuration", return_value=before),
+                mock.patch.object(body, "_preflight", return_value=True),
+                mock.patch.object(body, "private_configuration_problem", return_value=False),
+                mock.patch.object(body, "unit_digests", return_value=document["units"]),
+                mock.patch.object(units, "_path", side_effect=lambda *_args: str(slice_path)),
+                mock.patch.object(units, "safe", return_value=True),
+                mock.patch.object(common, "safe", return_value=True),
+                mock.patch.object(common, "current_bytes", side_effect=racing_read),
+                mock.patch.object(os, "replace") as replace,
+                mock.patch("os.close"),
+                redirect_stdout(output),
+            ):
+                body.main(document)
+
+            self.assertEqual(reads, [existing, existing])
+            replace.assert_not_called()
+            self.assertEqual(slice_path.read_text(), existing)
+            self.assertEqual(len(staged), 1)
+            self.assertFalse(staged[0].exists())
+            self.assertEqual(list(slice_path.parent.glob(".*.stage")), [])
+        self.assertIn('"class":"refused","reason":"automation"', output.getvalue())
 
 
 class BodyPayloadTests(SimpleTestCase):
