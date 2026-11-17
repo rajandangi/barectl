@@ -94,7 +94,8 @@ def assert_access_failure(
         test.assertTrue(
             stopped_step, "The caller must name the independently expected stopped step."
         )
-        sentence = f"This stopped after {stopped_step.lower()}. Nothing after it ran."
+        caption = f"This stopped after {stopped_step.lower()}. Nothing after it ran."
+        sentence = f"{caption} The requested change stopped."
         test.assertEqual(view.plain.sentence, sentence)
         test.assertIn(f"<p>{sentence}</p>", page)
         test.assertNotIn("Nothing changed", page)

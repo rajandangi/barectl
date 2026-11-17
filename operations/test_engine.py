@@ -294,6 +294,7 @@ class AccessRecoveryContractTests(SimpleTestCase):
                 "This stopped after checking key sign-in.",
                 "This finished successfully.",
             ),
+            (Window.PUT_BACK, " The requested change stopped.", ""),
             (Window.PUT_BACK, 'action="/changes/1/again/"', 'action="/changes/2/again/"'),
         ):
             with self.subTest(window=window, old=old):
