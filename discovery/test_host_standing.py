@@ -39,6 +39,88 @@ class NixBinaryProbeTests(TestCase):
                 self.assertIsNone(standing._nix_shape(shell))
 
 
+class PanelBatchTests(TestCase):
+    def test_collection_uses_one_panel_read_and_reports_present_paths(self) -> None:
+        from .fakes import FakeServer
+
+        shell = FakeServer()
+        shell.files["/usr/local/cpanel"] = ""
+        judgment = collect(shell, sites=False).standing
+        panel_reads = [command for command in shell.commands if command == standing._PANEL_COMMAND]
+        self.assertEqual(len(panel_reads), 1)
+        if judgment is None:
+            self.fail("Collection did not produce host standing.")
+        self.assertEqual(dict(judgment.evidence)["Hosting panel paths"], "/usr/local/cpanel")
+
+    def test_failed_or_invalid_batch_keeps_panel_evidence_unknown(self) -> None:
+        from .fakes import FakeServer
+
+        valid = "missing\n" * len(standing._PANEL_PATHS)
+        for result in (
+            CommandResult(1, valid),
+            CommandResult(0, valid, truncated=True),
+            CommandResult(0, ""),
+            CommandResult(0, valid + "missing\n"),
+            CommandResult(0, "missing\n" * (len(standing._PANEL_PATHS) - 1)),
+            CommandResult(0, valid.replace("missing", "invalid", 1)),
+        ):
+            with self.subTest(result=result):
+                shell = FakeServer()
+                shell.results[standing._PANEL_COMMAND] = result
+                judgment = collect(shell, sites=False).standing
+                if judgment is None:
+                    self.fail("Collection did not produce host standing.")
+                self.assertEqual(
+                    dict(judgment.evidence)["Hosting panel paths"], "Could not be read"
+                )
+
+    def test_malformed_line_framing_keeps_entire_batch_unknown(self) -> None:
+        from .fakes import FakeServer
+
+        valid = "present\n" + "missing\n" * (len(standing._PANEL_PATHS) - 1)
+        for reply in (
+            valid.removesuffix("\n"),
+            valid.replace("\n", "\r\n"),
+            valid.replace("\n", "\r"),
+            valid.replace("\n", "\v"),
+        ):
+            with self.subTest(reply=reply):
+                shell = FakeServer()
+                shell.results[standing._PANEL_COMMAND] = CommandResult(0, reply)
+                judgment = collect(shell, sites=False).standing
+                if judgment is None:
+                    self.fail("Collection did not produce host standing.")
+                self.assertEqual(
+                    dict(judgment.evidence)["Hosting panel paths"], "Could not be read"
+                )
+
+    def test_valid_mixed_reply_retains_present_missing_and_hidden_meanings(self) -> None:
+        from .fakes import FakeServer
+
+        shell = FakeServer()
+        shell.files["/usr/local/cpanel"] = ""
+        shell.files["/www/server"] = ""
+        shell.unsearchable.add("/www")
+        judgment = collect(shell, sites=False).standing
+        if judgment is None:
+            self.fail("Collection did not produce host standing.")
+        self.assertEqual(dict(judgment.evidence)["Hosting panel paths"], "/usr/local/cpanel")
+        self.assertIn("Hosting panel paths are present: /usr/local/cpanel.", judgment.reasons)
+        self.assertEqual(sum(command == standing._PANEL_COMMAND for command in shell.commands), 1)
+
+    def test_hidden_panel_path_does_not_prove_panels_absent(self) -> None:
+        from .fakes import FakeServer
+
+        shell = FakeServer()
+        shell.files["/www/server"] = ""
+        shell.unsearchable.add("/www")
+        judgment = collect(shell, sites=False).standing
+        if judgment is None:
+            self.fail("Collection did not produce host standing.")
+        self.assertEqual(dict(judgment.evidence)["Hosting panel paths"], "Could not be read")
+        self.assertIn("Hosting panel paths could not be inspected.", judgment.reasons)
+
+
 class RequiredToolsTests(TestCase):
     def test_the_fixed_shell_read_preserves_lookup_classifications(self) -> None:
         script = (
