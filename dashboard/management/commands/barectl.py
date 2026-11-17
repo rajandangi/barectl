@@ -4,51 +4,88 @@ import getpass
 import json
 import sys
 import time
-from typing import Literal, NoReturn, override
+from argparse import Namespace
+from collections.abc import Iterable
+from typing import Literal, NoReturn, TypeVar, overload, override
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
-from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.core.management.base import (
+    BaseCommand,
+    CommandError,
+    CommandParser,
+    OutputWrapper,
+)
 
 from discovery.services import RefreshNotFound, RefreshStatus, read_refresh, request_refresh
 from operations.lifecycle import OperationRefused
+
+_Namespace = TypeVar("_Namespace")
+
+
+class RefreshCommandParser(CommandParser):
+    output: OutputWrapper | None = None
+
+    @overload
+    def parse_args(
+        self, args: Iterable[str] | None = None, namespace: None = None
+    ) -> Namespace: ...
+
+    @overload
+    def parse_args(self, args: Iterable[str] | None, namespace: _Namespace) -> _Namespace: ...
+
+    @overload
+    def parse_args(self, *, namespace: _Namespace) -> _Namespace: ...
+
+    @override
+    def parse_args(
+        self, args: Iterable[str] | None = None, namespace: _Namespace | None = None
+    ) -> _Namespace | Namespace:
+        words = list(args) if args is not None else None
+        try:
+            return super().parse_args(words, namespace)
+        except (CommandError, SystemExit) as error:
+            if (
+                self.output is not None
+                and words is not None
+                and "--json" in words
+                and not (isinstance(error, SystemExit) and error.code == 0)
+            ):
+                self.output.write(
+                    json.dumps(
+                        {
+                            "version": 1,
+                            "code": "invalid_input",
+                            "message": "Invalid command arguments.",
+                            "operation_id": None,
+                        }
+                    )
+                )
+            if isinstance(error, CommandError):
+                raise CommandError(str(error), returncode=2) from error
+            raise
 
 
 class Command(BaseCommand):
     help = "Refresh a server or read a refresh operation on this controller."
     # Django's own startup diagnostics run outside the versioned command envelope.
     requires_system_checks: list[str] | tuple[str, ...] | Literal["__all__"] = ()
+    _called_from_command_line = False
 
     @override
     def create_parser(self, prog_name: str, subcommand: str, **kwargs: object) -> CommandParser:
-        parser = super().create_parser(prog_name, subcommand, **kwargs)
-        parse_args = parser.parse_args
-
-        def parse_refresh_args(args: list[str] | None = None, namespace: object = None) -> object:
-            try:
-                return parse_args(args, namespace)
-            except (CommandError, SystemExit) as error:
-                if (
-                    args is not None
-                    and "--json" in args
-                    and not (isinstance(error, SystemExit) and error.code == 0)
-                ):
-                    self.stdout.write(
-                        json.dumps(
-                            {
-                                "version": 1,
-                                "code": "invalid_input",
-                                "message": "Invalid command arguments.",
-                                "operation_id": None,
-                            }
-                        )
-                    )
-                if isinstance(error, CommandError):
-                    raise CommandError(str(error), returncode=2) from error
-                raise
-
-        parser.parse_args = parse_refresh_args  # type: ignore[assignment]
+        # Django constructs CommandParser directly; argparse parents preserve its options.
+        base_parser = super().create_parser(prog_name, subcommand, **kwargs)
+        parser = RefreshCommandParser(
+            parents=[base_parser],
+            add_help=False,
+            prog=base_parser.prog,
+            description=base_parser.description,
+            formatter_class=base_parser.formatter_class,
+            called_from_command_line=self._called_from_command_line,
+        )
+        parser.output = self.stdout
         return parser
 
     @override

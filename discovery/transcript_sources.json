@@ -236,7 +236,7 @@
     "dashboard/forms.py": "cb020afdaeba8be7521ebf0ffd3eedda253a73d389e352e8e4458010f74b356d",
     "dashboard/management/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "dashboard/management/commands/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "dashboard/management/commands/barectl.py": "d905d8921177086666ebe1721359924b0cb012ed8c0f9d2b095b8344dfe2be9d",
+    "dashboard/management/commands/barectl.py": "66fe37bae31b8098e659d08d45b15bdf8060f2129009911c96fa8c8dc7927ace",
     "dashboard/management/commands/barectl_upgrade.py": "fb74aabb87331d616d6a5b462e374225cfb4f13ae0bade25fd7e7d65b280bdca",
     "dashboard/middleware.py": "0745f12b2ea4c8545c66ce74414ca64ddc9209df317d3db800832cedd285b9e6",
     "dashboard/settings_views.py": "0f44f85baa331252be7038e2ec34bf886cce682a776a5b8393725b9d2a415eda",

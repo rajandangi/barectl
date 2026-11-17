@@ -2,6 +2,7 @@
 
 import io
 import json
+from contextlib import redirect_stdout
 from typing import cast, override
 from unittest import mock
 
@@ -69,6 +70,21 @@ class RefreshCommandTests(DiscoveryTestCase):
                     parser.parse_args(["server", *words, "--json"])
                 self.assertEqual(caught.exception.returncode, 2)
                 self.assertEqual(json.loads(output.getvalue())["code"], "invalid_input")
+                self.assertEqual(output.getvalue().count("\n"), 1)
+
+        output = io.StringIO()
+        command = Command()
+        command.stdout = OutputWrapper(output)
+        parser = command.create_parser("manage.py", "barectl")
+        with self.assertRaises(CommandError):
+            parser.parse_args(["server", "refresh", "nope", "--username", "operator"])
+        self.assertEqual(output.getvalue(), "")
+        help_output = io.StringIO()
+        with redirect_stdout(help_output), self.assertRaises(SystemExit) as help_caught:
+            parser.parse_args(["server", "refresh", "--help", "--json"])
+        self.assertEqual(help_caught.exception.code, 0)
+        self.assertIn("usage:", help_output.getvalue())
+        self.assertEqual(output.getvalue(), "")
 
     def test_id_validation_and_timeout_bounds(self) -> None:
         common = ("--username", "operator", "--password-stdin", "--json")
@@ -259,6 +275,28 @@ class RefreshCommandTests(DiscoveryTestCase):
         serialized = json.dumps(result)
         self.assertNotIn("/etc/", serialized)
         self.assertNotIn("settings", serialized)
+
+    def test_status_keeps_retained_snapshot_historical_after_connection_change(self) -> None:
+        requested = self.command("refresh", str(self.server.pk))
+        self.run_worker()
+        operation = cast(dict[str, object], requested["operation"])
+        operation_id = cast(int, operation["id"])
+        current = self.command("refresh-status", str(operation_id))
+        current_snapshot = cast(dict[str, object], current["snapshot"])
+        self.assertTrue(current_snapshot["connection_current"])
+
+        self.server.connection_revision += 1
+        self.server.save(update_fields=["connection_revision"])
+        count = DiscoveryAttempt.objects.count()
+        remote_reads = len(self.remote.targets)
+        historical = self.command("refresh-status", str(operation_id))
+
+        self.assertEqual(historical["code"], "succeeded")
+        self.assertEqual(historical["snapshot_availability"], "retained")
+        self.assertEqual(historical["operation"], current["operation"])
+        self.assertEqual(historical["snapshot"], {**current_snapshot, "connection_current": False})
+        self.assertEqual(DiscoveryAttempt.objects.count(), count)
+        self.assertEqual(len(self.remote.targets), remote_reads)
 
     def test_status_does_not_queue_and_missing_id_is_private(self) -> None:
         with self.assertRaises(RefreshNotFound):
