@@ -23,12 +23,15 @@ deprecation window. A version enters the history when it is released, and an exi
 is never edited; a later shape change needs a new version and a new entry. Each section is one module registered in `contract/manifest.py`; a
 later area adds one module and one registry entry.
 
-The version-2 guard permits new names in `application.commands` at the same version. It
-keeps the released command list in `contract/test_contract.py` and hashes a candidate with
-only that list restored to its released value. The unchanged released version-2 digest
-anchors the historical list. A removed or changed command, or any change elsewhere in the
-manifest, still fails even if the pinned manifest and history file are regenerated. The
-owning-module versus pinned-manifest comparison remains exact.
+The version-2 guard permits reviewed new names in `application.commands` at the same
+version. `contract/test_contract.py` keeps the released command list and a separate
+append-only tuple of reviewed same-version additions, currently `barectl`. The candidate
+must contain exactly those command names before the guard hashes it with only the command
+list restored to the released value. Every later documented addition must be recorded in
+that tuple. The unchanged released version-2 digest anchors the historical list. A removed,
+renamed or retyped command, an unrecorded addition, or any change elsewhere in the manifest
+still fails even if the pinned manifest and history file are regenerated. The owning-module
+versus pinned-manifest comparison remains exact.
 
 ## Change policy
 

@@ -49,6 +49,34 @@ RELEASED_COMMANDS = (
     "showmigrations",
     "test",
 )
+# docs/contracts.md#change-policy
+PROMISED_VERSION_TWO_COMMAND_ADDITIONS = ("barectl",)
+
+
+def version_two_command_problems(built: dict[str, object]) -> list[str]:
+    """See docs/contracts.md#change-policy."""
+    application = built.get("application")
+    if not isinstance(application, dict):
+        return []
+    commands = application.get("commands")
+    if not isinstance(commands, list) or not all(type(name) is str for name in commands):
+        return []
+    promised = set(RELEASED_COMMANDS) | set(PROMISED_VERSION_TWO_COMMAND_ADDITIONS)
+    actual = set(commands)
+    missing = promised - actual
+    unrecorded = actual - promised
+    problems = []
+    if missing:
+        problems.append(
+            f"application.commands is missing promised names {sorted(missing)}. {HISTORY_NOTICE}"
+        )
+    if unrecorded:
+        problems.append(
+            "application.commands has unrecorded same-version additions "
+            f"{sorted(unrecorded)}; record reviewed additions in "
+            "PROMISED_VERSION_TWO_COMMAND_ADDITIONS."
+        )
+    return problems
 
 
 def shapes_digest(built: dict[str, object]) -> str:
@@ -66,7 +94,7 @@ def version_two_digest(built: dict[str, object]) -> str:
     commands = application.get("commands")
     if not isinstance(commands, list) or not all(type(name) is str for name in commands):
         return shapes_digest(built)
-    if len(commands) != len(set(commands)) or not set(RELEASED_COMMANDS) <= set(commands):
+    if len(commands) != len(set(commands)) or version_two_command_problems(built):
         return shapes_digest(built)
     normalized = {
         **built,
@@ -86,6 +114,8 @@ def history_problems(built: dict[str, object], history: dict[str, str], version:
             + HISTORY_NOTICE
         )
     recorded = history.get(str(version))
+    if version == 2:
+        problems.extend(version_two_command_problems(built))
     digest = version_two_digest(built) if version == 2 else shapes_digest(built)
     expected_digest = RELEASED_HISTORY["2"] if version == 2 else digest
     if recorded != expected_digest or digest != expected_digest:
@@ -194,18 +224,42 @@ class JournalRetentionContractTests(SimpleTestCase):
 
 
 class ManifestContractTest(SimpleTestCase):
-    def test_additive_command_keeps_released_version_two_digest(self) -> None:
+    def test_reviewed_addition_keeps_released_version_two_digest(self) -> None:
+        built = manifest()
+        application = cast(dict[str, object], built["application"])
+        self.assertIn("barectl", cast(list[str], application["commands"]))
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+
+        self.assertEqual(history_problems(built, history, VERSION), [])
+
+    def test_unrecorded_addition_needs_an_explicit_promise(self) -> None:
         built = deepcopy(manifest())
         application = cast(dict[str, object], built["application"])
         cast(list[str], application["commands"]).append("new_command")
         history = json.loads(HISTORY.read_text(encoding="utf-8"))
 
-        self.assertEqual(history_problems(built, history, VERSION), [])
+        problems = history_problems(built, history, VERSION)
+        self.assertIn("unrecorded same-version additions", " ".join(problems))
+        with patch(
+            "contract.test_contract.PROMISED_VERSION_TWO_COMMAND_ADDITIONS",
+            (*PROMISED_VERSION_TWO_COMMAND_ADDITIONS, "new_command"),
+        ):
+            self.assertEqual(history_problems(built, history, VERSION), [])
+
+    def test_removed_promised_addition_fails_after_pin_regeneration(self) -> None:
+        built = deepcopy(manifest())
+        application = cast(dict[str, object], built["application"])
+        cast(list[str], application["commands"]).remove("barectl")
+        regenerated_pin = deepcopy(built)
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+
+        self.assertEqual(differences(regenerated_pin, built), [])
+        self.assertIn("barectl", " ".join(history_problems(built, history, VERSION)))
 
     def test_changed_commands_and_native_shapes_cannot_reuse_version_two(self) -> None:
         released = manifest()
         history = json.loads(HISTORY.read_text(encoding="utf-8"))
-        for case in ("removed", "renamed", "retyped", "additive_and_native"):
+        for case in ("removed", "renamed", "retyped", "renamed_addition", "additive_and_native"):
             with self.subTest(case=case):
                 built = deepcopy(released)
                 application = cast(dict[str, object], built["application"])
@@ -216,6 +270,8 @@ class ManifestContractTest(SimpleTestCase):
                     commands[commands.index("check")] = "check_renamed"
                 elif case == "retyped":
                     cast(list[object], commands)[commands.index("check")] = 42
+                elif case == "renamed_addition":
+                    commands[commands.index("barectl")] = "barectl_renamed"
                 else:
                     commands.append("new_command")
                     results = cast(dict[str, object], built["results"])
@@ -232,16 +288,23 @@ class ManifestContractTest(SimpleTestCase):
         self.assertTrue(history_problems(built, history, VERSION))
 
     def test_changed_historical_commands_cannot_authorize_an_addition(self) -> None:
-        built = deepcopy(manifest())
-        application = cast(dict[str, object], built["application"])
-        cast(list[str], application["commands"]).append("new_command")
+        built = manifest()
         history = json.loads(HISTORY.read_text(encoding="utf-8"))
 
         with patch(
             "contract.test_contract.RELEASED_COMMANDS",
-            (*RELEASED_COMMANDS, "new_command"),
+            (*RELEASED_COMMANDS, "barectl"),
         ):
             self.assertTrue(history_problems(built, history, VERSION))
+
+    def test_changed_released_history_cannot_authorize_native_change(self) -> None:
+        built = deepcopy(manifest())
+        results = cast(dict[str, object], built["results"])
+        results["prefix"] = "changed "
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+        history["2"] = shapes_digest(built)
+
+        self.assertTrue(released_history_problems(history))
 
     def test_pinned_manifest_matches_the_owning_modules(self) -> None:
         pinned = json.loads(PINNED.read_text(encoding="utf-8"))
