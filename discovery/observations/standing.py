@@ -39,6 +39,20 @@ _PANEL_PATHS = (
     "/etc/runcloud",
     "/home/clp",
 )
+_PANEL_COMMAND = (
+    "panel_state() {\n"
+    "  path=$1\n"
+    '  if test -e "$path"; then printf "present\\n"; return; fi\n'
+    '  while [ "$path" != / ]; do\n'
+    '    path=${path%/*}; [ -n "$path" ] || path=/\n'
+    '    if test -x "$path"; then printf "missing\\n"; return; fi\n'
+    '    if test -e "$path"; then printf "unreadable\\n"; return; fi\n'
+    "  done\n"
+    '  printf "missing\\n"\n'
+    "}\n"
+    "for path in " + shlex.join(_PANEL_PATHS) + '; do panel_state "$path"; done'
+)
+_PANEL_STATES: dict[str, bool | None] = {"present": True, "missing": False, "unreadable": None}
 _LISTENERS = "ss -Hlnpt '( sport = :80 or sport = :443 )'"
 _NIX_BINARY_PATH = "/nix/var/nix/profiles/default/bin/nix"
 _NIX_BINARY_COMMAND = (
@@ -131,7 +145,7 @@ def collect_with_foundation(
     proxy_stacks = _haproxy_stacks(shell)
     stacks = (*_foreign_stacks(installed_packages), *(proxy_stacks or ()))
     listeners = _listeners(shell)
-    panel_states = tuple((path, _path_state(shell, path)) for path in _PANEL_PATHS)
+    panel_states = _panel_states(shell)
     panels = tuple(path for path, state in panel_states if state is True)
     nix_shape = _nix_shape(shell)
     nix_ids_free = _nix_ids_free(shell)
@@ -348,6 +362,21 @@ def _path_state(shell: RemoteShell, path: str) -> bool | None:
     if _test(shell, "-e", path):
         return True
     return False if _path_missing(shell, path) else None
+
+
+def _panel_states(shell: RemoteShell) -> tuple[tuple[str, bool | None], ...]:
+    result = shell.run(_PANEL_COMMAND)
+    states = result.stdout.splitlines()
+    if (
+        result.exit_status
+        or result.truncated
+        or len(states) != len(_PANEL_PATHS)
+        or any(state not in _PANEL_STATES for state in states)
+    ):
+        return tuple((path, None) for path in _PANEL_PATHS)
+    return tuple(
+        (path, _PANEL_STATES[state]) for path, state in zip(_PANEL_PATHS, states, strict=True)
+    )
 
 
 def _supported_nix(shell: RemoteShell) -> bool:

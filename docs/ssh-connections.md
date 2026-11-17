@@ -256,3 +256,9 @@ checks. These changes reduce SSH round trips without caching permissions or obse
 the [tool lookup](../notes/performance-installed-software.md) and
 [Nix binary](../notes/performance-nix-binary-probe.md) reports distinguish controlled
 benchmarks from registered-server measurements.
+
+The eleven fixed hosting-panel paths use one bounded read with the SSH user's own
+permissions. Each path is tested for existence first, then its ancestors for search
+permission and existence. An incomplete or invalid reply leaves all panel paths unknown;
+the [panel comparison](../notes/performance-panel-checks.md) records the measured read count
+and timings.

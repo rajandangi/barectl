@@ -49,7 +49,13 @@ from .observations import (
     collect,
 )
 from .observations.components import version_query
-from .observations.standing import _NIX_BINARY_COMMAND, _NIX_BINARY_PATH, _TOOLS_COMMAND
+from .observations.standing import (
+    _NIX_BINARY_COMMAND,
+    _NIX_BINARY_PATH,
+    _PANEL_COMMAND,
+    _PANEL_PATHS,
+    _TOOLS_COMMAND,
+)
 from .presentation import present
 from .recorded import ReplayShell, load
 from .root_read import read_command
@@ -244,6 +250,7 @@ READ_ONLY = re.compile(
     r"|\Atest -[ex] /nix(?:/[A-Za-z0-9._-]+)*\Z"
     r"|\Atest -[ex] /etc/nix(?:/[A-Za-z0-9._-]+)*\Z"
     rf"|\A{re.escape(_NIX_BINARY_COMMAND)}\Z"
+    rf"|\A{re.escape(_PANEL_COMMAND)}\Z"
     r"|\Atest -[ex] (/usr|/usr/local|/home|/www|/etc/systemd|/etc/systemd/system|"
     r"/etc/systemd/journald\.conf\.d|/etc/caddy|/etc/nix|/nix|/nix/var|/nix/var/nix|"
     r"/nix/var/nix/profiles|/nix/var/nix/profiles/default|/nix/var/nix/profiles/per-user|"
@@ -473,6 +480,8 @@ class FakeServer:
                 if self._run(f"test -e {path}").exit_status == 0:
                     return ssh.CommandResult(0, "unreadable\n")
             return ssh.CommandResult(0, "missing\n")
+        if command == _PANEL_COMMAND:
+            return self._panel_answer()
         if (standing := self._standing_command(command)) is not None:
             return standing
         if command == PACKAGE_NAMES_QUERY:
@@ -485,6 +494,25 @@ class FakeServer:
             status = 0 if result.exit_status in {0, 1} else result.exit_status
             return ssh.CommandResult(status, output, result.truncated)
         return None
+
+    def _panel_answer(self) -> ssh.CommandResult:
+        states: list[str] = []
+        for original in _PANEL_PATHS:
+            path = original
+            if self._run(f"test -e {path}").exit_status == 0:
+                states.append("present")
+                continue
+            while path != "/":
+                path = path.rpartition("/")[0] or "/"
+                if self._run(f"test -x {path}").exit_status == 0:
+                    states.append("missing")
+                    break
+                if self._run(f"test -e {path}").exit_status == 0:
+                    states.append("unreadable")
+                    break
+            else:
+                states.append("missing")
+        return ssh.CommandResult(0, "".join(f"{state}\n" for state in states))
 
     def _standing_command(self, command: str) -> ssh.CommandResult | None:
         if command == "getent group 30000":
