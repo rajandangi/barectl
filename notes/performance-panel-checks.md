@@ -18,28 +18,32 @@ reads inside collection.
 
 | Workload, median | Local old | Local new | 25 ms old | 25 ms new | Reads old → new |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Panel checks | 0.0659 s | 0.0026 s | 1.7048 s | 0.0737 s | 24 → 1 |
-| Software stage | 0.2933 s | 0.2431 s | 6.8297 s | 5.2305 s | 95 → 72 |
-| `collect(..., sites=False)` | 0.3084 s | 0.2585 s | 7.1988 s | 5.5856 s | 100 → 77 |
+| Panel checks | 0.0716 s | 0.0029 s | 1.7939 s | 0.0724 s | 24 → 1 |
+| Software stage | 0.3300 s | 0.2644 s | 6.8837 s | 5.4661 s | 95 → 72 |
+| `collect(..., sites=False)` | 0.3457 s | 0.2812 s | 7.2731 s | 5.8272 s | 100 → 77 |
 
-All eleven path classifications matched in every pair. Every noncapacity snapshot field
-and the standing, reasons, warnings, foundation, profiles, and noncapacity standing evidence
-also matched. Sequential memory and free-disk readings can change between arms, so only
-those capacity values were excluded from the equality assertion. On this pristine server,
-all panel paths were missing and the standing was Fresh host with no reasons or warnings.
+All eleven path classifications matched in every pair. Every snapshot field except
+`memory_bytes`, `filesystem`, and `standing` matched. All standing fields except `evidence`
+matched, as did all evidence entries except those named Free disk and Available memory.
+Those capacity observations were retained in the raw samples but excluded from equality
+because sequential native readings can vary. In one delayed pair, Available memory was
+13.7 GiB in the old arm and 13.8 GiB in the new arm; exact capacity equality is not claimed.
+On this pristine server, all panel paths were missing and the standing was Fresh host with
+no reasons or warnings.
 The times cover SSH collection, not worker progress writes or dashboard and CLI response time.
 
 The script and raw samples are in `/tmp/barectl-refresh-cli/panel_compare.py` and
 `/tmp/barectl-refresh-cli/panel-comparison.json`; the complete runner log is
-`/tmp/barectl-refresh-cli/panel-compare.log`. These are local evidence artifacts, not
-repository sources.
+`/tmp/barectl-refresh-cli/564-fix-panel-compare.log`. The earlier samples, script, and log
+are preserved under `*-initial-544944bb.*` names. These are local evidence artifacts,
+not repository sources.
 
 ## Verification
 
 The public collector tests cover one panel read, present and hidden paths, and whole-batch
-unknown results for failed, truncated, missing, extra, and invalid replies. The FakeServer
-contract compares the fixed command with a real temporary filesystem, including a dead
-link and an unsearchable ancestor. `disposable.test_l0_discovery.PlainL0Discovery` and
-`disposable.test_foundation.FoundationSudoDiscovery` passed through real SSH. The shared
+unknown results for failed, truncated, missing, extra, invalid, and malformed line-framing
+replies. The FakeServer contract compares the fixed command with a real temporary filesystem,
+including a dead link and an unsearchable ancestor. The focused L0 and FoundationSudo
+scenarios passed through real SSH. The shared
 refresh/CLI tests passed through the existing worker and operation interfaces. The complete
 recorded-transcript pass is owned by the #562 integration run after preliminary reviews.

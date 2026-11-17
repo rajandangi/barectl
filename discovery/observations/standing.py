@@ -4,6 +4,7 @@ import json
 import re
 import shlex
 from dataclasses import replace
+from types import MappingProxyType
 
 from bootstrap.standing import HostEvidence, HostJudgment, judge
 from operations.apt import PROCESS_COMMAND
@@ -52,7 +53,7 @@ _PANEL_COMMAND = (
     "}\n"
     "for path in " + shlex.join(_PANEL_PATHS) + '; do panel_state "$path"; done'
 )
-_PANEL_STATES: dict[str, bool | None] = {"present": True, "missing": False, "unreadable": None}
+_PANEL_STATES = MappingProxyType({"present": True, "missing": False, "unreadable": None})
 _LISTENERS = "ss -Hlnpt '( sport = :80 or sport = :443 )'"
 _NIX_BINARY_PATH = "/nix/var/nix/profiles/default/bin/nix"
 _NIX_BINARY_COMMAND = (
@@ -366,16 +367,17 @@ def _path_state(shell: RemoteShell, path: str) -> bool | None:
 
 def _panel_states(shell: RemoteShell) -> tuple[tuple[str, bool | None], ...]:
     result = shell.run(_PANEL_COMMAND)
-    states = result.stdout.splitlines()
+    states = result.stdout.split("\n")
     if (
         result.exit_status
         or result.truncated
-        or len(states) != len(_PANEL_PATHS)
-        or any(state not in _PANEL_STATES for state in states)
+        or len(states) != len(_PANEL_PATHS) + 1
+        or states[-1] != ""
+        or any(state not in _PANEL_STATES for state in states[:-1])
     ):
         return tuple((path, None) for path in _PANEL_PATHS)
     return tuple(
-        (path, _PANEL_STATES[state]) for path, state in zip(_PANEL_PATHS, states, strict=True)
+        (path, _PANEL_STATES[state]) for path, state in zip(_PANEL_PATHS, states[:-1], strict=True)
     )
 
 

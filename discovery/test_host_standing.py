@@ -74,6 +74,26 @@ class PanelBatchTests(TestCase):
                     dict(judgment.evidence)["Hosting panel paths"], "Could not be read"
                 )
 
+    def test_malformed_line_framing_keeps_entire_batch_unknown(self) -> None:
+        from .fakes import FakeServer
+
+        valid = "present\n" + "missing\n" * (len(standing._PANEL_PATHS) - 1)
+        for reply in (
+            valid.removesuffix("\n"),
+            valid.replace("\n", "\r\n"),
+            valid.replace("\n", "\r"),
+            valid.replace("\n", "\v"),
+        ):
+            with self.subTest(reply=reply):
+                shell = FakeServer()
+                shell.results[standing._PANEL_COMMAND] = CommandResult(0, reply)
+                judgment = collect(shell, sites=False).standing
+                if judgment is None:
+                    self.fail("Collection did not produce host standing.")
+                self.assertEqual(
+                    dict(judgment.evidence)["Hosting panel paths"], "Could not be read"
+                )
+
     def test_valid_mixed_reply_retains_present_missing_and_hidden_meanings(self) -> None:
         from .fakes import FakeServer
 
