@@ -273,7 +273,7 @@
     "discovery/recorded.py": "d4d675aea5f5bab878bef5bae1e3b9d24e389dd44f28ae0b4486e4bdae653cf2",
     "discovery/releases.py": "b6268286d7f2a1cc1666ea4b0717341fda879f79e888299e1aff67f61f5997b1",
     "discovery/root_read.py": "67b89205dd687ef77ec9df9f4cc2f22fd75dc17ca35e992bfb7506e8be901186",
-    "discovery/services.py": "2e1c110ef74ed5ff4330c06170674a885387ae4ef2ea4073fe5710489c828e6c",
+    "discovery/services.py": "0ca3d5965c0727dd828a9928c8702eeed2afc61bf339ce6ef5b54b8d3ce88c83",
     "discovery/snapshot.py": "525d16b1e2c47671d3a0ae4c5e2f43ca5ba237762d7421cacc2ff15055681ff1",
     "discovery/source_manifest.py": "ff2f70b7b833aebe97cc530f817b1b2899e79880ff14555ad8ee4fccbc42d78e",
     "discovery/ssh.py": "7c98822276fdad55c608f2400c649a2d6970443f6180c244d6d77b8cc9dde8e8",

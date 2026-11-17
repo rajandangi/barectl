@@ -281,7 +281,9 @@ def _read_refresh_after_authorization(operation_id: int) -> RefreshStatus:
     operation = attempt
     server = attempt.server
     now = timezone.now()
-    elapsed = max(0, int((now - (operation.started_at or operation.queued_at)).total_seconds()))
+    elapsed_start = operation.started_at or operation.queued_at
+    elapsed_end = operation.finished_at or now
+    elapsed = max(0, int((elapsed_end - elapsed_start).total_seconds()))
     captured = attempt.connection
     connection_current = (
         server.connection_revision == 0
