@@ -602,7 +602,7 @@
     "sites/ui_testing.py": "2b1cdae9c9e541b6002318c0e0eb755a3499356cc8faa1f179b328f226f5fc64",
     "sites/views.py": "aff2a094cae0487d6a8c261ec282a4763c4d5d00bec6bf67d3184af5639b74c2",
     "uv.lock": "42645595fb92eb170319e8b657325d64924ee373185b22d938e0590e5d38f3d6",
-    "vulture_allowlist.py": "c65de0e433933a45d19209c2bf8af945b5bc633032ee619a49462b80eb0cccbf",
+    "vulture_allowlist.py": "735fafdb9818bd0f92dc4ebf12e74e534db7410bdd64180aa61fd538ac222fc0",
     "wordpress/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "wordpress/actions.py": "a82c8c0f8f3d6a3cebba674c6077d13b87928f708de9f678009c2c2743d2ebe2",
     "wordpress/apps.py": "9e18a4526c86967fcd68986a0e99a9f5b961c8dd5e3b0597adc7be3d58c6ad8d",
