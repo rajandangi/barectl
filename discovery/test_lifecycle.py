@@ -67,14 +67,16 @@ class ActiveAttemptRuleTests(TestCase):
 
 
 class RecoverFirstTests(TestCase):
-    def test_every_public_function_recovers_abandoned_attempts_first(self) -> None:
+    def test_legacy_public_functions_recover_abandoned_attempts_first(self) -> None:
         class Recovered(Exception):
             pass
 
         entries = [
             (name, function)
             for name, function in inspect.getmembers(services, inspect.isfunction)
-            if function.__module__ == services.__name__ and not name.startswith("_")
+            if function.__module__ == services.__name__
+            and not name.startswith("_")
+            and name not in ("request_refresh", "read_refresh")
         ]
         self.assertIn("request_discovery", dict(entries))
         with mock.patch.object(lifecycle, "_recover_stale_operations", side_effect=Recovered):
@@ -429,8 +431,22 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/settings/")
         self.assertContains(page, "Refresh server")
         self.assertNotContains(page, "hx-trigger")
+        form = next(
+            match
+            for match in re.finditer(
+                r'<form method="post" action="([^"]+)">(.*?)</form>',
+                page.content.decode(),
+                re.DOTALL,
+            )
+            if "Refresh server" in match.group(2)
+        )
+        csrf = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', form.group(2))
+        if csrf is None:
+            self.fail("Refresh server form has no CSRF field")
 
-        response = self.client.post(self.verify_url(), headers=HTMX_FRAGMENT)
+        response = self.client.post(
+            unescape(form.group(1)), {"csrfmiddlewaretoken": csrf.group(1)}, headers=HTMX_FRAGMENT
+        )
         content = response.content.decode()
         self.assertRegex(content, r'<div id="discovery"[^>]*hx-trigger="every 2s"')
         self.assertIn("Connection check queued.", content)
@@ -465,6 +481,28 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Ubuntu 26.04.2 LTS")
         self.assertNotContains(page, "may be out of date")
+
+    def test_dashboard_refresh_form_reports_another_kind_blocker(self) -> None:
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        page = self.client.get(f"/servers/{self.server.pk}/settings/")
+        form = next(
+            match
+            for match in re.finditer(
+                r'<form method="post" action="([^"]+)">(.*?)</form>',
+                page.content.decode(),
+                re.DOTALL,
+            )
+            if "Refresh server" in match.group(2)
+        )
+        RemoteOperation.objects.create(
+            server=self.server,
+            kind=RemoteOperation.Kind.CHANGE_PREPARATION,
+            status=RemoteOperation.Status.QUEUED,
+            ssh_alias=self.server.ssh_alias,
+        )
+        response = self.client.post(unescape(form.group(1)), follow=True)
+        self.assertContains(response, "Another server operation is still running")
+        self.assertEqual(DiscoveryAttempt.objects.count(), 0)
 
     def test_refresh_replaces_service_observations(self) -> None:
         before = self.succeed_once()

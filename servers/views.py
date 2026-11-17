@@ -19,7 +19,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from bootstrap.standing import Standing
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
-from discovery.services import recorded_discovery, request_discovery
+from discovery.services import RefreshNotFound, recorded_discovery, request_refresh
 from operations import activity as activity_read
 from operations import change_requirements, preparation
 from operations.lifecycle import OperationRefused
@@ -984,12 +984,17 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     jobs = request.POST.get("next") == "jobs"
     zone = request.POST.get("tz", "")
     try:
-        request_discovery(server, user=request.user)
-    except Server.DoesNotExist:
+        result = request_refresh(server.pk, user=request.user)
+    except RefreshNotFound:
         # Removed by another request after this one loaded it.
         raise Http404 from None
     except OperationRefused:
         messages.error(request, "The connection changed. Reload and request a new check.")
+        return redirect(_jobs_url(server, zone)) if jobs else redirect("server_detail", pk=pk)
+    if result.disposition == "busy":
+        messages.error(
+            request, "Another server operation is still running. Try again when it finishes."
+        )
         return redirect(_jobs_url(server, zone)) if jobs else redirect("server_detail", pk=pk)
     if _is_fragment_request(request):
         return _discovery_fragment(request, server, focus=True)

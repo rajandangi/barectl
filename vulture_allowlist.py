@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
     from dashboard.checks import check_built_assets
+    from dashboard.management.commands.barectl import Command as RefreshCommand
     from dashboard.management.commands.barectl_upgrade import Command as UpgradeCommand
     from dashboard.middleware import HtmxAuthenticationMiddleware
     from dashboard.templatetags.vite import vite_entry
@@ -563,6 +564,18 @@ if TYPE_CHECKING:
         _native_wire_fields.validation,
         _native_wire_fields.master_present,
         _native_wire_fields.pool_validation,
+    )
+    # Django reads command hooks by name. Refresh progress and capacity are TypedDict
+    # keys consumed through JSON, which Vulture does not recognize as Python references.
+    _refresh_wire_fields = SimpleNamespace()
+    _refresh_cli_uses = (
+        RefreshCommand.requires_system_checks,
+        _refresh_wire_fields.updated_at,
+        _refresh_wire_fields.elapsed_seconds,
+        _refresh_wire_fields.waiting_for_worker,
+        _refresh_wire_fields.total_bytes,
+        _refresh_wire_fields.available_bytes,
+        _refresh_wire_fields.root_filesystem,
     )
     # Transcript replay tests are found by Django's test discovery.
     _snapshot_validator_selection = HttpSiteValidators.validator
