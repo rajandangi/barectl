@@ -402,11 +402,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
 
 
 def _authorize(attempt: DiscoveryAttempt) -> None:
-    if (
-        attempt.connection is None
-        and attempt.authority != CHANGE_REFRESH_AUTHORITY
-        and attempt.requested_by_id is None
-    ):
+    if attempt.connection is None and not attempt.authority and attempt.requested_by_id is None:
         return
     if (
         attempt.connection is not None
