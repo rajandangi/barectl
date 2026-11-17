@@ -161,6 +161,7 @@ class Command(BaseCommand):
             operation, decision = requested.operation, requested.disposition
             if not machine:
                 self.stdout.write(f"Operation {operation.pk}: {decision}")
+                self.stdout.flush()
             if decision == "busy":
                 if machine:
                     self.stdout.write(
@@ -183,6 +184,7 @@ class Command(BaseCommand):
             self._fail(machine, "invalid_input", "Operation ID must be positive.", 2)
         if not machine:
             self.stdout.write(f"Operation {operation_id}: checking")
+            self.stdout.flush()
         return operation_id, "in_progress"
 
     def _poll(self, operation_id: int, user: User, wait: bool, timeout: int) -> RefreshStatus:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import cast, override
 from unittest import mock
 
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Permission, User
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.core.management.base import CommandError, OutputWrapper
@@ -23,7 +23,7 @@ from servers.models import Server
 
 from .fakes import DiscoveryTestCase
 from .models import DiscoveryAttempt, DiscoverySnapshot
-from .services import RefreshNotFound, queue_discovery, read_refresh, request_refresh
+from .services import RefreshNotFound, RefreshStatus, queue_discovery, read_refresh, request_refresh
 
 
 class RefreshCommandTests(DiscoveryTestCase):
@@ -268,6 +268,76 @@ class RefreshCommandTests(DiscoveryTestCase):
             )
         self.assertEqual(caught.exception.returncode, 130)
         self.assertEqual(json.loads(status_output.getvalue())["operation_id"], operation_id)
+
+    def test_text_id_reaches_buffered_stdout_while_wait_is_active(self) -> None:
+        common = ("--username", "operator", "--password-stdin", "--wait")
+        for action in ("refresh", "refresh-status"):
+            with self.subTest(action=action):
+                if action == "refresh-status":
+                    operation_id = cast(
+                        int,
+                        cast(
+                            dict[str, object],
+                            self.command("refresh", str(self.server.pk))["operation"],
+                        )["id"],
+                    )
+                    target = str(operation_id)
+                    label = "checking"
+                else:
+                    target = str(self.server.pk)
+                    label = "shared_active" if DiscoveryAttempt.objects.exists() else "accepted"
+
+                raw = io.BytesIO()
+                buffered_stdout = io.TextIOWrapper(raw, encoding="utf-8", line_buffering=False)
+
+                def inspect_during_wait(
+                    _: float, *, stream: io.BytesIO = raw, expected_label: str = label
+                ) -> None:
+                    active_id = DiscoveryAttempt.objects.latest("pk").pk
+                    self.assertEqual(
+                        stream.getvalue(), f"Operation {active_id}: {expected_label}\n".encode()
+                    )
+                    raise KeyboardInterrupt
+
+                with (
+                    mock.patch("sys.stdin", io.StringIO("local secret\n")),
+                    mock.patch(
+                        "dashboard.management.commands.barectl.time.sleep",
+                        side_effect=inspect_during_wait,
+                    ),
+                    self.assertRaises(CommandError) as caught,
+                ):
+                    call_command(
+                        "barectl", "server", action, target, *common, stdout=buffered_stdout
+                    )
+                self.assertEqual(caught.exception.returncode, 130)
+                buffered_stdout.detach()
+
+    def test_no_wait_refresh_acknowledges_submission_after_fast_failure(self) -> None:
+        def fail_before_status(operation_id: int, *, user: User) -> RefreshStatus:
+            RemoteOperation.objects.filter(pk=operation_id).update(
+                status=RemoteOperation.Status.FAILED, failure="A remote read failed."
+            )
+            return read_refresh(operation_id, user=user)
+
+        with mock.patch(
+            "dashboard.management.commands.barectl.read_refresh", side_effect=fail_before_status
+        ):
+            submitted = self.command("refresh", str(self.server.pk))
+        self.assertEqual(submitted["code"], "accepted")
+        self.assertEqual(cast(dict[str, object], submitted["operation"])["status"], "failed")
+        self.assertIsNone(submitted["snapshot"])
+        operation_id = cast(dict[str, object], submitted["operation"])["id"]
+        status, output = self.run_command(
+            "refresh-status",
+            str(operation_id),
+            "--username",
+            "operator",
+            "--password-stdin",
+            "--json",
+        )
+        self.assertEqual(status, 6)
+        self.assertEqual(json.loads(output)["code"], "failed")
 
     def test_text_status_without_wait_and_missing_operation(self) -> None:
         operation_id = cast(
