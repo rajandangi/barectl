@@ -23,3 +23,5 @@ user.groups.add(Group.objects.get(name="Site operator"))
 | Administrator | The above and `operations.change_shared`, `operations.change_destructive`, `operations.manage_secrets` | Applying Shared changes such as Set up server, Add runtime, server defaults and site creation beside other sites |
 
 The superuser has every permission. Registering, editing and removing servers need `servers.add_server`, `servers.change_server` and `servers.delete_server`, starting a connection check needs `discovery.add_discoveryattempt`, and seeing sites needs `discovery.view_siteobservation`; the presets grant none of these. Barectl has no interface for granting permissions. Inventory is shared among authorized operators; organization isolation is not implemented.
+
+The [local Refresh server CLI](cli.md) authenticates the named account with its Django password, read from stdin or a non-echoing terminal prompt. Its request and status reads require an active account with `servers.view_server` and `discovery.add_discoveryattempt`. The CLI never treats a username alone as identity.

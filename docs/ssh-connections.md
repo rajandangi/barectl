@@ -13,6 +13,8 @@ Discovery attempts and their history belong to this Barectl application database
 
 The server page polls while an attempt is queued or running and announces changes in a live region. A failed check also offers **Check again** on the server page.
 
+The [local CLI](cli.md) uses the same authorized request and status interface as the Refresh server button. It shares an active discovery attempt, reports another kind of operation as a blocker and reads only this controller's operation row while waiting. Each status read reloads the operator account and its permissions. The worker remains responsible for SSH, captured-connection reauthorization and publishing the snapshot.
+
 The worker records check progress in the local operation row before connecting, between
 the groups in `operations/check_progress.py`, and after each remote read returns. The page
 shows the current group, completed groups, the number of finished reads and total elapsed
