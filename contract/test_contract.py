@@ -35,8 +35,7 @@ RELEASED_HISTORY = MappingProxyType(
         "2": "48227634e465f577b19269065f417e7684ec89d051058aeb024b8017f6710257",
     }
 )
-# Version 2's released command names. The released digest above anchors this tuple: changing
-# either entry makes an additive candidate fail the same-version digest check.
+# Released command snapshot; see docs/contracts.md#change-policy.
 RELEASED_COMMANDS = (
     "barectl_upgrade",
     "changepassword",
@@ -60,7 +59,7 @@ def shapes_digest(built: dict[str, object]) -> str:
 
 
 def version_two_digest(built: dict[str, object]) -> str:
-    """Hash only compatible command additions as the released version-two shape."""
+    """See docs/contracts.md#change-policy for version-two digest normalization."""
     application = built.get("application")
     if not isinstance(application, dict):
         return shapes_digest(built)
