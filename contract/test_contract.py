@@ -49,13 +49,12 @@ RELEASED_COMMANDS = (
     "showmigrations",
     "test",
 )
-# Reviewed same-version additions become promises when documented. Append a name here
-# alongside its application registry and manifest change; never remove an existing name.
+# docs/contracts.md#change-policy
 PROMISED_VERSION_TWO_COMMAND_ADDITIONS = ("barectl",)
 
 
 def version_two_command_problems(built: dict[str, object]) -> list[str]:
-    """Require the exact released and reviewed command promises before normalization."""
+    """See docs/contracts.md#change-policy."""
     application = built.get("application")
     if not isinstance(application, dict):
         return []
