@@ -265,6 +265,7 @@ def _turn_off(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
 def main(document: dict[str, object]) -> None:
     identifier = str(document.get("identifier", ""))
     lock: int | None = None
+    effects_started = False
     try:
         value = _reviewed(document)
         identifier = value.identifier
@@ -289,6 +290,9 @@ def main(document: dict[str, object]) -> None:
         ):
             result("refused", "evidence")
             return
+        # Native calls below may change a unit or private file before raising. Once
+        # entered, their failure is an incomplete change, not a preflight refusal.
+        effects_started = True
         if value.state == "on":
             _turn_on(value, path, before)
         else:
@@ -296,7 +300,10 @@ def main(document: dict[str, object]) -> None:
     except (ValueError, OSError, subprocess.TimeoutExpired) as error:
         sys.stderr.write(f"barectl-problem {type(error).__name__}: {error}\n")
         sys.stderr.flush()
-        result("refused", "automation")
+        if effects_started:
+            result("partial", "automation_incomplete")
+        else:
+            result("refused", "automation")
     except Exception:
         sys.stderr.write("barectl-problem The scheduled tasks could not be changed.\n")
         sys.stderr.flush()

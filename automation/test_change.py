@@ -2,12 +2,17 @@
 
 import base64
 import gzip
+import hashlib
+import html
+import io
 import json
 import pathlib
-from contextlib import ExitStack
+import subprocess
+from contextlib import ExitStack, redirect_stdout
 from types import SimpleNamespace
 from unittest import mock
 
+from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 
 from automation import change, convention
@@ -21,8 +26,11 @@ from automation.testing import (
     wordpress,
 )
 from bootstrap.standing import Standing
+from operations import engine
 from operations.engine import BodyContext, NativeBody
 from operations.inputs import PreparationInputs
+from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consent, RemoteOperation
+from operations.presentation import run_view
 from sites.bodies.common import SITE_GATED, SiteRecord
 
 ON = PreparationInputs("", "shop", schedule_state="on")
@@ -222,6 +230,7 @@ class DocumentTests(SimpleTestCase):
             "version",
             "identifier",
             "state",
+            "runtime",
             "uid",
             "gid",
             "configuration_digest",
@@ -234,6 +243,44 @@ class DocumentTests(SimpleTestCase):
         forged = {**draft.document, "state": "maybe"}
         with self.assertRaises(ValueError):
             change.body(forged, BodyContext("unit", "boot", 1))
+        forged = {**draft.document, "runtime": "php99"}
+        with self.assertRaises(ValueError):
+            change.body(forged, BodyContext("unit", "boot", 1))
+
+    def test_a_stale_reviewed_runtime_is_refused_before_mutation(self) -> None:
+        draft = change.review(evidence(), ON)
+        self.assertEqual(draft.document["runtime"], "php84")
+        with (
+            mock.patch.object(body, "open_site_lock", return_value=3),
+            mock.patch.object(body, "_read_configuration", return_value="before"),
+            mock.patch.object(
+                body,
+                "native_state",
+                return_value={
+                    "sites": [
+                        {
+                            "identifier": "shop",
+                            "runtime": "php85",
+                            "state": "complete",
+                            "application": "wordpress",
+                            "names": [],
+                            "https": False,
+                            "readiness": "ready",
+                        }
+                    ]
+                },
+            ),
+            mock.patch.object(body, "_turn_on") as turn_on,
+            mock.patch.object(body, "setting", return_value=object()),
+            mock.patch.object(body, "site_fpm_read", return_value=object()),
+            mock.patch("os.close"),
+        ):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                body.main(draft.document)
+        self.assertIn('"class":"refused"', output.getvalue())
+        self.assertIn('"reason":"automation_site"', output.getvalue())
+        turn_on.assert_not_called()
 
     def test_the_assembled_body_is_valid_python_and_the_reviewed_size(self) -> None:
         compile(change.BODY_SOURCE, "<automation-body>", "exec")
@@ -348,6 +395,116 @@ class BodyOrderTests(SimpleTestCase):
                 self.assertIn("result:partial", order)
                 self.assertNotIn("stop", order)
                 self.assertNotIn("remove-units", order)
+
+
+class RecoveryTests(SimpleTestCase):
+    def run_body(
+        self, state: str, failure: str | None = None, error: Exception | None = None
+    ) -> tuple[str, str]:
+        before = "reviewed private configuration"
+        draft = change.review(evidence(), ON)
+        document = {
+            **draft.document,
+            "state": state,
+            "configuration_digest": hashlib.sha256(before.encode()).hexdigest(),
+        }
+        output = io.StringIO()
+        effects: list[str] = []
+
+        def failing(*_args: object) -> None:
+            raise error if error is not None else OSError("native operation stopped")
+
+        def no_op(*_args: object) -> None:
+            return None
+
+        with ExitStack() as stack:
+            for name, replacement in {
+                "open_site_lock": lambda *_args: 3,
+                "_read_configuration": lambda *_args: before,
+                "_preflight": lambda *_args: True,
+                "private_configuration_problem": lambda *_args: False,
+                "unit_digests": lambda *_args: document["units"],
+                "publish_units": lambda *_args: effects.append("publish"),
+                "daemon_reload": no_op,
+                "enable_timer": no_op,
+                "timer_ready": lambda *_args: True,
+                "wait_for_tick": lambda *_args: True,
+                "_configuration": lambda *_args: effects.append("configuration"),
+                "_verify_configuration": lambda *_args: True,
+                "_synchronize": lambda *_args: True,
+                "properties": lambda *_args: {"Result": "success"},
+                "disable_and_stop": no_op,
+                "remove_units": no_op,
+            }.items():
+                stack.enter_context(mock.patch.object(body, name, replacement))
+            stack.enter_context(mock.patch("os.close"))
+            if failure:
+                stack.enter_context(
+                    mock.patch.object(
+                        body,
+                        failure,
+                        (lambda *_args: False) if failure == "_synchronize" else failing,
+                    )
+                )
+            with redirect_stdout(output):
+                body.main(document)
+        lines = [engine.parse_result_line(line) for line in output.getvalue().splitlines()]
+        emitted = next(line for line in lines if line is not None)
+        self.assertIn("configuration", effects)
+        if state == "on":
+            self.assertIn("publish", effects)
+        preparation = ChangePreparation(pk=1, kind_slug="set_wordpress_server_cron")
+        review = ChangeReview(
+            preparation=preparation,
+            kind_slug="set_wordpress_server_cron",
+            consent=Consent.SITE,
+            document={"stages": ["configuration", "verify"]},
+        )
+        run = ChangeRun(
+            pk=1,
+            review=review,
+            status=RemoteOperation.Status.FAILED,
+            execution=emitted.result_class,
+            result_reason=emitted.reason,
+            server_name="Fixture",
+            failure=engine.reason_text(emitted.result_class, emitted.reason),
+        )
+        view = run_view(run)
+        page = " ".join(
+            render_to_string(
+                "operations/_run_status.html", {"run": view, "plain": view.plain}
+            ).split()
+        )
+        action = view.plain.next
+        if action is None:
+            self.fail("The interrupted cron change has no recovery action.")
+        self.assertEqual(action.label, "Try again")
+        self.assertEqual(action.kind, "again")
+        self.assertIn(action.label, page)
+        self.assertIn(view.plain.sentence, html.unescape(page))
+        return emitted.result_class + ":" + emitted.reason, html.unescape(page)
+
+    def test_reload_failure_after_on_and_off_has_truthful_rendered_recovery(self) -> None:
+        for state in ("on", "off"):
+            with self.subTest(state=state):
+                # _synchronize returns False for an unverifiable serving reload.
+                outcome, page = self.run_body(state, "_synchronize")
+                self.assertEqual(outcome, "partial:automation_php_reload")
+                self.assertNotIn("left the server task unchanged", page)
+                self.assertIn("Check the site's PHP service", page)
+
+    def test_expected_native_errors_after_effects_report_partial_with_recovery(self) -> None:
+        for state, failing_call, error in (
+            ("on", "_verify_configuration", ValueError("verification failed")),
+            ("on", "properties", OSError("native read failed")),
+            ("off", "disable_and_stop", subprocess.TimeoutExpired("systemctl", 120)),
+            ("off", "remove_units", OSError("native removal failed")),
+        ):
+            with self.subTest(state=state, failing_call=failing_call):
+                outcome, page = self.run_body(state, failing_call, error)
+                self.assertEqual(outcome, "partial:automation_incomplete")
+                self.assertIn("Check the run's journal", page)
+                self.assertNotIn("Nothing changed", page)
 
 
 class BodyPayloadTests(SimpleTestCase):

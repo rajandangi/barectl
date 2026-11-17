@@ -48,17 +48,30 @@ AUTOMATION_CHANGE: Final = ResultReason(
     },
 )
 
+AUTOMATION_INCOMPLETE: Final = ResultReason(
+    "automation_incomplete",
+    {
+        Result.PARTIAL: (
+            "The scheduled-tasks change stopped after native changes began, so its current "
+            "state needs checking. Check the run's journal, the site's PHP service, private "
+            "cron setting and timer on the server, then prepare a new review."
+        ),
+    },
+)
+
 SCHEDULE_REASONS: Final = (
     AUTOMATION_START,
     AUTOMATION_UNITS,
     AUTOMATION_CHANGE,
+    AUTOMATION_INCOMPLETE,
     ResultReason(
         "automation_php_reload",
         {
             Result.PARTIAL: (
                 "Barectl changed the private cron setting but could not verify a completed "
-                "reload of this site's serving PHP. Barectl left the server task unchanged. "
-                "Check the site's PHP service and the run's journal, then prepare a new review."
+                "reload of this site's serving PHP. The server task's current state needs "
+                "checking. Check the site's PHP service and the run's journal, then prepare "
+                "a new review."
             ),
         },
     ),
