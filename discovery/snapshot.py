@@ -957,6 +957,13 @@ def current_snapshot(server: Server) -> Snapshot | None:
     return None if row is None else _read(row, connection_label(row.attempt))
 
 
+class BasicOs(TypedDict):
+    outcome: str
+    name: str
+    distribution: str
+    version: str
+
+
 class BasicArchitecture(TypedDict):
     outcome: str
     value: str
@@ -982,7 +989,7 @@ class BasicSnapshot(TypedDict):
     id: int
     collected_at: str
     connection_current: bool
-    os: dict[str, str]
+    os: BasicOs
     architecture: BasicArchitecture
     cpu: BasicCpu
     memory: BasicMemory

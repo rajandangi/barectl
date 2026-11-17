@@ -565,7 +565,7 @@ if TYPE_CHECKING:
         _native_wire_fields.master_present,
         _native_wire_fields.pool_validation,
     )
-    # Django reads command hooks by name. Refresh progress and capacity are TypedDict
+    # Django reads command hooks by name. Refresh progress, OS, and capacity are TypedDict
     # keys consumed through JSON, which Vulture does not recognize as Python references.
     _refresh_wire_fields = SimpleNamespace()
     _refresh_cli_uses = (
@@ -573,6 +573,7 @@ if TYPE_CHECKING:
         _refresh_wire_fields.updated_at,
         _refresh_wire_fields.elapsed_seconds,
         _refresh_wire_fields.waiting_for_worker,
+        _refresh_wire_fields.distribution,
         _refresh_wire_fields.total_bytes,
         _refresh_wire_fields.available_bytes,
         _refresh_wire_fields.root_filesystem,

@@ -220,10 +220,15 @@ class RefreshProgress(TypedDict):
     waiting_for_worker: bool
 
 
+class RefreshServer(TypedDict):
+    id: int
+    name: str
+
+
 class RefreshStatus(TypedDict):
     version: int
     code: str
-    server: dict[str, str | int]
+    server: RefreshServer
     operation: RefreshOperation
     progress: RefreshProgress
     snapshot: BasicSnapshot | None
