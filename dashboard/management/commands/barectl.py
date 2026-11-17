@@ -27,6 +27,12 @@ _Namespace = TypeVar("_Namespace")
 class RefreshCommandParser(CommandParser):
     output: OutputWrapper | None = None
 
+    @override
+    def error(self, message: str) -> NoReturn:
+        # argparse messages can contain rejected argv values, including credentials.
+        super().error("Invalid command arguments.")
+        raise AssertionError("Parser error unexpectedly returned.")
+
     @overload
     def parse_args(
         self, args: Iterable[str] | None = None, namespace: None = None
@@ -63,7 +69,7 @@ class RefreshCommandParser(CommandParser):
                     )
                 )
             if isinstance(error, CommandError):
-                raise CommandError(str(error), returncode=2) from error
+                raise CommandError("Invalid command arguments.", returncode=2) from None
             raise
 
 
@@ -84,17 +90,26 @@ class Command(BaseCommand):
             description=base_parser.description,
             formatter_class=base_parser.formatter_class,
             called_from_command_line=self._called_from_command_line,
+            allow_abbrev=False,
         )
         parser.output = self.stdout
         return parser
 
     @override
     def add_arguments(self, parser: CommandParser) -> None:
-        server = parser.add_subparsers(dest="area", required=True)
-        server_parser = server.add_parser("server")
-        actions = server_parser.add_subparsers(dest="action", required=True)
+        server = parser.add_subparsers(
+            dest="area", required=True, parser_class=RefreshCommandParser
+        )
+        server_parser = server.add_parser(
+            "server", allow_abbrev=False, called_from_command_line=self._called_from_command_line
+        )
+        actions = server_parser.add_subparsers(
+            dest="action", required=True, parser_class=RefreshCommandParser
+        )
         for action, label in (("refresh", "server_id"), ("refresh-status", "operation_id")):
-            command = actions.add_parser(action)
+            command = actions.add_parser(
+                action, allow_abbrev=False, called_from_command_line=self._called_from_command_line
+            )
             command.add_argument(label, type=int)
             command.add_argument("--username", required=True)
             command.add_argument("--password-stdin", action="store_true")
