@@ -17,6 +17,7 @@ from django.test import SimpleTestCase
 
 from automation import change, convention
 from automation.bodies import schedule as body
+from automation.bodies import units
 from automation.testing import (
     automation,
     installed_units,
@@ -31,6 +32,7 @@ from operations.engine import BodyContext, NativeBody
 from operations.inputs import PreparationInputs
 from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consent, RemoteOperation
 from operations.presentation import run_view
+from sites.bodies import common
 from sites.bodies.common import SITE_GATED, SiteRecord
 
 ON = PreparationInputs("", "shop", schedule_state="on")
@@ -454,11 +456,27 @@ class RecoveryTests(SimpleTestCase):
         if state == "on":
             self.assertIn("publish", effects)
         preparation = ChangePreparation(pk=1, kind_slug="set_wordpress_server_cron")
+        stages = change.ON_STAGES if state == "on" else change.OFF_STAGES
+        progress = [
+            line.split(" ", 1)[1]
+            for line in output.getvalue().splitlines()
+            if line.startswith("barectl-stage ")
+        ][-1]
+        self.assertEqual(
+            progress,
+            {
+                "_synchronize": "configuration",
+                "_verify_configuration": "configuration",
+                "properties": "verify",
+                "disable_and_stop": "install",
+                "remove_units": "install",
+            }[failure or ""],
+        )
         review = ChangeReview(
             preparation=preparation,
             kind_slug="set_wordpress_server_cron",
             consent=Consent.SITE,
-            document={"stages": ["configuration", "verify"]},
+            document={"stages": stages},
         )
         run = ChangeRun(
             pk=1,
@@ -468,6 +486,7 @@ class RecoveryTests(SimpleTestCase):
             result_reason=emitted.reason,
             server_name="Fixture",
             failure=engine.reason_text(emitted.result_class, emitted.reason),
+            progress_stage=progress,
         )
         view = run_view(run)
         page = " ".join(
@@ -480,8 +499,11 @@ class RecoveryTests(SimpleTestCase):
             self.fail("The interrupted cron change has no recovery action.")
         self.assertEqual(action.label, "Try again")
         self.assertEqual(action.kind, "again")
-        self.assertIn(action.label, page)
-        self.assertIn(view.plain.sentence, html.unescape(page))
+        self.assertIn('method="post" action="' + action.url + '"', page)
+        self.assertIn('<button type="submit" class="usa-button">Try again</button>', page)
+        self.assertIn('<h2 id="run-status-heading">' + view.plain.result + "</h2>", page)
+        self.assertIn(run.failure, html.unescape(page))
+        self.assertIn("This stopped after", page)
         return emitted.result_class + ":" + emitted.reason, html.unescape(page)
 
     def test_reload_failure_after_on_and_off_has_truthful_rendered_recovery(self) -> None:
@@ -491,7 +513,13 @@ class RecoveryTests(SimpleTestCase):
                 outcome, page = self.run_body(state, "_synchronize")
                 self.assertEqual(outcome, "partial:automation_php_reload")
                 self.assertNotIn("left the server task unchanged", page)
-                self.assertIn("Check the site's PHP service", page)
+                self.assertIn(
+                    "Barectl changed the private cron setting but could not verify a completed "
+                    "reload of this site's serving PHP. The server task's current state needs "
+                    "checking. Check the site's PHP service and the run's journal, then prepare "
+                    "a new review.",
+                    page,
+                )
 
     def test_expected_native_errors_after_effects_report_partial_with_recovery(self) -> None:
         for state, failing_call, error in (
@@ -503,8 +531,88 @@ class RecoveryTests(SimpleTestCase):
             with self.subTest(state=state, failing_call=failing_call):
                 outcome, page = self.run_body(state, failing_call, error)
                 self.assertEqual(outcome, "partial:automation_incomplete")
-                self.assertIn("Check the run's journal", page)
+                self.assertIn(
+                    "The scheduled-tasks change stopped while applying, so its current "
+                    "state needs checking. Check the run's journal, the site's PHP service, "
+                    "private cron setting and timer on the server, then prepare a new review.",
+                    page,
+                )
                 self.assertNotIn("Nothing changed", page)
+
+    def test_first_unit_preimage_refusal_has_no_native_effect(self) -> None:
+        before = "reviewed private configuration"
+        draft = change.review(evidence(), ON)
+        document = {
+            **draft.document,
+            "configuration_digest": hashlib.sha256(before.encode()).hexdigest(),
+        }
+        output = io.StringIO()
+        writes: list[str] = []
+        with (
+            mock.patch.object(body, "open_site_lock", return_value=3),
+            mock.patch.object(body, "_read_configuration", return_value=before),
+            mock.patch.object(body, "_preflight", return_value=True),
+            mock.patch.object(body, "private_configuration_problem", return_value=False),
+            mock.patch.object(body, "unit_digests", return_value=document["units"]),
+            mock.patch.object(units, "_reviewed_preimage", side_effect=ValueError("changed")),
+            mock.patch.object(
+                units, "publish_unit_file", side_effect=lambda *args: writes.append("write")
+            ),
+            mock.patch("os.close"),
+            redirect_stdout(output),
+        ):
+            body.main(document)
+        self.assertEqual(writes, [])
+        self.assertIn('"class":"refused","reason":"automation"', output.getvalue())
+
+    def test_first_unit_publication_precheck_refuses_but_later_failure_is_partial(self) -> None:
+        before = "reviewed private configuration"
+        draft = change.review(evidence(), ON)
+        document = {
+            **draft.document,
+            "configuration_digest": hashlib.sha256(before.encode()).hexdigest(),
+        }
+        for failure_at, expected_class in (
+            ("first", "refused"),
+            ("replace_guard", "refused"),
+            ("later", "partial"),
+        ):
+            with self.subTest(failure_at=failure_at):
+                output = io.StringIO()
+                publication = mock.Mock()
+
+                with (
+                    mock.patch.object(body, "open_site_lock", return_value=3),
+                    mock.patch.object(body, "_read_configuration", return_value=before),
+                    mock.patch.object(body, "_preflight", return_value=True),
+                    mock.patch.object(body, "private_configuration_problem", return_value=False),
+                    mock.patch.object(body, "unit_digests", return_value=document["units"]),
+                    mock.patch.object(
+                        units,
+                        "_reviewed_preimage",
+                        side_effect=(
+                            [None, ValueError("later preimage changed")]
+                            if failure_at == "later"
+                            else [None]
+                        ),
+                    ),
+                    mock.patch.object(units, "publish_unit_file", publication)
+                    if failure_at == "later"
+                    else mock.patch.object(
+                        units,
+                        "current_text",
+                        return_value="changed" if failure_at == "first" else None,
+                    ),
+                    mock.patch.object(units, "safe", return_value=True),
+                    mock.patch.object(common, "current_bytes", return_value="raced")
+                    if failure_at == "replace_guard"
+                    else mock.patch.object(common, "current_bytes"),
+                    mock.patch("os.close"),
+                    redirect_stdout(output),
+                ):
+                    body.main(document)
+                self.assertEqual(publication.call_count, 1 if failure_at == "later" else 0)
+                self.assertIn(f'"class":"{expected_class}"', output.getvalue())
 
 
 class BodyPayloadTests(SimpleTestCase):

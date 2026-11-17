@@ -1916,15 +1916,21 @@ def validate_pool_candidate(settings: SimpleNamespace, identity: int, candidate:
         )
 
 
+class ReviewedPreimageChanged(ValueError):
+    """A publication preimage was rejected before its replacement."""
+
+
 def current_bytes(path: pathlib.Path) -> str | None:
     if path.is_symlink() or (path.exists() and not safe(str(path))):
-        raise ValueError("The live Caddy file is outside the root-controlled convention.")
+        raise ReviewedPreimageChanged(
+            "The live Caddy file is outside the root-controlled convention."
+        )
     return path.read_text() if path.exists() else None
 
 
 def replace_site_file(path: pathlib.Path, value: str, expected: str | None) -> None:
     if current_bytes(path) != expected or not safe(str(path.parent), directory=True):
-        raise ValueError("The reviewed preimage changed before publication.")
+        raise ReviewedPreimageChanged("The reviewed preimage changed before publication.")
     if expected is None:
         write_new(str(path), value, 0o644)
         return
@@ -1938,7 +1944,7 @@ def replace_site_file(path: pathlib.Path, value: str, expected: str | None) -> N
             os.fsync(output.fileno())
             os.fchmod(output.fileno(), 0o644)
         if current_bytes(path) != expected or not safe(str(path.parent), directory=True):
-            raise ValueError("The reviewed preimage changed during staging.")
+            raise ReviewedPreimageChanged("The reviewed preimage changed during staging.")
         os.replace(temporary, path)
     finally:
         pathlib.Path(temporary).unlink(missing_ok=True)

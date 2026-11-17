@@ -18,6 +18,7 @@ import sys
 from types import SimpleNamespace
 
 from automation.bodies.units import (
+    FirstPublicationRefusal,
     daemon_reload,
     disable_and_stop,
     enable_timer,
@@ -262,7 +263,7 @@ def _turn_off(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
     result("succeeded")
 
 
-def main(document: dict[str, object]) -> None:
+def main(document: dict[str, object]) -> None:  # noqa: C901 - one result for each body boundary
     identifier = str(document.get("identifier", ""))
     lock: int | None = None
     effects_started = False
@@ -290,13 +291,16 @@ def main(document: dict[str, object]) -> None:
         ):
             result("refused", "evidence")
             return
-        # Native calls below may change a unit or private file before raising. Once
-        # entered, their failure is an incomplete change, not a preflight refusal.
+        # See docs/recovery-guarantees.md: uncertainty after publication is partial.
         effects_started = True
         if value.state == "on":
             _turn_on(value, path, before)
         else:
             _turn_off(value, path, before)
+    except FirstPublicationRefusal as error:
+        sys.stderr.write(f"barectl-problem {type(error).__name__}: {error}\n")
+        sys.stderr.flush()
+        result("refused", "automation")
     except (ValueError, OSError, subprocess.TimeoutExpired) as error:
         sys.stderr.write(f"barectl-problem {type(error).__name__}: {error}\n")
         sys.stderr.flush()

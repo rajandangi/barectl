@@ -52,7 +52,7 @@ AUTOMATION_INCOMPLETE: Final = ResultReason(
     "automation_incomplete",
     {
         Result.PARTIAL: (
-            "The scheduled-tasks change stopped after native changes began, so its current "
+            "The scheduled-tasks change stopped while applying, so its current "
             "state needs checking. Check the run's journal, the site's PHP service, private "
             "cron setting and timer on the server, then prepare a new review."
         ),
