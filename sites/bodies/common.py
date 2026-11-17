@@ -2667,6 +2667,16 @@ def set_site_readiness(document: dict[str, object]) -> None:
         )
 
 
+def _site_fpm_completion(evidence: dict[str, object]) -> int:
+    load = evidence.get("load")
+    events = load.get("events") if isinstance(load, dict) else None
+    event = events[-1] if isinstance(events, list) and events else None
+    clock = event.get("__MONOTONIC_TIMESTAMP") if isinstance(event, dict) else None
+    if not isinstance(clock, str) or not clock.isdecimal():
+        raise ValueError("The site's PHP completed load has no valid journal clock.")
+    return int(clock)
+
+
 def reload_site_fpm(settings: SimpleNamespace) -> None:
     """Ask one site's own master to reload its pool and wait for the completed load."""
     unit = php_site_unit(settings.identifier, settings.runtime)
@@ -2675,16 +2685,19 @@ def reload_site_fpm(settings: SimpleNamespace) -> None:
     pid = before.get("MainPID", "")
     if before.get("ActiveState") != "active" or not pid.isdecimal() or int(pid) <= 0:
         raise ValueError("The site's own PHP master is not running.")
+    signal_boundary = time.monotonic_ns() // 1000
     os.kill(int(pid), signal.SIGUSR2)
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        if site_fpm_read(settings) is not None:
+        current = site_fpm_read(settings)
+        if current is not None:
             after = unit_properties(run(command, check=False))
             if after.get("MainPID") != pid or after.get("InvocationID") != before.get(
                 "InvocationID"
             ):
                 raise ValueError("The site's PHP master was replaced instead of reloaded.")
-            return
+            if _site_fpm_completion(current) > signal_boundary:
+                return
         time.sleep(0.5)
     raise ValueError("The site's PHP master did not complete its reload.")
 

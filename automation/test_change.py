@@ -200,6 +200,7 @@ class DocumentTests(SimpleTestCase):
                 "version",
                 "identifier",
                 "state",
+                "runtime",
                 "uid",
                 "gid",
                 "configuration_digest",
@@ -270,6 +271,10 @@ class BodyOrderTests(SimpleTestCase):
             note("verify-constant")
             return verified
 
+        def synchronize(*_args: object) -> bool:
+            note("reload-serving-php")
+            return True
+
         def result(outcome: str, reason: str = "") -> None:
             del reason
             note(f"result:{outcome}")
@@ -282,6 +287,7 @@ class BodyOrderTests(SimpleTestCase):
             "wait_for_tick": wait_tick,
             "_configuration": write_constant,
             "_verify_configuration": verify_constant,
+            "_synchronize": synchronize,
             "disable_and_stop": lambda *args: note("stop"),
             "remove_units": lambda *args: note("remove-units"),
             "unit_digests": lambda *args: dict.fromkeys(("slice", "service", "timer"), "absent"),
@@ -305,6 +311,7 @@ class BodyOrderTests(SimpleTestCase):
         self.assertLess(order.index("stage:tick"), order.index("wait-tick"))
         self.assertLess(order.index("wait-tick"), order.index("write-constant"))
         self.assertLess(order.index("write-constant"), order.index("result:succeeded"))
+        self.assertLess(order.index("write-constant"), order.index("reload-serving-php"))
 
     def test_a_failed_first_run_never_sets_the_constant(self) -> None:
         order, patches = self.patched()
@@ -319,9 +326,28 @@ class BodyOrderTests(SimpleTestCase):
         with self.apply_patches(patches):
             body._turn_off(self.value("off"), pathlib.Path("/nonexistent/wp-config.php"), "before")
         self.assertLess(order.index("clear-constant"), order.index("stop"))
+        self.assertLess(order.index("reload-serving-php"), order.index("stop"))
         self.assertLess(order.index("clear-constant"), order.index("remove-units"))
         self.assertLess(order.index("stop"), order.index("remove-units"))
         self.assertIn("result:succeeded", order)
+
+    def test_reload_failure_keeps_timer_installed_after_either_setting_write(self) -> None:
+        for state in ("on", "off"):
+            with self.subTest(state=state):
+                order, patches = self.patched()
+                patches["_synchronize"] = lambda *args: False
+                with self.apply_patches(patches):
+                    if state == "on":
+                        body._turn_on(
+                            self.value(state), pathlib.Path("/nonexistent/wp-config.php"), "before"
+                        )
+                    else:
+                        body._turn_off(
+                            self.value(state), pathlib.Path("/nonexistent/wp-config.php"), "before"
+                        )
+                self.assertIn("result:partial", order)
+                self.assertNotIn("stop", order)
+                self.assertNotIn("remove-units", order)
 
 
 class BodyPayloadTests(SimpleTestCase):

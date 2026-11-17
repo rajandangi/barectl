@@ -251,6 +251,7 @@ def _details(
                 else "Turned back on before the server task stops"
             ),
         },
+        {"label": "Serving PHP", "value": "Gracefully reload this site's PHP before the handover"},
         {"label": "Current state", "value": STATUS_SENTENCE[schedule.status]},
     ]
 
@@ -272,6 +273,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "body_sha256": BODY_SHA256,
         "identifier": inputs.identifier,
         "state": inputs.schedule_state,
+        "runtime": site["runtime"] if site is not None else "",
         "tick_budget_seconds": convention.TICK_BUDGET_SECONDS,
         "details": _details(inputs, schedule),
     }
@@ -291,10 +293,11 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 Scope.SITE,
                 (
                     f"Run {inputs.identifier}'s scheduled WordPress events on the server every "
-                    "minute, and stop page loads from running them."
+                    "minute, then gracefully reload this site's PHP before page loads stop "
+                    "running them."
                     if inputs.schedule_state == "on"
                     else f"Give {inputs.identifier}'s scheduled WordPress events back to page "
-                    "loads and stop the server task."
+                    "loads, gracefully reload this site's PHP, and stop the server task."
                 ),
                 (inputs.identifier,),
             ),
@@ -322,6 +325,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 else "Page loads run cron again before the server task stops."
             ),
             "The site's private configuration keeps its fixed lines and stays a site-owned file.",
+            "The site's serving PHP completes a graceful reload before the handover advances.",
             "The timer runs every minute as the site's own account, with no catch-up burst.",
         ),
         refusals=tuple(dict.fromkeys(refusals)),
@@ -344,6 +348,7 @@ def _document(document: dict[str, object]) -> dict[str, object]:
         or document.get("body_sha256") != BODY_SHA256
         or convention.SITE_IDENTIFIER.fullmatch(identifier) is None
         or state not in ("on", "off")
+        or document.get("runtime") not in PHP_RUNTIMES
         or type(document.get("uid")) is not int
         or type(document.get("gid")) is not int
         or not isinstance(document.get("configuration_digest"), str)
@@ -362,6 +367,7 @@ def _document(document: dict[str, object]) -> dict[str, object]:
         "version": 1,
         "identifier": identifier,
         "state": state,
+        "runtime": document["runtime"],
         "uid": document["uid"],
         "gid": document["gid"],
         "configuration_digest": document["configuration_digest"],

@@ -29,7 +29,16 @@ from automation.bodies.units import (
     wait_for_tick,
 )
 from automation.convention import ROLE_WPCRON, service_name, timer_name
-from sites.bodies.common import open_site_lock, result, site_account, stage
+from sites.bodies.common import (
+    native_state,
+    open_site_lock,
+    reload_site_fpm,
+    result,
+    setting,
+    site_account,
+    site_fpm_read,
+    stage,
+)
 from wordpress.convention import (
     apply_owned_constant,
     cron_disabled,
@@ -83,6 +92,7 @@ def _reviewed(document: dict[str, object]) -> SimpleNamespace:
         document.get("version") != 1
         or IDENTIFIER.fullmatch(identifier) is None
         or state not in ("on", "off")
+        or document.get("runtime") not in ("php84", "php85")
         or type(document.get("uid")) is not int
         or type(document.get("gid")) is not int
         or not isinstance(document.get("configuration_digest"), str)
@@ -99,6 +109,7 @@ def _reviewed(document: dict[str, object]) -> SimpleNamespace:
     return SimpleNamespace(
         identifier=identifier,
         state=state,
+        runtime=document["runtime"],
         uid=document["uid"],
         gid=document["gid"],
         configuration_digest=document["configuration_digest"],
@@ -158,14 +169,45 @@ def _verify_configuration(identifier: str, path: pathlib.Path, value: str) -> bo
 def _preflight(value: SimpleNamespace, path: pathlib.Path) -> bool:
     account = site_account(value.identifier)
     directory = pathlib.Path("/var/www") / value.identifier
+    selected = native_state(value.identifier, value.runtime, site_only=True, protections=False)
+    site = next((row for row in selected["sites"] if row["identifier"] == value.identifier), None)
+    settings = (
+        setting(value.identifier, site["names"], value.runtime, site["https"], site["readiness"])
+        if site is not None
+        else None
+    )
     return (
-        account is not None
+        site is not None
+        and site["state"] == "complete"
+        and site["application"] == "wordpress"
+        and site["runtime"] == value.runtime
+        and settings is not None
+        and site_fpm_read(settings) is not None
+        and account is not None
         and account[0] == value.uid
         and account[1] == value.gid
         and (directory / "current").is_dir()
         and (directory / "bin" / "wp").is_file()
         and _private(path, "s" + value.identifier)
     )
+
+
+def _synchronize(value: SimpleNamespace) -> bool:
+    try:
+        current = native_state(value.identifier, value.runtime, site_only=True, protections=False)
+        site = next(
+            (row for row in current["sites"] if row["identifier"] == value.identifier), None
+        )
+        if site is None or site["runtime"] != value.runtime or site["state"] != "complete":
+            return False
+        reload_site_fpm(
+            setting(
+                value.identifier, site["names"], value.runtime, site["https"], site["readiness"]
+            )
+        )
+        return True
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        return False
 
 
 def _turn_on(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
@@ -185,6 +227,9 @@ def _turn_on(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
     if not _verify_configuration(value.identifier, path, "true"):
         result("partial", "automation_configuration")
         return
+    if not _synchronize(value):
+        result("partial", "automation_php_reload")
+        return
     stage("verify")
     if not timer_ready(value.identifier, ROLE_WPCRON):
         result("partial", "automation_start")
@@ -200,6 +245,9 @@ def _turn_off(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
     _configuration(value.identifier, path, before, "")
     if not _verify_configuration(value.identifier, path, ""):
         result("partial", "automation_configuration")
+        return
+    if not _synchronize(value):
+        result("partial", "automation_php_reload")
         return
     stage("install")
     disable_and_stop(value.identifier, ROLE_WPCRON)

@@ -53,6 +53,16 @@ SCHEDULE_REASONS: Final = (
     AUTOMATION_UNITS,
     AUTOMATION_CHANGE,
     ResultReason(
+        "automation_php_reload",
+        {
+            Result.PARTIAL: (
+                "Barectl changed the private cron setting but could not verify a completed "
+                "reload of this site's serving PHP. Barectl left the server task unchanged. "
+                "Check the site's PHP service and the run's journal, then prepare a new review."
+            ),
+        },
+    ),
+    ResultReason(
         "automation_tick",
         {
             Result.PARTIAL: (
