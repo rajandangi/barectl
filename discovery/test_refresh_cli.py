@@ -19,8 +19,8 @@ from operations.models import RemoteOperation
 from servers.models import Server
 
 from .fakes import DiscoveryTestCase
-from .models import DiscoveryAttempt
-from .services import RefreshNotFound, read_refresh, request_refresh
+from .models import DiscoveryAttempt, DiscoverySnapshot
+from .services import RefreshNotFound, queue_discovery, read_refresh, request_refresh
 
 
 class RefreshCommandTests(DiscoveryTestCase):
@@ -491,6 +491,35 @@ class RefreshCommandTests(DiscoveryTestCase):
         self.assertIsNone(result["snapshot"])
         self.assertEqual(result["snapshot_availability"], "not_applicable")
         self.assertNotEqual(first["operation"], second["operation"])
+
+    def test_worker_refuses_deleted_refresh_actor_before_alias_ssh(self) -> None:
+        requested = request_refresh(self.server.pk, user=self.user)
+        attempt = cast(DiscoveryAttempt, requested.operation)
+        self.assertIsNone(attempt.connection)
+        self.assertEqual(attempt.authority, "discovery.add_discoveryattempt")
+
+        self.user.delete()
+        attempt.refresh_from_db()
+        self.assertIsNone(attempt.requested_by_id)
+        self.run_worker()
+
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+        self.assertIn("account that requested", attempt.failure)
+        self.assertEqual(self.remote.targets, [])
+        self.assertFalse(DiscoverySnapshot.objects.filter(attempt=attempt).exists())
+
+    def test_worker_allows_anonymous_legacy_alias_check(self) -> None:
+        attempt = queue_discovery(self.server)
+        self.assertIsNone(attempt.connection)
+        self.assertIsNone(attempt.requested_by_id)
+        self.assertEqual(attempt.authority, "")
+
+        self.run_worker()
+
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+        self.assertTrue(DiscoverySnapshot.objects.filter(attempt=attempt).exists())
 
     def test_wait_observes_worker_completion_and_resume_never_queues(self) -> None:
         output = io.StringIO()

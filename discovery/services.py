@@ -220,10 +220,15 @@ class RefreshProgress(TypedDict):
     waiting_for_worker: bool
 
 
+class RefreshServer(TypedDict):
+    id: int
+    name: str
+
+
 class RefreshStatus(TypedDict):
     version: int
     code: str
-    server: dict[str, str | int]
+    server: RefreshServer
     operation: RefreshOperation
     progress: RefreshProgress
     snapshot: BasicSnapshot | None
@@ -402,11 +407,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
 
 
 def _authorize(attempt: DiscoveryAttempt) -> None:
-    if (
-        attempt.connection is None
-        and attempt.authority != CHANGE_REFRESH_AUTHORITY
-        and attempt.requested_by_id is None
-    ):
+    if attempt.connection is None and not attempt.authority and attempt.requested_by_id is None:
         return
     if (
         attempt.connection is not None

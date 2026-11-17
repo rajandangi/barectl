@@ -32,11 +32,30 @@ On this pristine server, all panel paths were missing and the standing was Fresh
 no reasons or warnings.
 The times cover SSH collection, not worker progress writes or dashboard and CLI response time.
 
-The script and raw samples are in `/tmp/barectl-refresh-cli/panel_compare.py` and
-`/tmp/barectl-refresh-cli/panel-comparison.json`; the complete runner log is
-`/tmp/barectl-refresh-cli/564-fix-panel-compare.log`. The earlier samples, script, and log
-are preserved under `*-initial-544944bb.*` names. These are local evidence artifacts,
-not repository sources.
+The twelve measurements below are in execution order. Seconds are rounded to six decimal
+places; the median table above rounds to four. To repeat an equivalent comparison, use
+the baseline functions at the pinned commit and the current batch on one prepared
+disposable L0 server. Count each `RemoteShell.run` call and time the panel checks,
+software stage, and `collect(..., sites=False)` separately through the same SSH adapter.
+Alternate arm order for each sample, repeat with 25 ms server egress delay, then remove
+the delay. Compare panel states, standing fields, and the collection snapshot with the
+variable capacity values excluded as described above. Issue [#564](https://github.com/rajandangi/barectl/issues/564)
+records the baseline-only measurement and reuse decision.
+
+| Delay (ms) | Sample | Arm | Panel reads | Panel (s) | Software reads | Software (s) | Collection reads | Collection (s) |
+| ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 1 | old | 24 | 0.077067 | 95 | 0.335354 | 100 | 0.348542 |
+| 0 | 1 | new | 1 | 0.002796 | 72 | 0.269183 | 77 | 0.284313 |
+| 0 | 2 | new | 1 | 0.002878 | 72 | 0.264412 | 77 | 0.281233 |
+| 0 | 2 | old | 24 | 0.071577 | 95 | 0.321936 | 100 | 0.338710 |
+| 0 | 3 | old | 24 | 0.070790 | 95 | 0.330041 | 100 | 0.345730 |
+| 0 | 3 | new | 1 | 0.003155 | 72 | 0.261032 | 77 | 0.279152 |
+| 25 | 1 | old | 24 | 1.789495 | 95 | 7.176570 | 100 | 7.550915 |
+| 25 | 1 | new | 1 | 0.070186 | 72 | 5.511562 | 77 | 5.871149 |
+| 25 | 2 | new | 1 | 0.078365 | 72 | 5.466072 | 77 | 5.827163 |
+| 25 | 2 | old | 24 | 1.793871 | 95 | 6.845910 | 100 | 7.232277 |
+| 25 | 3 | old | 24 | 1.859465 | 95 | 6.883741 | 100 | 7.273082 |
+| 25 | 3 | new | 1 | 0.072406 | 72 | 4.992254 | 77 | 5.361078 |
 
 ## Verification
 
