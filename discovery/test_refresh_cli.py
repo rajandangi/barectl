@@ -8,8 +8,10 @@ from unittest import mock
 from django.contrib.auth.models import Permission
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
-from django.core.management.base import CommandError
+from django.core.management.base import CommandError, OutputWrapper
 
+from dashboard.management.commands.barectl import Command
+from operations import lifecycle
 from operations.models import RemoteOperation
 from servers.models import Server
 
@@ -41,6 +43,202 @@ class RefreshCommandTests(DiscoveryTestCase):
                 stdout=output,
             )
         return cast(dict[str, object], json.loads(output.getvalue()))
+
+    def run_command(self, *words: str) -> tuple[int, str]:
+        output = io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO("local secret\n")):
+            try:
+                call_command("barectl", "server", *words, stdout=output)
+            except CommandError as error:
+                return error.returncode, output.getvalue()
+        return 0, output.getvalue()
+
+    def test_parser_errors_have_a_json_envelope(self) -> None:
+        for words in (
+            ("refresh", "nope", "--username", "operator"),
+            ("refresh", "1", "--username", "operator", "--wait", "--timeout", "bad"),
+            ("refresh", "1"),
+        ):
+            with self.subTest(words=words):
+                command = Command()
+                self.assertFalse(command.requires_system_checks)
+                output = io.StringIO()
+                command.stdout = OutputWrapper(output)
+                parser = command.create_parser("manage.py", "barectl")
+                with self.assertRaises(CommandError) as caught:
+                    parser.parse_args(["server", *words, "--json"])
+                self.assertEqual(caught.exception.returncode, 2)
+                self.assertEqual(json.loads(output.getvalue())["code"], "invalid_input")
+
+    def test_id_validation_and_timeout_bounds(self) -> None:
+        common = ("--username", "operator", "--password-stdin", "--json")
+        for action in ("refresh", "refresh-status"):
+            for value in ("0", "-1"):
+                with self.subTest(action=action, value=value):
+                    status, output = self.run_command(action, value, *common)
+                    self.assertEqual(status, 2)
+                    self.assertEqual(json.loads(output)["code"], "invalid_input")
+        for value in ("0", "601"):
+            status, output = self.run_command(
+                "refresh", str(self.server.pk), *common, "--wait", "--timeout", value
+            )
+            self.assertEqual(status, 2)
+            self.assertEqual(json.loads(output)["code"], "invalid_input")
+        for value in ("1", "600"):
+            with mock.patch(
+                "dashboard.management.commands.barectl.time.monotonic", side_effect=[0, int(value)]
+            ):
+                status, output = self.run_command(
+                    "refresh", str(self.server.pk), *common, "--wait", "--timeout", value
+                )
+            self.assertEqual(status, 7)
+            self.assertEqual(json.loads(output)["code"], "client_timeout")
+
+    def test_terminal_prompt_text_status_and_interrupt_keep_id(self) -> None:
+        with (
+            mock.patch("sys.stdin") as stdin,
+            mock.patch(
+                "dashboard.management.commands.barectl.getpass.getpass", return_value="local secret"
+            ) as prompt,
+        ):
+            stdin.isatty.return_value = True
+            output = io.StringIO()
+            call_command(
+                "barectl",
+                "server",
+                "refresh",
+                str(self.server.pk),
+                "--username",
+                "operator",
+                stdout=output,
+            )
+        prompt.assert_called_once()
+        operation_id = DiscoveryAttempt.objects.get().pk
+        self.assertIn(f"Operation {operation_id}: accepted", output.getvalue())
+
+        output = io.StringIO()
+        with (
+            mock.patch("sys.stdin", io.StringIO("local secret\n")),
+            mock.patch(
+                "dashboard.management.commands.barectl.time.sleep", side_effect=KeyboardInterrupt
+            ),
+            self.assertRaises(CommandError) as caught,
+        ):
+            call_command(
+                "barectl",
+                "server",
+                "refresh-status",
+                str(operation_id),
+                "--username",
+                "operator",
+                "--password-stdin",
+                "--wait",
+                stdout=output,
+            )
+        self.assertEqual(caught.exception.returncode, 130)
+        self.assertEqual(output.getvalue(), f"Operation {operation_id}: checking\n")
+        self.assertEqual(DiscoveryAttempt.objects.get().status, DiscoveryAttempt.Status.QUEUED)
+
+        status_output = io.StringIO()
+        with (
+            mock.patch("sys.stdin", io.StringIO("local secret\n")),
+            mock.patch(
+                "dashboard.management.commands.barectl.time.sleep", side_effect=KeyboardInterrupt
+            ),
+            self.assertRaises(CommandError) as caught,
+        ):
+            call_command(
+                "barectl",
+                "server",
+                "refresh-status",
+                str(operation_id),
+                "--username",
+                "operator",
+                "--password-stdin",
+                "--wait",
+                "--json",
+                stdout=status_output,
+            )
+        self.assertEqual(caught.exception.returncode, 130)
+        self.assertEqual(json.loads(status_output.getvalue())["operation_id"], operation_id)
+
+    def test_text_status_without_wait_and_missing_operation(self) -> None:
+        operation_id = cast(
+            dict[str, object], self.command("refresh", str(self.server.pk))["operation"]
+        )["id"]
+        status, output = self.run_command(
+            "refresh-status", str(operation_id), "--username", "operator", "--password-stdin"
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            output,
+            f"Operation {operation_id}: checking\nOperation {operation_id}: in_progress (queued)\n",
+        )
+        status, output = self.run_command(
+            "refresh-status", "404", "--username", "operator", "--password-stdin", "--json"
+        )
+        self.assertEqual(status, 4)
+        self.assertEqual(json.loads(output)["code"], "not_found")
+
+    def test_failed_wait_and_stale_connection_have_exit_six(self) -> None:
+        common = ("--username", "operator", "--password-stdin", "--json")
+        for failure, code in (
+            ("A remote read failed.", "failed"),
+            ("The saved connection changed; request a new check.", "stale_connection"),
+        ):
+            with self.subTest(code=code):
+                operation = cast(
+                    dict[str, object], self.command("refresh", str(self.server.pk))["operation"]
+                )
+                operation_id = cast(int, operation["id"])
+
+                def fail_during_wait(
+                    _: float, *, target: int = operation_id, reason: str = failure
+                ) -> None:
+                    RemoteOperation.objects.filter(pk=target).update(
+                        status=RemoteOperation.Status.FAILED, failure=reason
+                    )
+
+                with mock.patch(
+                    "dashboard.management.commands.barectl.time.sleep", side_effect=fail_during_wait
+                ):
+                    status, output = self.run_command(
+                        "refresh-status", str(operation_id), *common, "--wait"
+                    )
+                self.assertEqual(status, 6)
+                result = json.loads(output)
+                self.assertEqual(result["code"], code)
+                self.assertIsNone(result["snapshot"])
+
+    def test_revoked_permission_blocks_recovery(self) -> None:
+        self.user.user_permissions.remove(Permission.objects.get(codename="add_discoveryattempt"))
+        with mock.patch.object(lifecycle, "_recover_stale_operations") as recover:
+            with self.assertRaises(PermissionDenied):
+                request_refresh(self.server.pk, user=self.user)
+            with self.assertRaises(PermissionDenied):
+                read_refresh(1, user=self.user)
+        recover.assert_not_called()
+
+    def test_removed_or_inactive_actor_cannot_trigger_recovery(self) -> None:
+        for inactive in (True, False):
+            with self.subTest(inactive=inactive):
+                actor = self.user
+                if inactive:
+                    actor.is_active = False
+                    actor.save(update_fields=["is_active"])
+                else:
+                    actor.delete()
+                with mock.patch.object(lifecycle, "_recover_stale_operations") as recover:
+                    with self.assertRaises(PermissionDenied):
+                        request_refresh(self.server.pk, user=actor)
+                    with self.assertRaises(PermissionDenied):
+                        read_refresh(1, user=actor)
+                recover.assert_not_called()
+                if inactive:
+                    actor.is_active = True
+                    actor.save(update_fields=["is_active"])
+                else:
+                    break
 
     def test_request_shares_attempt_and_worker_publishes_only_its_snapshot(self) -> None:
         first = self.command("refresh", str(self.server.pk))

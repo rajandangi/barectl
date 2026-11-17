@@ -2,7 +2,9 @@
 
 docs/adr/0004-serialize-remote-operations-in-one-table.md
 
-Every public entry recovers abandoned operations first (docs/ssh-connections.md#workflow).
+Legacy discovery entries recover abandoned operations first
+(docs/ssh-connections.md#workflow). Operator refresh entries authorize a freshly
+loaded account before recovery can change operation state.
 No other module reads attempts or their snapshots through a server's related names.
 """
 
@@ -239,10 +241,14 @@ def _refresh_actor(user: User) -> User:
     return actor
 
 
-@recovers_first
 def request_refresh(server_id: int, *, user: User) -> RefreshRequest:
     """Submit the operator refresh, sharing an active attempt or naming a blocker."""
     actor = _refresh_actor(user)
+    return _request_refresh_after_authorization(server_id, actor)
+
+
+@recovers_first
+def _request_refresh_after_authorization(server_id: int, actor: User) -> RefreshRequest:
     server = Server.objects.filter(pk=server_id).first()
     if server is None:
         raise RefreshNotFound
@@ -257,10 +263,14 @@ def request_refresh(server_id: int, *, user: User) -> RefreshRequest:
         raise RefreshNotFound from None
 
 
-@recovers_first
 def read_refresh(operation_id: int, *, user: User) -> RefreshStatus:
     """Return an allowlisted status for one operation, with no cached fallback."""
     _refresh_actor(user)
+    return _read_refresh_after_authorization(operation_id)
+
+
+@recovers_first
+def _read_refresh_after_authorization(operation_id: int) -> RefreshStatus:
     attempt = (
         DiscoveryAttempt.objects.select_related("server", "connection")
         .filter(pk=operation_id)

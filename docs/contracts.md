@@ -163,7 +163,7 @@ URL names, management commands and documented environment variables. It is owned
   `discovery.add_discoveryattempt` and `discovery.view_siteobservation`;
 - every named route in `config/urls.py`, including the redirects that keep the old
   `stack/`, `setup/` and `changes/` paths working;
-- the documented management commands `barectl_upgrade`, `changepassword`, `check`,
+- the documented management commands `barectl`, `barectl_upgrade`, `changepassword`, `check`,
   `collectstatic`, `createsuperuser`, `db_worker`, `makemigrations`, `migrate`,
   `runserver`, `showmigrations` and `test`; and
 - the documented environment variables `BARECTL_SECRET_KEY`, `BARECTL_ALLOWED_HOSTS`,

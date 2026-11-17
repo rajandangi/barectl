@@ -4,7 +4,7 @@ import getpass
 import json
 import sys
 import time
-from typing import NoReturn, override
+from typing import Literal, NoReturn, override
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
@@ -17,6 +17,39 @@ from operations.lifecycle import OperationRefused
 
 class Command(BaseCommand):
     help = "Refresh a server or read a refresh operation on this controller."
+    # Django's own startup diagnostics run outside the versioned command envelope.
+    requires_system_checks: list[str] | tuple[str, ...] | Literal["__all__"] = ()
+
+    @override
+    def create_parser(self, prog_name: str, subcommand: str, **kwargs: object) -> CommandParser:
+        parser = super().create_parser(prog_name, subcommand, **kwargs)
+        parse_args = parser.parse_args
+
+        def parse_refresh_args(args: list[str] | None = None, namespace: object = None) -> object:
+            try:
+                return parse_args(args, namespace)
+            except (CommandError, SystemExit) as error:
+                if (
+                    args is not None
+                    and "--json" in args
+                    and not (isinstance(error, SystemExit) and error.code == 0)
+                ):
+                    self.stdout.write(
+                        json.dumps(
+                            {
+                                "version": 1,
+                                "code": "invalid_input",
+                                "message": "Invalid command arguments.",
+                                "operation_id": None,
+                            }
+                        )
+                    )
+                if isinstance(error, CommandError):
+                    raise CommandError(str(error), returncode=2) from error
+                raise
+
+        parser.parse_args = parse_refresh_args  # type: ignore[assignment]
+        return parser
 
     @override
     def add_arguments(self, parser: CommandParser) -> None:
@@ -96,6 +129,8 @@ class Command(BaseCommand):
         operation_id = options["operation_id"]
         if not isinstance(operation_id, int) or operation_id <= 0:
             self._fail(machine, "invalid_input", "Operation ID must be positive.", 2)
+        if not machine:
+            self.stdout.write(f"Operation {operation_id}: checking")
         return operation_id, "in_progress"
 
     def _poll(self, operation_id: int, user: User, wait: bool, timeout: int) -> RefreshStatus:
