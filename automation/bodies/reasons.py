@@ -45,6 +45,11 @@ AUTOMATION_CHANGE: Final = ResultReason(
             "what changed is unknown and no rollback happens. Read the unit's journal on the "
             "server, then prepare a new review."
         ),
+        Result.PARTIAL: (
+            "The scheduled-tasks change stopped while applying, so its current "
+            "state needs checking. Check the run's journal, the site's PHP service, private "
+            "cron setting and timer on the server, then prepare a new review."
+        ),
     },
 )
 
@@ -66,8 +71,10 @@ SCHEDULE_REASONS: Final = (
         "automation_configuration",
         {
             Result.PARTIAL: (
-                "Barectl could not set or clear the site's cron setting in the private "
-                "WordPress configuration. Check the run's journal, then prepare a new review."
+                "Barectl could not verify the site's private cron setting or a completed reload "
+                "of its serving PHP. The server task's current state needs checking. Check the "
+                "private WordPress configuration, PHP service and run's journal on the server, "
+                "then prepare a new review."
             ),
         },
     ),

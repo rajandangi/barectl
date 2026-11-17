@@ -17,7 +17,13 @@ from pathlib import Path, PurePosixPath
 from unittest import SkipTest, TestCase
 
 from .fakes import FakeServer
-from .observations.standing import _NIX_BINARY_COMMAND, _NIX_BINARY_PATH, _path_state
+from .observations.standing import (
+    _NIX_BINARY_COMMAND,
+    _NIX_BINARY_PATH,
+    _PANEL_COMMAND,
+    _PANEL_PATHS,
+    _path_state,
+)
 
 TESTS = ("-e", "-r", "-x", "-L", "-d")
 LISTINGS = ("ls -1b", "ls -1bA")
@@ -200,6 +206,33 @@ def _gnu_coreutils() -> bool:
 
 
 class FakeServerContractTests(TestCase):
+    def test_panel_batch_matches_a_real_filesystem_with_mixed_states(self) -> None:
+        scenario = Scenario(
+            files={"/usr/local/cpanel": "", "/www/server/panel": ""},
+            dead_links={"/usr/local/psa"},
+            unsearchable={"/www"},
+        )
+        if scenario.uses_permissions and os.geteuid() == 0:
+            self.skipTest("Permissions do not restrict root.")
+        fake = scenario.fake()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            scenario.build(root)
+            try:
+                command = _PANEL_COMMAND
+                for path in _PANEL_PATHS:
+                    command = command.replace(
+                        shlex.quote(path), shlex.quote(str(_under(root, path)))
+                    )
+                expected = ["missing"] * len(_PANEL_PATHS)
+                expected[_PANEL_PATHS.index("/usr/local/cpanel")] = "present"
+                expected[_PANEL_PATHS.index("/www/server")] = "unreadable"
+                output = "".join(f"{state}\n" for state in expected)
+                self.assertEqual(_shell(command), (True, output))
+                self.assertEqual(self.fake_answer(fake, _PANEL_COMMAND), (True, output))
+            finally:
+                _restore_modes(root)
+
     def test_the_nix_binary_probe_preserves_filesystem_classifications(self) -> None:
         for name, scenario, token, state in (
             ("absent tree", Scenario(), "missing\n", False),

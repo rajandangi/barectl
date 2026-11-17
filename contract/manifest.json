@@ -1,6 +1,7 @@
 {
   "application": {
     "commands": [
+      "barectl",
       "barectl_upgrade",
       "changepassword",
       "check",

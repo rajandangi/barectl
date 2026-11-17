@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import OuterRef, Q, QuerySet, Subquery
@@ -955,6 +955,73 @@ def current_snapshot(server: Server) -> Snapshot | None:
         .first()
     )
     return None if row is None else _read(row, connection_label(row.attempt))
+
+
+class BasicOs(TypedDict):
+    outcome: str
+    name: str
+    distribution: str
+    version: str
+
+
+class BasicArchitecture(TypedDict):
+    outcome: str
+    value: str
+
+
+class BasicCpu(TypedDict):
+    outcome: str
+    count: int | None
+
+
+class BasicMemory(TypedDict):
+    outcome: str
+    bytes: int | None
+
+
+class BasicFilesystem(TypedDict):
+    outcome: str
+    total_bytes: int | None
+    available_bytes: int | None
+
+
+class BasicSnapshot(TypedDict):
+    id: int
+    collected_at: str
+    connection_current: bool
+    os: BasicOs
+    architecture: BasicArchitecture
+    cpu: BasicCpu
+    memory: BasicMemory
+    root_filesystem: BasicFilesystem
+
+
+def basic_snapshot_of(
+    attempt: DiscoveryAttempt, *, connection_current: bool
+) -> BasicSnapshot | None:
+    """The CLI's small safe projection of this attempt's retained observations."""
+    row = DiscoverySnapshot.objects.filter(attempt=attempt).first()
+    if row is None:
+        return None
+    return {
+        "id": row.pk,
+        "collected_at": row.collected_at.isoformat(),
+        "connection_current": connection_current,
+        "os": {
+            "outcome": row.os_status,
+            "name": row.os_pretty_name or row.os_name,
+            "distribution": row.os_id,
+            "version": row.os_version_id,
+        },
+        "architecture": {"outcome": row.arch_status, "value": row.arch_value},
+        "cpu": {"outcome": row.cpu_status, "count": row.cpu_count},
+        "memory": {"outcome": row.memory_status, "bytes": row.memory_bytes},
+        "root_filesystem": {
+            "outcome": row.filesystem_status,
+            "total_bytes": row.filesystem_size_bytes,
+            "available_bytes": row.filesystem_avail_bytes,
+        },
+    }
 
 
 def snapshot_of(attempt: DiscoveryAttempt) -> Snapshot | None:

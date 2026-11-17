@@ -46,6 +46,8 @@ uv run --env-file .env python manage.py db_worker
 
 Open <http://127.0.0.1:8000>, sign in, and choose **Add server**. [Host your first PHP site](docs/first-site.md)
 
+The [local CLI](docs/cli.md) can request Refresh server and read its operation status from the same controller.
+
 ## Core philosophy
 
 The managed server is the source of truth. Barectl reads ordinary Linux configuration, service state, and logs. Accounts, saved connections, and private operation history stay in the original installation's local database. SSH credentials stay on the computer running Barectl. [Architecture](docs/architecture.md#state-and-discovery) · [Native recovery](docs/recovery.md)

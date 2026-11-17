@@ -18,6 +18,7 @@ import sys
 from types import SimpleNamespace
 
 from automation.bodies.units import (
+    FirstPublicationRefusal,
     daemon_reload,
     disable_and_stop,
     enable_timer,
@@ -29,7 +30,16 @@ from automation.bodies.units import (
     wait_for_tick,
 )
 from automation.convention import ROLE_WPCRON, service_name, timer_name
-from sites.bodies.common import open_site_lock, result, site_account, stage
+from sites.bodies.common import (
+    native_state,
+    open_site_lock,
+    reload_site_fpm,
+    result,
+    setting,
+    site_account,
+    site_fpm_read,
+    stage,
+)
 from wordpress.convention import (
     apply_owned_constant,
     cron_disabled,
@@ -83,6 +93,7 @@ def _reviewed(document: dict[str, object]) -> SimpleNamespace:
         document.get("version") != 1
         or IDENTIFIER.fullmatch(identifier) is None
         or state not in ("on", "off")
+        or document.get("runtime") not in ("php84", "php85")
         or type(document.get("uid")) is not int
         or type(document.get("gid")) is not int
         or not isinstance(document.get("configuration_digest"), str)
@@ -99,6 +110,7 @@ def _reviewed(document: dict[str, object]) -> SimpleNamespace:
     return SimpleNamespace(
         identifier=identifier,
         state=state,
+        runtime=document["runtime"],
         uid=document["uid"],
         gid=document["gid"],
         configuration_digest=document["configuration_digest"],
@@ -158,14 +170,45 @@ def _verify_configuration(identifier: str, path: pathlib.Path, value: str) -> bo
 def _preflight(value: SimpleNamespace, path: pathlib.Path) -> bool:
     account = site_account(value.identifier)
     directory = pathlib.Path("/var/www") / value.identifier
+    selected = native_state(value.identifier, value.runtime, site_only=True, protections=False)
+    site = next((row for row in selected["sites"] if row["identifier"] == value.identifier), None)
+    settings = (
+        setting(value.identifier, site["names"], value.runtime, site["https"], site["readiness"])
+        if site is not None
+        else None
+    )
     return (
-        account is not None
+        site is not None
+        and site["state"] == "complete"
+        and site["application"] == "wordpress"
+        and site["runtime"] == value.runtime
+        and settings is not None
+        and site_fpm_read(settings) is not None
+        and account is not None
         and account[0] == value.uid
         and account[1] == value.gid
         and (directory / "current").is_dir()
         and (directory / "bin" / "wp").is_file()
         and _private(path, "s" + value.identifier)
     )
+
+
+def _synchronize(value: SimpleNamespace) -> bool:
+    try:
+        current = native_state(value.identifier, value.runtime, site_only=True, protections=False)
+        site = next(
+            (row for row in current["sites"] if row["identifier"] == value.identifier), None
+        )
+        if site is None or site["runtime"] != value.runtime or site["state"] != "complete":
+            return False
+        reload_site_fpm(
+            setting(
+                value.identifier, site["names"], value.runtime, site["https"], site["readiness"]
+            )
+        )
+        return True
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        return False
 
 
 def _turn_on(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
@@ -185,6 +228,9 @@ def _turn_on(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
     if not _verify_configuration(value.identifier, path, "true"):
         result("partial", "automation_configuration")
         return
+    if not _synchronize(value):
+        result("partial", "automation_configuration")
+        return
     stage("verify")
     if not timer_ready(value.identifier, ROLE_WPCRON):
         result("partial", "automation_start")
@@ -201,6 +247,9 @@ def _turn_off(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
     if not _verify_configuration(value.identifier, path, ""):
         result("partial", "automation_configuration")
         return
+    if not _synchronize(value):
+        result("partial", "automation_configuration")
+        return
     stage("install")
     disable_and_stop(value.identifier, ROLE_WPCRON)
     remove_units(value.identifier, ROLE_WPCRON, value.units)
@@ -214,9 +263,10 @@ def _turn_off(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
     result("succeeded")
 
 
-def main(document: dict[str, object]) -> None:
+def main(document: dict[str, object]) -> None:  # noqa: C901 - one result for each body boundary
     identifier = str(document.get("identifier", ""))
     lock: int | None = None
+    effects_started = False
     try:
         value = _reviewed(document)
         identifier = value.identifier
@@ -241,14 +291,23 @@ def main(document: dict[str, object]) -> None:
         ):
             result("refused", "evidence")
             return
+        # See docs/recovery-guarantees.md: uncertainty after publication is partial.
+        effects_started = True
         if value.state == "on":
             _turn_on(value, path, before)
         else:
             _turn_off(value, path, before)
-    except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+    except FirstPublicationRefusal as error:
         sys.stderr.write(f"barectl-problem {type(error).__name__}: {error}\n")
         sys.stderr.flush()
         result("refused", "automation")
+    except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+        sys.stderr.write(f"barectl-problem {type(error).__name__}: {error}\n")
+        sys.stderr.flush()
+        if effects_started:
+            result("partial", "automation")
+        else:
+            result("refused", "automation")
     except Exception:
         sys.stderr.write("barectl-problem The scheduled tasks could not be changed.\n")
         sys.stderr.flush()

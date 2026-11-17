@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 # docs/upgrade.md, docs/hosting.md and docs/frontend-assets.md promise these commands.
 # Built-ins and django_tasks_db's db_worker join the dashboard's barectl_upgrade.
 DOCUMENTED_COMMANDS: Final = (
+    "barectl",
     "barectl_upgrade",
     "changepassword",
     "check",

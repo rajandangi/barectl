@@ -8,8 +8,11 @@ history entry change together in the same review.
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
+from types import MappingProxyType
 from typing import cast
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -26,9 +29,54 @@ HISTORY_NOTICE = (
 )
 # A version enters this record when it is released. An existing entry is never edited: a
 # changed shape needs a new version and a new history entry (docs/contracts.md, ADR 0042).
-RELEASED_HISTORY = {
-    "1": "6635196b2c4e0db8c9e964e56c1da2bbe04c72f3409754eb833205a2a1c61153",
-}
+RELEASED_HISTORY = MappingProxyType(
+    {
+        "1": "6635196b2c4e0db8c9e964e56c1da2bbe04c72f3409754eb833205a2a1c61153",
+        "2": "48227634e465f577b19269065f417e7684ec89d051058aeb024b8017f6710257",
+    }
+)
+# Released command snapshot; see docs/contracts.md#change-policy.
+RELEASED_COMMANDS = (
+    "barectl_upgrade",
+    "changepassword",
+    "check",
+    "collectstatic",
+    "createsuperuser",
+    "db_worker",
+    "makemigrations",
+    "migrate",
+    "runserver",
+    "showmigrations",
+    "test",
+)
+# docs/contracts.md#change-policy
+PROMISED_VERSION_TWO_COMMAND_ADDITIONS = ("barectl",)
+
+
+def version_two_command_problems(built: dict[str, object]) -> list[str]:
+    """See docs/contracts.md#change-policy."""
+    application = built.get("application")
+    if not isinstance(application, dict):
+        return []
+    commands = application.get("commands")
+    if not isinstance(commands, list) or not all(type(name) is str for name in commands):
+        return []
+    promised = set(RELEASED_COMMANDS) | set(PROMISED_VERSION_TWO_COMMAND_ADDITIONS)
+    actual = set(commands)
+    missing = promised - actual
+    unrecorded = actual - promised
+    problems = []
+    if missing:
+        problems.append(
+            f"application.commands is missing promised names {sorted(missing)}. {HISTORY_NOTICE}"
+        )
+    if unrecorded:
+        problems.append(
+            "application.commands has unrecorded same-version additions "
+            f"{sorted(unrecorded)}; record reviewed additions in "
+            "PROMISED_VERSION_TWO_COMMAND_ADDITIONS."
+        )
+    return problems
 
 
 def shapes_digest(built: dict[str, object]) -> str:
@@ -36,6 +84,23 @@ def shapes_digest(built: dict[str, object]) -> str:
     shapes = {name: value for name, value in built.items() if name != "version"}
     encoded = json.dumps(shapes, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def version_two_digest(built: dict[str, object]) -> str:
+    """See docs/contracts.md#change-policy for version-two digest normalization."""
+    application = built.get("application")
+    if not isinstance(application, dict):
+        return shapes_digest(built)
+    commands = application.get("commands")
+    if not isinstance(commands, list) or not all(type(name) is str for name in commands):
+        return shapes_digest(built)
+    if len(commands) != len(set(commands)) or version_two_command_problems(built):
+        return shapes_digest(built)
+    normalized = {
+        **built,
+        "application": {**application, "commands": list(RELEASED_COMMANDS)},
+    }
+    return shapes_digest(normalized)
 
 
 def history_problems(built: dict[str, object], history: dict[str, str], version: int) -> list[str]:
@@ -49,11 +114,14 @@ def history_problems(built: dict[str, object], history: dict[str, str], version:
             + HISTORY_NOTICE
         )
     recorded = history.get(str(version))
-    digest = shapes_digest(built)
-    if recorded != digest:
+    if version == 2:
+        problems.extend(version_two_command_problems(built))
+    digest = version_two_digest(built) if version == 2 else shapes_digest(built)
+    expected_digest = RELEASED_HISTORY["2"] if version == 2 else digest
+    if recorded != expected_digest or digest != expected_digest:
         problems.append(
             f"contract/history.json version {version} records {recorded!r}, but the built "
-            f"shapes hash to {digest}. {HISTORY_NOTICE}"
+            f"shapes hash to {digest}; released digest is {expected_digest}. {HISTORY_NOTICE}"
         )
     return problems
 
@@ -156,6 +224,88 @@ class JournalRetentionContractTests(SimpleTestCase):
 
 
 class ManifestContractTest(SimpleTestCase):
+    def test_reviewed_addition_keeps_released_version_two_digest(self) -> None:
+        built = manifest()
+        application = cast(dict[str, object], built["application"])
+        self.assertIn("barectl", cast(list[str], application["commands"]))
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+
+        self.assertEqual(history_problems(built, history, VERSION), [])
+
+    def test_unrecorded_addition_needs_an_explicit_promise(self) -> None:
+        built = deepcopy(manifest())
+        application = cast(dict[str, object], built["application"])
+        cast(list[str], application["commands"]).append("new_command")
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+
+        problems = history_problems(built, history, VERSION)
+        self.assertIn("unrecorded same-version additions", " ".join(problems))
+        with patch(
+            "contract.test_contract.PROMISED_VERSION_TWO_COMMAND_ADDITIONS",
+            (*PROMISED_VERSION_TWO_COMMAND_ADDITIONS, "new_command"),
+        ):
+            self.assertEqual(history_problems(built, history, VERSION), [])
+
+    def test_removed_promised_addition_fails_after_pin_regeneration(self) -> None:
+        built = deepcopy(manifest())
+        application = cast(dict[str, object], built["application"])
+        cast(list[str], application["commands"]).remove("barectl")
+        regenerated_pin = deepcopy(built)
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+
+        self.assertEqual(differences(regenerated_pin, built), [])
+        self.assertIn("barectl", " ".join(history_problems(built, history, VERSION)))
+
+    def test_changed_commands_and_native_shapes_cannot_reuse_version_two(self) -> None:
+        released = manifest()
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+        for case in ("removed", "renamed", "retyped", "renamed_addition", "additive_and_native"):
+            with self.subTest(case=case):
+                built = deepcopy(released)
+                application = cast(dict[str, object], built["application"])
+                commands = cast(list[str], application["commands"])
+                if case == "removed":
+                    commands.remove("check")
+                elif case == "renamed":
+                    commands[commands.index("check")] = "check_renamed"
+                elif case == "retyped":
+                    cast(list[object], commands)[commands.index("check")] = 42
+                elif case == "renamed_addition":
+                    commands[commands.index("barectl")] = "barectl_renamed"
+                else:
+                    commands.append("new_command")
+                    results = cast(dict[str, object], built["results"])
+                    results["prefix"] = "changed "
+                self.assertTrue(history_problems(built, history, VERSION))
+
+    def test_regenerated_history_cannot_hide_same_version_native_change(self) -> None:
+        built = deepcopy(manifest())
+        results = cast(dict[str, object], built["results"])
+        results["prefix"] = "changed "
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+        history["2"] = shapes_digest(built)
+
+        self.assertTrue(history_problems(built, history, VERSION))
+
+    def test_changed_historical_commands_cannot_authorize_an_addition(self) -> None:
+        built = manifest()
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+
+        with patch(
+            "contract.test_contract.RELEASED_COMMANDS",
+            (*RELEASED_COMMANDS, "barectl"),
+        ):
+            self.assertTrue(history_problems(built, history, VERSION))
+
+    def test_changed_released_history_cannot_authorize_native_change(self) -> None:
+        built = deepcopy(manifest())
+        results = cast(dict[str, object], built["results"])
+        results["prefix"] = "changed "
+        history = json.loads(HISTORY.read_text(encoding="utf-8"))
+        history["2"] = shapes_digest(built)
+
+        self.assertTrue(released_history_problems(history))
+
     def test_pinned_manifest_matches_the_owning_modules(self) -> None:
         pinned = json.loads(PINNED.read_text(encoding="utf-8"))
         changes = differences(pinned, manifest())

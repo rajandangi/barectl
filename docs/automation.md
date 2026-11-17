@@ -34,8 +34,8 @@ Ticks and workers never take the global mutation lock. Systemd's one-instance-pe
 
 A WordPress site normally runs due events during page loads. **Settings > Scheduled tasks** offers one reviewed change, with Site consent:
 
-- **On** publishes the slice, service and timer, starts the timer, waits for one run to succeed, and only then writes `define( 'DISABLE_WP_CRON', 'true' );` into the site's private configuration. There is never a window in which neither page loads nor the server runs cron. A first run that does not succeed within the reviewed wait leaves the timer installed and the constant unset, and the run is reported as partly applied.
-- **Off** removes the constant first, so page loads run cron again, then stops and disables the timer, stops the service and removes the three unit files.
+- **On** publishes the slice, service and timer, starts the timer, waits for one run to succeed, writes `define( 'DISABLE_WP_CRON', 'true' );` into the site's private configuration, then gracefully reloads the site's serving PHP-FPM and waits for its new completed load. There is never a window in which neither page loads nor the server runs cron. A first run that does not succeed within the reviewed wait leaves the timer installed and the constant unset, and the run is reported as partly applied.
+- **Off** removes the constant first, gracefully reloads the site's serving PHP-FPM and waits for its new completed load, then stops and disables the timer, stops the service and removes the three unit files. If the reload cannot be verified, Barectl reports a partial change and leaves the timer installed for cron coverage. The operator checks the site's PHP service and prepares a new review.
 
 The service runs the site's own WP-CLI wrapper (`/var/www/<id>/bin/wp`) with the site's public root as `--path`, so a PHP version switch changes the runtime without rewriting the unit. WP-CLI's own `doing_cron` lock prevents overlap with any remaining page-load cron.
 

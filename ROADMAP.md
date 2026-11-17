@@ -9,7 +9,7 @@ Nothing scheduled.
 ## Later
 
 - Optional shared database for Barectl records across installations.
-- Fleet overview and CLI parity.
+- Fleet overview and full CLI parity. The first local [Refresh server CLI workflow](docs/cli.md) is implemented on the development branch.
 - Tested team hosting with credential management.
 
 ## Released

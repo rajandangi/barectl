@@ -23,6 +23,16 @@ deprecation window. A version enters the history when it is released, and an exi
 is never edited; a later shape change needs a new version and a new entry. Each section is one module registered in `contract/manifest.py`; a
 later area adds one module and one registry entry.
 
+The version-2 guard permits reviewed new names in `application.commands` at the same
+version. `contract/test_contract.py` keeps the released command list and a separate
+append-only tuple of reviewed same-version additions, currently `barectl`. The candidate
+must contain exactly those command names before the guard hashes it with only the command
+list restored to the released value. Every later documented addition must be recorded in
+that tuple. The unchanged released version-2 digest anchors the historical list. A removed,
+renamed or retyped command, an unrecorded addition, or any change elsewhere in the manifest
+still fails even if the pinned manifest and history file are regenerated. The owning-module
+versus pinned-manifest comparison remains exact.
+
 ## Change policy
 
 - **Additive change.** A new optional field, site, runtime, command or permission that
@@ -156,7 +166,7 @@ URL names, management commands and documented environment variables. It is owned
   `discovery.add_discoveryattempt` and `discovery.view_siteobservation`;
 - every named route in `config/urls.py`, including the redirects that keep the old
   `stack/`, `setup/` and `changes/` paths working;
-- the documented management commands `barectl_upgrade`, `changepassword`, `check`,
+- the documented management commands `barectl`, `barectl_upgrade`, `changepassword`, `check`,
   `collectstatic`, `createsuperuser`, `db_worker`, `makemigrations`, `migrate`,
   `runserver`, `showmigrations` and `test`; and
 - the documented environment variables `BARECTL_SECRET_KEY`, `BARECTL_ALLOWED_HOSTS`,
