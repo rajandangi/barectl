@@ -3,6 +3,7 @@
 import io
 import json
 from contextlib import redirect_stdout
+from datetime import timedelta
 from typing import cast, override
 from unittest import mock
 
@@ -10,6 +11,7 @@ from django.contrib.auth.models import Permission
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.core.management.base import CommandError, OutputWrapper
+from django.utils import timezone
 
 from dashboard.management.commands.barectl import Command
 from operations import lifecycle
@@ -297,6 +299,71 @@ class RefreshCommandTests(DiscoveryTestCase):
         self.assertEqual(historical["snapshot"], {**current_snapshot, "connection_current": False})
         self.assertEqual(DiscoveryAttempt.objects.count(), count)
         self.assertEqual(len(self.remote.targets), remote_reads)
+
+    def test_status_elapsed_seconds_stops_at_completion(self) -> None:
+        queued_at = timezone.now() - timedelta(hours=1)
+        for status, started_at, finished_at, expected in (
+            (
+                RemoteOperation.Status.SUCCEEDED,
+                queued_at + timedelta(seconds=10),
+                queued_at + timedelta(seconds=40),
+                30,
+            ),
+            (
+                RemoteOperation.Status.FAILED,
+                queued_at + timedelta(seconds=10),
+                queued_at + timedelta(seconds=40),
+                30,
+            ),
+            (RemoteOperation.Status.FAILED, None, queued_at + timedelta(seconds=20), 20),
+            (RemoteOperation.Status.FAILED, None, queued_at - timedelta(seconds=5), 0),
+        ):
+            with self.subTest(status=status, started_at=started_at, finished_at=finished_at):
+                attempt = request_refresh(self.server.pk, user=self.user).operation
+                RemoteOperation.objects.filter(pk=attempt.pk).update(
+                    status=status,
+                    queued_at=queued_at,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+                result = read_refresh(attempt.pk, user=self.user)
+                self.assertEqual(result["progress"]["elapsed_seconds"], expected)
+                with mock.patch(
+                    "discovery.services.timezone.now", return_value=queued_at + timedelta(hours=2)
+                ):
+                    later = read_refresh(attempt.pk, user=self.user)
+                self.assertEqual(later["progress"]["elapsed_seconds"], expected)
+
+    def test_status_elapsed_seconds_advances_for_queued_and_running(self) -> None:
+        attempt = request_refresh(self.server.pk, user=self.user).operation
+        queued_at = timezone.now()
+        RemoteOperation.objects.filter(pk=attempt.pk).update(queued_at=queued_at)
+        with mock.patch(
+            "discovery.services.timezone.now", return_value=queued_at + timedelta(seconds=10)
+        ):
+            queued_first = read_refresh(attempt.pk, user=self.user)
+        with mock.patch(
+            "discovery.services.timezone.now", return_value=queued_at + timedelta(seconds=20)
+        ):
+            queued_later = read_refresh(attempt.pk, user=self.user)
+        self.assertEqual(queued_first["progress"]["elapsed_seconds"], 10)
+        self.assertEqual(queued_later["progress"]["elapsed_seconds"], 20)
+
+        started_at = queued_at + timedelta(seconds=5)
+        RemoteOperation.objects.filter(pk=attempt.pk).update(
+            status=RemoteOperation.Status.RUNNING,
+            started_at=started_at,
+        )
+        with mock.patch(
+            "discovery.services.timezone.now", return_value=queued_at + timedelta(seconds=20)
+        ):
+            running_first = read_refresh(attempt.pk, user=self.user)
+        with mock.patch(
+            "discovery.services.timezone.now", return_value=queued_at + timedelta(seconds=30)
+        ):
+            running_later = read_refresh(attempt.pk, user=self.user)
+        self.assertEqual(running_first["progress"]["elapsed_seconds"], 15)
+        self.assertEqual(running_later["progress"]["elapsed_seconds"], 25)
 
     def test_status_does_not_queue_and_missing_id_is_private(self) -> None:
         with self.assertRaises(RefreshNotFound):
