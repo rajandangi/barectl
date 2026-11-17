@@ -2,8 +2,11 @@
 
 import io
 import json
-from contextlib import redirect_stdout
+import subprocess
+import sys
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import timedelta
+from pathlib import Path
 from typing import cast, override
 from unittest import mock
 
@@ -87,6 +90,92 @@ class RefreshCommandTests(DiscoveryTestCase):
         self.assertEqual(help_caught.exception.code, 0)
         self.assertIn("usage:", help_output.getvalue())
         self.assertEqual(output.getvalue(), "")
+        options = parser.parse_args(
+            ["--verbosity", "0", "server", "refresh", "1", "--username", "operator"]
+        )
+        self.assertEqual(options.verbosity, 0)
+        version_output = io.StringIO()
+        with redirect_stdout(version_output), self.assertRaises(SystemExit) as version_caught:
+            parser.parse_args(["--version"])
+        self.assertEqual(version_caught.exception.code, 0)
+        self.assertTrue(version_output.getvalue())
+
+    def test_rejected_argument_values_are_not_reported(self) -> None:
+        sentinel = "DUMMY_CREDENTIAL_SENTINEL"
+        cases = (
+            ("refresh", "1", "--password=" + sentinel),
+            ("refresh-status", "1", "--password", sentinel),
+            ("refresh", "1", "--password-not-supported", sentinel),
+            ("refresh-status", sentinel),
+            ("refresh", "1", "--timeout", sentinel),
+        )
+        for action in cases:
+            for machine in (False, True):
+                with self.subTest(action=action, machine=machine):
+                    output, errors = io.StringIO(), io.StringIO()
+                    command = Command()
+                    command.stdout = OutputWrapper(output)
+                    parser = command.create_parser("manage.py", "barectl")
+                    words = ["server", *action, "--username", "operator"]
+                    if machine:
+                        words.append("--json")
+                    with (
+                        mock.patch("dashboard.management.commands.barectl.authenticate") as auth,
+                        mock.patch(
+                            "dashboard.management.commands.barectl.request_refresh"
+                        ) as request,
+                        mock.patch("dashboard.management.commands.barectl.read_refresh") as read,
+                        redirect_stderr(errors),
+                        self.assertRaises(CommandError) as caught,
+                    ):
+                        parser.parse_args(words)
+                    self.assertEqual(caught.exception.returncode, 2)
+                    self.assertNotIn(sentinel, output.getvalue() + errors.getvalue())
+                    self.assertNotIn(sentinel, str(caught.exception))
+                    auth.assert_not_called()
+                    request.assert_not_called()
+                    read.assert_not_called()
+                    if machine:
+                        self.assertEqual(json.loads(output.getvalue())["code"], "invalid_input")
+                        self.assertEqual(output.getvalue().count("\n"), 1)
+                    else:
+                        self.assertEqual(output.getvalue(), "")
+        self.assertFalse(DiscoveryAttempt.objects.exists())
+
+    def test_subprocess_parser_diagnostics_hide_rejected_values(self) -> None:
+        sentinel = "DUMMY_CREDENTIAL_SENTINEL"
+        root = Path(__file__).resolve().parents[1]
+        for extra in (
+            ("--json", "--password=" + sentinel),
+            ("--json", "--password", sentinel),
+            ("--password-not-supported", sentinel),
+            ("--json", "--traceback", "--timeout", sentinel),
+        ):
+            with self.subTest(extra=extra):
+                result = subprocess.run(  # noqa: S603 - fixed local command with dummy test input
+                    [
+                        sys.executable,
+                        "manage.py",
+                        "barectl",
+                        "server",
+                        "refresh",
+                        "1",
+                        "--username",
+                        "operator",
+                        *extra,
+                    ],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertNotIn(sentinel, result.stdout + result.stderr)
+                if "--json" in extra:
+                    self.assertEqual(json.loads(result.stdout)["code"], "invalid_input")
+                    self.assertEqual(result.stdout.count("\n"), 1)
+                else:
+                    self.assertEqual(result.stdout, "")
 
     def test_id_validation_and_timeout_bounds(self) -> None:
         common = ("--username", "operator", "--password-stdin", "--json")
