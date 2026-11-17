@@ -3,7 +3,7 @@
   "sources": {
     "automation/bodies/observe.py": "79277bbb47a00ee5d9468bea5686f97722a72a6066a07e9086e84837c09a90ac",
     "automation/bodies/observe_workers.py": "90123854ed8ee46be4c76fff75423559307d34f5b779f45caaed7044af124b60",
-    "automation/bodies/schedule.py": "76b53f66139a9fcfbcd4c10251a6dcd051f76513bcd9c94ebd35eb83dffc10fa",
+    "automation/bodies/schedule.py": "75e3d678d74da9376b1ba4fdbed23fb76a5aa0f8e181b2bf0283e761d58beb8c",
     "automation/bodies/scheduler.py": "9a0f838f97bc6e95e9dfe357889ab673c6e95d07bd83ab719c9474c0920cc4a1",
     "automation/bodies/units.py": "1220d51b4416c8bc7a3b7b445291d112071f529cde98d3788d0c58bd8bbf976f",
     "automation/bodies/worker.py": "bdda18f3648835e0bfd2b57d2f6e38e57fcca92925e63c021309e9cd06a98fe7",
@@ -113,8 +113,8 @@
     "automation/bodies/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "automation/bodies/observe.py": "79277bbb47a00ee5d9468bea5686f97722a72a6066a07e9086e84837c09a90ac",
     "automation/bodies/observe_workers.py": "90123854ed8ee46be4c76fff75423559307d34f5b779f45caaed7044af124b60",
-    "automation/bodies/reasons.py": "b14b394e097bb3e46ed276bc74f0d71d563a002717788f1f8271fca8377b0aeb",
-    "automation/bodies/schedule.py": "76b53f66139a9fcfbcd4c10251a6dcd051f76513bcd9c94ebd35eb83dffc10fa",
+    "automation/bodies/reasons.py": "dc3501079691db5f05b2476e8a7d8b42065df60f621702df1d0dc02a3bfad490",
+    "automation/bodies/schedule.py": "75e3d678d74da9376b1ba4fdbed23fb76a5aa0f8e181b2bf0283e761d58beb8c",
     "automation/bodies/scheduler.py": "9a0f838f97bc6e95e9dfe357889ab673c6e95d07bd83ab719c9474c0920cc4a1",
     "automation/bodies/source.py": "9f1545144891bcd7cee40439387f52bcfd9efde0c6ee060e0230f96611f2e2e7",
     "automation/bodies/units.py": "1220d51b4416c8bc7a3b7b445291d112071f529cde98d3788d0c58bd8bbf976f",
@@ -474,7 +474,7 @@
     "operations/reason_testing.py": "4e765263ce363a12f07036c1f303fbe8530d1f68a3b4397717b39fd0b951ac01",
     "operations/reasons.py": "6fc33fd2abb0fa68b2c22edc1e41a3702a763e1d40f213c30c21105b9cedd5d8",
     "operations/recovery.py": "65956fea460a3a66ca7117b9f72e2848010ab87279063f30cd30797c31acc222",
-    "operations/recovery_testing.py": "5a568d2241506696e24b983c7a8daa3b3a9ad67095726222a237327facfa58cd",
+    "operations/recovery_testing.py": "abf5c7e45bcc0f21294f8726cd7c51dfa5833fdbfa7d69612c769d4f6ce7ba4e",
     "operations/revert.py": "7ddfcffbc5abaa4403cf8185199e28217aab16241155ce6dcad963e70f7c2de2",
     "operations/secret_testing.py": "b2f0b30b1c1bd41712665b789c2ec68f74b501b757f134510d89d9e9bd5b0bba",
     "operations/services.py": "38f41e3d153a4398b78068be7fd8c3cdd3608f22b317321e68581adb7d5850f0",
@@ -622,7 +622,7 @@
   "capture_command_inputs": {
     "automation/bodies/observe.py": "79277bbb47a00ee5d9468bea5686f97722a72a6066a07e9086e84837c09a90ac",
     "automation/bodies/observe_workers.py": "90123854ed8ee46be4c76fff75423559307d34f5b779f45caaed7044af124b60",
-    "automation/bodies/schedule.py": "76b53f66139a9fcfbcd4c10251a6dcd051f76513bcd9c94ebd35eb83dffc10fa",
+    "automation/bodies/schedule.py": "75e3d678d74da9376b1ba4fdbed23fb76a5aa0f8e181b2bf0283e761d58beb8c",
     "automation/bodies/scheduler.py": "9a0f838f97bc6e95e9dfe357889ab673c6e95d07bd83ab719c9474c0920cc4a1",
     "automation/bodies/units.py": "1220d51b4416c8bc7a3b7b445291d112071f529cde98d3788d0c58bd8bbf976f",
     "automation/bodies/worker.py": "bdda18f3648835e0bfd2b57d2f6e38e57fcca92925e63c021309e9cd06a98fe7",
@@ -727,11 +727,11 @@
     "wordpress/convention.py": "a25e359d7d788d9b82163b6effc17f5a4a3558d9125dd7cc93cd838bc9520472"
   },
   "capture_pins": {
-    "catalog-sha256": "4d619aee18282b32ad8e84d8e4851af9682bb2dafff71ff9d444d9f46c4f82e5",
+    "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
+    "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78",
     "nix-version": "2.35.2",
     "nixpkgs": "ac588ef1c914865dad517b337ea0eb9694a4021c",
-    "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
-    "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
+    "catalog-sha256": "4d619aee18282b32ad8e84d8e4851af9682bb2dafff71ff9d444d9f46c4f82e5"
   },
   "capture_states": {
     "apache-26.04": "2f5d408a23e462b197b11d21d26696e2ad70763f23dc021d49ecc111bb1ec68a",

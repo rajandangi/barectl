@@ -514,13 +514,13 @@ class RecoveryTests(SimpleTestCase):
             with self.subTest(state=state):
                 # _synchronize returns False for an unverifiable serving reload.
                 outcome, page = self.run_body(state, "_synchronize")
-                self.assertEqual(outcome, "partial:automation_php_reload")
+                self.assertEqual(outcome, "partial:automation_configuration")
                 self.assertNotIn("left the server task unchanged", page)
                 self.assertIn(
-                    "Barectl changed the private cron setting but could not verify a completed "
-                    "reload of this site's serving PHP. The server task's current state needs "
-                    "checking. Check the site's PHP service and the run's journal, then prepare "
-                    "a new review.",
+                    "Barectl could not verify the site's private cron setting or a completed "
+                    "reload of its serving PHP. The server task's current state needs checking. "
+                    "Check the private WordPress configuration, PHP service and run's journal "
+                    "on the server, then prepare a new review.",
                     page,
                 )
 
@@ -533,7 +533,7 @@ class RecoveryTests(SimpleTestCase):
         ):
             with self.subTest(state=state, failing_call=failing_call):
                 outcome, page = self.run_body(state, failing_call, error)
-                self.assertEqual(outcome, "partial:automation_incomplete")
+                self.assertEqual(outcome, "partial:automation")
                 self.assertIn(
                     "The scheduled-tasks change stopped while applying, so its current "
                     "state needs checking. Check the run's journal, the site's PHP service, "

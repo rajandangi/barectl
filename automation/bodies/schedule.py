@@ -229,7 +229,7 @@ def _turn_on(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
         result("partial", "automation_configuration")
         return
     if not _synchronize(value):
-        result("partial", "automation_php_reload")
+        result("partial", "automation_configuration")
         return
     stage("verify")
     if not timer_ready(value.identifier, ROLE_WPCRON):
@@ -248,7 +248,7 @@ def _turn_off(value: SimpleNamespace, path: pathlib.Path, before: str) -> None:
         result("partial", "automation_configuration")
         return
     if not _synchronize(value):
-        result("partial", "automation_php_reload")
+        result("partial", "automation_configuration")
         return
     stage("install")
     disable_and_stop(value.identifier, ROLE_WPCRON)
@@ -305,7 +305,7 @@ def main(document: dict[str, object]) -> None:  # noqa: C901 - one result for ea
         sys.stderr.write(f"barectl-problem {type(error).__name__}: {error}\n")
         sys.stderr.flush()
         if effects_started:
-            result("partial", "automation_incomplete")
+            result("partial", "automation")
         else:
             result("refused", "automation")
     except Exception:
