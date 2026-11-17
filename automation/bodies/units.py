@@ -26,12 +26,20 @@ from automation.convention import (
     timer_name,
     unit_file,
 )
-from sites.bodies.common import replace_site_file, run, safe
+from sites.bodies.common import ReviewedPreimageChanged, replace_site_file, run, safe
 
 NAME = re.compile(
     r"barectl-site-[a-z][a-z0-9]{2,23}(?:-[a-z][a-z0-9]{2,20})?\.(?:service|timer|slice)\Z"
 )
 POLL_SECONDS = 0.25
+
+
+class FirstPublicationRefusal(ValueError):
+    """The first unit was rejected before publication could begin."""
+
+
+class UnitPreimageRefusal(ValueError):
+    """The publication helper rejected a reviewed preimage before writing."""
 
 
 # A runtime drop-in that refuses a manual start. On systemd 259 a runtime mask of an
@@ -80,8 +88,12 @@ def current_text(path: pathlib.Path) -> str | None:
 def publish_unit_file(path: str, text: str, expected: str | None) -> None:
     """Replace ``path`` with ``text`` only if it is still the reviewed ``expected`` text."""
     target = pathlib.Path(path)
-    if current_text(target) != expected or not safe(str(target.parent), directory=True):
-        raise ValueError("The reviewed automation evidence changed before publication.")
+    try:
+        matched = current_text(target) == expected and safe(str(target.parent), directory=True)
+    except (ValueError, OSError) as error:
+        raise UnitPreimageRefusal(str(error)) from error
+    if not matched:
+        raise UnitPreimageRefusal("The reviewed automation evidence changed before publication.")
     replace_site_file(target, text, expected)
 
 
@@ -122,8 +134,18 @@ def _reviewed_preimage(path: str, reviewed: str) -> str | None:
 def publish_units(identifier: str, role: str, expected: dict[str, str]) -> None:
     for kind in ("slice", "service", "timer"):
         path = _path(identifier, role, kind)
-        preimage = _reviewed_preimage(path, expected.get(kind, ""))
-        publish_unit_file(path, render(identifier, role, kind), preimage)
+        if kind == "slice":
+            try:
+                preimage = _reviewed_preimage(path, expected.get(kind, ""))
+            except (ValueError, OSError) as error:
+                raise FirstPublicationRefusal(str(error)) from error
+            try:
+                publish_unit_file(path, render(identifier, role, kind), preimage)
+            except (UnitPreimageRefusal, ReviewedPreimageChanged) as error:
+                raise FirstPublicationRefusal(str(error)) from error
+        else:
+            preimage = _reviewed_preimage(path, expected.get(kind, ""))
+            publish_unit_file(path, render(identifier, role, kind), preimage)
 
 
 def remove_units(identifier: str, role: str, expected: dict[str, str]) -> None:

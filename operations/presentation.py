@@ -312,7 +312,8 @@ def _run_words(  # noqa: C901 - one sentence per run outcome
         return "Stopped", run.failure
     stopped = _stopped_step(steps)
     if stopped:
-        return "Stopped", f"This stopped after {stopped.lower()}. Nothing after it ran."
+        caption = f"This stopped after {stopped.lower()}. Nothing after it ran."
+        return "Stopped", f"{caption} {run.failure}" if run.failure else caption
     return "Stopped", run.failure
 
 
