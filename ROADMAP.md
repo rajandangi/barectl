@@ -9,10 +9,12 @@ Nothing scheduled.
 ## Later
 
 - Optional shared database for Barectl records across installations.
-- Fleet overview and full CLI parity. The first local [Refresh server CLI workflow](docs/cli.md) is implemented on the development branch.
+- Fleet overview and full CLI parity. The first local [Refresh server CLI workflow](docs/cli.md) ships in v1.2.0.
 - Tested team hosting with credential management.
 
 ## Released
+
+[v1.2.0](https://github.com/rajandangi/barectl/releases/tag/v1.2.0) adds a local CLI for Refresh server and status, improves fixed panel reads, and repairs WordPress cron handover to serving PHP. [Release notes](CHANGELOG.md#120---2026-11-18) · [Qualification](docs/v1.2.0-qualification.md) · [CLI guide](docs/cli.md)
 
 [v1.1.0](https://github.com/rajandangi/barectl/releases/tag/v1.1.0) adds the dashboard setting for journald log retention, deferred from 1.0 in [ADR 0043](docs/adr/0043-defer-log-retention-settings-to-1-1.md), and improves discovery and controller-query performance. [Release notes](CHANGELOG.md#110---2026-11-15) · [Qualification](docs/v1.1.0-qualification.md) · [Journal retention setting](docs/logs.md#retention)
 

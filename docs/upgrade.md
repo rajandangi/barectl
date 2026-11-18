@@ -1,6 +1,6 @@
 # Upgrading Barectl
 
-This guide upgrades Barectl 0.4.x or 1.0.x to the selected 1.1.0 release in place. It covers
+This guide upgrades Barectl 0.4.x, 1.0.x or 1.1.0 to the selected 1.2.0 release in place. It covers
 the supported versions, the stop and backup, the install and migration, post-upgrade
 verification and rollback. A database older than 0.4.0 cannot be upgraded this way.
 
@@ -8,23 +8,24 @@ verification and rollback. A database older than 0.4.0 cannot be upgraded this w
 
 | From | To | Controller database migration |
 | --- | --- | --- |
-| 0.4.0 and later 0.4.x | 1.1.0 | Yes |
-| 1.0.0 or 1.0.1 | 1.1.0 | Yes, with the same procedure |
-| 0.3.x or earlier | 1.1.0 | No |
+| 0.4.0 and later 0.4.x | 1.2.0 | Yes |
+| 1.0.0 or 1.0.1 | 1.2.0 | Yes, with the same procedure |
+| 1.1.0 | 1.2.0 | No new migrations |
+| 0.3.x or earlier | 1.2.0 | No |
 
 Barectl 0.4.0 replaced the Nginx, Certbot and APT PHP stack and stopped keeping the
 migration history of earlier builds. A 0.3.x database therefore has neither the tables nor
-the recorded migrations 1.1.0 expects. The upgrade command refuses it with one sentence.
+the recorded migrations 1.2.0 expects. The upgrade command refuses it with one sentence.
 
 ## Mixed controller versions
 
-Every change applied by a 1.1.0 controller writes a contract-version-2 result line. A
+Every change applied by a 1.1.0 or 1.2.0 controller writes a contract-version-2 result line. A
 1.0.1 controller reads that newer version as **Outside supported settings**, withholds
 every change card and refuses direct preparation. Upgrade every controller you use
-before applying any 1.1.0 change, including the [log retention setting](logs.md#retention).
+before applying any change from either release, including the [log retention setting](logs.md#retention).
 
 A successful controller database migration does not guarantee continued server
-management. Version 1.1.0 also rejects any retained explicit contract-1 result that fresh
+management. Versions 1.1.0 and 1.2.0 also reject any retained explicit contract-1 result that fresh
 discovery reads, including a history containing both contract 1 and contract 2. Such a
 server shows **Outside supported settings** and every change is refused. There is no
 in-app migration or override for those result lines. Pre-field contract-0 evidence and
@@ -81,17 +82,19 @@ cp .env .env.before-upgrade
 
 ```bash
 git fetch --tags
-git checkout v1.1.0
+git checkout v1.2.0
 uv sync --locked
 npm ci
 npm run build
 ```
 
-The commands select 1.1.0. Compared with 1.0.0, it adds two controller database migrations,
+The commands select 1.2.0. Compared with 1.0.0, it includes two controller database migrations,
 `operations.0008_check_progress` for connection-check progress and
 `discovery.0022_discoverysnapshot_journal_retention_disk_cap_and_more` for the stored
-retention observation. The native contract moves to version 2. Run the same stop, backup,
-upgrade and verification procedure.
+retention observation. Version 1.1.0 to 1.2.0 adds no controller database migration. The
+native contract remains version 2. Run the same stop, backup, upgrade and verification
+procedure. Installing controller code does not apply server settings or runtime catalog
+updates; those require their own reviewed changes.
 
 If you track a branch or use another release channel, check out the revision you intend to
 run and run the same install steps. The migration is part of the new code, so install it
@@ -144,7 +147,7 @@ with its notice, and the server page names the connection or permission problem 
 
 ## Roll back
 
-Rollback restores the database from before the migration together with its original code
+Rollback restores the database from before the upgrade together with its original code
 revision. Stop the dashboard and worker first. For an upgrade from a 1.0.x release, use the
 matching backup directory and the recorded revision:
 
@@ -158,18 +161,18 @@ npm ci
 npm run build
 ```
 
-For an upgrade from 0.4.x or a development checkout, replace `v1.0.1` with the revision
+For an upgrade from 0.4.x, 1.1.0 or a development checkout, replace `v1.0.1` with the revision
 recorded before that upgrade. Start the restored version's dashboard and worker again.
 Do not start the older code against the migrated database: an older release does not know
 the newer migration records.
 
 ## The unsupported 0.3.0 case
 
-A 0.3.x installation cannot be upgraded in place. Start a new 1.1.0 installation, register
+A 0.3.x installation cannot be upgraded in place. Start a new 1.2.0 installation, register
 the servers again, and run discovery on each one. Discovery reconstructs the supported
 server views from native evidence. It cannot recover the previous installation's Barectl
 logins, saved connections, settings or private operation history, and the 0.3.x stack is
-not what 1.1.0 manages. See [reconstruction](architecture.md#state-and-discovery) for what a
+not what 1.2.0 manages. See [reconstruction](architecture.md#state-and-discovery) for what a
 fresh controller can and cannot rebuild.
 
 ## What the command does not do

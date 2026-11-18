@@ -8,9 +8,9 @@ Barectl is an open-source hosting panel for PHP, WordPress, and Laravel. If you 
 
 [Run Barectl locally](#run-locally) · [See how recovery is tested](docs/recovery-guarantees.md#matrix)
 
-**Latest release** · [v1.1.0](https://github.com/rajandangi/barectl/releases/tag/v1.1.0)
+**Latest release** · [v1.2.0](https://github.com/rajandangi/barectl/releases/tag/v1.2.0)
 
-Before upgrading from 1.0.x, read the [controller and retained-history compatibility limits](docs/upgrade.md#mixed-controller-versions). Version 1.1.0 can refuse changes when discovery reads retained contract-1 results.
+Before upgrading from 1.0.x, read the [controller and retained-history compatibility limits](docs/upgrade.md#mixed-controller-versions). Version 1.2.0 can refuse changes when discovery reads retained contract-1 results.
 
 ## Current status
 
@@ -20,11 +20,11 @@ Barectl supports fresh Ubuntu 26.04 LTS servers on amd64 and arm64, and servers 
 - Run Laravel queues and schedulers, WordPress cron, and per-site Valkey. Inspect logs, server jobs, and security settings, and set server-wide journal retention.
 - Schedule encrypted restic backups, copy them to S3-compatible storage, and restore site files or databases.
 
-The [v1.0 qualification record](docs/v1.0-qualification.md) describes the tested environments and recovery procedures. The [v1.1.0 record](docs/v1.1.0-qualification.md) covers this release and its compatibility limits.
+The [v1.0 qualification record](docs/v1.0-qualification.md) describes the tested environments and recovery procedures. The [v1.2.0 record](docs/v1.2.0-qualification.md) covers this release and its compatibility limits.
 
 ## Run locally
 
-Use [uv](https://docs.astral.sh/uv/getting-started/installation/), Python 3.14, and Node.js 24. The commands below run the development branch. For a stable install, add `--branch v1.1.0` to `git clone`.
+Use [uv](https://docs.astral.sh/uv/getting-started/installation/), Python 3.14, and Node.js 24. The commands below run the development branch. For a stable install, add `--branch v1.2.0` to `git clone`.
 
 ```bash
 git clone https://github.com/rajandangi/barectl.git

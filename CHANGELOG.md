@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.2.0 - 2026-11-18
+
+Barectl adds a local CLI for the existing Refresh server workflow and improves
+collection and WordPress cron handover. See the [release qualification](docs/v1.2.0-qualification.md),
+[CLI guide](docs/cli.md) and [upgrade guide](docs/upgrade.md).
+
+### Refresh server
+
+- Submit a refresh and read its status from the controller host with the `barectl` CLI.
+  Dashboard and CLI requests share the same operation, worker, permission checks and
+  stored progress. Status reports the requested attempt; a retained snapshot from an
+  earlier connection is marked historical, never current inventory. See the
+  [CLI guide](docs/cli.md) for authentication, JSON outcomes and exit codes.
+- Read eleven fixed hosting-panel paths in one SSH call, with missing, hidden and unknown
+  classifications preserved. On one disposable Ubuntu server, the controlled
+  25 ms-delay comparison reduced panel reads from 24 to 1 and the software-stage median
+  from 6.8837 s to 5.4661 s. These are collection measurements, not full-refresh or
+  live-server timings ([measurement](notes/performance-panel-checks.md)).
+
+### Native recovery and development checks
+
+- WordPress cron On and Off changes now reload the site's serving PHP master and verify
+  a new completed configuration load before handover. Off preserves an existing server
+  task until verification. A proven pre-write refusal and an uncertain post-effect
+  failure keep distinct outcomes with recovery instructions
+  ([scheduled tasks](docs/automation.md#turning-wordpress-server-cron-on-and-off)).
+- The application contract guard accepts documented additive commands while retaining
+  released shapes, history and native contract version 2. The pinned cloud-image VM
+  downloader handles its corrected source without expanding provider qualification.
+  A cited subset of coding standards is included in the development documentation.
+
+Version 1.1.0 to 1.2.0 adds no controller database migration. Upgrades from 0.4.x and
+1.0.x still run the documented migrations. Installing 1.2.0 does not apply server
+settings or runtime catalog updates. The retained contract-1 refusal and
+mixed-controller limits remain in the [upgrade guide](docs/upgrade.md#mixed-controller-versions).
+
 ## 1.1.0 - 2026-11-15
 
 Dashboard control for journald log retention, with a reviewed server-wide change and
