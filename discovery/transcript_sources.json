@@ -601,7 +601,7 @@
     "sites/settings_forms.py": "0466abbe80d34ef32a16498afd17f180494dc1ab909f8a8cb648c0af2e8fd097",
     "sites/ui_testing.py": "2b1cdae9c9e541b6002318c0e0eb755a3499356cc8faa1f179b328f226f5fc64",
     "sites/views.py": "aff2a094cae0487d6a8c261ec282a4763c4d5d00bec6bf67d3184af5639b74c2",
-    "uv.lock": "42645595fb92eb170319e8b657325d64924ee373185b22d938e0590e5d38f3d6",
+    "uv.lock": "2bfc6537b8a67f7d7d67ea6cc19a22e7710022fa06933f9fac3e182f68eee056",
     "vulture_allowlist.py": "6a97366fe5276a5d6b77fa2bef6f51c336e926cc96367f388619a24916a9fdb2",
     "wordpress/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "wordpress/actions.py": "a82c8c0f8f3d6a3cebba674c6077d13b87928f708de9f678009c2c2743d2ebe2",

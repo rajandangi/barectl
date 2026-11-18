@@ -129,9 +129,9 @@ those modules and does not keep a second list:
 Version 2 adds the `set_journal_retention` kind and its `journal_retention` reason (with a
 refused and a partial sentence) and the `journal_retention_prepare` route. It changes no
 version-1 native shape, so the new setting needs no server-configuration migration.
-Every change run by 1.1.0 writes contract 2. A 1.0.1 controller reads that newer result
+Every change run by 1.1.0 or 1.2.0 writes contract 2. A 1.0.1 controller reads that newer result
 as **Outside supported settings**, withholds every change card and refuses direct
-preparation. Upgrade every controller before applying any 1.1.0 change.
+preparation. Upgrade every controller before applying a change from either newer release.
 
 ### Retained result lines
 
@@ -145,7 +145,7 @@ establish no version and are not by themselves unrecognized. Discovery stays rea
 it reads the retained line and never writes a version marker on the server.
 
 Consequently, retained explicit contract-1 results can block changes after a controller
-database upgrade to 1.1.0, despite the unchanged native configuration shapes. There is no
+database upgrade to 1.1.0 or 1.2.0, despite the unchanged native configuration shapes. There is no
 in-app result-line migration or override. See the [upgrade compatibility limits](upgrade.md#mixed-controller-versions).
 
 ## Application surface
