@@ -1,8 +1,10 @@
 import json
 import re
 import socket
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from dataclasses import replace
+from http.client import HTTPResponse
+from threading import Event, Thread
 from unittest import mock
 
 from django.contrib.auth.models import Permission
@@ -70,6 +72,7 @@ class AdvisoryTests(SimpleTestCase):
                 notice("0002", ("<8.5.99", "8.5.99")),
                 notice("0003", ("<8.4.99", "8.4.99"), state="draft"),
                 notice("0004", ("<8.4.99", "8.4.99"), withdrawn=True),
+                {**notice("0005", ("<8.4.99", "8.4.99")), "withdrawn_at": True},
             ]
         )
         node = https_response(
@@ -97,6 +100,7 @@ class AdvisoryTests(SimpleTestCase):
             "php84_redis 6.3.0 has no upstream advisory source in this check.", report["notes"]
         )
         self.assertTrue(any("FastCGI" in note for note in report["notes"]))
+        self.assertIn("The PHP source returned unsupported records.", report["notes"])
         self.assertEqual(connect.call_count, 2)
         php.request.assert_called_once_with(
             "GET",
@@ -201,7 +205,10 @@ class AdvisoryTests(SimpleTestCase):
             runtimes=(),
         )
         data = json.dumps(
-            [notice(f"{index:04d}", ("<=2.11.7", "2.11.8")) for index in range(21)]
+            [
+                notice(f"{index:04d}", ("<=2.11.7", "2.11.8"))
+                for index in range(advisories.MAX_FINDINGS + 1)
+            ]
         ).encode()
         at_limit = data.ljust(advisories.MAX_RESPONSE)
 
@@ -209,12 +216,12 @@ class AdvisoryTests(SimpleTestCase):
             advisories, "HTTPSConnection", return_value=https_response(at_limit)
         ):
             report = advisories.check(collected)
-        self.assertEqual(len(report["findings"]), 20)
-        self.assertIn("The display limit was reached. Omitted matches: 1.", report["notes"])
+        self.assertEqual(len(report["findings"]), advisories.MAX_FINDINGS)
+        self.assertIn("The report reached its display limit and omitted 1 more.", report["notes"])
 
         for body, note in (
-            (at_limit + b" ", "Caddy: the upstream response exceeded the size limit."),
-            (b"<html>", "Caddy: the upstream response was malformed."),
+            (at_limit + b" ", "The Caddy advisory response exceeded the size limit."),
+            (b"<html>", "The Caddy advisory response was malformed."),
         ):
             with (
                 self.subTest(note=note),
@@ -224,6 +231,50 @@ class AdvisoryTests(SimpleTestCase):
                 self.assertEqual(report["findings"], [])
                 self.assertEqual(report["checked"], [])
                 self.assertIn(note, report["notes"])
+
+    def test_slow_response_expires_while_bytes_are_still_arriving(self) -> None:
+        caddy = next(
+            build for build in load().offered(Architecture.X86_64) if build.entry == "caddy"
+        )
+        collected = replace(
+            COLLECTED,
+            standing=HostJudgment(
+                Standing.TARGET_STACK, (), (), (), profiles=(("caddy", caddy.path),)
+            ),
+            runtimes=(),
+        )
+        incoming, outgoing = socket.socketpair()
+        stop = Event()
+
+        def send_body() -> None:
+            with suppress(OSError):
+                for byte in b"[    ]":
+                    if stop.wait(0.025):
+                        return
+                    outgoing.sendall(bytes([byte]))
+
+        with incoming, outgoing:
+            incoming.settimeout(0.15)
+            outgoing.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\n")
+            response = HTTPResponse(incoming)
+            response.begin()
+            connection = mock.Mock(sock=incoming)
+            connection.getresponse.return_value = response
+            peer = Thread(target=send_body)
+            peer.start()
+            try:
+                with (
+                    mock.patch.object(advisories, "HTTPSConnection", return_value=connection),
+                    mock.patch.object(advisories, "TIMEOUT", 0.05),
+                ):
+                    report = advisories.check(collected)
+            finally:
+                stop.set()
+                peer.join()
+                response.close()
+
+        self.assertEqual(report["checked"], [])
+        self.assertIn("The advisory request for Caddy timed out.", report["notes"])
 
     def test_uncovered_extension_is_still_an_identified_catalog_build(self) -> None:
         ext = next(
@@ -385,30 +436,34 @@ class VerificationWorkflowTests(DiscoveryTestCase):
             self.assertContains(response, "Upstream fix in 2.11.8.")
             self.assertContains(
                 response,
-                f"The catalog offers {caddy.version}, which is older than the upstream fix.",
+                f"The catalog used for this check offers {caddy.version}, "
+                "which is older than the upstream fix.",
             )
             self.assertContains(response, "The source provides no usable fixed version.")
-            self.assertContains(response, "Composer: GitHub rate-limited the advisory request.")
-            self.assertContains(response, "Caddy: additional upstream advisory pages were skipped.")
-            self.assertContains(response, "Caddy: some upstream records were unsupported.")
-            self.assertContains(response, "TCP reachability")
+            self.assertContains(response, "GitHub rate-limited the advisory request for Composer.")
+            self.assertContains(
+                response, "Additional pages of the Caddy advisory source were skipped."
+            )
+            self.assertContains(response, "The Caddy source returned unsupported records.")
+            self.assertContains(response, "Use a saved public IPv4 or IPv6 address")
 
     def test_an_older_report_keeps_the_recorded_offer(self) -> None:
         server = self.register()
         self.run_worker()
+        finding = {
+            "name": "Caddy",
+            "version": "2.11.6",
+            "advisory": "GHSA-aaaa-bbbb-0001",
+            "url": "https://github.com/caddyserver/caddy/security/advisories/GHSA-aaaa-bbbb-0001",
+            "fixed": "2.11.8",
+            "catalog_has_fix": False,
+        }
         report = {
             "checked": ["Caddy"],
             "notes": [],
             "findings": [
-                {
-                    "name": "Caddy",
-                    "version": "2.11.6",
-                    "advisory": "GHSA-aaaa-bbbb-0001",
-                    "url": "https://github.com/caddyserver/caddy/security/advisories/GHSA-aaaa-bbbb-0001",
-                    "fixed": "2.11.8",
-                    "catalog_version": "2.11.7",
-                    "catalog_has_fix": False,
-                }
+                {**finding, "catalog_version": "2.11.7"},
+                {**finding, "catalog_version": "2.11.7-dev"},
             ],
         }
         with mock.patch.object(advisories, "check", return_value=report):
@@ -417,7 +472,13 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{server.pk}/security/")
         self.assertContains(page, "Upstream fix in 2.11.8.")
         self.assertContains(
-            page, "The catalog offers 2.11.7. The comparison with the upstream fix is unknown."
+            page,
+            "The catalog used for this check offers 2.11.7, which is older than the upstream fix.",
+        )
+        self.assertContains(
+            page,
+            "The catalog used for this check offers 2.11.7-dev. "
+            "The comparison with the upstream fix is unknown.",
         )
 
     def test_repeated_security_requests_share_one_attempt_and_ordinary_refresh_is_busy(

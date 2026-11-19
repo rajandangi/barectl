@@ -35,14 +35,14 @@
               {% else %}
                 The source provides no usable fixed version.
               {% endif %}
-              {% if finding.catalog_comparison == "reaches_fix" or finding.catalog_has_fix %}
-                The catalog offers {{ finding.catalog_version }}, which reaches the upstream fix version.
+              {% if finding.catalog_comparison == "reaches_fix" %}
+                The catalog used for this check offers {{ finding.catalog_version }}, which reaches the upstream fix version.
               {% elif finding.catalog_comparison == "older_offer" %}
-                The catalog offers {{ finding.catalog_version }}, which is older than the upstream fix.
-              {% elif not finding.catalog_version %}
-                The catalog offers no build for this entry and architecture.
+                The catalog used for this check offers {{ finding.catalog_version }}, which is older than the upstream fix.
+              {% elif finding.catalog_comparison == "no_offer" %}
+                The catalog used for this check offers no build for this entry and architecture.
               {% else %}
-                The catalog offers {{ finding.catalog_version }}. The comparison with the upstream fix is unknown.
+                The catalog used for this check offers {{ finding.catalog_version }}. The comparison with the upstream fix is unknown.
               {% endif %}
             </li>
           {% endfor %}

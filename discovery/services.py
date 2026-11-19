@@ -116,7 +116,7 @@ def read_discovery(server: Server) -> ServerDiscovery:
         lifecycle.active_operation(server),
         SecurityVerification(
             verified.finished_at,
-            verified.security_verification,
+            advisories.read_report(verified.security_verification),
             attempt is not None and verified.pk != attempt.pk,
         )
         if verified is not None and verified.finished_at is not None

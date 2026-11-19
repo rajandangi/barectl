@@ -66,10 +66,11 @@ stable security release above the installed version on its major line. Barectl r
 [published upstream repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories#list-repository-security-advisories)
 for recognized builds of PHP, Composer, Caddy, FastCGI client, HAProxy, restic and WP-CLI.
 The controller sends fixed HTTPS requests with generic client headers. It checks one
-page per repository with up to four requests in flight, a four-second socket timeout and
-a 2 MiB response limit per request. It reports unread pages, unavailable sources, rate
-limits, unsupported records and any matches omitted beyond the 20 shown. An empty result
-applies only to the supported records on the pages read.
+page per repository with up to four requests in flight. HTTPS setup uses a four-second
+socket timeout. The controller's DNS resolver controls name resolution time. Once connected,
+each request has a four-second deadline and a 2 MiB response limit. The report flags unread
+pages, unavailable sources, rate limits, unsupported records and matches omitted at its
+display limit. An empty result applies only to the supported records on the pages read.
 
 The Security page shows the installed version, the upstream notice and its fixed version
 when available. PHP fixes use the installed major and minor line. The offered build for

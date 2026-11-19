@@ -3,8 +3,12 @@ import operator
 import re
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from http.client import HTTPException, HTTPResponse, HTTPSConnection
+from socket import SHUT_RDWR
+from threading import Event, Timer
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, NamedTuple, TypedDict
 
@@ -112,7 +116,7 @@ def check(collected: CollectedSnapshot) -> AdvisoryReport:
         responses = pool.map(_source, groups)
         for (source, builds), feed in zip(groups.items(), responses, strict=True):
             if feed.note:
-                notes.append(f"{source.name}: {feed.note}")
+                notes.append(feed.note)
             if feed.records is None:
                 continue
             checked.append(source.name)
@@ -126,9 +130,9 @@ def check(collected: CollectedSnapshot) -> AdvisoryReport:
                     else:
                         omitted += 1
             if unsupported:
-                notes.append(f"{source.name}: some upstream records were unsupported.")
+                notes.append(f"The {source.name} source returned unsupported records.")
     if omitted:
-        notes.append(f"The display limit was reached. Omitted matches: {omitted}.")
+        notes.append(f"The report reached its display limit and omitted {omitted} more.")
     return {"findings": findings, "notes": notes, "checked": checked}
 
 
@@ -213,32 +217,68 @@ def _source(source: Source) -> Feed:
     )
     connection = HTTPSConnection(host, timeout=TIMEOUT)
     try:
-        return _read_feed(connection, path, github=bool(source.repo))
+        connection.connect()
+        return _fetch(connection, path, source)
+    except TimeoutError:
+        return Feed(None, f"The advisory request for {source.name} timed out.")
     except OSError, HTTPException:
-        return Feed(None, "could not read the upstream source.")
+        return Feed(None, f"Could not read the {source.name} advisory source.")
     finally:
         connection.close()
 
 
-def _read_feed(connection: HTTPSConnection, path: str, *, github: bool) -> Feed:
+def _fetch(connection: HTTPSConnection, path: str, source: Source) -> Feed:
+    peer = connection.sock
+    if peer is None:
+        return Feed(None, f"Could not connect to the {source.name} advisory source.")
+
+    expired = Event()
+
+    def stop_request() -> None:
+        expired.set()
+        with suppress(OSError):
+            peer.shutdown(SHUT_RDWR)
+
+    deadline = Timer(TIMEOUT, stop_request)
+    deadline.start()
+    try:
+        feed = _read_feed(connection, path, source)
+    except TimeoutError:
+        expired.set()
+        feed = Feed(None)
+    except OSError, HTTPException:
+        feed = Feed(None, f"Could not read the {source.name} advisory source.")
+    finally:
+        deadline.cancel()
+        deadline.join()
+    if expired.is_set():
+        return Feed(None, f"The advisory request for {source.name} timed out.")
+    return feed
+
+
+def _read_feed(connection: HTTPSConnection, path: str, source: Source) -> Feed:
     connection.request("GET", path, headers={"User-Agent": "Barectl", "Accept": "application/json"})
     response = connection.getresponse()
     if _rate_limited(response):
-        upstream = "GitHub" if github else "Node.js"
-        return Feed(None, f"{upstream} rate-limited the advisory request.")
+        upstream = "GitHub" if source.repo else "Node.js"
+        return Feed(None, f"{upstream} rate-limited the advisory request for {source.name}.")
     if response.status != 200:
-        return Feed(None, f"the upstream source was unavailable (HTTP {response.status}).")
+        return Feed(
+            None, f"The {source.name} advisory source was unavailable (HTTP {response.status})."
+        )
     body = response.read(MAX_RESPONSE + 1)
     if len(body) > MAX_RESPONSE:
-        return Feed(None, "the upstream response exceeded the size limit.")
+        return Feed(None, f"The {source.name} advisory response exceeded the size limit.")
     try:
         data: object = json.loads(body)
     except ValueError, RecursionError:
-        return Feed(None, "the upstream response was malformed.")
+        return Feed(None, f"The {source.name} advisory response was malformed.")
     if not isinstance(data, list):
-        return Feed(None, "the upstream response was malformed.")
+        return Feed(None, f"The {source.name} advisory response was malformed.")
     next_page = 'rel="next"' in (response.getheader("Link") or "")
-    note = "additional upstream advisory pages were skipped." if next_page else ""
+    note = (
+        f"Additional pages of the {source.name} advisory source were skipped." if next_page else ""
+    )
     return Feed(tuple(data), note)
 
 
@@ -294,8 +334,11 @@ def _node(records: tuple[object, ...], installed: Version) -> tuple[list[Match],
 def _github(row: object, source: Source, installed: Version) -> tuple[list[Match], bool]:
     if not isinstance(row, dict):
         return [], True
-    if row.get("withdrawn_at") or row.get("state") in ("draft", "closed", "withdrawn"):
+    if row.get("state") in ("draft", "closed", "withdrawn"):
         return [], False
+    withdrawn = row.get("withdrawn_at")
+    if withdrawn is not None:
+        return [], not _withdrawal_time(withdrawn)
     ghsa, entries = row.get("ghsa_id"), row.get("vulnerabilities")
     if (
         row.get("state") != "published"
@@ -320,6 +363,16 @@ def _github(row: object, source: Source, installed: Version) -> tuple[list[Match
         elif applicable:
             matches.append(Match(label, url, fixed))
     return matches, skipped
+
+
+def _withdrawal_time(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        observed = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return observed.tzinfo is not None
 
 
 def _affected(
@@ -353,23 +406,39 @@ def _build_name(build: Build, source: Source) -> str:
     return runtime_label(build.entry) if build.kind in (Kind.PHP, Kind.NODE) else source.name
 
 
-def _catalog_comparison(fixed: str, offered: Build | None) -> CatalogComparison:
-    if offered is None:
+def _catalog_comparison(fixed: object, catalog_version: object) -> CatalogComparison:
+    if catalog_version == "":
         return "no_offer"
     fix = _version(fixed)
-    catalog = _version(offered.version)
+    catalog = _version(catalog_version)
     if fix is None or catalog is None:
         return "unknown"
     return "reaches_fix" if catalog >= fix else "older_offer"
 
 
 def _finding(build: Build, source: Source, match: Match, offered: Build | None) -> Finding:
+    catalog_version = offered.version if offered else ""
     return {
         "name": _build_name(build, source),
         "version": build.version,
         "advisory": match.label,
         "url": match.url,
         "fixed": match.fixed,
-        "catalog_version": offered.version if offered else "",
-        "catalog_comparison": _catalog_comparison(match.fixed, offered),
+        "catalog_version": catalog_version,
+        "catalog_comparison": _catalog_comparison(match.fixed, catalog_version),
     }
+
+
+def read_report(stored: dict[str, object]) -> dict[str, object]:
+    report = stored.get("advisories")
+    if not isinstance(report, dict) or not isinstance(report.get("findings"), list):
+        return stored
+    findings = [_read_finding(finding) for finding in report["findings"]]
+    return {**stored, "advisories": {**report, "findings": findings}}
+
+
+def _read_finding(stored: object) -> object:
+    if not isinstance(stored, dict) or "catalog_comparison" in stored:
+        return stored
+    comparison = _catalog_comparison(stored.get("fixed"), stored.get("catalog_version"))
+    return {**stored, "catalog_comparison": comparison}
