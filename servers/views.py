@@ -20,11 +20,10 @@ from bootstrap.standing import Standing
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import RefreshNotFound, recorded_discovery, request_refresh
-from discovery.services import security_verification as latest_security_verification
 from operations import activity as activity_read
 from operations import change_requirements, preparation
 from operations.lifecycle import OperationRefused
-from operations.models import VIEW_CHANGES, RemoteOperation
+from operations.models import VIEW_CHANGES
 from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog, shown_runtimes, shown_updates
 from sites import names as site_names
@@ -510,17 +509,7 @@ def server_page(
         from security.presentation import firewall_panel
         from security.presentation import present as present_security
 
-        verification = latest_security_verification(server)
-        context["security_verification"] = verification
-        context["security_verification_pending"] = (
-            verification is not None and verification.status in RemoteOperation.ACTIVE
-        )
-        context["security_verification_older"] = (
-            verification is not None
-            and verification.finished_at is not None
-            and state.snapshot is not None
-            and verification.finished_at < state.snapshot.collected_at
-        )
+        context["security_verification_pending"] = state.checking
         if (
             _is_fragment_request(request)
             and request.GET.get("verification") == "1"

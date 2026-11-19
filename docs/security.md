@@ -47,9 +47,12 @@ verdicts there.
 
 **Check upstream fixes and reachability** requests fresh discovery through the same
 worker as **Refresh server**. Only this action runs the additional checks. The Security
-page shows their time and labels them as older when a later refresh has replaced the host
-snapshot. A change to the saved connection hides results for the previous connection.
-Opening the page reads stored results.
+page keeps the last successful report for the current saved connection, with its completion
+time. It shows the latest connection check's progress or failure alongside that report and
+labels the report older while a later check is queued or running, after one fails, or after
+one publishes a newer host snapshot. The next completed verification replaces the shown
+report. A change to the saved connection hides results for the previous connection.
+Opening the page or polling its fragment reads stored results and starts no network checks.
 
 The advisory check uses the [Node.js release index](https://nodejs.org/dist/index.json)
 and [published upstream repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories#list-repository-security-advisories)

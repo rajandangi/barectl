@@ -23,6 +23,7 @@ from discovery.presentation import (
 )
 from discovery.services import (
     STALE_AFTER,
+    SecurityVerification,
     ServerCapacity,
     history,
     inventory_discovery,
@@ -167,6 +168,7 @@ class AttemptView:
     connection_revision: int = 0
     original_target: str = ""
     check: CheckView | None = None
+    check_security: bool = False
 
     @property
     def older_connection(self) -> bool:
@@ -205,6 +207,7 @@ def _view(recorded: AttemptSummary) -> AttemptView:
         connection_revision=attempt.connection.revision if attempt.connection else 0,
         original_target=(attempt.connection.target_label if attempt.connection else ""),
         check=present_check(attempt) if attempt.status in RemoteOperation.ACTIVE else None,
+        check_security=attempt.check_security,
     )
 
 
@@ -225,6 +228,7 @@ class DiscoveryState:
     other_active: bool = False
     # That other operation, for pages that link to it.
     other_operation: RemoteOperation | None = None
+    security_verification: SecurityVerification | None = None
 
     @cached_property
     def sites(self) -> ShownSites:
@@ -383,6 +387,7 @@ def server_state(server: Server) -> DiscoveryState:
         other_operation=(
             active if active is not None and active.kind != RemoteOperation.Kind.DISCOVERY else None
         ),
+        security_verification=discovery.verification,
     )
 
 

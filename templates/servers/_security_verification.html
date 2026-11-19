@@ -7,59 +7,63 @@
     Compare installed versions with upstream security notices and check selected TCP ports
     from the computer running Barectl.
   </p>
+  {% if state.attempt %}
+    <p role="status">Latest connection check: {{ state.attempt.status }}{% if state.attempt.failure %}. {{ state.attempt.failure }}{% endif %}</p>
+  {% endif %}
   {% if security_verification_pending %}
-    <p role="status">Checking upstream fixes and TCP reachability…</p>
-  {% elif security_verification %}
-    {% if security_verification.security_verification %}
-      {% with report=security_verification.security_verification %}
-        <p>Checked {{ security_verification.finished_at|date:"M j, Y, H:i:s T" }}.</p>
-        {% if security_verification_older %}
-          <p>These results predate the latest server refresh. Run the checks again to verify the current state.</p>
-        {% endif %}
-        <h4>Upstream fixes</h4>
-        {% if report.advisories.findings %}
-          <ul>
-            {% for finding in report.advisories.findings %}
-              <li>
-                {{ finding.name }} {{ finding.version }}.
-                <a href="{{ finding.url }}">{{ finding.advisory }}</a>.
-                {% if finding.fixed %}
-                  {% if finding.catalog_has_fix %}
-                    Upstream fix in {{ finding.fixed }}. The release checked offers {{ finding.catalog_version }}.
-                  {% else %}
-                    Upstream fix in {{ finding.fixed }}. The release checked has no build at that version or later.
-                  {% endif %}
-                {% else %}
-                  The source did not provide a fixed version this check could read.
-                {% endif %}
-              </li>
-            {% endfor %}
-          </ul>
-          <p><a href="{% url 'server_advanced' server.pk %}?tab=catalog">See available builds in Advanced</a></p>
-        {% elif report.advisories.checked %}
-          <p>No matches in the sources checked.</p>
-        {% endif %}
-        {% if report.advisories.checked %}
-          <p>Sources checked for {{ report.advisories.checked|join:", " }}. Matches use upstream versions. A build can carry a backported fix.</p>
-        {% endif %}
-        {% for note in report.advisories.notes %}<p>{{ note }}</p>{% endfor %}
-        <h4>TCP reachability</h4>
-        {% if report.reachability.address %}
-          <p>Checked {{ report.reachability.address }} from the Barectl computer. Other networks can get different results. This check covers TCP only.</p>
-          <ul>
-            {% for port in report.reachability.ports %}
-              <li>
-                TCP {{ port.port }}. {{ port.result }}.
-                {% if port.unexpected %}<strong>Extra port reachable.</strong>{% endif %}
-              </li>
-            {% endfor %}
-          </ul>
-        {% endif %}
-        {% if report.reachability.note %}<p>{{ report.reachability.note }}</p>{% endif %}
-      {% endwith %}
+    {% if state.attempt.check_security %}
+      <p role="status">Checking upstream fixes and TCP reachability…</p>
     {% else %}
-      <p role="status">Could not complete the check. Read the server connection status for details.</p>
+      <p role="status">Refreshing server observations…</p>
     {% endif %}
+  {% endif %}
+  {% if state.security_verification %}
+    {% with report=state.security_verification.report %}
+      <p>Checked {{ state.security_verification.completed_at|date:"M j, Y, H:i:s T" }}.</p>
+      {% if state.security_verification.older %}
+        <p>These results are older than the latest connection check. Run the checks again to verify the current state.</p>
+      {% endif %}
+      <h4>Upstream fixes</h4>
+      {% if report.advisories.findings %}
+        <ul>
+          {% for finding in report.advisories.findings %}
+            <li>
+              {{ finding.name }} {{ finding.version }}.
+              <a href="{{ finding.url }}">{{ finding.advisory }}</a>.
+              {% if finding.fixed %}
+                {% if finding.catalog_has_fix %}
+                  Upstream fix in {{ finding.fixed }}. The release checked offers {{ finding.catalog_version }}.
+                {% else %}
+                  Upstream fix in {{ finding.fixed }}. The release checked has no build at that version or later.
+                {% endif %}
+              {% else %}
+                The source did not provide a fixed version this check could read.
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        <p><a href="{% url 'server_advanced' server.pk %}?tab=catalog">See available builds in Advanced</a></p>
+      {% elif report.advisories.checked %}
+        <p>No matches in the sources checked.</p>
+      {% endif %}
+      {% if report.advisories.checked %}
+        <p>Sources checked for {{ report.advisories.checked|join:", " }}. Matches use upstream versions. A build can carry a backported fix.</p>
+      {% endif %}
+      {% for note in report.advisories.notes %}<p>{{ note }}</p>{% endfor %}
+      <h4>TCP reachability</h4>
+      {% if report.reachability.address %}
+        <p>Checked {{ report.reachability.address }} from the Barectl computer. Other networks can get different results. This check covers TCP only.</p>
+        <ul>
+          {% for port in report.reachability.ports %}
+            <li>
+              TCP {{ port.port }}. {{ port.result }}.
+              {% if port.unexpected %}<strong>Extra port reachable.</strong>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if report.reachability.note %}<p>{{ report.reachability.note }}</p>{% endif %}
+    {% endwith %}
   {% endif %}
   {% if perms.discovery.add_discoveryattempt and state.alias_usable and state.can_request %}
     <form method="post" action="{% url 'server_verify' server.pk %}">
