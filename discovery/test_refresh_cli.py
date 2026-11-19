@@ -2,9 +2,10 @@
 
 import io
 import json
+import socket
 import subprocess
 import sys
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from datetime import timedelta
 from pathlib import Path
 from typing import cast, override
@@ -19,8 +20,10 @@ from django.utils import timezone
 from dashboard.management.commands.barectl import Command
 from operations import lifecycle
 from operations.models import RemoteOperation
-from servers.models import Server
+from security import advisories
+from servers.models import ConnectionDefinition, Server
 
+from . import recorded, ssh
 from .fakes import DiscoveryTestCase
 from .models import DiscoveryAttempt, DiscoverySnapshot
 from .services import RefreshNotFound, RefreshStatus, queue_discovery, read_refresh, request_refresh
@@ -418,14 +421,37 @@ class RefreshCommandTests(DiscoveryTestCase):
                     break
 
     def test_request_shares_attempt_and_worker_publishes_only_its_snapshot(self) -> None:
-        first = self.command("refresh", str(self.server.pk))
-        self.assertEqual(first["code"], "accepted")
-        self.assertEqual(first["snapshot"], None)
-        self.assertEqual(self.command("refresh", str(self.server.pk))["code"], "shared_active")
-        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
-        self.assertEqual(self.remote.targets, [])
+        self.server.connection_mode = "agent"
+        self.server.address = "2600::1"
+        self.server.connection_revision = 1
+        self.server.save(update_fields=["connection_mode", "address", "connection_revision"])
+        ConnectionDefinition.objects.create(
+            server=self.server,
+            revision=self.server.connection_revision,
+            mode=self.server.connection_mode,
+            alias=self.server.ssh_alias,
+            address=self.server.address,
+            username=self.server.username,
+            port=self.server.port,
+        )
+        shell = recorded.ReplayShell(recorded.load("laravel-create-26.04"))
+        with (
+            mock.patch.object(ssh, "connect", return_value=nullcontext(shell)) as ssh_connect,
+            mock.patch.object(advisories, "HTTPSConnection") as https,
+            mock.patch.object(socket, "socket") as tcp,
+        ):
+            first = self.command("refresh", str(self.server.pk))
+            self.assertEqual(first["code"], "accepted")
+            self.assertEqual(first["snapshot"], None)
+            self.assertEqual(self.command("refresh", str(self.server.pk))["code"], "shared_active")
+            self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+            ssh_connect.assert_not_called()
+            self.run_worker()
+            ssh_connect.assert_called_once()
+            self.assertEqual(ssh_connect.call_args.args[0].hostname, self.server.address)
+            https.assert_not_called()
+            tcp.assert_not_called()
 
-        self.run_worker()
         first_operation = cast(dict[str, object], first["operation"])
         result = self.command("refresh-status", str(first_operation["id"]))
         self.assertEqual(result["code"], "succeeded")

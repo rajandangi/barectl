@@ -1,13 +1,15 @@
 import json
 import re
 import socket
-from contextlib import nullcontext, suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import replace
-from http.client import HTTPResponse
+from http.client import HTTPException, HTTPResponse
 from threading import Event, Thread
 from unittest import mock
 
 from django.contrib.auth.models import Permission
+from django.http import HttpResponse
 from django.template.defaultfilters import date
 from django.test import SimpleTestCase
 from django.utils import timezone
@@ -17,13 +19,14 @@ from bootstrap.standing import HostJudgment, Standing
 from discovery import recorded, ssh
 from discovery.fakes import COLLECTED, DiscoveryTestCase
 from discovery.models import DiscoveryAttempt, ObservationOutcome
-from discovery.snapshot import Observation
+from discovery.snapshot import CollectedSnapshot, Observation
 from runtimes import updates
 from runtimes.catalog import Architecture, load
 from security import advisories, observation, reachability
 from security.observation import Listener
 from security.testing import blocked, check, ok_state
 from servers.models import Server
+from servers.ssh_config import ConnectionTarget
 
 
 def notice(
@@ -54,6 +57,18 @@ def https_response(
 
 
 class AdvisoryTests(SimpleTestCase):
+    def caddy_observation(self) -> CollectedSnapshot:
+        caddy = next(
+            build for build in load().offered(Architecture.X86_64) if build.entry == "caddy"
+        )
+        return replace(
+            COLLECTED,
+            standing=HostJudgment(
+                Standing.TARGET_STACK, (), (), (), profiles=(("caddy", caddy.path),)
+            ),
+            runtimes=(),
+        )
+
     def test_php_branch_and_node_major_are_matched_without_checking_php_extensions(self) -> None:
         catalog = load()
         installed = [
@@ -197,16 +212,7 @@ class AdvisoryTests(SimpleTestCase):
         self.assertIn("Composer 2.10.3-dev uses an unsupported version format.", report["notes"])
 
     def test_response_limit_and_omitted_matches_are_reported(self) -> None:
-        caddy = next(
-            build for build in load().offered(Architecture.X86_64) if build.entry == "caddy"
-        )
-        collected = replace(
-            COLLECTED,
-            standing=HostJudgment(
-                Standing.TARGET_STACK, (), (), (), profiles=(("caddy", caddy.path),)
-            ),
-            runtimes=(),
-        )
+        collected = self.caddy_observation()
         data = json.dumps(
             [
                 notice(f"{index:04d}", ("<=2.11.7", "2.11.8"))
@@ -236,16 +242,7 @@ class AdvisoryTests(SimpleTestCase):
                 self.assertIn(note, report["notes"])
 
     def test_slow_response_expires_while_bytes_are_still_arriving(self) -> None:
-        caddy = next(
-            build for build in load().offered(Architecture.X86_64) if build.entry == "caddy"
-        )
-        collected = replace(
-            COLLECTED,
-            standing=HostJudgment(
-                Standing.TARGET_STACK, (), (), (), profiles=(("caddy", caddy.path),)
-            ),
-            runtimes=(),
-        )
+        collected = self.caddy_observation()
         incoming, outgoing = socket.socketpair()
         stop = Event()
 
@@ -278,6 +275,40 @@ class AdvisoryTests(SimpleTestCase):
 
         self.assertEqual(report["checked"], [])
         self.assertIn("The advisory request for Caddy timed out.", report["notes"])
+
+    def test_https_setup_and_exchange_failures_are_reported(self) -> None:
+        collected = self.caddy_observation()
+        for failure, note in (
+            (TimeoutError, "The advisory request for Caddy timed out."),
+            (OSError, "Could not read the Caddy advisory source."),
+            (HTTPException, "Could not read the Caddy advisory source."),
+        ):
+            for step in ("connect", "request"):
+                with self.subTest(failure=failure, step=step):
+                    connection = https_response([])
+                    getattr(connection, step).side_effect = failure
+                    with mock.patch.object(advisories, "HTTPSConnection", return_value=connection):
+                        report = advisories.check(collected)
+                    self.assertEqual(report["checked"], [])
+                    self.assertIn(note, report["notes"])
+                    connection.close.assert_called_once()
+
+    def test_unexpected_error_outside_the_https_exchange_propagates(self) -> None:
+        collected = self.caddy_observation()
+        connection = https_response([])
+        with (
+            mock.patch.object(advisories, "HTTPSConnection", return_value=connection),
+            mock.patch.object(
+                type(connection),
+                "sock",
+                new_callable=mock.PropertyMock,
+                side_effect=OSError("Unexpected socket access failure"),
+                create=True,
+            ),
+            self.assertRaisesRegex(OSError, "Unexpected socket access failure"),
+        ):
+            advisories.check(collected)
+        connection.close.assert_called_once()
 
     def test_uncovered_extension_is_still_an_identified_catalog_build(self) -> None:
         ext = next(
@@ -430,26 +461,39 @@ class ReachabilityTests(SimpleTestCase):
 
 
 class VerificationWorkflowTests(DiscoveryTestCase):
-    def submit_rendered_verification(self, server: Server, **fields: str) -> None:
+    def rendered_form(self, server: Server, button: str) -> tuple[str, dict[str, str]]:
         page = self.client.get(f"/servers/{server.pk}/security/")
-        form = re.search(
-            r'<form method="post" action="([^"]+)">\s*'
-            r'<input[^>]+>\s*<input type="hidden" name="([^"]+)" value="security">',
+        for action, body in re.findall(
+            r'<form method="post" action="([^"]+)">(.*?)</form>',
             page.content.decode(),
-        )
-        if form is None:
-            self.fail("The Security section did not render a verification form.")
-        self.client.post(form[1], {**fields, form[2]: "security"})
+            re.DOTALL,
+        ):
+            if re.search(rf"<button\b[^>]*>\s*{re.escape(button)}\s*</button>", body):
+                fields = re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', body)
+                return action, dict(fields)
+        raise AssertionError(f"The Security page did not render a {button!r} form.")
 
-    def test_verified_ipv6_tcp_results_survive_an_advisory_outage(self) -> None:
-        address = "2600::1"
+    def rendered_verification(self, server: Server) -> tuple[str, dict[str, str]]:
+        return self.rendered_form(server, "Check upstream fixes and reachability")
+
+    def submit_rendered_verification(self, server: Server, **extra: str) -> HttpResponse:
+        action, fields = self.rendered_verification(server)
+        return self.client.post(action, {**extra, **fields})
+
+    def register_saved_address(self, address: str) -> Server:
         self.sign_in_with("view_server", "add_server", "add_discoveryattempt")
         response = self.client.post(
             "/servers/add/",
             {"name": "Saved address", "address": address, "username": "root", "port": "2222"},
         )
         self.assertEqual(response.status_code, 302)
-        server = Server.objects.get(name="Saved address")
+        return Server.objects.get(name="Saved address")
+
+    def test_verified_ipv6_tcp_results_survive_an_advisory_outage_and_ordinary_refresh(
+        self,
+    ) -> None:
+        address = "2600::1"
+        server = self.register_saved_address(address)
         transcript = recorded.load("laravel-create-26.04")
         listeners = check((Listener("*", 8443, "tcp", "web", True),))
         security = Observation(
@@ -497,6 +541,19 @@ class VerificationWorkflowTests(DiscoveryTestCase):
                     "HX-Target": "section#security-verification",
                 },
             )
+            self.assertCountEqual(tcp.connect.call_args_list, expected)
+            self.assertEqual(https.call_count, advisory_requests)
+
+            action, fields = self.rendered_form(server, "Refresh server")
+            self.assertRedirects(
+                self.client.post(action, fields),
+                f"/servers/{server.pk}/",
+                fetch_redirect_response=False,
+            )
+            self.run_worker()
+            self.assertEqual(ssh_transport.call_count, 3)
+            self.assert_succeeded()
+            self.assertEqual(open_socket.call_count, len(expected))
             self.assertCountEqual(tcp.connect.call_args_list, expected)
             self.assertEqual(https.call_count, advisory_requests)
 
@@ -638,16 +695,19 @@ class VerificationWorkflowTests(DiscoveryTestCase):
     ) -> None:
         server = self.register()
         self.run_worker()
-        verify_url = f"/servers/{server.pk}/verify/"
-        self.client.post(verify_url, {"next": "security"})
+        action, fields = self.rendered_verification(server)
+        self.client.post(action, fields)
         queued = DiscoveryAttempt.objects.latest("pk")
-        self.client.post(verify_url, {"next": "security"})
+        self.assertEqual(queued.status, DiscoveryAttempt.Status.QUEUED)
+        self.client.post(action, fields)
         self.assertEqual(DiscoveryAttempt.objects.latest("pk").pk, queued.pk)
         self.run_worker()
 
-        self.client.post(verify_url, {})
+        refresh_action, refresh_fields = self.rendered_form(server, "Refresh server")
+        self.client.post(refresh_action, refresh_fields)
         ordinary = DiscoveryAttempt.objects.latest("pk")
-        busy = self.client.post(verify_url, {"next": "security"}, follow=True)
+        self.assertNotEqual(ordinary.pk, queued.pk)
+        busy = self.client.post(action, fields, follow=True)
         self.assertContains(busy, "Another server operation is still running")
         self.assertEqual(DiscoveryAttempt.objects.latest("pk").pk, ordinary.pk)
 
@@ -659,15 +719,13 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         ):
             self.submit_rendered_verification(server)
             self.run_worker()
+        action, fields = self.rendered_verification(server)
         self.user.user_permissions.remove(Permission.objects.get(codename="add_discoveryattempt"))
         self.assertContains(
             self.client.get(f"/servers/{server.pk}/security/"), "No matches in the sources checked."
         )
         before = DiscoveryAttempt.objects.count()
-        self.assertEqual(
-            self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"}).status_code,
-            403,
-        )
+        self.assertEqual(self.client.post(action, fields).status_code, 403)
         self.assertEqual(DiscoveryAttempt.objects.count(), before)
 
     def test_connection_edit_hides_prior_verification(self) -> None:
@@ -700,20 +758,52 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         self.assertContains(page, "Permission to check this server is no longer available.")
         self.assertNotContains(page, "No matches in the sources checked.")
 
+    def test_revocation_during_native_collection_blocks_both_extra_checks(self) -> None:
+        server = self.register_saved_address("2600::1")
+        transcript = recorded.load("laravel-create-26.04")
+        with mock.patch.object(
+            ssh, "connect", return_value=nullcontext(recorded.ReplayShell(transcript))
+        ):
+            self.run_worker()
+        self.assert_succeeded()
+        self.submit_rendered_verification(server)
+
+        shell = recorded.ReplayShell(transcript)
+
+        @contextmanager
+        def collect_then_revoke(_target: ConnectionTarget) -> Iterator[ssh.RemoteShell]:
+            yield shell
+            self.user.user_permissions.remove(
+                Permission.objects.get(codename="add_discoveryattempt")
+            )
+
+        with (
+            mock.patch.object(ssh, "connect", side_effect=collect_then_revoke),
+            mock.patch.object(advisories, "HTTPSConnection") as https,
+            mock.patch.object(socket, "socket") as tcp,
+        ):
+            self.run_worker()
+        self.assertTrue(shell.commands)
+        https.assert_not_called()
+        tcp.assert_not_called()
+        page = self.client.get(f"/servers/{server.pk}/security/")
+        self.assertContains(page, "Permission to check this server is no longer available.")
+        self.assertNotContains(page, "Verification completed")
+
     def test_revocation_during_checks_cannot_publish_a_new_report(self) -> None:
         server = self.register()
         self.run_worker()
         url = f"/servers/{server.pk}/security/"
         report: dict[str, object] = {"findings": [], "notes": [], "checked": ["PHP"]}
         with mock.patch.object(advisories, "check", return_value=report):
-            self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
+            self.submit_rendered_verification(server)
             self.run_worker()
         first_checked = re.search(
             r"Verification completed ([^<]+)</p>", self.client.get(url).content.decode()
         )
         if first_checked is None:
             self.fail("The first verification did not show its completion time.")
-        self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
+        self.submit_rendered_verification(server)
 
         def revoke(_collected: object) -> dict[str, object]:
             self.user.user_permissions.remove(
@@ -735,9 +825,9 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         self.run_worker()
         report: dict[str, object] = {"findings": [], "notes": [], "checked": ["PHP"]}
         with mock.patch.object(advisories, "check", return_value=report):
-            self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
+            self.submit_rendered_verification(server)
             self.run_worker()
-        self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
+        self.submit_rendered_verification(server)
 
         def edit(_collected: object) -> dict[str, object]:
             server.connection_revision += 1
@@ -759,14 +849,14 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         with mock.patch.object(
             advisories, "check", return_value={"findings": [], "notes": [], "checked": ["PHP"]}
         ):
-            self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
+            self.submit_rendered_verification(server)
             self.run_worker()
         first_checked = re.search(
             r"Verification completed ([^<]+)</p>", self.client.get(url).content.decode()
         )
         if first_checked is None:
             self.fail("The first verification did not show its completion time.")
-        self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
+        self.submit_rendered_verification(server)
         queued = self.client.get(url)
         self.assertContains(queued, "No matches in the sources checked.")
         self.assertContains(queued, "older")
@@ -785,7 +875,7 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         with mock.patch.object(
             advisories, "check", return_value={"findings": [], "notes": [], "checked": ["PHP"]}
         ):
-            self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
+            self.submit_rendered_verification(server)
             self.run_worker()
         verified = self.client.get(url)
         first_checked = re.search(r"Verification completed ([^<]+)</p>", verified.content.decode())
@@ -794,7 +884,8 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         self.assertContains(verified, "No matches in the sources checked.")
         self.assertContains(verified, "Verification completed ")
 
-        self.client.post(f"/servers/{server.pk}/verify/", {})
+        action, fields = self.rendered_form(server, "Refresh server")
+        self.client.post(action, fields)
         queued = self.client.get(url)
         self.assertContains(queued, "No matches in the sources checked.")
         self.assertContains(queued, "older")
@@ -813,16 +904,8 @@ class VerificationWorkflowTests(DiscoveryTestCase):
             upstream.assert_not_called()
 
             page_url = f"/servers/{server.pk}/security/"
-            page = self.client.get(page_url)
-            form = re.search(
-                r'<form method="post" action="([^"]+)">\s*'
-                r'<input[^>]+>\s*<input type="hidden" name="([^"]+)" value="security">',
-                page.content.decode(),
-            )
-            if form is None:
-                self.fail("The Security section did not render a verification form.")
             self.assertRedirects(
-                self.client.post(form[1], {form[2]: "security"}),
+                self.submit_rendered_verification(server),
                 f"{page_url}#security-verification",
                 fetch_redirect_response=False,
             )

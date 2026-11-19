@@ -217,12 +217,13 @@ def _source(source: Source) -> Feed:
     )
     connection = HTTPSConnection(host, timeout=TIMEOUT)
     try:
-        connection.connect()
+        try:
+            connection.connect()
+        except TimeoutError:
+            return Feed(None, f"The advisory request for {source.name} timed out.")
+        except OSError, HTTPException:
+            return Feed(None, f"Could not read the {source.name} advisory source.")
         return _fetch(connection, path, source)
-    except TimeoutError:
-        return Feed(None, f"The advisory request for {source.name} timed out.")
-    except OSError, HTTPException:
-        return Feed(None, f"Could not read the {source.name} advisory source.")
     finally:
         connection.close()
 
