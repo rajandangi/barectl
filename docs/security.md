@@ -47,28 +47,56 @@ verdicts there.
 
 **Check upstream fixes and reachability** requests fresh discovery through the same
 worker as **Refresh server**. Only this action runs the additional checks. The Security
-page shows their time and labels them as older when a later refresh has replaced the host
-snapshot. A change to the saved connection hides results for the previous connection.
-Opening the page reads stored results.
+page keeps the last successful report for the current saved connection, with its completion
+time. It shows the latest connection check's progress or failure alongside that report and
+labels the report older while a later check is queued or running, after one fails, or after
+one publishes a newer host snapshot. The next completed verification replaces the shown
+report. A change to the saved connection hides results for the previous connection.
+Opening the page or polling its fragment reads stored results and starts no network checks.
 
-The advisory check uses the [Node.js release index](https://nodejs.org/dist/index.json)
-and [published upstream repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories#list-repository-security-advisories)
-for the recognized installed catalog builds. It shows the upstream fixed version when the
-source supplies one, alongside the catalog's offered version. PHP advisories with fixes
-for several branches are matched against the installed branch. Node.js uses the newest
-security release on its installed major line. Requests send only fixed source URLs and
-generic client headers. Upstreams can publish advisories elsewhere, and a Nix build can
-include backported patches at the same version. A missing match says only what the chosen
-sources returned. Unavailable sources, additional advisory pages and unsupported ranges
-are reported when detected. Install catalog fixes through the existing reviewed update.
+The advisory check looks up the observed Nix store path and server architecture in the
+catalog, including retired builds. It reports unmatched profiles, unsupported versions
+and recognized entries with no source, including separate PHP extensions. PHP's repository
+advisories cover the PHP runtime and its bundled modules. The check can identify restic
+when backup observations include its profile. The current runtime read may leave the
+FastCGI client build unverified because it does not expose the installed profile path.
 
-The TCP check runs from the Barectl computer against the public IPv4 or IPv6 literal in
-the saved SSH connection, after SSH has verified the host. It checks that SSH port, 80,
-443 and up to nine additional observed TCP ports. A refused connection and an inconclusive
-attempt have different results. This is a test of the controller's network path to one
-address. Use a controller outside a private or allowlisted network to check that path
-separately. UDP, other addresses and the provider's rule configuration are outside the
-check. Hostname and alias registrations still get advisory results.
+Node.js uses the [release index](https://nodejs.org/dist/index.json) and shows the newest
+stable security release above the installed version on its major line. Barectl reads
+[published upstream repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories#list-repository-security-advisories)
+for recognized builds of PHP, Composer, Caddy, FastCGI client, HAProxy, restic and WP-CLI.
+The controller sends fixed HTTPS requests with generic client headers. It checks one
+page per repository with up to four requests in flight. HTTPS setup uses a four-second
+socket timeout. The controller's DNS resolver controls name resolution time. Once connected,
+each request has a four-second deadline and a 2 MiB response limit. The report flags unread
+pages, unavailable sources, rate limits, unsupported records and matches omitted at its
+display limit. An empty result applies only to the supported records on the pages read.
+
+The Security page shows the installed version, the upstream notice and its fixed version
+when available. PHP fixes use the installed major and minor line. The offered build for
+the same entry and architecture can reach the upstream fix, be older than the fix or be
+absent. The comparison can also be unknown, for example when an advisory names no fixed
+version. Matches use upstream version evidence. Nix builds may include backports, and this
+check cannot verify an individual build's patch status. Review catalog updates through the
+existing action in Advanced, which works independently of advisory availability.
+
+The worker checks TCP from the Barectl controller host after SSH verifies the saved public
+unicast IPv4 or IPv6 address. It connects directly to that numeric address. The worker
+skips an SSH alias, a hostname, a nonpublic address or a scoped IPv6 address, and still
+checks upstream advisories.
+
+The worker includes the saved SSH port, 80 and 443 once each. It adds up to nine more
+distinct ports from observed non-loopback TCP listeners, starting with the lowest port
+number. The report counts extra ports omitted at the limit. If the worker could not read
+the listeners, it checks only the standard ports and reports the coverage gap. It attempts
+up to four connections at a time with a 1.5-second timeout per connection. Each connection
+closes without sending application data.
+
+The Security report shows when verification completed, the numeric destination and whether
+each TCP connection was accepted, refused or inconclusive. It calls out accepted extra
+ports. These results describe the controller host's network path to that address. A
+controller on a different network can get different results. Provider rules and the
+server's Firewall check are separate from this TCP evidence.
 
 ## Firewall
 

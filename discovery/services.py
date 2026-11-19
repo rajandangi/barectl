@@ -66,6 +66,13 @@ class DiscoveryBusy(Exception):
         self.operation = operation
 
 
+@dataclass(frozen=True)
+class SecurityVerification:
+    completed_at: datetime
+    report: dict[str, object]
+    older: bool
+
+
 class ServerDiscovery(NamedTuple):
     attempt: DiscoveryAttempt | None
     # The snapshot the latest successful attempt published, whatever became of later ones.
@@ -74,6 +81,7 @@ class ServerDiscovery(NamedTuple):
     history: list[AttemptSummary]
     # The server's active remote operation of any kind, which blocks a new attempt.
     active: RemoteOperation | None
+    verification: SecurityVerification | None
 
 
 @recovers_first
@@ -89,11 +97,30 @@ def read_discovery(server: Server) -> ServerDiscovery:
     attempt = next((item.attempt for item in recorded if current(item)), None)
     # The latest successful attempt matching the connection still holds the snapshot.
     published = next((item.attempt for item in recorded if item.snapshot and current(item)), None)
+    verified = next(
+        (
+            item.attempt
+            for item in recorded
+            if current(item)
+            and item.attempt.check_security
+            and item.attempt.status == RemoteOperation.Status.SUCCEEDED
+            and item.attempt.security_verification
+            and item.attempt.finished_at is not None
+        ),
+        None,
+    )
     return ServerDiscovery(
         attempt,
         snapshot_of(published) if published is not None else None,
         recorded,
         lifecycle.active_operation(server),
+        SecurityVerification(
+            verified.finished_at,
+            advisories.read_report(verified.security_verification),
+            attempt is not None and verified.pk != attempt.pk,
+        )
+        if verified is not None and verified.finished_at is not None
+        else None,
     )
 
 
@@ -430,21 +457,6 @@ def _verify_security(attempt: DiscoveryAttempt, collected: CollectedSnapshot) ->
         "reachability": reachability.check(peer, collected.security.value),
         "advisories": advisories.check(collected),
     }
-
-
-@recovers_first
-def security_verification(server: Server) -> DiscoveryAttempt | None:
-    """Return the last requested verification for this connection only."""
-    connection = (
-        Q(connection__revision=server.connection_revision)
-        if server.connection_revision
-        else Q(connection__isnull=True)
-    )
-    return (
-        DiscoveryAttempt.objects.filter(connection, server=server, check_security=True)
-        .order_by("-pk")
-        .first()
-    )
 
 
 def _authorize(attempt: DiscoveryAttempt) -> None:
