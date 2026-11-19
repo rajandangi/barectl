@@ -3,8 +3,8 @@
 ## 1.2.0 - 2026-11-18
 
 Barectl adds a local CLI for the existing Refresh server workflow and improves
-collection and WordPress cron handover. See the [release qualification](docs/v1.2.0-qualification.md),
-[CLI guide](docs/cli.md) and [upgrade guide](docs/upgrade.md).
+collection and WordPress cron handover. See the [release qualification](docs/v1.2.0-qualification.md)
+and [CLI guide](docs/cli.md).
 
 ### Refresh server
 
@@ -30,11 +30,6 @@ collection and WordPress cron handover. See the [release qualification](docs/v1.
   released shapes, history and native contract version 2. The pinned cloud-image VM
   downloader handles its corrected source without expanding provider qualification.
   A cited subset of coding standards is included in the development documentation.
-
-Version 1.1.0 to 1.2.0 adds no controller database migration. Upgrades from 0.4.x and
-1.0.x still run the documented migrations. Installing 1.2.0 does not apply server
-settings or runtime catalog updates. The retained contract-1 refusal and
-mixed-controller limits remain in the [upgrade guide](docs/upgrade.md#mixed-controller-versions).
 
 ## 1.1.0 - 2026-11-15
 

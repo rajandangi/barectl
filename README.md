@@ -10,8 +10,6 @@ Barectl is an open-source hosting panel for PHP, WordPress, and Laravel. If you 
 
 **Latest release** · [v1.2.0](https://github.com/rajandangi/barectl/releases/tag/v1.2.0)
 
-Before upgrading from 1.0.x, read the [controller and retained-history compatibility limits](docs/upgrade.md#mixed-controller-versions). Version 1.2.0 can refuse changes when discovery reads retained contract-1 results.
-
 ## Current status
 
 Barectl supports fresh Ubuntu 26.04 LTS servers on amd64 and arm64, and servers already set up on the supported Barectl stack. Existing Nginx, APT PHP, and hosting-panel servers are read-only in Barectl. [Server requirements](docs/bootstrap.md#prerequisites) · [Stack and architecture](docs/target-architecture.md#stack)
