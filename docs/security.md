@@ -54,16 +54,30 @@ one publishes a newer host snapshot. The next completed verification replaces th
 report. A change to the saved connection hides results for the previous connection.
 Opening the page or polling its fragment reads stored results and starts no network checks.
 
-The advisory check uses the [Node.js release index](https://nodejs.org/dist/index.json)
-and [published upstream repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories#list-repository-security-advisories)
-for the recognized installed catalog builds. It shows the upstream fixed version when the
-source supplies one, alongside the catalog's offered version. PHP advisories with fixes
-for several branches are matched against the installed branch. Node.js uses the newest
-security release on its installed major line. Requests send only fixed source URLs and
-generic client headers. Upstreams can publish advisories elsewhere, and a Nix build can
-include backported patches at the same version. A missing match says only what the chosen
-sources returned. Unavailable sources, additional advisory pages and unsupported ranges
-are reported when detected. Install catalog fixes through the existing reviewed update.
+The advisory check looks up the observed Nix store path and server architecture in the
+catalog, including retired builds. It reports unmatched profiles, unsupported versions
+and recognized entries with no source, including separate PHP extensions. PHP's repository
+advisories cover the PHP runtime and its bundled modules. The check can identify restic
+when backup observations include its profile. The current runtime read may leave the
+FastCGI client build unverified because it does not expose the installed profile path.
+
+Node.js uses the [release index](https://nodejs.org/dist/index.json) and shows the newest
+stable security release above the installed version on its major line. Barectl reads
+[published upstream repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories#list-repository-security-advisories)
+for recognized builds of PHP, Composer, Caddy, FastCGI client, HAProxy, restic and WP-CLI.
+The controller sends fixed HTTPS requests with generic client headers. It checks one
+page per repository with up to four requests in flight, a four-second socket timeout and
+a 2 MiB response limit per request. It reports unread pages, unavailable sources, rate
+limits, unsupported records and any matches omitted beyond the 20 shown. An empty result
+applies only to the supported records on the pages read.
+
+The Security page shows the installed version, the upstream notice and its fixed version
+when available. PHP fixes use the installed major and minor line. The offered build for
+the same entry and architecture can reach the upstream fix, be older than the fix or be
+absent. The comparison can also be unknown, for example when an advisory names no fixed
+version. Matches use upstream version evidence. Nix builds may include backports, and this
+check cannot verify an individual build's patch status. Review catalog updates through the
+existing action in Advanced, which works independently of advisory availability.
 
 The TCP check runs from the Barectl computer against the public IPv4 or IPv6 literal in
 the saved SSH connection, after SSH has verified the host. It checks that SSH port, 80,

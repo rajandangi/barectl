@@ -1,12 +1,16 @@
+import json
 import re
 import socket
+from contextlib import nullcontext
 from dataclasses import replace
 from unittest import mock
 
 from django.contrib.auth.models import Permission
 from django.test import SimpleTestCase
 
+from backups.observation import ObservedBackup
 from bootstrap.standing import HostJudgment, Standing
+from discovery import recorded, ssh
 from discovery.fakes import COLLECTED, DiscoveryTestCase
 from discovery.models import DiscoveryAttempt
 from runtimes import updates
@@ -17,24 +21,41 @@ from security.testing import check, ok_state
 from servers.models import Server
 
 
+def notice(
+    key: str, *ranges: tuple[str, str | None], state: str = "published", withdrawn: bool = False
+) -> dict[str, object]:
+    return {
+        "ghsa_id": f"GHSA-aaaa-bbbb-{key}",
+        "state": state,
+        "published_at": "2026-10-21T13:34:25Z",
+        "withdrawn_at": "2026-10-22T13:34:25Z" if withdrawn else None,
+        "vulnerabilities": [
+            {"vulnerable_version_range": affected, "patched_versions": patched}
+            for affected, patched in ranges
+        ],
+    }
+
+
+def https_response(
+    data: object, *, status: int = 200, headers: dict[str, str] | None = None
+) -> mock.Mock:
+    response = mock.Mock(status=status)
+    response.getheader.side_effect = (headers or {}).get
+    body = data if isinstance(data, bytes) else json.dumps(data).encode()
+    response.read.side_effect = lambda size: body[:size]
+    connection = mock.Mock()
+    connection.getresponse.return_value = response
+    return connection
+
+
 class AdvisoryTests(SimpleTestCase):
-    def test_installed_and_offered_builds_are_compared_with_upstream_fixes(self) -> None:
+    def test_php_branch_and_node_major_are_matched_without_checking_php_extensions(self) -> None:
         catalog = load()
-        installed = tuple(
-            replace(build, version=version, retired=build.entry == "caddy")
-            for entry, version in (
-                ("php84", "8.4.27"),
-                ("caddy", "2.11.7"),
-                ("nodejs_24", "24.22.1"),
-            )
+        installed = [
+            build
             for build in catalog.offered(Architecture.X86_64)
-            if build.entry == entry
-        )
-        caddy_build = next(build for build in installed if build.entry == "caddy")
-        updated_caddy = replace(
-            caddy_build, version="2.11.8", path=caddy_build.path + "-updated", retired=False
-        )
-        catalog = replace(catalog, builds=(*installed, updated_caddy))
+            if build.entry in {"php84", "php84_redis", "nodejs_24"}
+        ]
         standing = HostJudgment(
             Standing.TARGET_STACK,
             (),
@@ -43,44 +64,186 @@ class AdvisoryTests(SimpleTestCase):
             profiles=tuple((build.entry, build.path) for build in installed),
         )
         collected = replace(COLLECTED, standing=standing, runtimes=())
+        php = https_response(
+            [
+                notice("0001", ("<8.4.28", "8.4.28"), ("<8.5.99", "8.5.99")),
+                notice("0002", ("<8.5.99", "8.5.99")),
+                notice("0003", ("<8.4.99", "8.4.99"), state="draft"),
+                notice("0004", ("<8.4.99", "8.4.99"), withdrawn=True),
+            ]
+        )
+        node = https_response(
+            [
+                {"version": "v24.22.99", "security": False},
+                {"version": "v25.22.99", "security": True},
+                {"version": "v24.22.4-rc.1", "security": True},
+                {"version": "v24.22.3", "security": True},
+                {"version": "v24.22.2", "security": True},
+            ]
+        )
+        with mock.patch.object(
+            advisories,
+            "HTTPSConnection",
+            side_effect=lambda host, **_opts: {"api.github.com": php, "nodejs.org": node}[host],
+        ) as connect:
+            report = advisories.check(collected)
 
-        php = {
-            "ghsa_id": "GHSA-aaaa-bbbb-cccc",
-            "cve_id": "CVE-2026-12345",
-            "vulnerabilities": [
-                {"vulnerable_version_range": "<8.4.27", "patched_versions": "8.4.27"},
-                {"vulnerable_version_range": "<8.5.99", "patched_versions": "8.5.99"},
-            ],
-        }
-        caddy = {
-            "ghsa_id": "GHSA-bbbb-cccc-dddd",
-            "vulnerabilities": [
-                {"vulnerable_version_range": ">=2.11.7, <2.11.8", "patched_versions": "2.11.8"}
-            ],
-        }
-        node = [
-            {"version": "v24.22.99", "security": False},
-            {"version": "v25.22.99", "security": True},
-            {"version": "v24.22.3", "security": True},
-        ]
-        responses = {
-            "php/php-src": ([php], False),
-            "caddyserver/caddy": ([caddy], False),
-            "": (node, False),
-        }
+        self.assertCountEqual(
+            [(row["name"], row["fixed"], row["catalog_version"]) for row in report["findings"]],
+            [("PHP 8.4", "8.4.28", "8.4.27"), ("Node.js 24", "24.22.3", "24.22.1")],
+        )
+        self.assertCountEqual(report["checked"], ["PHP", "Node.js"])
+        self.assertIn(
+            "php84_redis 6.3.0 has no upstream advisory source in this check.", report["notes"]
+        )
+        self.assertTrue(any("FastCGI" in note for note in report["notes"]))
+        self.assertEqual(connect.call_count, 2)
+        php.request.assert_called_once_with(
+            "GET",
+            "/repos/php/php-src/security-advisories?per_page=100&state=published&sort=published",
+            headers={"User-Agent": "Barectl", "Accept": "application/json"},
+        )
+        node.request.assert_called_once_with(
+            "GET",
+            "/dist/index.json",
+            headers={"User-Agent": "Barectl", "Accept": "application/json"},
+        )
+
+    def test_offers_and_coverage_gaps_use_observed_entries_and_architecture(self) -> None:
+        catalog = load()
+        x86 = {build.entry: build for build in catalog.offered(Architecture.X86_64)}
+        caddy = replace(
+            x86["caddy"], version="2.11.6", path=x86["caddy"].path + "-old", retired=True
+        )
+        restic = replace(x86["restic"], retired=True)
+        composer = replace(x86["composer"], version="2.10.3-dev")
+        other_arch = next(
+            build for build in catalog.offered(Architecture.AARCH64) if build.entry == "restic"
+        )
+        offered = replace(x86["caddy"], version="2.11.8")
+        catalog = replace(catalog, builds=(caddy, restic, composer, offered, other_arch))
+        collected = replace(
+            COLLECTED,
+            standing=HostJudgment(
+                Standing.TARGET_STACK,
+                (),
+                (),
+                (),
+                profiles=(
+                    ("caddy", caddy.path),
+                    ("composer", composer.path),
+                    ("php84", "/unknown"),
+                ),
+            ),
+            runtimes=(),
+            backups=replace(
+                COLLECTED.backups, value=(ObservedBackup("alpha", profile=restic.path),)
+            ),
+        )
+
+        def reply() -> mock.Mock:
+            connection = https_response(None)
+
+            def request(method: str, path: str, **_headers: object) -> None:
+                if "/caddyserver/caddy/" in path:
+                    connection.getresponse.return_value = https_response(
+                        [
+                            notice("0001", ("<2.11.8", "2.11.8")),
+                            notice("0002", ("<2.11.8", None)),
+                        ]
+                    ).getresponse.return_value
+                elif "/restic/restic/" in path:
+                    connection.getresponse.return_value = https_response(
+                        [
+                            notice("0003", ("<=0.18.1", "0.18.2")),
+                        ]
+                    ).getresponse.return_value
+                else:
+                    self.fail(f"Unexpected advisory request {method} {path}")
+
+            connection.request.side_effect = request
+            return connection
+
         with (
-            mock.patch.object(advisories, "_source", side_effect=responses.__getitem__),
+            mock.patch.object(
+                advisories, "HTTPSConnection", side_effect=lambda *_a, **_kw: reply()
+            ),
             mock.patch.object(advisories, "load", return_value=catalog),
             mock.patch.object(updates, "load", return_value=catalog),
         ):
             report = advisories.check(collected)
 
-        self.assertEqual(
-            [(row["name"], row["fixed"], row["catalog_has_fix"]) for row in report["findings"]],
-            [("Node.js 24", "24.22.3", False), ("Caddy", "2.11.8", True)],
+        self.assertCountEqual(
+            [
+                (row["version"], row["fixed"], row["catalog_comparison"])
+                for row in report["findings"]
+            ],
+            [
+                ("2.11.6", "2.11.8", "reaches_fix"),
+                ("2.11.6", "", "unknown"),
+                ("0.18.1", "0.18.2", "no_offer"),
+            ],
         )
-        self.assertEqual(report["checked"], ["PHP", "Node.js", "Caddy"])
-        self.assertEqual(report["notes"], [])
+        self.assertIn(
+            "Could not match the installed php84 profile to a catalog build.", report["notes"]
+        )
+        self.assertIn("Composer 2.10.3-dev uses an unsupported version format.", report["notes"])
+
+    def test_response_limit_and_omitted_matches_are_reported(self) -> None:
+        caddy = next(
+            build for build in load().offered(Architecture.X86_64) if build.entry == "caddy"
+        )
+        collected = replace(
+            COLLECTED,
+            standing=HostJudgment(
+                Standing.TARGET_STACK, (), (), (), profiles=(("caddy", caddy.path),)
+            ),
+            runtimes=(),
+        )
+        data = json.dumps(
+            [notice(f"{index:04d}", ("<=2.11.7", "2.11.8")) for index in range(21)]
+        ).encode()
+        at_limit = data.ljust(advisories.MAX_RESPONSE)
+
+        with mock.patch.object(
+            advisories, "HTTPSConnection", return_value=https_response(at_limit)
+        ):
+            report = advisories.check(collected)
+        self.assertEqual(len(report["findings"]), 20)
+        self.assertIn("The display limit was reached. Omitted matches: 1.", report["notes"])
+
+        for body, note in (
+            (at_limit + b" ", "Caddy: the upstream response exceeded the size limit."),
+            (b"<html>", "Caddy: the upstream response was malformed."),
+        ):
+            with (
+                self.subTest(note=note),
+                mock.patch.object(advisories, "HTTPSConnection", return_value=https_response(body)),
+            ):
+                report = advisories.check(collected)
+                self.assertEqual(report["findings"], [])
+                self.assertEqual(report["checked"], [])
+                self.assertIn(note, report["notes"])
+
+    def test_uncovered_extension_is_still_an_identified_catalog_build(self) -> None:
+        ext = next(
+            build for build in load().offered(Architecture.X86_64) if build.entry == "php84_redis"
+        )
+        collected = replace(
+            COLLECTED,
+            standing=HostJudgment(
+                Standing.TARGET_STACK, (), (), (), profiles=((ext.entry, ext.path),)
+            ),
+            runtimes=(),
+        )
+        with mock.patch.object(advisories, "HTTPSConnection") as https:
+            report = advisories.check(collected)
+            https.assert_not_called()
+        self.assertEqual(report["checked"], [])
+        self.assertIn(
+            "php84_redis 6.3.0 has no upstream advisory source in this check.", report["notes"]
+        )
+        self.assertNotIn("No installed catalog builds could be identified.", report["notes"])
 
 
 class ReachabilityTests(SimpleTestCase):
@@ -150,6 +313,112 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         if form is None:
             self.fail("The Security section did not render a verification form.")
         self.client.post(form[1], {form[2]: "security"})
+
+    def test_advisory_matches_and_partial_coverage_are_read_from_the_stored_report(self) -> None:
+        server = self.register()
+        transcript = recorded.load("laravel-create-26.04")
+        caddy = next(
+            build for build in load().offered(Architecture.AARCH64) if build.entry == "caddy"
+        )
+
+        def connect(host: str, *, timeout: float) -> mock.Mock:
+            self.assertEqual(host, "api.github.com")
+            self.assertEqual(timeout, 4)
+            connection = https_response(None)
+
+            def request(method: str, path: str, **headers: object) -> None:
+                self.assertEqual(method, "GET")
+                self.assertEqual(
+                    headers, {"headers": {"User-Agent": "Barectl", "Accept": "application/json"}}
+                )
+                if "/caddyserver/caddy/" in path:
+                    response = https_response(
+                        [
+                            notice("0001", ("<=2.11.7", "2.11.8")),
+                            notice("0002", ("<2.12.0", None)),
+                            {"state": "published", "ghsa_id": "malformed"},
+                        ],
+                        headers={"Link": '<https://example.test/ignored>; rel="next"'},
+                    )
+                elif "/composer/composer/" in path:
+                    response = https_response(
+                        None, status=403, headers={"X-RateLimit-Remaining": "0"}
+                    )
+                else:
+                    response = https_response([])
+                connection.getresponse.return_value = response.getresponse.return_value
+
+            connection.request.side_effect = request
+            return connection
+
+        url = f"/servers/{server.pk}/security/"
+        with (
+            mock.patch.object(advisories, "HTTPSConnection", side_effect=connect) as https,
+            mock.patch.object(
+                ssh,
+                "connect",
+                side_effect=lambda _target: nullcontext(recorded.ReplayShell(transcript)),
+            ),
+        ):
+            self.run_worker()
+            self.submit_rendered_verification(server)
+            https.assert_not_called()
+            self.run_worker()
+            calls = https.call_count
+            self.assertGreater(calls, 0)
+            page = self.client.get(url)
+            fragment = self.client.get(
+                url + "?verification=1",
+                headers={
+                    "HX-Request": "true",
+                    "HX-Request-Type": "partial",
+                    "HX-Target": "section#security-verification",
+                },
+            )
+            self.assertEqual(https.call_count, calls)
+        for response in (page, fragment):
+            self.assertContains(response, f"Caddy {caddy.version}.")
+            self.assertContains(
+                response,
+                "https://github.com/caddyserver/caddy/security/advisories/GHSA-aaaa-bbbb-0001",
+            )
+            self.assertContains(response, "Upstream fix in 2.11.8.")
+            self.assertContains(
+                response,
+                f"The catalog offers {caddy.version}, which is older than the upstream fix.",
+            )
+            self.assertContains(response, "The source provides no usable fixed version.")
+            self.assertContains(response, "Composer: GitHub rate-limited the advisory request.")
+            self.assertContains(response, "Caddy: additional upstream advisory pages were skipped.")
+            self.assertContains(response, "Caddy: some upstream records were unsupported.")
+            self.assertContains(response, "TCP reachability")
+
+    def test_an_older_report_keeps_the_recorded_offer(self) -> None:
+        server = self.register()
+        self.run_worker()
+        report = {
+            "checked": ["Caddy"],
+            "notes": [],
+            "findings": [
+                {
+                    "name": "Caddy",
+                    "version": "2.11.6",
+                    "advisory": "GHSA-aaaa-bbbb-0001",
+                    "url": "https://github.com/caddyserver/caddy/security/advisories/GHSA-aaaa-bbbb-0001",
+                    "fixed": "2.11.8",
+                    "catalog_version": "2.11.7",
+                    "catalog_has_fix": False,
+                }
+            ],
+        }
+        with mock.patch.object(advisories, "check", return_value=report):
+            self.submit_rendered_verification(server)
+            self.run_worker()
+        page = self.client.get(f"/servers/{server.pk}/security/")
+        self.assertContains(page, "Upstream fix in 2.11.8.")
+        self.assertContains(
+            page, "The catalog offers 2.11.7. The comparison with the upstream fix is unknown."
+        )
 
     def test_repeated_security_requests_share_one_attempt_and_ordinary_refresh_is_busy(
         self,

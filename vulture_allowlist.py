@@ -583,7 +583,7 @@ if TYPE_CHECKING:
     _advisory_template_fields = (
         _advisory_wire_fields.advisory,
         _advisory_wire_fields.catalog_version,
-        _advisory_wire_fields.catalog_has_fix,
+        _advisory_wire_fields.catalog_comparison,
     )
     # Transcript replay tests are found by Django's test discovery.
     _snapshot_validator_selection = HttpSiteValidators.validator

@@ -31,23 +31,30 @@
               {{ finding.name }} {{ finding.version }}.
               <a href="{{ finding.url }}">{{ finding.advisory }}</a>.
               {% if finding.fixed %}
-                {% if finding.catalog_has_fix %}
-                  Upstream fix in {{ finding.fixed }}. The release checked offers {{ finding.catalog_version }}.
-                {% else %}
-                  Upstream fix in {{ finding.fixed }}. The release checked has no build at that version or later.
-                {% endif %}
+                Upstream fix in {{ finding.fixed }}.
               {% else %}
-                The source did not provide a fixed version this check could read.
+                The source provides no usable fixed version.
+              {% endif %}
+              {% if finding.catalog_comparison == "reaches_fix" or finding.catalog_has_fix %}
+                The catalog offers {{ finding.catalog_version }}, which reaches the upstream fix version.
+              {% elif finding.catalog_comparison == "older_offer" %}
+                The catalog offers {{ finding.catalog_version }}, which is older than the upstream fix.
+              {% elif not finding.catalog_version %}
+                The catalog offers no build for this entry and architecture.
+              {% else %}
+                The catalog offers {{ finding.catalog_version }}. The comparison with the upstream fix is unknown.
               {% endif %}
             </li>
           {% endfor %}
         </ul>
-        <p><a href="{% url 'server_advanced' server.pk %}?tab=catalog">See available builds in Advanced</a></p>
       {% elif report.advisories.checked %}
-        <p>No matches in the sources checked.</p>
+        <p>No matches in the sources checked. This covers only the supported records on the pages read.</p>
       {% endif %}
       {% if report.advisories.checked %}
-        <p>Sources checked for {{ report.advisories.checked|join:", " }}. Matches use upstream versions. A build can carry a backported fix.</p>
+        <p>Sources checked for {{ report.advisories.checked|join:", " }}. Matches use upstream version evidence. Nix builds may include backported fixes. The check cannot verify the patch status of a Nix build.</p>
+      {% endif %}
+      {% if report.advisories.checked %}
+        <p><a href="{% url 'server_advanced' server.pk %}?tab=catalog">Review catalog updates in Advanced</a></p>
       {% endif %}
       {% for note in report.advisories.notes %}<p>{{ note }}</p>{% endfor %}
       <h4>TCP reachability</h4>
