@@ -386,6 +386,20 @@ class ReachabilityTests(SimpleTestCase):
                     self.assertIn(reason, result["note"])
             probe.assert_not_called()
 
+    def test_saved_ssh_port_must_be_between_1_and_65535(self) -> None:
+        address = "5.5.5.5"
+        with mock.patch.object(socket, "socket") as open_socket:
+            for port in (0, 65536):
+                with self.subTest(port=port):
+                    result = reachability.check((address, port), ok_state())
+                    self.assertEqual(result["ports"], [])
+                    self.assertIn("The saved SSH port is outside the valid range.", result["note"])
+            open_socket.assert_not_called()
+            for port, expected in ((1, [1, 80, 443]), (65535, [80, 443, 65535])):
+                with self.subTest(port=port):
+                    result = reachability.check((address, port), ok_state())
+                    self.assertEqual([row["port"] for row in result["ports"]], expected)
+
     def test_port_limit_keeps_the_standard_endpoints(self) -> None:
         listeners = tuple(Listener("*", port, "tcp", "service", True) for port in range(49, 29, -1))
         state = replace(ok_state(), listeners=check(listeners))
@@ -822,7 +836,7 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         with (
             mock.patch.object(advisories, "check") as upstream,
-            mock.patch.object(socket, "create_connection") as tcp,
+            mock.patch.object(socket, "socket") as tcp,
         ):
             page = self.client.get(
                 page_url + "?verification=1",
