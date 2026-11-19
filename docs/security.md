@@ -80,13 +80,23 @@ version. Matches use upstream version evidence. Nix builds may include backports
 check cannot verify an individual build's patch status. Review catalog updates through the
 existing action in Advanced, which works independently of advisory availability.
 
-The TCP check runs from the Barectl computer against the public IPv4 or IPv6 literal in
-the saved SSH connection, after SSH has verified the host. It checks that SSH port, 80,
-443 and up to nine additional observed TCP ports. A refused connection and an inconclusive
-attempt have different results. This is a test of the controller's network path to one
-address. Use a controller outside a private or allowlisted network to check that path
-separately. UDP, other addresses and the provider's rule configuration are outside the
-check. Hostname and alias registrations still get advisory results.
+The worker checks TCP from the Barectl controller host after SSH verifies the saved public
+unicast IPv4 or IPv6 address. It connects directly to that numeric address. The worker
+skips an SSH alias, a hostname, a nonpublic address or a scoped IPv6 address, and still
+checks upstream advisories.
+
+The worker includes the saved SSH port, 80 and 443 once each. It adds up to nine more
+distinct ports from observed non-loopback TCP listeners, starting with the lowest port
+number. The report counts extra ports omitted at the limit. If the worker could not read
+the listeners, it checks only the standard ports and reports the coverage gap. It attempts
+up to four connections at a time with a 1.5-second timeout per connection. Each connection
+closes without sending application data.
+
+The Security report shows when verification completed, the numeric destination and whether
+each TCP connection was accepted, refused or inconclusive. It calls out accepted extra
+ports. These results describe the controller host's network path to that address. A
+controller on a different network can get different results. Provider rules and the
+server's Firewall check are separate from this TCP evidence.
 
 ## Firewall
 

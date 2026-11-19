@@ -8,18 +8,21 @@ from threading import Event, Thread
 from unittest import mock
 
 from django.contrib.auth.models import Permission
+from django.template.defaultfilters import date
 from django.test import SimpleTestCase
+from django.utils import timezone
 
 from backups.observation import ObservedBackup
 from bootstrap.standing import HostJudgment, Standing
 from discovery import recorded, ssh
 from discovery.fakes import COLLECTED, DiscoveryTestCase
-from discovery.models import DiscoveryAttempt
+from discovery.models import DiscoveryAttempt, ObservationOutcome
+from discovery.snapshot import Observation
 from runtimes import updates
 from runtimes.catalog import Architecture, load
-from security import advisories, reachability
+from security import advisories, observation, reachability
 from security.observation import Listener
-from security.testing import check, ok_state
+from security.testing import blocked, check, ok_state
 from servers.models import Server
 
 
@@ -301,60 +304,119 @@ class ReachabilityTests(SimpleTestCase):
     def test_only_the_verified_public_address_and_observed_tcp_ports_are_probed(self) -> None:
         address = "5.5.5.5"
         listeners = (
-            Listener("*", 3306, "tcp", "database", True),
-            Listener("*", 443, "udp", "web", True),
-            Listener("127.0.0.1", 6379, "tcp", "cache", False),
+            Listener("192.168.1.1", 3306, "tcp", "database", True),
+            Listener("192.168.1.2", 3306, "tcp", "database", True),
+            Listener("*", 2222, "tcp", "sshd", True),
+            Listener("*", 443, "tcp", "web", True),
+            Listener("*", 9000, "udp", "service", True),
+            Listener("127.0.0.7", 6379, "tcp", "cache", False),
+            Listener("::ffff:127.0.0.1", 5432, "tcp", "database", True),
+            Listener("*", 0, "tcp", "service", True),
+            Listener("*", 1, "tcp", "service", True),
+            Listener("*", 65535, "tcp", "service", True),
+            Listener("*", 65536, "tcp", "service", True),
         )
+        sockets: list[mock.Mock] = []
 
-        def connect(endpoint: tuple[str, int], *, timeout: float) -> mock.Mock:
-            self.assertEqual(timeout, reachability.TIMEOUT)
-            if endpoint[1] == 80:
-                raise ConnectionRefusedError
-            if endpoint[1] == 443:
-                raise TimeoutError
-            return mock.Mock()
+        def open_socket(family: socket.AddressFamily, kind: socket.SocketKind) -> mock.Mock:
+            self.assertEqual(family, socket.AF_INET)
+            self.assertEqual(kind, socket.SOCK_STREAM)
+            connection = mock.Mock()
+
+            def connect(endpoint: tuple[str, int]) -> None:
+                if endpoint[1] == 80:
+                    raise ConnectionRefusedError
+                if endpoint[1] == 443:
+                    raise TimeoutError
+
+            connection.connect.side_effect = connect
+            sockets.append(connection)
+            return connection
 
         state = replace(ok_state(), listeners=check(listeners))
-        with mock.patch.object(socket, "create_connection", side_effect=connect) as probe:
+        with (
+            mock.patch.object(socket, "socket", side_effect=open_socket),
+            mock.patch.object(socket, "getaddrinfo") as resolve,
+        ):
             result = reachability.check((address, 2222), state)
+            resolve.assert_not_called()
+        destinations = [(address, port) for port in (1, 80, 443, 2222, 3306, 65535)]
+        self.assertCountEqual(
+            [connection.connect.call_args.args[0] for connection in sockets], destinations
+        )
+        for connection in sockets:
+            endpoint = connection.connect.call_args.args[0]
             self.assertEqual(
-                {call.args[0] for call in probe.call_args_list},
-                {(address, port) for port in (80, 443, 2222, 3306)},
+                connection.mock_calls,
+                [mock.call.settimeout(1.5), mock.call.connect(endpoint), mock.call.close()],
             )
         self.assertEqual(
             result["ports"],
             [
+                {"port": 1, "result": "Connection accepted", "unexpected": True},
                 {"port": 80, "result": "Connection refused", "unexpected": False},
-                {"port": 443, "result": "Could not connect", "unexpected": False},
+                {"port": 443, "result": "Inconclusive", "unexpected": False},
                 {"port": 2222, "result": "Connection accepted", "unexpected": False},
                 {"port": 3306, "result": "Connection accepted", "unexpected": True},
+                {"port": 65535, "result": "Connection accepted", "unexpected": True},
             ],
         )
 
     def test_unsupported_addresses_do_not_open_sockets(self) -> None:
-        with mock.patch.object(socket, "create_connection") as probe:
-            for address in ("example.com", "127.0.0.1", "10.0.0.1", "ff02::1", "fe80::1"):
-                with self.subTest(address=address):
-                    result = reachability.check((address, 22), ok_state())
+        cases = (
+            (None, "uses an SSH alias"),
+            (("example.com", 22), "uses a hostname"),
+            (("2600::1%en0", 22), "has an IPv6 scope"),
+            (("127.0.0.1", 22), "public unicast"),
+            (("10.0.0.1", 22), "public unicast"),
+            (("100.64.0.1", 22), "public unicast"),
+            (("224.0.0.1", 22), "public unicast"),
+            (("ff02::1", 22), "public unicast"),
+            (("fe80::1", 22), "public unicast"),
+            (("fec0::1", 22), "public unicast"),
+            (("::ffff:127.0.0.1", 22), "public unicast"),
+            (("::ffff:224.0.0.1", 22), "public unicast"),
+        )
+        with mock.patch.object(socket, "socket") as probe:
+            for peer, reason in cases:
+                with self.subTest(peer=peer):
+                    result = reachability.check(peer, ok_state())
+                    self.assertEqual(result["address"], "")
                     self.assertFalse(result["ports"])
-                    self.assertIn("public", result["note"])
+                    self.assertIn(reason, result["note"])
             probe.assert_not_called()
 
     def test_port_limit_keeps_the_standard_endpoints(self) -> None:
-        listeners = tuple(Listener("*", port, "tcp", "service", True) for port in range(30, 50))
+        listeners = tuple(Listener("*", port, "tcp", "service", True) for port in range(49, 29, -1))
         state = replace(ok_state(), listeners=check(listeners))
-        with mock.patch.object(socket, "create_connection"):
-            result = reachability.check(("5.5.5.5", 2222), state)
+        with mock.patch.object(socket, "socket"):
+            result = reachability.check(("5.5.5.5", 443), state)
 
         self.assertEqual(
             [row["port"] for row in result["ports"]],
-            [*range(30, 39), 80, 443, 2222],
+            [*range(30, 39), 80, 443],
         )
-        self.assertIn("port limit", result["note"])
+        self.assertIn("It omitted 11 observed TCP ports.", result["note"])
+
+    def test_missing_listeners_leave_only_standard_ipv6_ports(self) -> None:
+        address = "2600::1"
+        state = replace(ok_state(), listeners=blocked())
+        with mock.patch.object(socket, "socket") as open_socket:
+            result = reachability.check((address, 80), state)
+
+        self.assertEqual(
+            open_socket.call_args_list, [mock.call(socket.AF_INET6, socket.SOCK_STREAM)] * 2
+        )
+        self.assertCountEqual(
+            open_socket.return_value.connect.call_args_list,
+            [mock.call((address, 80, 0, 0)), mock.call((address, 443, 0, 0))],
+        )
+        self.assertEqual([row["port"] for row in result["ports"]], [80, 443])
+        self.assertIn("Host listeners could not be read", result["note"])
 
 
 class VerificationWorkflowTests(DiscoveryTestCase):
-    def submit_rendered_verification(self, server: Server) -> None:
+    def submit_rendered_verification(self, server: Server, **fields: str) -> None:
         page = self.client.get(f"/servers/{server.pk}/security/")
         form = re.search(
             r'<form method="post" action="([^"]+)">\s*'
@@ -363,7 +425,81 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         )
         if form is None:
             self.fail("The Security section did not render a verification form.")
-        self.client.post(form[1], {form[2]: "security"})
+        self.client.post(form[1], {**fields, form[2]: "security"})
+
+    def test_verified_ipv6_tcp_results_survive_an_advisory_outage(self) -> None:
+        address = "2600::1"
+        self.sign_in_with("view_server", "add_server", "add_discoveryattempt")
+        response = self.client.post(
+            "/servers/add/",
+            {"name": "Saved address", "address": address, "username": "root", "port": "2222"},
+        )
+        self.assertEqual(response.status_code, 302)
+        server = Server.objects.get(name="Saved address")
+        transcript = recorded.load("laravel-create-26.04")
+        listeners = check((Listener("*", 8443, "tcp", "web", True),))
+        security = Observation(
+            ObservationOutcome.OBSERVED, (), "", replace(ok_state(), listeners=listeners)
+        )
+
+        def connect(endpoint: tuple[str, int, int, int]) -> None:
+            if endpoint[1] == 80:
+                raise ConnectionRefusedError
+            if endpoint[1] == 443:
+                raise TimeoutError
+
+        url = f"/servers/{server.pk}/security/"
+        with (
+            mock.patch.object(
+                ssh,
+                "connect",
+                side_effect=lambda _target: nullcontext(recorded.ReplayShell(transcript)),
+            ) as ssh_transport,
+            mock.patch.object(observation, "collect", return_value=security),
+            mock.patch.object(
+                advisories, "HTTPSConnection", return_value=https_response(None, status=503)
+            ) as https,
+            mock.patch.object(socket, "socket") as open_socket,
+        ):
+            tcp = open_socket.return_value
+            tcp.connect.side_effect = connect
+            self.run_worker()
+            self.submit_rendered_verification(server, address="127.0.0.1", port="1")
+            https.assert_not_called()
+            open_socket.assert_not_called()
+            self.run_worker()
+            self.assertEqual(ssh_transport.call_count, 2)
+            target = ssh_transport.call_args.args[0]
+            self.assertEqual((target.hostname, target.port), (address, 2222))
+            expected = [mock.call((address, port, 0, 0)) for port in (80, 443, 2222, 8443)]
+            self.assertCountEqual(tcp.connect.call_args_list, expected)
+            advisory_requests = https.call_count
+            page = self.client.get(url)
+            fragment = self.client.get(
+                url + "?verification=1",
+                headers={
+                    "HX-Request": "true",
+                    "HX-Request-Type": "partial",
+                    "HX-Target": "section#security-verification",
+                },
+            )
+            self.assertCountEqual(tcp.connect.call_args_list, expected)
+            self.assertEqual(https.call_count, advisory_requests)
+
+        attempt = DiscoveryAttempt.objects.get(server=server, check_security=True)
+        if attempt.finished_at is None:
+            self.fail("The worker did not record completion.")
+        completed = date(timezone.localtime(attempt.finished_at), "M j, Y, H:i:s T")
+        for response in (page, fragment):
+            self.assertContains(response, f"Verification completed {completed}.")
+            self.assertContains(response, f"Checked {address} from the Barectl controller host.")
+            self.assertContains(response, "This check covers TCP only.")
+            self.assertContains(response, "TCP 80. Connection refused.")
+            self.assertContains(response, "TCP 443. Inconclusive.")
+            self.assertContains(response, "TCP 2222. Connection accepted.")
+            self.assertContains(response, "TCP 8443. Connection accepted.")
+            self.assertContains(response, "Extra port reachable.", count=1)
+            self.assertContains(response, "The Caddy advisory source was unavailable (HTTP 503).")
 
     def test_advisory_matches_and_partial_coverage_are_read_from_the_stored_report(self) -> None:
         server = self.register()
@@ -445,7 +581,9 @@ class VerificationWorkflowTests(DiscoveryTestCase):
                 response, "Additional pages of the Caddy advisory source were skipped."
             )
             self.assertContains(response, "The Caddy source returned unsupported records.")
-            self.assertContains(response, "Use a saved public IPv4 or IPv6 address")
+            self.assertContains(
+                response, "TCP check skipped. The saved SSH connection uses an SSH alias."
+            )
 
     def test_an_older_report_keeps_the_recorded_offer(self) -> None:
         server = self.register()
@@ -556,7 +694,9 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         with mock.patch.object(advisories, "check", return_value=report):
             self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
             self.run_worker()
-        first_checked = re.search(r"Checked ([^<]+)</p>", self.client.get(url).content.decode())
+        first_checked = re.search(
+            r"Verification completed ([^<]+)</p>", self.client.get(url).content.decode()
+        )
         if first_checked is None:
             self.fail("The first verification did not show its completion time.")
         self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
@@ -570,7 +710,7 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         with mock.patch.object(advisories, "check", side_effect=revoke):
             self.run_worker()
         page = self.client.get(url)
-        self.assertContains(page, f"Checked {first_checked[1]}")
+        self.assertContains(page, f"Verification completed {first_checked[1]}")
         self.assertContains(page, "No matches in the sources checked.")
         self.assertContains(page, "Permission to check this server is no longer available.")
         self.assertContains(page, "older")
@@ -607,7 +747,9 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         ):
             self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
             self.run_worker()
-        first_checked = re.search(r"Checked ([^<]+)</p>", self.client.get(url).content.decode())
+        first_checked = re.search(
+            r"Verification completed ([^<]+)</p>", self.client.get(url).content.decode()
+        )
         if first_checked is None:
             self.fail("The first verification did not show its completion time.")
         self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
@@ -617,7 +759,7 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         self.remote.failure = "SSH authentication failed."
         self.run_worker()
         failed = self.client.get(url)
-        self.assertContains(failed, f"Checked {first_checked[1]}")
+        self.assertContains(failed, f"Verification completed {first_checked[1]}")
         self.assertContains(failed, "No matches in the sources checked.")
         self.assertContains(failed, "SSH authentication failed.")
         self.assertContains(failed, "older")
@@ -632,11 +774,11 @@ class VerificationWorkflowTests(DiscoveryTestCase):
             self.client.post(f"/servers/{server.pk}/verify/", {"next": "security"})
             self.run_worker()
         verified = self.client.get(url)
-        first_checked = re.search(r"Checked ([^<]+)</p>", verified.content.decode())
+        first_checked = re.search(r"Verification completed ([^<]+)</p>", verified.content.decode())
         if first_checked is None:
             self.fail("The verification did not show its completion time.")
         self.assertContains(verified, "No matches in the sources checked.")
-        self.assertContains(verified, "Checked ")
+        self.assertContains(verified, "Verification completed ")
 
         self.client.post(f"/servers/{server.pk}/verify/", {})
         queued = self.client.get(url)
@@ -646,7 +788,7 @@ class VerificationWorkflowTests(DiscoveryTestCase):
         self.assertContains(queued, "Refreshing server observations…")
         self.run_worker()
         refreshed = self.client.get(url)
-        self.assertContains(refreshed, f"Checked {first_checked[1]}")
+        self.assertContains(refreshed, f"Verification completed {first_checked[1]}")
         self.assertContains(refreshed, "No matches in the sources checked.")
         self.assertContains(refreshed, "older")
 
@@ -693,5 +835,5 @@ class VerificationWorkflowTests(DiscoveryTestCase):
             upstream.assert_not_called()
             tcp.assert_not_called()
         self.assertContains(page, "No matches in the sources checked.")
-        self.assertContains(page, "Use a saved public IPv4 or IPv6 address")
+        self.assertContains(page, "TCP check skipped. The saved SSH connection uses an SSH alias.")
         self.assertNotContains(page, "<html")
