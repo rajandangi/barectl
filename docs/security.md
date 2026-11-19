@@ -41,7 +41,34 @@ freshness notice as the rest of the server page. It shows no score.
 Engine detail, such as service state and configuration files, stays in
 [Advanced](dashboard-workflows.md). The Caddy administration socket, its port 2019,
 Nix users and OPcache protections come from the existing foundation and runtime
-verdicts there; this section does not read them again.
+verdicts there.
+
+## Upstream fixes and TCP reachability
+
+**Check upstream fixes and reachability** requests fresh discovery through the same
+worker as **Refresh server**. Only this action runs the additional checks. The Security
+page shows their time and labels them as older when a later refresh has replaced the host
+snapshot. A change to the saved connection hides results for the previous connection.
+Opening the page reads stored results.
+
+The advisory check uses the [Node.js release index](https://nodejs.org/dist/index.json)
+and [published upstream repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories#list-repository-security-advisories)
+for the recognized installed catalog builds. It shows the upstream fixed version when the
+source supplies one, alongside the catalog's offered version. PHP advisories with fixes
+for several branches are matched against the installed branch. Node.js uses the newest
+security release on its installed major line. Requests send only fixed source URLs and
+generic client headers. Upstreams can publish advisories elsewhere, and a Nix build can
+include backported patches at the same version. A missing match says only what the chosen
+sources returned. Unavailable sources, additional advisory pages and unsupported ranges
+are reported when detected. Install catalog fixes through the existing reviewed update.
+
+The TCP check runs from the Barectl computer against the public IPv4 or IPv6 literal in
+the saved SSH connection, after SSH has verified the host. It checks that SSH port, 80,
+443 and up to nine additional observed TCP ports. A refused connection and an inconclusive
+attempt have different results. This is a test of the controller's network path to one
+address. Use a controller outside a private or allowlisted network to check that path
+separately. UDP, other addresses and the provider's rule configuration are outside the
+check. Hostname and alias registrations still get advisory results.
 
 ## Firewall
 

@@ -39,8 +39,8 @@ ATTENTION = CheckState.ATTENTION
 UNKNOWN = CheckState.UNKNOWN
 OUTSIDE = CheckState.OUTSIDE
 _NOT_AVAILABLE = "Not available yet"
-_RUNTIME_CHECK_SETTING = "Web runtime fixes arrive through Barectl releases, not Ubuntu updates."
-_CLOUD_FIREWALL = "A firewall at your cloud provider is outside what Barectl can see."
+_RUNTIME_CHECK_SETTING = "Barectl releases carry pinned runtime fixes. Check upstream fixes below."
+_CLOUD_FIREWALL = "These rules describe the host firewall. Your cloud provider's rules can differ."
 
 
 @dataclass(frozen=True)
@@ -354,7 +354,7 @@ def _listeners(
     ssh: Check[SshState],
     read_at: datetime,
 ) -> ShownCheck:
-    why = "A public database, cache or management port can be reached by anyone."
+    why = "A database, cache or management port listening beyond the host needs review."
     if not check.observed or check.value is None:
         return _could_not("", check, why, read_at)
     ssh_ports = ssh.value.ports if ssh.observed and ssh.value else (22,)
@@ -365,7 +365,7 @@ def _listeners(
         return ShownCheck(
             "",
             OK,
-            "Nothing listens for connections from the internet.",
+            "No services listen for connections beyond the host.",
             why,
             read_at,
             _NOT_AVAILABLE,
@@ -378,7 +378,7 @@ def _listeners(
         return ShownCheck(
             "",
             ATTENTION,
-            f"Programs outside the standard web and SSH ports accept connections: {named}.",
+            f"Services listen beyond the host on extra ports: {named}.",
             why,
             read_at,
             _NOT_AVAILABLE,
@@ -391,7 +391,7 @@ def _listeners(
     return ShownCheck(
         "",
         OK,
-        "Only SSH and web traffic accept connections from the internet.",
+        "SSH and web ports are the only ones listening beyond the host.",
         why,
         read_at,
         _NOT_AVAILABLE,
@@ -772,7 +772,7 @@ def _runtimes(collected: CollectedSnapshot, read_at: datetime, advanced_url: str
     return ShownCheck(
         "Web runtimes",
         OK,
-        "Every web runtime matches this Barectl release.",
+        "This Barectl release has no update for these builds.",
         why,
         read_at,
         _NOT_AVAILABLE,

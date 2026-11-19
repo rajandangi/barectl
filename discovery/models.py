@@ -19,6 +19,8 @@ class DiscoveryAttempt(RemoteOperation):
     )
     authority = models.CharField(max_length=80, blank=True)
     expected_host_key = models.TextField(blank=True)
+    check_security = models.BooleanField(default=False)
+    security_verification = models.JSONField(default=dict, blank=True)
     challenge_key_type = models.CharField(max_length=80, blank=True)
     challenge_key_blob = models.TextField(blank=True)
     challenge_fingerprint = models.CharField(max_length=80, blank=True)

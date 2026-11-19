@@ -1,0 +1,72 @@
+<section id="security-verification"
+         class="margin-top-4"
+         aria-labelledby="security-verification-heading"
+         {% if security_verification_pending %}hx-get="{% url 'server_security' server.pk %}?verification=1" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  <h3 id="security-verification-heading">Upstream fixes and TCP reachability</h3>
+  <p>
+    Compare installed versions with upstream security notices and check selected TCP ports
+    from the computer running Barectl.
+  </p>
+  {% if security_verification_pending %}
+    <p role="status">Checking upstream fixes and TCP reachability…</p>
+  {% elif security_verification %}
+    {% if security_verification.security_verification %}
+      {% with report=security_verification.security_verification %}
+        <p>Checked {{ security_verification.finished_at|date:"M j, Y, H:i:s T" }}.</p>
+        {% if security_verification_older %}
+          <p>These results predate the latest server refresh. Run the checks again to verify the current state.</p>
+        {% endif %}
+        <h4>Upstream fixes</h4>
+        {% if report.advisories.findings %}
+          <ul>
+            {% for finding in report.advisories.findings %}
+              <li>
+                {{ finding.name }} {{ finding.version }}.
+                <a href="{{ finding.url }}">{{ finding.advisory }}</a>.
+                {% if finding.fixed %}
+                  {% if finding.catalog_has_fix %}
+                    Upstream fix in {{ finding.fixed }}. The release checked offers {{ finding.catalog_version }}.
+                  {% else %}
+                    Upstream fix in {{ finding.fixed }}. The release checked has no build at that version or later.
+                  {% endif %}
+                {% else %}
+                  The source did not provide a fixed version this check could read.
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+          <p><a href="{% url 'server_advanced' server.pk %}?tab=catalog">See available builds in Advanced</a></p>
+        {% elif report.advisories.checked %}
+          <p>No matches in the sources checked.</p>
+        {% endif %}
+        {% if report.advisories.checked %}
+          <p>Sources checked for {{ report.advisories.checked|join:", " }}. Matches use upstream versions. A build can carry a backported fix.</p>
+        {% endif %}
+        {% for note in report.advisories.notes %}<p>{{ note }}</p>{% endfor %}
+        <h4>TCP reachability</h4>
+        {% if report.reachability.address %}
+          <p>Checked {{ report.reachability.address }} from the Barectl computer. Other networks can get different results. This check covers TCP only.</p>
+          <ul>
+            {% for port in report.reachability.ports %}
+              <li>
+                TCP {{ port.port }}. {{ port.result }}.
+                {% if port.unexpected %}<strong>Extra port reachable.</strong>{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if report.reachability.note %}<p>{{ report.reachability.note }}</p>{% endif %}
+      {% endwith %}
+    {% else %}
+      <p role="status">Could not complete the check. Read the server connection status for details.</p>
+    {% endif %}
+  {% endif %}
+  {% if perms.discovery.add_discoveryattempt and state.alias_usable and state.can_request %}
+    <form method="post" action="{% url 'server_verify' server.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="security">
+      <button type="submit"
+              class="usa-button usa-button--outline">Check upstream fixes and reachability</button>
+    </form>
+  {% endif %}
+</section>

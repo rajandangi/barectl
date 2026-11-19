@@ -24,6 +24,7 @@ from operations import lifecycle
 from operations.check_progress import CheckProgress, CheckReader, CheckStage
 from operations.lifecycle import OperationBusy, recovers_first
 from operations.models import RemoteOperation
+from security import advisories, reachability
 from servers.models import Server
 
 from . import ssh
@@ -32,6 +33,7 @@ from .observations import collect
 from .snapshot import (
     AttemptSummary,
     BasicSnapshot,
+    CollectedSnapshot,
     Snapshot,
     attempt_summaries,
     basic_snapshot_of,
@@ -158,6 +160,7 @@ def queue_discovery(
     user: User | None = None,
     authority: str = "discovery.add_discoveryattempt",
     expected_host_key: str = "",
+    check_security: bool = False,
 ) -> DiscoveryAttempt:
     """Raise ``DiscoveryBusy`` while the server has an active remote operation.
 
@@ -170,6 +173,7 @@ def queue_discovery(
             requested_by=user,
             authority=authority if user is not None else "",
             expected_host_key=expected_host_key,
+            check_security=check_security,
         )
     except OperationBusy as busy:
         raise DiscoveryBusy(busy.operation) from None
@@ -246,22 +250,25 @@ def _refresh_actor(user: User) -> User:
     return actor
 
 
-def request_refresh(server_id: int, *, user: User) -> RefreshRequest:
+def request_refresh(server_id: int, *, user: User, check_security: bool = False) -> RefreshRequest:
     """Submit the operator refresh, sharing an active attempt or naming a blocker."""
     actor = _refresh_actor(user)
-    return _request_refresh_after_authorization(server_id, actor)
+    return _request_refresh_after_authorization(server_id, actor, check_security=check_security)
 
 
 @recovers_first
-def _request_refresh_after_authorization(server_id: int, actor: User) -> RefreshRequest:
+def _request_refresh_after_authorization(
+    server_id: int, actor: User, *, check_security: bool
+) -> RefreshRequest:
     server = Server.objects.filter(pk=server_id).first()
     if server is None:
         raise RefreshNotFound
     try:
-        return RefreshRequest(queue_discovery(server, user=actor), RefreshDisposition.ACCEPTED)
+        queued = queue_discovery(server, user=actor, check_security=check_security)
+        return RefreshRequest(queued, RefreshDisposition.ACCEPTED)
     except DiscoveryBusy as busy:
         attempt = DiscoveryAttempt.objects.filter(pk=busy.operation.pk).first()
-        if attempt is not None:
+        if attempt is not None and (not check_security or attempt.check_security):
             return RefreshRequest(attempt, RefreshDisposition.SHARED_ACTIVE)
         return RefreshRequest(busy.operation, RefreshDisposition.BUSY)
     except Server.DoesNotExist:
@@ -394,6 +401,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             challenge_port=challenge.port,
         )
         raise
+    verification = _verify_security(attempt, collected) if attempt.check_security else None
     now = timezone.now()
     progress.report(CheckStage.SAVE)
     # A recovery that already marked this attempt interrupted wins: a stale worker never
@@ -403,7 +411,40 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         if not lifecycle.succeed(attempt.pk, now, host_key=host_key):
             return
         save_snapshot(attempt, collected, now)
+        if verification is not None:
+            DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
+                security_verification=verification
+            )
     logger.info("Discovery attempt %s succeeded", attempt.pk)
+
+
+def _verify_security(attempt: DiscoveryAttempt, collected: CollectedSnapshot) -> dict[str, object]:
+    _authorize(attempt)
+    definition = attempt.connection
+    peer = (
+        (definition.address, definition.port)
+        if definition is not None and definition.mode in {"agent", "keyfile"}
+        else None
+    )
+    return {
+        "reachability": reachability.check(peer, collected.security.value),
+        "advisories": advisories.check(collected),
+    }
+
+
+@recovers_first
+def security_verification(server: Server) -> DiscoveryAttempt | None:
+    """Return the last requested verification for this connection only."""
+    connection = (
+        Q(connection__revision=server.connection_revision)
+        if server.connection_revision
+        else Q(connection__isnull=True)
+    )
+    return (
+        DiscoveryAttempt.objects.filter(connection, server=server, check_security=True)
+        .order_by("-pk")
+        .first()
+    )
 
 
 def _authorize(attempt: DiscoveryAttempt) -> None:

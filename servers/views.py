@@ -20,10 +20,11 @@ from bootstrap.standing import Standing
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import RefreshNotFound, recorded_discovery, request_refresh
+from discovery.services import security_verification as latest_security_verification
 from operations import activity as activity_read
 from operations import change_requirements, preparation
 from operations.lifecycle import OperationRefused
-from operations.models import VIEW_CHANGES
+from operations.models import VIEW_CHANGES, RemoteOperation
 from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog, shown_runtimes, shown_updates
 from sites import names as site_names
@@ -509,6 +510,25 @@ def server_page(
         from security.presentation import firewall_panel
         from security.presentation import present as present_security
 
+        verification = latest_security_verification(server)
+        context["security_verification"] = verification
+        context["security_verification_pending"] = (
+            verification is not None and verification.status in RemoteOperation.ACTIVE
+        )
+        context["security_verification_older"] = (
+            verification is not None
+            and verification.finished_at is not None
+            and state.snapshot is not None
+            and verification.finished_at < state.snapshot.collected_at
+        )
+        if (
+            _is_fragment_request(request)
+            and request.GET.get("verification") == "1"
+            and request.headers.get("HX-Target", "").partition("#")[2] == "security-verification"
+        ):
+            response = render(request, "servers/_security_verification.html", context)
+            patch_vary_headers(response, ("HX-Request", "HX-Request-Type", "HX-Target"))
+            return response
         security = _decision(state, request.user, change_requirements.SECURITY)
         can_change_security = security.allowed
         context["security_reason"] = security.sentence
@@ -982,24 +1002,29 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     if not isinstance(request.user, User):
         raise Http404
     jobs = request.POST.get("next") == "jobs"
+    check_security = request.POST.get("next") == "security"
     zone = request.POST.get("tz", "")
+    destination = _jobs_url(server, zone) if jobs else reverse("server_detail", args=[pk])
+    if check_security:
+        destination = reverse("server_security", args=[pk]) + "#security-verification"
     try:
-        result = request_refresh(server.pk, user=request.user)
+        result = request_refresh(server.pk, user=request.user, check_security=check_security)
     except RefreshNotFound:
         # Removed by another request after this one loaded it.
         raise Http404 from None
     except OperationRefused:
         messages.error(request, "The connection changed. Reload and request a new check.")
-        return redirect(_jobs_url(server, zone)) if jobs else redirect("server_detail", pk=pk)
+        return redirect(destination)
     if result.disposition == "busy":
         messages.error(
             request, "Another server operation is still running. Try again when it finishes."
         )
-        return redirect(_jobs_url(server, zone)) if jobs else redirect("server_detail", pk=pk)
-    if _is_fragment_request(request):
+        return redirect(destination)
+    if _is_fragment_request(request) and not check_security:
         return _discovery_fragment(request, server, focus=True)
-    messages.success(request, f"Barectl queued a connection check for {server.name}.")
-    return redirect(_jobs_url(server, zone)) if jobs else redirect("server_detail", pk=pk)
+    check_name = "a security verification" if check_security else "a connection check"
+    messages.success(request, f"Barectl queued {check_name} for {server.name}.")
+    return redirect(destination)
 
 
 @never_cache

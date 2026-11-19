@@ -4,7 +4,8 @@
 
 ## Next
 
-Nothing scheduled.
+- Show upstream security fixes for installed catalog versions and check TCP reachability
+  from the Barectl computer ([#571](https://github.com/rajandangi/barectl/issues/571)).
 
 ## Later
 

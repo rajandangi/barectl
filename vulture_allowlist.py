@@ -578,6 +578,13 @@ if TYPE_CHECKING:
         _refresh_wire_fields.available_bytes,
         _refresh_wire_fields.root_filesystem,
     )
+    # The Security verification template reads these stored advisory keys.
+    _advisory_wire_fields = SimpleNamespace()
+    _advisory_template_fields = (
+        _advisory_wire_fields.advisory,
+        _advisory_wire_fields.catalog_version,
+        _advisory_wire_fields.catalog_has_fix,
+    )
     # Transcript replay tests are found by Django's test discovery.
     _snapshot_validator_selection = HttpSiteValidators.validator
     _host_standing_transcripts = (RecordedHostStandingTests, RecordedHttpSiteTests)
