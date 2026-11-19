@@ -6,10 +6,10 @@ from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import replace
 from http.client import HTTPException, HTTPResponse
 from threading import Event, Thread
+from typing import TYPE_CHECKING
 from unittest import mock
 
 from django.contrib.auth.models import Permission
-from django.http import HttpResponse
 from django.template.defaultfilters import date
 from django.test import SimpleTestCase
 from django.utils import timezone
@@ -27,6 +27,9 @@ from security.observation import Listener
 from security.testing import blocked, check, ok_state
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 
 def notice(
@@ -476,7 +479,9 @@ class VerificationWorkflowTests(DiscoveryTestCase):
     def rendered_verification(self, server: Server) -> tuple[str, dict[str, str]]:
         return self.rendered_form(server, "Check upstream fixes and reachability")
 
-    def submit_rendered_verification(self, server: Server, **extra: str) -> HttpResponse:
+    def submit_rendered_verification(
+        self, server: Server, **extra: str
+    ) -> _MonkeyPatchedWSGIResponse:
         action, fields = self.rendered_verification(server)
         return self.client.post(action, {**extra, **fields})
 
