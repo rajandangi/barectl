@@ -19,7 +19,7 @@ from runtimes import observation as runtime_observation
 from runtimes.catalog import Architecture, architecture_of
 
 from . import observation
-from .bodies.common import CADDY_OUTSIDE, NativeState
+from .bodies.common import CADDY_OUTSIDE, SITE_GATED, NativeState
 from .bodies.reasons import SITE_REASONS
 from .configuration import PHP_RUNTIMES, SiteSettings, render_caddy, render_pool
 
@@ -346,6 +346,10 @@ def review_identity(native: NativeState, identifier: str) -> int:
     return native["next_id"]
 
 
+# docs/recovery.md#after-a-change-stopped-partway
+REMOVE_PARTIAL: Final = "Remove the partly applied site from its Settings, then create it again."
+
+
 def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool, list[str]]:
     existing = False
     refusals: list[str] = []
@@ -364,6 +368,8 @@ def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool,
                     site["problem"]
                     or "The existing site is incomplete or outside supported settings."
                 )
+                if site["state"] == "partial" and site["problem"] != SITE_GATED:
+                    refusals.append(REMOVE_PARTIAL)
             elif not existing:
                 refusals.append("This identifier already names another observed site.")
         elif set(site["names"]).intersection(inputs.names):

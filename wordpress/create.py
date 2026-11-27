@@ -201,7 +201,7 @@ def _existing_refusals(row: SiteRecord, inputs: PreparationInputs) -> tuple[bool
     if state == "unsupported":
         refusals.append(problem or "The existing site is outside supported settings.")
     elif state == "partial" and problem != SITE_GATED:
-        refusals.append(problem or "The existing site is incomplete.")
+        refusals.extend((problem or "The existing site is incomplete.", site_change.REMOVE_PARTIAL))
     return state in ("complete", "partial"), problem == SITE_GATED, refusals
 
 

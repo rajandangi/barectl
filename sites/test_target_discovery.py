@@ -1,6 +1,6 @@
 """Fresh native transcripts preserve target-site identity and review semantics."""
 
-from typing import ClassVar
+from typing import ClassVar, cast
 from unittest import TestCase
 
 from bootstrap.standing import Standing
@@ -12,6 +12,7 @@ from operations import engine
 from operations.inputs import PreparationInputs, decode_inputs
 
 from . import change, recognition
+from .bodies.common import ROUTE_ABSENT, SITE_GATED, NativeState
 
 
 class RecordedHttpSiteTests(TestCase):
@@ -185,3 +186,28 @@ class RecordedJudgeByShapeTests(TestCase):
         allowed = PreparationInputs("php85", "s9alpha")
         permitted = php_change.review(php_change.inspect(shell, allowed), allowed)
         self.assertTrue(permitted.eligible, permitted.refusals)
+
+
+class ExistingSiteRefusalTests(TestCase):
+    def site(self, problem: str) -> dict[str, object]:
+        return {
+            "identifier": "alpha",
+            "names": [],
+            "runtime": "php84",
+            "state": "partial",
+            "problem": problem,
+            "readiness": "/",
+        }
+
+    def refusals(self, problem: str) -> list[str]:
+        inputs = PreparationInputs("php84", "alpha", ("alpha.example.com",))
+        native = cast(NativeState, {"sites": [self.site(problem)]})
+        existing, refusals = change.existing_site(native, inputs)
+        self.assertFalse(existing)
+        return refusals
+
+    def test_a_stopped_creation_points_to_removal(self) -> None:
+        self.assertEqual(self.refusals(ROUTE_ABSENT), [ROUTE_ABSENT, change.REMOVE_PARTIAL])
+
+    def test_a_gated_site_is_not_sent_to_removal(self) -> None:
+        self.assertEqual(self.refusals(SITE_GATED), [SITE_GATED])

@@ -78,6 +78,21 @@ class RemovalReviewTests(SimpleTestCase):
         self.assertIsNone(draft.current_sites)
         self.assertEqual(draft.sites_read, "")
 
+    def test_a_stopped_creation_is_removed_from_what_exists(self) -> None:
+        stopped = evidence(names=(), binding_state="")
+        inventory = cast(dict[str, object], stopped.inventory)
+        paths = cast(dict[str, bool], inventory["paths"])
+        for path in paths:
+            paths[path] = path == "/var/www/alpha"
+        inventory.update(proxy_account=None, proxy_group=None, certificates=[], site_file_digest="")
+        draft = remove.review(stopped, PreparationInputs("", "alpha", primary="alpha.example.com"))
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["confirmation"], "alpha.example.com")
+        details = cast(list[dict[str, str]], draft.document["details"])
+        text = "\n".join(item["value"] for item in details)
+        self.assertIn("/var/www/alpha", text)
+        self.assertIn("/etc/caddy/sites/alpha.caddy (already absent)", text)
+
     def test_a_custom_database_binding_is_refused(self) -> None:
         draft = remove.review(evidence(binding_state="custom"), PreparationInputs("", "alpha"))
         self.assertFalse(draft.eligible)
@@ -211,30 +226,25 @@ class RemovalPageTests(ControllerConfigTestCase):
         )
         self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
 
-    def test_a_partly_applied_site_withholds_removal_until_it_is_finished(self) -> None:
+    def test_a_partly_applied_site_offers_removal_with_a_typed_primary_domain(self) -> None:
         from operations.services import read_changes
 
         record_shaped_sites(self.server)
-        sentence = (
-            "This site is partly applied; finish the change that is already in progress first."
-        )
         url = f"/servers/{self.server.pk}/sites/omega/settings/"
+        action = f"/servers/{self.server.pk}/sites/omega/settings/remove/prepare/"
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'name="primary"')
-        self.assertNotContains(
-            response,
-            f'action="/servers/{self.server.pk}/sites/omega/settings/remove/prepare/"',
+        self.assertContains(response, f'action="{action}"')
+        self.assertContains(response, 'name="primary"')
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):
+            prepared = self.client.post(action, {"primary": "omega.example.com"})
+        rows = read_changes(self.server).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            rows[0].preparation.inputs,
+            {"version": 1, "identifier": "omega", "primary": "omega.example.com"},
         )
-        self.assertContains(response, sentence)
-        refusal = self.client.post(
-            f"/servers/{self.server.pk}/sites/omega/settings/remove/prepare/",
-            {"primary": "omega.example.com"},
-            follow=True,
-        )
-        self.assertRedirects(refusal, url)
-        self.assertIn(sentence, [str(message) for message in refusal.context["messages"]])
-        self.assertEqual(read_changes(self.server).rows, [])
+        self.assertRedirects(prepared, f"/changes/{rows[0].preparation.pk}/")
 
     def test_a_not_following_site_offers_removal_and_withholds_the_convention_cards(
         self,
