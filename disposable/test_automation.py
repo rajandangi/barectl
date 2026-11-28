@@ -22,7 +22,7 @@ from automation.workers import WorkerDefinition
 from discovery import recorded, ssh
 from operations.inputs import PreparationInputs
 
-from .change_testing import apply_change, submit_change, wait_result
+from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG
 from .test_laravel_deploy import LaravelDeployCase
 from .test_wordpress_create import WordPressCreateCase
@@ -234,76 +234,7 @@ class WordPressServerCron(WordPressCreateCase):
         )
 
 
-@tag(SCENARIO_TAG)
-class ReloadKeepsSitesCreatable(WordPressCreateCase):
-    """A change that reloads systemd leaves the server able to create a site (#580).
-
-    The reload clears every running unit's executed-command fields. A site's own master
-    and proxy stay verified without a restart; the runtime masters do not, so the change
-    restarts them (docs/runtimes.md#restarting-the-runtime-masters-after-a-systemd-reload).
-    """
-
-    layer = "L3"
-    prefix = "s4"
-
-    def main_pids(self, pattern: str) -> dict[str, str]:
-        listed = self.native(f"systemctl list-units --plain --no-legend {shlex.quote(pattern)}")
-        units = [line.split()[0] for line in listed.splitlines() if line.strip()]
-        self.assertTrue(units, pattern)
-        return {
-            unit: self.native(f"systemctl show --value -p MainPID {unit}").strip() for unit in units
-        }
-
-    def test_server_cron_keeps_other_sites_and_runtime_masters_verified(self) -> None:
-        from discovery.observations import collect
-        from sites import change as site_change
-
-        self.install_acme()
-        self.assertIn("WordPress", prepare_wordpress_https(self))
-        site_units = {
-            **self.main_pids(f"php-fpm-site-*@{IDENTIFIER}.service"),
-            **self.main_pids(f"haproxy-site@{IDENTIFIER}.service"),
-        }
-        masters = self.main_pids("php-fpm@*.service")
-
-        submitted = submit_change(
-            self,
-            change.SET_WORDPRESS_SERVER_CRON,
-            PreparationInputs("", IDENTIFIER, schedule_state="on"),
-        )
-        wait_result(self, submitted, timeout=180)
-        journal = self.native(f"journalctl --no-pager -o cat -u {shlex.quote(submitted.unit)}")
-        for unit in masters:
-            self.assertIn("barectl-restarted " + unit, journal)
-        self.assertEqual(
-            {
-                **self.main_pids(f"php-fpm-site-*@{IDENTIFIER}.service"),
-                **self.main_pids(f"haproxy-site@{IDENTIFIER}.service"),
-            },
-            site_units,
-        )
-        restarted = self.main_pids("php-fpm@*.service")
-        self.assertEqual(restarted.keys(), masters.keys())
-        self.assertTrue(all(restarted[unit] != masters[unit] for unit in masters), restarted)
-        with self.shell() as shell:
-            observed = collect(shell, sites=False)
-        self.assertTrue(all(row.manageable for row in observed.runtimes), observed.runtimes)
-
-        identifier = "s4second"
-        domain = identifier + ".example.com"
-        apply_change(
-            self,
-            site_change.CREATE_SITE,
-            PreparationInputs("php84", identifier, (domain,)),
-            timeout=120,
-        )
-        self.assertIn(
-            identifier,
-            self.native(f"curl --fail --silent -H 'Host: {domain}' http://127.0.0.1/"),
-        )
-
-
-__all__ = ["LaravelQueueWorkers", "ReloadKeepsSitesCreatable", "WordPressServerCron"]
+__all__ = ["LaravelQueueWorkers", "WordPressServerCron"]
 
 
 _QUEUE_MIGRATION = r"""<?php
@@ -449,6 +380,16 @@ class LaravelQueueWorkers(LaravelDeployCase):
     def property(self, unit: str, name: str) -> str:
         return self.native(f"systemctl show --value -p {name} {unit}").strip()
 
+    def properties(self, names: list[str], *keys: str) -> dict[str, dict[str, str]]:
+        """Each unit's ``keys`` from one ``systemctl show``, keyed by unit name."""
+        flags = " ".join(f"-p {key}" for key in ("Id", *keys))
+        text = self.native(f"systemctl show {flags} {' '.join(names)}")
+        values: dict[str, dict[str, str]] = {}
+        for block in text.strip().split("\n\n"):
+            fields = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+            values[fields.pop("Id")] = fields
+        return values
+
     def unix_property(self, unit: str, name: str) -> str:
         return self.native(f"systemctl show --value --timestamp=unix -p {name} {unit}").strip()
 
@@ -460,17 +401,19 @@ class LaravelQueueWorkers(LaravelDeployCase):
         return worker_observation.worker_for(value, self.identity)
 
     def assert_queue_active(self, name: str, *, timeout: float = 20) -> None:
-        self.wait_active(name, timeout=timeout)
-        journal = self.native(f"journalctl -u {name} --no-pager -o cat -n 30 || true")
-        self.assertIn("active", self.property(name, "ActiveState"), journal)
+        if self.active_within(name, timeout=timeout) != "active":
+            self.fail(self.native(f"journalctl -u {name} --no-pager -o cat -n 30 || true"))
 
     def wait_active(self, name: str, *, timeout: float = 20) -> None:
+        self.assertEqual(self.active_within(name, timeout=timeout), "active")
+
+    def active_within(self, name: str, *, timeout: float) -> str:
         end = time.monotonic() + timeout
         state = self.property(name, "ActiveState")
         while state != "active" and time.monotonic() < end:
             time.sleep(0.2)
             state = self.property(name, "ActiveState")
-        self.assertEqual(state, "active")
+        return state
 
     def probe(self, statement: str) -> str:
         return self.native(self._migrations_client(statement)).strip()
@@ -549,14 +492,17 @@ class LaravelQueueWorkers(LaravelDeployCase):
         self.assertEqual(definition["processes"], 2)
         environment = self.native(f"cat {self.base()}/private/laravel.env")
         self.assertIn("DB_QUEUE_RETRY_AFTER=90", environment)
-        for process in (1, 2):
-            name = self.queue_unit(process)
+        names = [self.queue_unit(process) for process in (1, 2)]
+        for name in names:
             self.assert_queue_active(name)
-            self.assertIn("enabled", self.property(name, "UnitFileState"))
-            self.assertEqual(self.property(name, "Restart"), "always")
-            self.assertEqual(self.property(name, "StartLimitBurst"), "5")
-            self.assertEqual(self.property(name, "TimeoutStopUSec"), "1min 15s")
-            self.assertEqual(self.property(name, "User"), f"s{self.identity}")
+        expected = {
+            "UnitFileState": "enabled",
+            "Restart": "always",
+            "StartLimitBurst": "5",
+            "TimeoutStopUSec": "1min 15s",
+            "User": f"s{self.identity}",
+        }
+        self.assertEqual(self.properties(names, *expected), dict.fromkeys(names, expected))
         # Jobs dispatched with no Barectl controller are processed by both processes.
         self.dispatch("offline-one")
         self.dispatch("offline-two")
@@ -576,8 +522,10 @@ class LaravelQueueWorkers(LaravelDeployCase):
         self.assertGreater(int(self.unix_property(self.queue_unit(1), "NRestarts")), before)
         self.assertIn("active", self.property(self.queue_unit(1), "ActiveState"))
         # Repeated starts stop at the start limit and read as such.
-        for _ in range(6):
-            self.native(f"systemctl restart {self.queue_unit(1)} >/dev/null 2>&1 || true")
+        self.native(
+            f"for _ in 1 2 3 4 5 6; do systemctl restart {self.queue_unit(1)} >/dev/null 2>&1; "
+            "done; true"
+        )
         self.assertEqual(self.property(self.queue_unit(1), "Result"), "start-limit-hit")
         row = self.worker_row()
         self.assertEqual(row.status, WorkerStatus.STOPPED_AFTER_CRASHES)
@@ -649,7 +597,7 @@ class LaravelQueueWorkers(LaravelDeployCase):
     def test_4_back_to_back_changes_keep_the_masters_and_a_stop_survives_a_restart(
         self,
     ) -> None:
-        """Quick changes restart each runtime master once per change (#586).
+        """Quick changes restart each runtime master once per change (#580, #586).
 
         Four processes start with one reload and four ``enable`` calls, and the stop that
         follows disables four services: nine restarts of each master under a restart per
@@ -660,6 +608,13 @@ class LaravelQueueWorkers(LaravelDeployCase):
 
         masters = self.running_masters()
         self.assertTrue(masters)
+        # A reload clears every running unit's executed-command fields. The site's own
+        # master and proxy stay verified without a restart; the runtime masters do not.
+        site_units = [
+            f"php-fpm-site-php84@{self.identity}.service",
+            f"haproxy-site@{self.identity}.service",
+        ]
+        site_pids = self.properties(site_units, "MainPID")
         wider = PreparationInputs(
             "",
             self.identity,
@@ -673,30 +628,29 @@ class LaravelQueueWorkers(LaravelDeployCase):
             line, unit, _ = self.apply(worker_change.SET_LARAVEL_QUEUE_WORKERS, inputs, timeout=120)
             self.assert_succeeded(line, unit)
             units.append(unit)
-        states = {
-            name: self.native(f"systemctl is-active {name} || true").strip() for name in masters
-        }
-        self.assertEqual(states, dict.fromkeys(masters, "active"))
+        self.assertEqual(
+            self.properties(masters, "ActiveState"),
+            {name: {"ActiveState": "active"} for name in masters},
+        )
         for unit in units:
             journal = self.native(f"journalctl --no-pager -o cat -u {shlex.quote(unit)}")
             for name in masters:
                 self.assertEqual(journal.count("barectl-restarted " + name), 1, journal)
+        self.assertEqual(self.properties(site_units, "MainPID"), site_pids)
         with self.shell() as shell:
             observed = collect(shell, sites=False)
         self.assertTrue(all(row.manageable for row in observed.runtimes), observed.runtimes)
 
-        for process in (1, 2, 3, 4):
-            name = self.queue_unit(process)
-            self.assertEqual(self.property(name, "ActiveState"), "inactive")
-            self.assertEqual(self.property(name, "UnitFileState"), "disabled")
+        queues = [self.queue_unit(process) for process in (1, 2, 3, 4)]
+        stopped = {
+            name: {"ActiveState": "inactive", "UnitFileState": "disabled"} for name in queues
+        }
+        self.assertEqual(self.properties(queues, "ActiveState", "UnitFileState"), stopped)
         # A systemd re-exec is the controller-independent part of a restart; the disabled
         # unit has no boot link, so the explicit stop survives it.
         self.native("systemctl daemon-reexec")
         time.sleep(1)
-        for process in (1, 2, 3, 4):
-            name = self.queue_unit(process)
-            self.assertEqual(self.property(name, "ActiveState"), "inactive")
-            self.assertEqual(self.property(name, "UnitFileState"), "disabled")
+        self.assertEqual(self.properties(queues, "ActiveState", "UnitFileState"), stopped)
 
 
 _DISPATCH_SCRIPT = """<?php
