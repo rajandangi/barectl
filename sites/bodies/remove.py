@@ -325,27 +325,6 @@ def remove_automation(document: dict[str, object], identifier: str) -> None:
             raise ValueError("An automation unit file is still present.")
 
 
-def restart_runtime_masters() -> None:
-    """Restart each running runtime master after this body's daemon-reloads.
-
-    A daemon-reload unbinds the master's verified execution evidence, and Create then
-    refuses the runtime (docs/runtimes.md). The runtime master serves no site.
-    """
-    for entry in RUNTIMES:
-        unit = f"php-fpm@{entry}.service"
-        active = subprocess.run(  # noqa: S603 - fixed unit name
-            ["/usr/bin/systemctl", "is-active", "--quiet", unit],
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
-        if active.returncode != 0:
-            continue
-        run(["/usr/bin/systemctl", "restart", unit])
-        sys.stdout.write("barectl-restarted " + unit + "\n")
-        sys.stdout.flush()
-
-
 def remove_path(path: str) -> None:
     """Remove one site artifact without following a link or crossing its boundary."""
     target = pathlib.Path(path)
@@ -731,7 +710,6 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
         for path in site_paths(identifier):
             if path not in keep:
                 remove_path(path)
-        restart_runtime_masters()
         stage("database")
         reason = drop_database(document)
         if reason:

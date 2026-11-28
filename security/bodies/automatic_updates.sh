@@ -17,6 +17,7 @@ finish() {
 trap finish EXIT
 trap 'result "{\"class\":\"timed_out\"}"; exit 3' TERM
 stage() { printf 'barectl-stage %s\n' "$1"; }
+# RESTART_RUNTIME_MASTERS
 
 state=${1:?state}
 expected=${2:?precondition digest}
@@ -63,6 +64,8 @@ if [ -n "$roots" ]; then
   fi
   admitted=$(printf '%s\n' "$output" | grep -cx 'barectl-guard: admitted')
   [ "$status" -eq 0 ] && [ "$admitted" -eq 1 ] || refused automatic_updates_package
+  # A package's maintainer script may reload systemd (docs/runtimes.md).
+  restart_runtime_masters
 else
   [ -z "$guard" ] || refused evidence
 fi

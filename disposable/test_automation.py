@@ -22,7 +22,7 @@ from automation.workers import WorkerDefinition
 from discovery import recorded, ssh
 from operations.inputs import PreparationInputs
 
-from .change_testing import apply_change
+from .change_testing import apply_change, submit_change, wait_result
 from .scenario_testing import SCENARIO_TAG
 from .test_laravel_deploy import LaravelDeployCase
 from .test_wordpress_create import WordPressCreateCase
@@ -234,7 +234,76 @@ class WordPressServerCron(WordPressCreateCase):
         )
 
 
-__all__ = ["LaravelQueueWorkers", "WordPressServerCron"]
+@tag(SCENARIO_TAG)
+class ReloadKeepsSitesCreatable(WordPressCreateCase):
+    """A change that reloads systemd leaves the server able to create a site (#580).
+
+    The reload clears every running unit's executed-command fields. A site's own master
+    and proxy stay verified without a restart; the runtime masters do not, so the change
+    restarts them (docs/runtimes.md#restarting-the-runtime-masters-after-a-systemd-reload).
+    """
+
+    layer = "L3"
+    prefix = "s4"
+
+    def main_pids(self, pattern: str) -> dict[str, str]:
+        listed = self.native(f"systemctl list-units --plain --no-legend {shlex.quote(pattern)}")
+        units = [line.split()[0] for line in listed.splitlines() if line.strip()]
+        self.assertTrue(units, pattern)
+        return {
+            unit: self.native(f"systemctl show --value -p MainPID {unit}").strip() for unit in units
+        }
+
+    def test_server_cron_keeps_other_sites_and_runtime_masters_verified(self) -> None:
+        from discovery.observations import collect
+        from sites import change as site_change
+
+        self.install_acme()
+        self.assertIn("WordPress", prepare_wordpress_https(self))
+        site_units = {
+            **self.main_pids(f"php-fpm-site-*@{IDENTIFIER}.service"),
+            **self.main_pids(f"haproxy-site@{IDENTIFIER}.service"),
+        }
+        masters = self.main_pids("php-fpm@*.service")
+
+        submitted = submit_change(
+            self,
+            change.SET_WORDPRESS_SERVER_CRON,
+            PreparationInputs("", IDENTIFIER, schedule_state="on"),
+        )
+        wait_result(self, submitted, timeout=180)
+        journal = self.native(f"journalctl --no-pager -o cat -u {shlex.quote(submitted.unit)}")
+        for unit in masters:
+            self.assertIn("barectl-restarted " + unit, journal)
+        self.assertEqual(
+            {
+                **self.main_pids(f"php-fpm-site-*@{IDENTIFIER}.service"),
+                **self.main_pids(f"haproxy-site@{IDENTIFIER}.service"),
+            },
+            site_units,
+        )
+        restarted = self.main_pids("php-fpm@*.service")
+        self.assertEqual(restarted.keys(), masters.keys())
+        self.assertTrue(all(restarted[unit] != masters[unit] for unit in masters), restarted)
+        with self.shell() as shell:
+            observed = collect(shell, sites=False)
+        self.assertTrue(all(row.manageable for row in observed.runtimes), observed.runtimes)
+
+        identifier = "s4second"
+        domain = identifier + ".example.com"
+        apply_change(
+            self,
+            site_change.CREATE_SITE,
+            PreparationInputs("php84", identifier, (domain,)),
+            timeout=120,
+        )
+        self.assertIn(
+            identifier,
+            self.native(f"curl --fail --silent -H 'Host: {domain}' http://127.0.0.1/"),
+        )
+
+
+__all__ = ["LaravelQueueWorkers", "ReloadKeepsSitesCreatable", "WordPressServerCron"]
 
 
 _QUEUE_MIGRATION = r"""<?php

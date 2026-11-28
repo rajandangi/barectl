@@ -10,7 +10,12 @@ import importlib.resources
 from typing import Final
 
 # Modules the assembled program receives from its own concatenated neighbours.
-_IMPORTS: Final = ("sites.bodies.common", "automation.convention", "automation.bodies.units")
+_IMPORTS: Final = (
+    "sites.bodies.common",
+    "automation.convention",
+    "automation.bodies.units",
+    "runtimes.bodies.masters",
+)
 
 
 def without_imports(text: str, modules: tuple[str, ...] = _IMPORTS) -> str:
@@ -28,8 +33,14 @@ def without_imports(text: str, modules: tuple[str, ...] = _IMPORTS) -> str:
     return "\n".join(kept)
 
 
+# The runtime-master restart every reloading helper runs (runtimes/bodies/masters.py).
+MASTERS_SOURCE: Final = (
+    importlib.resources.files("runtimes.bodies").joinpath("masters.py").read_text()
+)
 AUTOMATION_SOURCE: Final = (
-    importlib.resources.files("automation").joinpath("convention.py").read_text()
+    MASTERS_SOURCE
+    + "\n"
+    + importlib.resources.files("automation").joinpath("convention.py").read_text()
     + "\n"
     + without_imports(
         importlib.resources.files("automation.bodies").joinpath("units.py").read_text()

@@ -13,6 +13,7 @@ from typing import Final
 
 from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
+from operations import recovery
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import EMPTY_INPUTS, PreparationInputs
@@ -61,6 +62,7 @@ BODY_BYTES: Final = (
     .read_text()
     .replace("# FOUNDATION_READ", READ_SOURCE)
     .replace("# SITE_SERVICE_UNITS", serving_units_install())
+    .replace("# RESTART_RUNTIME_MASTERS", recovery.runtime_masters_shell().rstrip("\n"))
     .replace(
         "# PROXY_INVENTORY_PREFLIGHT",
         '[ "$(' + PROXY_INVENTORY_COMMAND + ")\" = '[]' ] || refused foreign_stack",

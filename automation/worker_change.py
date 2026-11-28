@@ -30,6 +30,7 @@ from sites.configuration import PHP_RUNTIMES
 
 from . import convention, worker_observation, worker_preconditions, workers
 from .bodies.reasons import WORKER_REASONS
+from .bodies.source import MASTERS_SOURCE
 from .worker_status import STATUS_SENTENCE
 
 SLUG: Final = "set_laravel_queue_workers"
@@ -44,6 +45,7 @@ _IMPORTS: Final = (
     "automation.convention",
     "automation.workers",
     "automation.bodies.units",
+    "runtimes.bodies.masters",
     "automation.bodies.worker",
     "laravel.bodies.common",
     "sites.bodies.common",
@@ -67,6 +69,7 @@ def _without_imports(text: str) -> str:
 BODY_SOURCE: Final = "\n".join(
     (
         laravel_observation.LARAVEL_SOURCE,
+        MASTERS_SOURCE,
         importlib.resources.files("automation").joinpath("convention.py").read_text(),
         _without_imports(
             importlib.resources.files("automation").joinpath("workers.py").read_text()

@@ -29,6 +29,8 @@ REFUSED = 1
 PARTIAL = 2
 
 if TYPE_CHECKING:
+    # Assembled into this body by backups/change.py.
+    from runtimes.bodies.masters import restart_runtime_masters
 
     def check_mode(payload: str, location: str) -> None: ...
 
@@ -252,6 +254,7 @@ def install_check(value: object, identifier: str) -> None:  # noqa: C901 - one r
             check=False,
         ).returncode:
             partial("backup_check")
+    restart_runtime_masters()
 
 
 def check_unit_path(identifier: str, key: str) -> str | None:

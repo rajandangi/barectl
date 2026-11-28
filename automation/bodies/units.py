@@ -26,6 +26,7 @@ from automation.convention import (
     timer_name,
     unit_file,
 )
+from runtimes.bodies.masters import restart_runtime_masters
 from sites.bodies.common import ReviewedPreimageChanged, replace_site_file, run, safe
 
 NAME = re.compile(
@@ -71,7 +72,14 @@ def clear_dropin(name: str) -> None:
 
 
 def daemon_reload() -> None:
+    """Reload systemd, then restart the runtime masters the reload unbinds.
+
+    docs/runtimes.md#restarting-the-runtime-masters-after-a-systemd-reload. ``enable``,
+    ``disable``, ``mask`` and ``unmask`` reload systemd too, so each helper below that runs
+    one restarts the masters after its last systemd change.
+    """
     systemctl("daemon-reload")
+    restart_runtime_masters()
 
 
 def current_text(path: pathlib.Path) -> str | None:
@@ -161,12 +169,14 @@ def remove_units(identifier: str, role: str, expected: dict[str, str]) -> None:
 def enable_timer(timer: str) -> None:
     systemctl("enable", timer)
     systemctl("start", timer)
+    restart_runtime_masters()
 
 
 def disable_and_stop(identifier: str, role: str) -> None:
     """Stop the timer before its service, then the slice (docs/adr/0036)."""
     timer, service = timer_name(identifier, role), service_name(identifier, role)
     systemctl("disable", "--now", timer)
+    restart_runtime_masters()
     if load_state(service) != "not-found":
         systemctl("stop", service)
     if load_state(slice_name(identifier)) != "not-found":
@@ -435,6 +445,8 @@ def fence(  # noqa: C901 - one reviewed stop sequence
                 systemctl("stop", name)
         if load_state(plan.slice) != "not-found":
             systemctl("stop", plan.slice)
+        if gate:
+            restart_runtime_masters()
     except OSError, ValueError, KeyError:
         return False
     return wait_slice_empty(plan.slice, plan.budget_seconds)
@@ -463,6 +475,7 @@ def restore(document: object, identifier: str) -> bool:
                 # started by its timer and has none.
                 run(["/usr/bin/systemctl", "enable", name], check=False)
             systemctl("start", name)
+        restart_runtime_masters()
         return all(_active(name) for name in plan.resume)
     except OSError, ValueError, KeyError:
         return False
@@ -492,6 +505,7 @@ def forget(document: object, identifier: str) -> None:
         for action in ("unmask --runtime", "reset-failed"):
             run(["/usr/bin/systemctl", *action.split(), name], check=False)
     run(["/usr/bin/systemctl", "daemon-reload"], check=False)
+    restart_runtime_masters()
 
 
 def _role(name: str, identifier: str) -> str:
@@ -545,10 +559,12 @@ def restart_service(name: str) -> None:
 
 def enable_service(name: str) -> None:
     systemctl("enable", name)
+    restart_runtime_masters()
 
 
 def disable_and_stop_service(name: str) -> None:
     systemctl("disable", "--now", name)
+    restart_runtime_masters()
 
 
 def wait_services_active(names: list[str], budget_seconds: int) -> bool:

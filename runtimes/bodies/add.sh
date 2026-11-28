@@ -12,6 +12,7 @@ finish() {
 }
 trap finish EXIT
 trap 'result "{\"class\":\"timed_out\"}"; exit 3' TERM
+# RESTART_RUNTIME_MASTERS
 entry=$1
 path=$2
 fcgi=$3
@@ -70,5 +71,6 @@ printf 'barectl-stage validate\n'
 "$path/bin/php-fpm" -t -y /etc/php-fpm/"$entry"/php-fpm.conf -c /etc/php-fpm/"$entry"/php.ini || fail partial runtime_config
 if [ "$template_changed" -eq 1 ]; then systemctl daemon-reload; fi
 systemctl --no-reload enable --now "php-fpm@$entry.service" || fail partial runtime_start
+if [ "$template_changed" -eq 1 ]; then restart_runtime_masters; fi
 printf 'barectl-stage verify\n'
 result '{"class":"succeeded"}'

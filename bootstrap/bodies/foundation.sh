@@ -15,6 +15,7 @@ finish() {
 trap finish EXIT
 trap 'result "{\"class\":\"timed_out\"}"; exit 3' TERM
 stage() { printf 'barectl-stage %s\n' "$1"; }
+# RESTART_RUNTIME_MASTERS
 expected=${1:?precondition digest}
 installer_url=${2:?installer URL}
 installer_sha256=${3:?installer digest}
@@ -184,6 +185,7 @@ if [ "$caddy_mode" = refresh ]; then systemctl restart caddy.service; fi
 # SITE_SERVICE_UNITS
 systemctl daemon-reload
 systemctl enable --now caddy.service
+restart_runtime_masters
 stage journald
 install -d -m 755 /etc/systemd/journald.conf.d
 if [ ! -e "$journal" ]; then printf '[Journal]\nStorage=persistent\n' > "$journal"; fi

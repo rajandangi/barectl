@@ -38,3 +38,25 @@ $units
 EOF
 }}
 """
+
+
+def runtime_masters_shell() -> str:
+    """The shell form of ``runtimes/bodies/masters.py`` for the shell bodies that reload.
+
+    docs/runtimes.md#restarting-the-runtime-masters-after-a-systemd-reload. Only the
+    runtime masters restart; a failed restart leaves the master as systemd reports it.
+    """
+    return """restart_runtime_masters() {
+  masters=$(systemctl list-units --type=service --state=running --no-legend --plain \\
+    'php-fpm@*.service') || return 0
+  while read -r unit _; do
+    case "$unit" in
+      php-fpm@php[0-9][0-9].service) ;;
+      *) continue ;;
+    esac
+    if systemctl restart -- "$unit"; then printf 'barectl-restarted %s\\n' "$unit"; fi
+  done <<EOF
+$masters
+EOF
+}
+"""

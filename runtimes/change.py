@@ -9,6 +9,7 @@ from typing import Final
 
 from bootstrap.standing import Standing
 from discovery.ssh import RemoteShell
+from operations import recovery
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import PreparationInputs
@@ -22,7 +23,12 @@ from .configuration import ENTRIES, PROBE, render
 SLUG: Final = "add_runtime"
 STAGES: Final = ("preflight", "realise", "configure", "validate", "verify")
 BODY_BYTES: Final = (
-    importlib.resources.files("runtimes.bodies").joinpath("add.sh").read_bytes().rstrip(b"\n")
+    importlib.resources.files("runtimes.bodies")
+    .joinpath("add.sh")
+    .read_text()
+    .replace("# RESTART_RUNTIME_MASTERS", recovery.runtime_masters_shell().rstrip("\n"))
+    .rstrip("\n")
+    .encode()
 )
 BODY_SHA256: Final = hashlib.sha256(BODY_BYTES).hexdigest()
 
