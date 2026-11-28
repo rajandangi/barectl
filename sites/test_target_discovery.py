@@ -1,13 +1,17 @@
 """Fresh native transcripts preserve target-site identity and review semantics."""
 
+import hashlib
+from types import SimpleNamespace
 from typing import ClassVar, cast
-from unittest import TestCase
+from unittest import TestCase, mock
 
 from bootstrap.standing import Standing
+from databases import provision
 from discovery import recorded
 from discovery.models import SiteState
 from discovery.observations import collect
 from discovery.recorded import ReplayShell
+from discovery.ssh import RemoteShell
 from operations import engine
 from operations.inputs import PreparationInputs, decode_inputs
 
@@ -66,8 +70,13 @@ class RecordedHttpSiteTests(TestCase):
         self.assertFalse(refused.eligible)
         self.assertIn("A requested DNS name already belongs to another site.", refused.refusals)
 
-    def test_a_stopped_creation_without_a_route_is_not_a_current_site(self) -> None:
-        """Create's membership read lists Caddy files, so a partial site stays out of it."""
+
+class StoppedCreationDigestTests(TestCase):
+    """Each Create kind's affected-sites digest matches the Caddy-only membership read while
+    a stopped creation without a route is on the server (#582).
+    """
+
+    def site_evidence(self) -> change.SiteEvidence:
         shell = ReplayShell(recorded.load("http-site-26.04"))
         collect(shell)
         original = PreparationInputs("php84", "s4alpha", ("s4alpha.example.com",))
@@ -83,12 +92,67 @@ class RecordedHttpSiteTests(TestCase):
         }
         native["sites"].append(cast(SiteRecord, stopped))
         native["current_sites"] = [*native["current_sites"], "stopped"]
+        return evidence
+
+    def database(self) -> provision.DatabaseEvidence:
+        return provision.DatabaseEvidence("mariadb", "MariaDB", True, (), None, "", "", "", "")
+
+    def assert_digest_matches(self, draft: engine.ReviewDraft) -> None:
+        self.assertNotEqual(draft.sites_read, "")
+        # membership_command lists Caddy files only: the stopped site has none.
+        result = SimpleNamespace(stdout="s4alpha\n", exit_status=0, truncated=False)
+        shell = mock.Mock(spec=RemoteShell, run=mock.Mock(return_value=result))
+        self.assertEqual(
+            engine._sites_digest(shell, draft), hashlib.sha256(b"s4alpha\n").hexdigest()
+        )
+
+    def test_http_create_prepares_another_site_and_refuses_the_stopped_one(self) -> None:
+        evidence = self.site_evidence()
         other = PreparationInputs("php84", "another", ("another.example.com",))
-        self.assertEqual(change.review(evidence, other).current_sites, ("s4alpha",))
+        self.assert_digest_matches(change.review(evidence, other))
         again = PreparationInputs("php84", "stopped", ("stopped.example.com",))
         refused = change.review(evidence, again)
         self.assertIn(change.REMOVE_PARTIAL, refused.refusals)
-        self.assertEqual(refused.current_sites, ("s4alpha",))
+        self.assert_digest_matches(refused)
+
+    def test_wordpress_create_prepares_another_site_and_refuses_the_stopped_one(self) -> None:
+        from wordpress import create
+
+        evidence = create.WordPressEvidence(self.site_evidence(), self.database())
+
+        def inputs(identifier: str) -> PreparationInputs:
+            return PreparationInputs(
+                "php84",
+                identifier,
+                (identifier + ".example.com",),
+                title="Shop",
+                admin_username="shopadmin",
+                admin_email="admin@example.com",
+            )
+
+        self.assert_digest_matches(create.review(evidence, inputs("another")))
+        refused = create.review(evidence, inputs("stopped"))
+        self.assertIn(change.REMOVE_PARTIAL, refused.refusals)
+        self.assert_digest_matches(refused)
+
+    def test_laravel_create_prepares_another_site_and_refuses_the_stopped_one(self) -> None:
+        from laravel import create
+
+        evidence = create.LaravelEvidence(self.site_evidence(), self.database(), (), "")
+
+        def inputs(identifier: str) -> PreparationInputs:
+            return PreparationInputs(
+                "php84",
+                identifier,
+                (identifier + ".example.com",),
+                repository="https://example.com/app.git",
+                branch="main",
+            )
+
+        self.assert_digest_matches(create.review(evidence, inputs("another")))
+        refused = create.review(evidence, inputs("stopped"))
+        self.assertIn(change.REMOVE_PARTIAL, refused.refusals)
+        self.assert_digest_matches(refused)
 
 
 class RecordedReconstructionTests(TestCase):

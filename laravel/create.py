@@ -240,7 +240,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     current: tuple[str, ...] = ()
     existing = False
     if native is not None:
-        current = tuple(str(site) for site in native["current_sites"])
+        current = site_change.routed_sites(native)
         existing, collisions = site_change.existing_site(native, inputs)
         refusals.extend(collisions)
         identity = site_change.review_identity(native, inputs.identifier)

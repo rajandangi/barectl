@@ -242,12 +242,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     }
     document.update(runtime_document(evidence, inputs))
     if native is not None:
-        # The shared route reaches only sites with a Caddy file, as membership_command lists
-        # them; a stopped creation has none (docs/recovery.md#after-a-change-stopped-partway).
-        unrouted = {
-            site["identifier"] for site in native["sites"] if site["problem"] == ROUTE_ABSENT
-        }
-        current = tuple(str(site) for site in native["current_sites"] if site not in unrouted)
+        current = routed_sites(native)
         existing, collisions = existing_site(native, inputs)
         refusals.extend(collisions)
         if not existing and native["evidence"].get(settings.directory) is not None:
@@ -380,6 +375,16 @@ def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool,
         elif set(site["names"]).intersection(inputs.names):
             refusals.append("A requested DNS name already belongs to another site.")
     return existing, refusals
+
+
+def routed_sites(native: NativeState) -> tuple[str, ...]:
+    """The sites a Create's shared Caddy route reaches, as ``membership_command`` lists them.
+
+    A stopped creation has no Caddy file (docs/recovery.md#after-a-change-stopped-partway),
+    so counting it would never match the membership read.
+    """
+    unrouted = {site["identifier"] for site in native["sites"] if site["problem"] == ROUTE_ABSENT}
+    return tuple(str(site) for site in native["current_sites"] if site not in unrouted)
 
 
 def membership_command(runtime: str) -> str:
