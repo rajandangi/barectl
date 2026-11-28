@@ -12,8 +12,7 @@
   "log_sha256": "e61bb40b4d05fdc2e5e2625491b7e1891d13f4255fd4731874d58f3bd2fed78c",
   "changed_non_native_inputs_during_run": ["disposable/test_mirror.py"],
   "sources": {
-    "disposable.test_automation.LaravelQueueWorkers": "local run 2026-11-02 capacity16",
-    "disposable.test_automation.ReloadKeepsSitesCreatable": "local run 2026-11-28 capacity16",
+    "disposable.test_automation.LaravelQueueWorkers": "local run 2026-11-28 capacity16",
     "disposable.test_automation.WordPressServerCron": "local run 2026-11-02 capacity16",
     "disposable.test_backups.BackupFailure": "local run 2026-11-02 capacity16",
     "disposable.test_backups.BackupLifecycle": "local run 2026-11-02 capacity16",
@@ -110,8 +109,7 @@
     "disposable.test_wordpress_create.WordPressCreateMariaDB": "local run 2026-11-28 capacity16"
   },
   "scenarios": {
-    "disposable.test_automation.LaravelQueueWorkers": 82.6,
-    "disposable.test_automation.ReloadKeepsSitesCreatable": 41.7,
+    "disposable.test_automation.LaravelQueueWorkers": 74.3,
     "disposable.test_automation.WordPressServerCron": 127.5,
     "disposable.test_backups.BackupFailure": 72.6,
     "disposable.test_backups.BackupLifecycle": 95.4,

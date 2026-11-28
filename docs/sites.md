@@ -87,7 +87,7 @@ site's primary domain exactly; a request without that value changes nothing.
 Applying is one run: it rechecks the reviewed inventory under the native lock, first
 disables and removes the site's backup units, publishes the maintenance gate, validates the
 remaining Caddy tree, removes the site file and reloads Caddy, stops and disables the
-site's services, removes its FPM and HAProxy configuration, restarts each running runtime master after its systemd reloads so the next site change can verify it ([runtimes](runtimes.md#restarting-the-runtime-masters-after-a-systemd-reload)), drops the database and
+site's services, removes its FPM and HAProxy configuration, restarts each running runtime master once after its systemd reloads so the next site change can verify it ([runtimes](runtimes.md#restarting-the-runtime-masters-after-a-systemd-reload)), drops the database and
 principal, removes the stored certificate, deletes the site directory and its accounts,
 and verifies that nothing remains while the remaining sites serve. A failure reports **partly applied**; a fresh review names only what remains and
 finishes it. The database and all application data are not recoverable after the run.
