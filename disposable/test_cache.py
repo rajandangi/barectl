@@ -411,6 +411,94 @@ class SiteObjectCache(ValkeyCase):
             collected = collect(shell)
         self.assertEqual(self.cache_row(collected).state, "off")
 
+    def test_6_one_site_changes_meet_the_other_site(self) -> None:
+        """Readiness and WordPress settings each read only their own site's membership (#584).
+
+        The L4 layer holds the plain site and the WordPress site, so each change's review
+        runs with another site on the server.
+        """
+        import json
+
+        from databases import binding
+        from sites import readiness_change
+        from wordpress import convention
+        from wordpress import settings as wordpress_settings
+
+        if self.record_state:
+            self.skipTest("Recording stops after the transcript checkpoints.")
+
+        listed = self.native("ls /etc/caddy/sites").split()
+        self.assertEqual(listed, sorted([f"{self.other}.caddy", f"{self.site}.caddy"]))
+        # A changed readiness path on the plain site is published as native Caddy evidence
+        # and reconstructed by a fresh controller.
+        readiness = PreparationInputs("", self.other, readiness="/hello.txt")
+        apply_change(self, readiness_change.SET_SITE_READINESS, readiness)
+        with self.shell() as fresh:
+            repeated = readiness_change.SET_SITE_READINESS.review(
+                readiness_change.SET_SITE_READINESS.inspect(fresh, readiness), readiness
+            )
+            self.assertTrue(repeated.no_changes, repeated.refusals)
+            observed = {row.identifier: row for row in collect(fresh).sites.value}
+        self.assertEqual(observed[self.other].readiness, "/hello.txt")
+
+        # An extra WordPress constant stays a private site-owned value.
+        canary = "Barectl-Canary-9b4e2c17"
+        base = f"/var/www/{self.site}"
+        private = f"{base}/private/wp-config.php"
+        fixed_count = len(
+            convention.render_private_configuration(
+                self.site, ("x" * 64,) * len(convention.SALTS)
+            ).splitlines()
+        )
+        apply_change(
+            self,
+            wordpress_settings.EDIT_SETTINGS,
+            PreparationInputs("", self.site, settings_changes=(("MAIL_HOST", "set"),)),
+            timeout=60,
+            secret=json.dumps({"values": {"MAIL_HOST": canary}}).encode(),
+        )
+        configured = self.native(f"cat {private}")
+        self.assertIn(f"define( 'MAIL_HOST', '{canary}' );", configured)
+        self.assertEqual(
+            self.native(f"stat -c '%U %a' {private}").strip(),
+            f"{binding.name_of(self.site)} 600",
+        )
+        leaked = self.native(
+            f"grep -R --binary-files=without-match -l {shlex.quote(canary)} "
+            f"{base}/current {base}/releases {base}/logs /etc/caddy 2>/dev/null || true"
+        )
+        self.assertEqual(leaked.strip(), "")
+        journal = self.native(
+            "journalctl --since '-10 min' --no-pager -o cat | grep -F "
+            f"{shlex.quote(canary)} || true"
+        )
+        self.assertEqual(journal.strip(), "")
+
+        # The fixed Barectl block stays byte-identical when one constant changes.
+        fixed = configured.splitlines()[:fixed_count]
+        apply_change(
+            self,
+            wordpress_settings.EDIT_SETTINGS,
+            PreparationInputs("", self.site, settings_changes=(("MAIL_HOST", "set"),)),
+            timeout=60,
+            secret=json.dumps({"values": {"MAIL_HOST": "mail.example.com"}}).encode(),
+        )
+        changed = self.native(f"cat {private}")
+        self.assertEqual(changed.splitlines()[:fixed_count], fixed)
+        self.assertIn("define( 'MAIL_HOST', 'mail.example.com' );", changed)
+        self.assertNotIn(canary, changed)
+
+        # A removal needs no confidential value and leaves the fixed block alone.
+        apply_change(
+            self,
+            wordpress_settings.EDIT_SETTINGS,
+            PreparationInputs("", self.site, settings_changes=(("MAIL_HOST", "remove"),)),
+            timeout=60,
+        )
+        removed = self.native(f"cat {private}")
+        self.assertNotIn("MAIL_HOST", removed)
+        self.assertEqual(removed.splitlines()[:fixed_count], fixed)
+
 
 LARAVEL_CACHE_STATE = "object-cache-laravel-26.04"
 LARAVEL_CACHE_SITE = "sqwalpha"

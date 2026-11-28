@@ -1962,6 +1962,74 @@ class WordPressFullRestore(BackupCase):
         self.assertEqual(len(safety), 1)
         self.assertEqual(safety[0]["scope"], "full")
 
+    def test_b_the_laravel_environment_edit_meets_the_wordpress_site(self) -> None:
+        """L5's Laravel fixture and this item's WordPress site share the server, so the
+        environment review reads only its own site's membership (#584).
+        """
+        from automation import worker_change
+        from databases import binding
+        from laravel import settings
+
+        laravel = "sqwalpha"
+        self.assertEqual(
+            self.native("ls /etc/caddy/sites").split(),
+            [f"{self.identifier}.caddy", "sqwalpha.caddy"],
+        )
+        # The environment edit cannot yet restart workers it has fenced, so the fixture's
+        # workers are stopped first; that defect is outside this item.
+        apply_change(
+            self,
+            worker_change.SET_LARAVEL_QUEUE_WORKERS,
+            PreparationInputs("", laravel, worker_action="stop"),
+            timeout=60,
+        )
+        canary = "Barectl-Canary-6d2f4a91"
+        path = f"/var/www/{laravel}/private/laravel.env"
+        self.native(f"cp {path} /tmp/laravel.env.before")
+        apply_change(
+            self,
+            settings.EDIT_ENVIRONMENT,
+            PreparationInputs(
+                "",
+                laravel,
+                settings_changes=(("MAIL_PASSWORD", "set"), ("MAIL_FROM_ADDRESS", "set")),
+            ),
+            timeout=60,
+            secret=json.dumps(
+                {"values": {"MAIL_PASSWORD": canary, "MAIL_FROM_ADDRESS": "bot@example.com"}}
+            ).encode(),
+        )
+        private = self.native(f"cat {path}")
+        self.assertIn("MAIL_FROM_ADDRESS=bot@example.com", private)
+        self.assertIn(canary, private)
+        self.assertEqual(
+            self.native(f"stat -c '%U %a' {path}").strip(),
+            f"{binding.name_of(laravel)} 600",
+        )
+        # Only the edited keys change; every other line stays byte-identical.
+        edited = ("MAIL_PASSWORD=", "MAIL_FROM_ADDRESS=")
+        difference = self.native(f"diff -u /tmp/laravel.env.before {path} || true")
+        untouched = [
+            line
+            for line in difference.splitlines()
+            if line.startswith(("-", "+"))
+            and not line.startswith(("---", "+++"))
+            and not line[1:].startswith(edited)
+        ]
+        self.assertEqual(untouched, [])
+        leaked = self.native(
+            f"find /var/www/{laravel}/current /var/www/{laravel}/releases "
+            f"/var/www/{laravel}/logs /etc/caddy -type f -print0 2>/dev/null "
+            f"| xargs -0 -r grep --binary-files=without-match -l -F {shlex.quote(canary)} "
+            "2>/dev/null || true"
+        )
+        self.assertEqual(leaked.strip(), "")
+        journal = self.native(
+            "journalctl --since '-10 min' --no-pager -o cat | grep -F "
+            f"{shlex.quote(canary)} || true"
+        )
+        self.assertEqual(journal.strip(), "")
+
 
 @tag(SCENARIO_TAG)
 class LaravelFullRestore(BackupCase):

@@ -16,7 +16,7 @@ from discovery.ssh import RemoteShell
 from operations.inputs import PreparationInputs
 
 from . import mirror
-from .change_testing import add_plain_site, apply_change
+from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 IDENTIFIER = "swpalpha"
@@ -204,8 +204,6 @@ class WordPressCreateMariaDB(WordPressCreateCase):
         from wordpress import actions
 
         base = f"/var/www/{IDENTIFIER}"
-        # The actions and settings below change one site while another one is present (#584).
-        add_plain_site(self, "swpbeta")
         # Reset the administrator password over the confidential channel, and prove the
         # new value signs in while the old one does not.
         apply_change(
@@ -274,70 +272,6 @@ class WordPressCreateMariaDB(WordPressCreateCase):
             PreparationInputs("", IDENTIFIER),
             timeout=60,
         )
-
-    def test_3_edits_extra_constants_and_keeps_the_value_private(self) -> None:
-        import json
-
-        from databases import binding
-        from wordpress import convention
-        from wordpress import settings as wordpress_settings
-
-        canary = "Barectl-Canary-9b4e2c17"
-        base = f"/var/www/{IDENTIFIER}"
-        private = f"{base}/private/wp-config.php"
-        fixed_count = len(
-            convention.render_private_configuration(
-                IDENTIFIER, ("x" * 64,) * len(convention.SALTS)
-            ).splitlines()
-        )
-        apply_change(
-            self,
-            wordpress_settings.EDIT_SETTINGS,
-            PreparationInputs("", IDENTIFIER, settings_changes=(("MAIL_HOST", "set"),)),
-            timeout=60,
-            secret=json.dumps({"values": {"MAIL_HOST": canary}}).encode(),
-        )
-        configured = self.native(f"cat {private}")
-        self.assertIn(f"define( 'MAIL_HOST', '{canary}' );", configured)
-        self.assertEqual(
-            self.native(f"stat -c '%U %a' {private}").strip(),
-            f"{binding.name_of(IDENTIFIER)} 600",
-        )
-        leaked = self.native(
-            f"grep -R --binary-files=without-match -l {shlex.quote(canary)} "
-            f"{base}/current {base}/releases {base}/logs /etc/caddy 2>/dev/null || true"
-        )
-        self.assertEqual(leaked.strip(), "")
-        journal = self.native(
-            "journalctl --since '-10 min' --no-pager -o cat | grep -F "
-            f"{shlex.quote(canary)} || true"
-        )
-        self.assertEqual(journal.strip(), "")
-
-        # The fixed Barectl block stays byte-identical when one constant changes.
-        fixed = configured.splitlines()[:fixed_count]
-        apply_change(
-            self,
-            wordpress_settings.EDIT_SETTINGS,
-            PreparationInputs("", IDENTIFIER, settings_changes=(("MAIL_HOST", "set"),)),
-            timeout=60,
-            secret=json.dumps({"values": {"MAIL_HOST": "mail.example.com"}}).encode(),
-        )
-        changed = self.native(f"cat {private}")
-        self.assertEqual(changed.splitlines()[:fixed_count], fixed)
-        self.assertIn("define( 'MAIL_HOST', 'mail.example.com' );", changed)
-        self.assertNotIn(canary, changed)
-
-        # A removal needs no confidential value and leaves the fixed block alone.
-        apply_change(
-            self,
-            wordpress_settings.EDIT_SETTINGS,
-            PreparationInputs("", IDENTIFIER, settings_changes=(("MAIL_HOST", "remove"),)),
-            timeout=60,
-        )
-        removed = self.native(f"cat {private}")
-        self.assertNotIn("MAIL_HOST", removed)
-        self.assertEqual(removed.splitlines()[:fixed_count], fixed)
 
     def test_4_removes_the_wordpress_site_and_its_resources(self) -> None:
         from databases import binding
