@@ -25,7 +25,7 @@ from operations.models import ChangeReview
 from sites import observation
 from sites.bodies.common import NativeState, SiteRecord
 from sites.bodies.reasons import SITE_REASONS
-from sites.change import membership_command
+from sites.change import site_membership_command
 from sites.configuration import PHP_RUNTIMES
 
 from . import convention
@@ -260,7 +260,7 @@ def _draft(
         refusals=tuple(dict.fromkeys(refusals)),
         boot_id=str(native["boot"]) if native is not None else "",
         uptime_centiseconds=int(str(native["uptime"])) if native is not None else None,
-        sites_read=(membership_command(site["runtime"]) if effects and site is not None else ""),
+        sites_read=site_membership_command(identifier) if effects else "",
         current_sites=(identifier,) if effects else None,
         document=document,
     )

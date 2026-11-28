@@ -203,3 +203,18 @@ def apply_run(
                 verified = kind.verify(shell, submitted.review)
             test.assertTrue(verified)
     return submitted
+
+
+def add_plain_site(test: ScenarioTestCase, identifier: str) -> None:
+    """Create a second plain PHP site, so a later one-site change meets another site."""
+    from sites import change
+
+    apply_change(
+        test,
+        change.CREATE_SITE,
+        PreparationInputs("php84", identifier, (f"{identifier}.example.com",)),
+        timeout=60,
+    )
+    listed = test.native("ls /etc/caddy/sites").split()
+    test.assertIn(f"{identifier}.caddy", listed)
+    test.assertGreaterEqual(len(listed), 2, listed)

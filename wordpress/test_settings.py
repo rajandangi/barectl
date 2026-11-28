@@ -2,6 +2,7 @@
 
 import base64
 import gzip
+import hashlib
 import json
 from typing import cast
 from unittest import mock
@@ -10,6 +11,7 @@ from django.test import SimpleTestCase
 
 from bootstrap.standing import Standing
 from operations.engine import BodyContext
+from operations.fakes import sites_digest_on
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from sites.bodies.common import NativeState
 from wordpress import convention, settings
@@ -186,6 +188,14 @@ class WordPressSettingsReviewTests(SimpleTestCase):
         )
         self.assertFalse(removal.writes_secrets)
         self.assertEqual(removal.document["secret_fields"], [])
+
+    def test_the_review_reads_only_its_own_site_among_others(self) -> None:
+        draft = settings.review(
+            evidence(), PreparationInputs("", "shop", settings_changes=(("OLD_KEY", "remove"),))
+        )
+        self.assertEqual(
+            sites_digest_on(draft, "alpha", "shop", "zeta"), hashlib.sha256(b"shop\n").hexdigest()
+        )
 
     def test_barectl_owned_names_are_refused_at_review(self) -> None:
         draft = settings.review(

@@ -387,6 +387,18 @@ def routed_sites(native: NativeState) -> tuple[str, ...]:
     return tuple(str(site) for site in native["current_sites"] if site not in unrouted)
 
 
+def site_membership_command(identifier: str) -> str:
+    """The membership read of a change to one site: that site's own Caddy file.
+
+    Listing every site would refuse the change whenever another site exists.
+    """
+    return (
+        "find /etc/caddy/sites -maxdepth 1 -type f -name "
+        + shlex.quote(identifier + ".caddy")
+        + " -printf '%f\\n' | sed 's/\\.caddy$//'"
+    )
+
+
 def membership_command(runtime: str) -> str:
     if runtime not in PHP_RUNTIMES:
         raise ValueError("Unknown PHP master.")

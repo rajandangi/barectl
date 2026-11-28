@@ -213,10 +213,15 @@ else:
                     )
                 )
             # A changed readiness path is one reviewed Site change, published as native
-            # Caddy evidence and reconstructed by a fresh controller.
+            # Caddy evidence and reconstructed by a fresh controller. Another site on the
+            # server leaves its review unaffected (#584).
             from operations import engine, native
             from operations.models import ChangeReview
             from sites import readiness_change
+
+            from .change_testing import add_plain_site
+
+            add_plain_site(self, "s4beta")
 
             readiness_inputs = PreparationInputs("", inputs.identifier, readiness="/hello.txt")
             with self.shell() as change_shell:

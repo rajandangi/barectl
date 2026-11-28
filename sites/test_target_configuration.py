@@ -148,6 +148,18 @@ class ReadinessReviewTests(SimpleTestCase):
         self.assertTrue(draft.eligible, draft.refusals)
         self.assertTrue(draft.no_changes)
 
+    def test_the_review_reads_only_its_own_site_among_others(self) -> None:
+        import hashlib
+
+        from operations.fakes import sites_digest_on
+        from operations.inputs import PreparationInputs
+        from sites.readiness_change import review
+
+        draft = review(self.evidence(), PreparationInputs("", "shop", readiness="/health"))
+        self.assertEqual(
+            sites_digest_on(draft, "alpha", "shop", "zeta"), hashlib.sha256(b"shop\n").hexdigest()
+        )
+
 
 class DnsWarningTests(SimpleTestCase):
     """A DNS mismatch warns and never refuses (issue #376, docs/tls.md)."""

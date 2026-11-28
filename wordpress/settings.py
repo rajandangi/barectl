@@ -26,7 +26,7 @@ from operations.models import ChangeReview
 from sites import observation as site_observation
 from sites.bodies.common import NativeState, SiteRecord
 from sites.bodies.reasons import SITE_REASONS
-from sites.change import membership_command
+from sites.change import site_membership_command
 from sites.configuration import PHP_RUNTIMES
 
 from . import convention, observation
@@ -225,11 +225,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         uptime_centiseconds=(
             int(str(evidence.native["uptime"])) if evidence.native is not None else None
         ),
-        sites_read=(
-            membership_command(str(site["runtime"]))
-            if site is not None and site["runtime"] in PHP_RUNTIMES
-            else ""
-        ),
+        sites_read=site_membership_command(inputs.identifier) if site is not None else "",
         current_sites=(inputs.identifier,) if site is not None else None,
         document=document,
         writes_secrets=bool(secret_fields),

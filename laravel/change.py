@@ -24,6 +24,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of
 from sites.bodies.common import NativeState, SiteRecord
+from sites.change import site_membership_command
 from sites.configuration import SiteSettings, render_laravel_caddy
 
 from . import observation
@@ -364,13 +365,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         refusals=tuple(refusals),
         boot_id=evidence.boot_id,
         uptime_centiseconds=evidence.uptime_centiseconds,
-        sites_read=(
-            "find /etc/caddy/sites -maxdepth 1 -type f -name "
-            + shlex.quote(inputs.identifier + ".caddy")
-            + " -printf '%f\\n' | sed 's/\\.caddy$//'"
-        )
-        if site is not None
-        else "",
+        sites_read=(site_membership_command(inputs.identifier)) if site is not None else "",
         current_sites=(inputs.identifier,) if site is not None else None,
         document=document,
     )

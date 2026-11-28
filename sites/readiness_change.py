@@ -23,7 +23,7 @@ from operations.models import ChangeReview
 from . import observation
 from .bodies.common import NativeState
 from .bodies.reasons import SITE_REASONS
-from .change import membership_command
+from .change import site_membership_command
 
 SLUG: Final = "set_site_readiness"
 BODY_SOURCE: Final = (
@@ -88,7 +88,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     current = site["readiness"] if site is not None else ""
     reportable = site is not None and site["state"] == "complete"
     unchanged = reportable and current == inputs.readiness
-    sites_read = membership_command(site["runtime"]) if reportable and site is not None else ""
+    sites_read = site_membership_command(inputs.identifier) if reportable else ""
     document: dict[str, object] = {
         "version": 1,
         "identifier": inputs.identifier,
