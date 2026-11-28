@@ -19,7 +19,7 @@ from runtimes import observation as runtime_observation
 from runtimes.catalog import Architecture, architecture_of
 
 from . import observation
-from .bodies.common import CADDY_OUTSIDE, SITE_GATED, NativeState
+from .bodies.common import CADDY_OUTSIDE, ROUTE_ABSENT, SITE_GATED, NativeState
 from .bodies.reasons import SITE_REASONS
 from .configuration import PHP_RUNTIMES, SiteSettings, render_caddy, render_pool
 
@@ -242,7 +242,12 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     }
     document.update(runtime_document(evidence, inputs))
     if native is not None:
-        current = tuple(str(site) for site in native["current_sites"])
+        # The shared route reaches only sites with a Caddy file, as membership_command lists
+        # them; a stopped creation has none (docs/recovery.md#after-a-change-stopped-partway).
+        unrouted = {
+            site["identifier"] for site in native["sites"] if site["problem"] == ROUTE_ABSENT
+        }
+        current = tuple(str(site) for site in native["current_sites"] if site not in unrouted)
         existing, collisions = existing_site(native, inputs)
         refusals.extend(collisions)
         if not existing and native["evidence"].get(settings.directory) is not None:

@@ -87,6 +87,7 @@ if TYPE_CHECKING:
     from disposable.test_http_site_identities import HttpSiteIdentityAdmission
     from disposable.test_http_site_reconstruction import HttpSiteReconstruction
     from disposable.test_http_site_recovery import (
+        FreshControllerStoppedCreation,
         HttpSiteControllerRecovery,
         ServerStoppedDuringBody,
         StoppedCreationRemoved,
@@ -523,6 +524,7 @@ if TYPE_CHECKING:
         HttpSiteControllerRecovery,
         ServerStoppedDuringBody,
         StoppedCreationRemoved,
+        FreshControllerStoppedCreation,
         WorkerKilledAfterDispatch,
         WorkerKilledBeforeDispatch,
         SitePHPControllerRecovery,

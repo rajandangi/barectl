@@ -12,7 +12,7 @@ from operations import engine
 from operations.inputs import PreparationInputs, decode_inputs
 
 from . import change, recognition
-from .bodies.common import ROUTE_ABSENT, SITE_GATED, NativeState
+from .bodies.common import ROUTE_ABSENT, SITE_GATED, NativeState, SiteRecord
 
 
 class RecordedHttpSiteTests(TestCase):
@@ -65,6 +65,30 @@ class RecordedHttpSiteTests(TestCase):
         refused = change.review(evidence, collision)
         self.assertFalse(refused.eligible)
         self.assertIn("A requested DNS name already belongs to another site.", refused.refusals)
+
+    def test_a_stopped_creation_without_a_route_is_not_a_current_site(self) -> None:
+        """Create's membership read lists Caddy files, so a partial site stays out of it."""
+        shell = ReplayShell(recorded.load("http-site-26.04"))
+        collect(shell)
+        original = PreparationInputs("php84", "s4alpha", ("s4alpha.example.com",))
+        evidence = change.inspect(shell, original)
+        native = evidence.native
+        if native is None:
+            self.fail("No native site evidence.")
+        stopped = dict(native["sites"][0]) | {
+            "identifier": "stopped",
+            "names": [],
+            "state": "partial",
+            "problem": ROUTE_ABSENT,
+        }
+        native["sites"].append(cast(SiteRecord, stopped))
+        native["current_sites"] = [*native["current_sites"], "stopped"]
+        other = PreparationInputs("php84", "another", ("another.example.com",))
+        self.assertEqual(change.review(evidence, other).current_sites, ("s4alpha",))
+        again = PreparationInputs("php84", "stopped", ("stopped.example.com",))
+        refused = change.review(evidence, again)
+        self.assertIn(change.REMOVE_PARTIAL, refused.refusals)
+        self.assertEqual(refused.current_sites, ("s4alpha",))
 
 
 class RecordedReconstructionTests(TestCase):

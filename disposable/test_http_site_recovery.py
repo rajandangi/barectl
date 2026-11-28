@@ -126,6 +126,79 @@ else:
             run_worker()
         run = ChangeRun.objects.select_related('review').get(pk=run.pk)
         print(json.dumps(snapshot_of(run)))
+    elif mode in ('fresh', 'rebuild'):
+        # A second controller: its own empty database reads the server, then reviews and
+        # applies through the same services the dashboard calls.
+        identifier = os.environ['RECOVERY_IDENTIFIER']
+        domain = identifier + '.example.com'
+        create_inputs = {
+            'version': 1, 'selection': 'php84', 'identifier': identifier, 'names': [domain],
+        }
+
+        def reviewed(slug, inputs):
+            preparation = request_prepare(server, user, slug, inputs=inputs)
+            if preparation is None:
+                raise AssertionError('Preparation was not queued: ' + slug)
+            run_worker()
+            preparation.refresh_from_db()
+            if not hasattr(preparation, 'review'):
+                raise AssertionError(f'{slug}: {preparation.status} {preparation.failure}')
+            return preparation.review
+
+        def applied(review, **confirm):
+            requested = request_apply(review, user, acknowledged=True, **confirm)
+            if requested.run is None:
+                raise AssertionError(requested.problem)
+            run_worker()
+            run = ChangeRun.objects.get(pk=requested.run.pk)
+            return {'execution': str(run.execution), 'verification': str(run.verification),
+                    'failure': run.failure}
+
+        call_command('migrate', verbosity=0, interactive=False)
+        if mode == 'fresh':
+            user = User.objects.create_superuser(username='operator')
+            server = Server(name='Recovery', ssh_alias='recovery')
+            save_server(server, user=user)
+            run_worker()
+            snapshot = read_discovery(server).snapshot
+            if snapshot is None:
+                raise AssertionError('The controller did not discover the native server.')
+            from jobs.presentation import present as present_jobs
+            jobs = present_jobs(snapshot, server, may_view_changes=True)
+            history = {'preparations': ChangePreparation.objects.count(),
+                       'runs': ChangeRun.objects.count()}
+            create = reviewed(SLUG, create_inputs)
+            refused = request_apply(create, user, acknowledged=True)
+            print(json.dumps(history | {
+                'sites': [{'identifier': row.identifier, 'state': str(row.state),
+                           'names': list(row.server_names)}
+                          for row in snapshot.collected.sites.value],
+                'jobs': [
+                    {'title': row.title, 'sites': list(row.sites), 'summary': row.summary,
+                     'result_class': row.result_class, 'running': row.running, 'unit': row.unit,
+                     'group': group.key}
+                    for group in jobs.groups for row in group.rows
+                ],
+                'create_eligible': create.eligible,
+                'create_refusals': create.document.get('refusals', []),
+                'create_run': refused.run is not None, 'create_problem': refused.problem,
+            }))
+        else:
+            user = User.objects.get(username='operator')
+            server = Server.objects.get(ssh_alias='recovery')
+            removal = reviewed('remove_site', {
+                'version': 1, 'identifier': identifier, 'primary': domain})
+            if not removal.eligible:
+                raise AssertionError(removal.document)
+            removed = applied(removal, confirmation=domain)
+            create = reviewed(SLUG, create_inputs)
+            if not create.eligible:
+                raise AssertionError(create.document)
+            print(json.dumps({
+                'confirmation': removal.confirmation, 'consent': str(removal.consent),
+                'removed': removed, 'created': applied(create),
+                'identity': create.document['identity'],
+            }))
     else:
         call_command('migrate', verbosity=0, interactive=False)
         user = User.objects.create_superuser(username='operator')
@@ -135,9 +208,10 @@ else:
         snapshot = read_discovery(server).snapshot
         if snapshot is None:
             raise AssertionError('The controller did not discover the native server.')
+        identifier = os.environ.get('RECOVERY_IDENTIFIER', 's3recovery')
         preparation = request_prepare(server, user, SLUG, inputs={
-            'version': 1, 'selection': 'php84', 'identifier': 's3recovery',
-            'names': ['s3recovery.example.com'],
+            'version': 1, 'selection': 'php84', 'identifier': identifier,
+            'names': [identifier + '.example.com'],
         })
         if preparation is None:
             raise AssertionError('Preparation was not queued.')
@@ -679,3 +753,103 @@ class StoppedCreationRemoved(ScenarioTestCase):
             identifier,
             self.native(f"curl --fail --silent -H 'Host: {domain}' http://127.0.0.1/"),
         )
+
+
+@tag(SCENARIO_TAG)
+class FreshControllerStoppedCreation(ControllerRecoveryMixin):
+    """A creation stopped with its controller is removed and created again by a fresh one."""
+
+    def test_a_fresh_controller_removes_and_recreates_a_creation_stopped_with_its_controller(
+        self,
+    ) -> None:
+        identifier = "s3fresh"
+        domain = identifier + ".example.com"
+        with tempfile.TemporaryDirectory(prefix="barectl-s3-fresh-") as directory:
+            root = Path(directory)
+            environment = self.recovery_environment(root) | {"RECOVERY_IDENTIFIER": identifier}
+            prepared = self.controller(environment | {"RECOVERY_MODE": "prepare"})
+            raw_unit = prepared["unit"]
+            if not isinstance(raw_unit, str):
+                self.fail("The controller did not report its native unit.")
+            unit = shlex.quote(raw_unit)
+            worker = self.start_worker(environment)
+            try:
+                # Freeze the body once it reports the pool stage: the account and layout
+                # exist, and the site has no Caddy route yet.
+                self.native(
+                    "deadline=$(( $(date +%s) + 60 )); "
+                    'while [ "$(systemctl show -p MainPID --value ' + unit + ')" = 0 ]; '
+                    "do [ $(date +%s) -lt $deadline ] || exit 1; sleep .02; done; "
+                    "until journalctl --no-pager -o cat -u " + unit + " "
+                    "| grep -qx 'barectl-stage pool'; "
+                    "do [ $(date +%s) -lt $deadline ] || exit 1; "
+                    "systemctl is-active --quiet " + unit + " || "
+                    '{ echo "the body ended before the pool stage"; exit 1; }; '
+                    "sleep .02; done; "
+                    "systemctl kill --kill-whom=all --signal=STOP " + unit,
+                    timeout=90,
+                )
+                self.assertIsNone(worker.poll(), "The controller finished before interruption.")
+                self.kill_worker(worker)
+            finally:
+                if worker.poll() is None:
+                    worker.kill()
+                    worker.communicate(timeout=10)
+                self.native(
+                    "systemctl kill --kill-whom=all --signal=KILL " + unit + " || true; "
+                    "while systemctl is-active --quiet " + unit + "; do sleep .1; done",
+                    timeout=30,
+                )
+            self.assertNotIn(
+                "barectl-result", self.native(f"journalctl --no-pager -o cat -u {unit}")
+            )
+            baseline = self.submissions()
+
+            second = environment | {"RECOVERY_DATABASE": str(root / "controller-b.sqlite3")}
+            fresh = self.controller(second | {"RECOVERY_MODE": "fresh"}, timeout=120)
+            self.assertEqual((fresh["preparations"], fresh["runs"]), (0, 0), fresh)
+            sites = fresh["sites"]
+            if not isinstance(sites, list):
+                self.fail("The fresh controller did not report site observations.")
+            self.assertIn({"identifier": identifier, "state": "partly_applied", "names": []}, sites)
+            jobs = fresh["jobs"]
+            if not isinstance(jobs, list):
+                self.fail("The fresh controller did not report Jobs rows.")
+            # Without a result line the journal names neither the kind nor its sites, so the
+            # row is the unit's stopped run: it needs attention and never claims an outcome.
+            stopped = {
+                "title": "A Barectl change",
+                "sites": [],
+                "summary": "Could not confirm",
+                "result_class": "",
+                "running": False,
+                "unit": raw_unit,
+            }
+            self.assertEqual(
+                [row for row in jobs if row["unit"] == raw_unit],
+                [stopped | {"group": "attention"}, stopped | {"group": "recent"}],
+                jobs,
+            )
+            self.assertFalse(fresh["create_eligible"])
+            from sites.change import REMOVE_PARTIAL
+
+            refusals = fresh["create_refusals"]
+            if not isinstance(refusals, list):
+                self.fail("The fresh controller did not report the Create refusals.")
+            self.assertIn(REMOVE_PARTIAL, refusals)
+            self.assertFalse(fresh["create_run"], fresh)
+            self.assertEqual(self.submissions(), baseline, "A refused Create reached the server.")
+
+            rebuilt = self.controller(second | {"RECOVERY_MODE": "rebuild"}, timeout=150)
+            self.assertEqual(rebuilt["confirmation"], domain)
+            self.assertEqual(rebuilt["consent"], "destructive")
+            for step in ("removed", "created"):
+                self.assertEqual(
+                    rebuilt[step],
+                    {"execution": "succeeded", "verification": "passed", "failure": ""},
+                    step,
+                )
+            response = json.loads(
+                self.native(f"curl --fail --silent -H 'Host: {domain}' http://127.0.0.1/")
+            )
+            self.assertEqual(response["uid"], rebuilt["identity"])
