@@ -121,7 +121,7 @@
     "disposable.test_backups.OffsiteCopy": 102.9,
     "disposable.test_backups.Retention": 149.2,
     "disposable.test_backups.ScheduledCapture": 61.9,
-    "disposable.test_backups.WordPressFullRestore": 56.0,
+    "disposable.test_backups.WordPressFullRestore": 54.4,
     "disposable.test_cache.LaravelObjectCache": 30.3,
     "disposable.test_cache.SiteObjectCache": 41.3,
     "disposable.test_cache.ValkeyInstall": 38.3,
