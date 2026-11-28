@@ -1,13 +1,15 @@
 """An environment change restarts the site's enabled queue workers, and nothing else."""
 
 import hashlib
+import subprocess
+from collections.abc import Callable
 from contextlib import ExitStack
 from typing import cast
 from unittest import mock
 
 from django.test import SimpleTestCase
 
-from automation.bodies import worker_env
+from automation.bodies import units, worker_env
 
 
 class RestartEnabledWorkersTests(SimpleTestCase):
@@ -132,7 +134,13 @@ class FakeSite:
 
 
 class EnvironmentBodyTests(SimpleTestCase):
-    def edit(self, site: FakeSite, *, fenced: bool) -> list[str]:
+    def edit(
+        self,
+        site: FakeSite,
+        *,
+        fenced: bool,
+        restore: Callable[[dict[str, object], str], bool] | None = None,
+    ) -> list[str]:
         from laravel.bodies import settings as body
 
         document: dict[str, object] = {
@@ -148,7 +156,16 @@ class EnvironmentBodyTests(SimpleTestCase):
         if fenced:
             document["automation_fence"] = {
                 "version": 1,
-                "sites": [{"identifier": "shop", "services": [QUEUE1, QUEUE2], "resume": [QUEUE1]}],
+                "sites": [
+                    {
+                        "identifier": "shop",
+                        "slice": "barectl-site-shop.slice",
+                        "timers": [],
+                        "services": [QUEUE1, QUEUE2],
+                        "resume": [QUEUE1],
+                        "budget_seconds": 30,
+                    }
+                ],
             }
         settings = mock.Mock(
             identifier="shop",
@@ -160,7 +177,9 @@ class EnvironmentBodyTests(SimpleTestCase):
         )
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(body, "fence", site.fence, create=True))
-            stack.enter_context(mock.patch.object(body, "restore", site.restore, create=True))
+            stack.enter_context(
+                mock.patch.object(body, "restore", restore or site.restore, create=True)
+            )
             stack.enter_context(
                 mock.patch("automation.bodies.worker_env.subprocess.run", site.systemctl)
             )
@@ -203,3 +222,28 @@ class EnvironmentBodyTests(SimpleTestCase):
         self.assertLess(order.index(f"restart:{QUEUE1}"), order.index("stage:verify"))
         self.assertNotIn(f"restart:{QUEUE2}", order)
         self.assertEqual(site.running, {QUEUE1: NEW, QUEUE2: None})
+
+    def test_a_restore_step_that_times_out_is_a_partial_restore(self) -> None:
+        """The environment is already written, so a timed-out start is not a refusal."""
+        site = FakeSite()
+
+        def systemctl(*arguments: str) -> str:
+            if arguments[0] == "start":
+                raise subprocess.TimeoutExpired(["/usr/bin/systemctl", *arguments], 20)
+            return ""
+
+        def restore(document: dict[str, object], identifier: str) -> bool:
+            site.order.append("restore")
+            with ExitStack() as stack:
+                for name, value in {
+                    "systemctl": systemctl,
+                    "run": lambda *_args, **_kwargs: "",
+                    "load_state": lambda _name: "masked",
+                    "clear_dropin": lambda _name: None,
+                    "note_reload": lambda: None,
+                }.items():
+                    stack.enter_context(mock.patch.object(units, name, value))
+                return units.restore(document, identifier)
+
+        order = self.edit(site, fenced=True, restore=restore)
+        self.assertEqual(order[-1], "result:partial:automation_restore", order)

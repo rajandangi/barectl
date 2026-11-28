@@ -6,6 +6,7 @@ recovery items, and the safe-failure proof #410 adds. Each check is an operator-
 outcome or a safe failure on a real Ubuntu 26.04 host.
 """
 
+import datetime
 import json
 import os
 import shlex
@@ -1963,13 +1964,22 @@ class WordPressFullRestore(BackupCase):
         self.assertEqual(safety[0]["scope"], "full")
 
     def laravel_workers(self, laravel: str, path: str) -> tuple[int, dict[str, dict[str, str]]]:
-        """The environment file's mtime and each L5 worker's state, in one native read."""
+        """The configuration's mtime and each L5 worker's state, in one native read.
+
+        The mtime is the cached configuration's when one is in use, since the edit rebuilds
+        it after writing the environment, otherwise the environment file's; both in
+        microseconds.
+        """
         units = " ".join(f"barectl-site-{laravel}-queue{index}.service" for index in (1, 2))
+        cache = f"/var/www/{laravel}/current/bootstrap/cache/config.php"
         lines = self.native(
-            f'stat -c %Y {path}; for unit in {units}; do echo "Unit=$unit"; '
-            "systemctl show --timestamp=unix -p ActiveState -p LoadState -p UnitFileState "
+            f"file={cache}; [ -e $file ] || file={path}; stat -L -c %.6Y $file; "
+            f'for unit in {units}; do echo "Unit=$unit"; '
+            "systemctl show --timestamp=us+utc -p ActiveState -p LoadState -p UnitFileState "
             '-p RefuseManualStart -p InvocationID -p ExecMainStartTimestamp "$unit"; done'
         ).splitlines()
+        seconds, _point, fraction = lines[0].strip().partition(".")
+        self.assertEqual(len(fraction), 6, lines[0])
         workers: dict[str, dict[str, str]] = {}
         unit = ""
         for line in lines[1:]:
@@ -1979,7 +1989,7 @@ class WordPressFullRestore(BackupCase):
                 workers[unit] = {}
             else:
                 workers[unit][key] = value
-        return int(lines[0]), workers
+        return int(seconds) * 1_000_000 + int(fraction), workers
 
     def assert_workers_restarted(
         self,
@@ -1997,9 +2007,14 @@ class WordPressFullRestore(BackupCase):
             )
             self.assertEqual(values["RefuseManualStart"], "no", unit)
             self.assertNotEqual(values["InvocationID"], before[1][unit]["InvocationID"], unit)
-            # A queue worker reads the environment once, when its process starts.
-            started = values["ExecMainStartTimestamp"].removeprefix("@")
-            self.assertGreaterEqual(int(started), written, unit)
+            # A queue worker reads its configuration once, when its process starts.
+            started = datetime.datetime.strptime(
+                values["ExecMainStartTimestamp"].partition(" ")[2], "%Y-%m-%d %H:%M:%S.%f UTC"
+            ).replace(tzinfo=datetime.UTC)
+            epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
+            self.assertGreater(
+                (started - epoch) // datetime.timedelta(microseconds=1), written, unit
+            )
 
     def test_b_the_laravel_environment_edit_meets_the_wordpress_site(self) -> None:
         """L5's Laravel fixture and this item's WordPress site share the server, so the
@@ -2049,7 +2064,8 @@ class WordPressFullRestore(BackupCase):
         )
         self.assertEqual(journal.strip(), "")
         # The fixture's running workers come back unmasked on the new environment (#587).
-        self.assert_workers_restarted(before, self.laravel_workers(laravel, path))
+        first = self.laravel_workers(laravel, path)
+        self.assert_workers_restarted(before, first)
 
         # A second edit leaves every untouched line byte-identical.
         self.native(f"cp {path} /tmp/laravel.env.before")
@@ -2073,6 +2089,7 @@ class WordPressFullRestore(BackupCase):
         ]
         self.assertEqual((removed, added), ([], []))
         self.assertIn("MAIL_FROM_ADDRESS=other@example.com", self.native(f"cat {path}"))
+        self.assert_workers_restarted(first, self.laravel_workers(laravel, path))
         self.assertIn(f"MAIL_PASSWORD={canary}", self.native(f"cat {path}"))
 
 
