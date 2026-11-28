@@ -639,14 +639,53 @@ class LaravelQueueWorkers(LaravelDeployCase):
         ]
         self.assertEqual(job.state, "On, running")
 
-    def test_4_an_explicit_stop_survives_a_restart(self) -> None:
-        from automation import worker_change
-
-        line, unit, _ = self.apply(
-            worker_change.SET_LARAVEL_QUEUE_WORKERS, self.action_inputs("stop"), timeout=120
+    def running_masters(self) -> list[str]:
+        listed = self.native(
+            "systemctl list-units --type=service --state=running --plain --no-legend "
+            "'php-fpm@*.service'"
         )
-        self.assert_succeeded(line, unit)
-        for process in (1, 2):
+        return sorted(line.split()[0] for line in listed.splitlines() if line.strip())
+
+    def test_4_back_to_back_changes_keep_the_masters_and_a_stop_survives_a_restart(
+        self,
+    ) -> None:
+        """Quick changes restart each runtime master once per change (#586).
+
+        Four processes start with one reload and four ``enable`` calls, and the stop that
+        follows disables four services: nine restarts of each master under a restart per
+        reload step, beyond systemd's default start limit of five in ten seconds.
+        """
+        from automation import worker_change
+        from discovery.observations import collect
+
+        masters = self.running_masters()
+        self.assertTrue(masters)
+        wider = PreparationInputs(
+            "",
+            self.identity,
+            worker_action="start",
+            worker_queues=("default",),
+            worker_processes=4,
+            worker_timeout=60,
+        )
+        units = []
+        for inputs in (wider, self.action_inputs("stop")):
+            line, unit, _ = self.apply(worker_change.SET_LARAVEL_QUEUE_WORKERS, inputs, timeout=120)
+            self.assert_succeeded(line, unit)
+            units.append(unit)
+        states = {
+            name: self.native(f"systemctl is-active {name} || true").strip() for name in masters
+        }
+        self.assertEqual(states, dict.fromkeys(masters, "active"))
+        for unit in units:
+            journal = self.native(f"journalctl --no-pager -o cat -u {shlex.quote(unit)}")
+            for name in masters:
+                self.assertEqual(journal.count("barectl-restarted " + name), 1, journal)
+        with self.shell() as shell:
+            observed = collect(shell, sites=False)
+        self.assertTrue(all(row.manageable for row in observed.runtimes), observed.runtimes)
+
+        for process in (1, 2, 3, 4):
             name = self.queue_unit(process)
             self.assertEqual(self.property(name, "ActiveState"), "inactive")
             self.assertEqual(self.property(name, "UnitFileState"), "disabled")
@@ -654,7 +693,7 @@ class LaravelQueueWorkers(LaravelDeployCase):
         # unit has no boot link, so the explicit stop survives it.
         self.native("systemctl daemon-reexec")
         time.sleep(1)
-        for process in (1, 2):
+        for process in (1, 2, 3, 4):
             name = self.queue_unit(process)
             self.assertEqual(self.property(name, "ActiveState"), "inactive")
             self.assertEqual(self.property(name, "UnitFileState"), "disabled")
