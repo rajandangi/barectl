@@ -260,7 +260,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa:
     }
     document.update(site_change.runtime_document(evidence.site, inputs))
     if native is not None:
-        current = tuple(str(site) for site in native["current_sites"])
+        current = site_change.routed_sites(native)
         identity = _account_identity(row) or site_change.review_identity(native, inputs.identifier)
         document.update(
             identity=identity,
