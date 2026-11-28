@@ -7,18 +7,21 @@ closure probe reports. A successful cleanup clears the units its payload names. 
 establishes nothing about real systemd, flock or journald; the native suites do.
 """
 
+import fnmatch
 import hashlib
 import importlib.resources
 import json
 import re
+import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import override
 from unittest import mock
 
 from automation import observation as automation_observation
 from discovery.fakes import DiscoveryTestCase, FakeServer
-from discovery.ssh import CommandResult, ConnectionFailed
+from discovery.ssh import CommandResult, ConnectionFailed, RemoteShell
 from servers.models import Server
 
 from . import engine, native
@@ -37,6 +40,24 @@ _TARGETS = re.compile(r"(barectl-apply-[0-9a-f]{32}\.service)\|[0-9a-f]{32}\|")
 # The engine writes the change kind and its sites into the payload's result function and
 # body filter, and every result line carries them (docs/adr/0035).
 _RESULT_FIELDS = re.compile(r'"change_kind":"([a-z0-9_]+)","sites":(\[[^]]*\])')
+
+
+def sites_digest_on(draft: engine.ReviewDraft, *caddy_sites: str) -> str:
+    """The draft's affected-sites digest on a server whose Caddy files are ``caddy_sites``.
+
+    The shell answers the draft's ``find /etc/caddy/sites … -name PATTERN`` read as find
+    would, so a read of every file and a read of one site's own file list different sites.
+    """
+    words = shlex.split(draft.sites_read)
+    if words[:2] != ["find", "/etc/caddy/sites"]:
+        raise ValueError("Not a Caddy membership read.")
+    pattern = words[words.index("-name") + 1]
+    listed = sorted(site for site in caddy_sites if fnmatch.fnmatchcase(f"{site}.caddy", pattern))
+    result = SimpleNamespace(
+        stdout="".join(f"{site}\n" for site in listed), exit_status=0, truncated=False
+    )
+    shell = mock.Mock(spec=RemoteShell, run=mock.Mock(return_value=result))
+    return engine._sites_digest(shell, draft)
 
 
 def _result_fields(command: str) -> tuple[str, tuple[str, ...]]:

@@ -16,7 +16,7 @@ from discovery.ssh import RemoteShell
 from operations.inputs import PreparationInputs
 
 from . import mirror
-from .change_testing import apply_change
+from .change_testing import add_plain_site, apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 IDENTIFIER = "swpalpha"
@@ -204,6 +204,8 @@ class WordPressCreateMariaDB(WordPressCreateCase):
         from wordpress import actions
 
         base = f"/var/www/{IDENTIFIER}"
+        # The actions and settings below change one site while another one is present (#584).
+        add_plain_site(self, "swpbeta")
         # Reset the administrator password over the confidential channel, and prove the
         # new value signs in while the old one does not.
         apply_change(

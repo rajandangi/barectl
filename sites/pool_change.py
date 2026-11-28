@@ -21,6 +21,7 @@ from . import observation
 from .bodies.common import NativeState
 from .bodies.pool import SitePool
 from .bodies.reasons import SITE_REASONS
+from .change import site_membership_command
 
 SLUG: Final = "set_site_pool"
 BODY_SOURCE: Final = (
@@ -117,13 +118,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 (inputs.identifier,),
             ),
         ),
-        sites_read=(
-            "find /etc/caddy/sites -maxdepth 1 -type f -name "
-            + shlex.quote(inputs.identifier + ".caddy")
-            + " -printf '%f\\n' | sed 's/\\.caddy$//'"
-        )
-        if reportable
-        else "",
+        sites_read=(site_membership_command(inputs.identifier)) if reportable else "",
         current_sites=(inputs.identifier,) if reportable else None,
         stages=("preflight", "pool", "reload", "verify"),
         refusals=tuple(refusals),

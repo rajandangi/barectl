@@ -23,13 +23,13 @@ from discovery.ssh import CommandResult
 from operations import services
 from operations.consent import Scope
 from operations.engine import BodyContext, ChangeKind
-from operations.fakes import APPLY_PERMISSIONS, ChangeTestCase
+from operations.fakes import APPLY_PERMISSIONS, ChangeTestCase, sites_digest_on
 from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview, ChangeRun
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase, assert_query_count_flat_as_history_grows
 from sites.bodies.common import NativeState
-from sites.change import membership_command
+from sites.change import site_membership_command
 from sites.ui_testing import record_http_sites, record_older_snapshots, record_wordpress_sites
 from wordpress import actions
 from wordpress.bodies import actions as body_actions
@@ -150,7 +150,7 @@ class WordPressReviewTests(SimpleTestCase):
         self.assertEqual(draft.document["secret_label"], "New WordPress administrator password")
         self.assertTrue(draft.document["secret_generate"])
         self.assertEqual(draft.stages, ("preflight", "password", "verify"))
-        self.assertEqual(draft.sites_read, membership_command("php84"))
+        self.assertEqual(draft.sites_read, site_membership_command("shop"))
         self.assertEqual(draft.current_sites, ("shop",))
 
     def test_core_verification_is_one_site_effect(self) -> None:
@@ -159,6 +159,20 @@ class WordPressReviewTests(SimpleTestCase):
         self.assertEqual([effect.scope for effect in draft.effects], [Scope.SITE])
         self.assertNotIn("secret_label", draft.document)
         self.assertEqual(draft.stages, ("preflight", "checksums"))
+
+    def test_both_actions_read_only_their_own_site_among_others(self) -> None:
+        drafts = (
+            actions.password_review(
+                evidence(), PreparationInputs("", "shop", admin_username="shopadmin")
+            ),
+            actions.core_review(evidence(), PreparationInputs("", "shop")),
+        )
+        for draft in drafts:
+            with self.subTest(draft.kind):
+                self.assertEqual(
+                    sites_digest_on(draft, "alpha", "shop", "zeta"),
+                    hashlib.sha256(b"shop\n").hexdigest(),
+                )
 
     def test_a_plain_php_site_is_refused(self) -> None:
         draft = actions.core_review(
@@ -515,7 +529,7 @@ class WordPressSecretChannelTests(ChangeTestCase):
         )
         engine.register_kind(test_kind)
         self.addCleanup(engine.register_kind, actions.RESET_PASSWORD)
-        self.remote.results[membership_command("php84")] = CommandResult(0, "shop\n")
+        self.remote.results[site_membership_command("shop")] = CommandResult(0, "shop\n")
 
     def test_the_password_reaches_the_body_sealed_and_leaves_no_trace(self) -> None:
         from operations import engine

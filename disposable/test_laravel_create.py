@@ -19,7 +19,7 @@ from discovery.ssh import RemoteShell
 from operations.inputs import PreparationInputs
 
 from . import mirror
-from .change_testing import apply_change
+from .change_testing import add_plain_site, apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 IDENTIFIER = "slcalpha"
@@ -266,6 +266,8 @@ class LaravelCreateMariaDB(LaravelCreateCase):
         if self.record_state:
             self.skipTest("Recording stops after the transcript checkpoint.")
 
+        # The environment edit changes one site while another one is present (#584).
+        add_plain_site(self, "slcbeta")
         canary = "Barectl-Canary-6d2f4a91"
         path = f"/var/www/{IDENTIFIER}/private/laravel.env"
         apply_change(
