@@ -258,7 +258,7 @@ The state of a site resource that differs from the site convention or holds a se
 _Avoid_: Foreign site, custom site
 
 **Partly applied**:
-The state of a site, or the execution outcome of a run, where some convention resources exist and match while others are absent. A new review creates only what is missing and never replaces what exists.
+The state of a site, or the execution outcome of a run, where some convention resources exist and match while others are absent. A new review creates only what is missing and never replaces what exists. A site whose creation stopped partway is removed and created again instead ([native recovery](docs/recovery.md#after-a-change-stopped-partway)).
 _Avoid_: Rolled back, failed without changes
 
 ### Discovery

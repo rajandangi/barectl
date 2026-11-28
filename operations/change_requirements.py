@@ -55,11 +55,14 @@ SITE_POOL = replace(preparation.SITE, pool=True)
 SITE_READINESS = replace(preparation.SITE, releases_observed=True, no_releases=True)
 SITE_DOMAINS = preparation.SITE
 SITE_DATABASE = preparation.SITE
+# A partly applied site is removable: removing it and creating it again is how a stopped
+# creation recovers (docs/recovery.md#after-a-change-stopped-partway).
 SITE_REMOVE = preparation.Requirements(
     target_stack=True,
     site=True,
     convention=False,
     allow_not_following=True,
+    allow_partly_applied=True,
     needs=frozenset({preparation.Need.CHANGE, preparation.Need.SITE}),
 )
 SITE_CACHE_ON = replace(preparation.SITE, cache=True)

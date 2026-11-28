@@ -89,6 +89,7 @@ if TYPE_CHECKING:
     from disposable.test_http_site_recovery import (
         HttpSiteControllerRecovery,
         ServerStoppedDuringBody,
+        StoppedCreationRemoved,
         WorkerKilledAfterDispatch,
         WorkerKilledBeforeDispatch,
     )
@@ -521,6 +522,7 @@ if TYPE_CHECKING:
         HttpSiteSecurityBehavior,
         HttpSiteControllerRecovery,
         ServerStoppedDuringBody,
+        StoppedCreationRemoved,
         WorkerKilledAfterDispatch,
         WorkerKilledBeforeDispatch,
         SitePHPControllerRecovery,

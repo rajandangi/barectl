@@ -54,7 +54,7 @@ A Site operator applies a Site review; a Shared review needs an Administrator an
 5. Validate the whole Caddy tree with the new file, publish it only if the live file is still what was reviewed, reload Caddy, and check that the running configuration equals the files on disk. A failed reload restores the previous state and keeps the old configuration serving.
 6. Verify the site by requesting `index.php` from the server itself for each name through Caddy, over `https://` for an HTTPS site (waiting briefly for Caddy's first handshake to obtain the certificate) and over `http://` for an HTTP-only site, and checking that PHP answers as the site user. Reachability from the internet is not checked.
 
-After a verified run Barectl queues discovery, and the run page links to the site's page once discovery observes it. A run that stopped after its first change is **partly applied**: what it created stays, and the run page names the stage it reached. Discovery reports the site as partly applied, and a new review proposes only what is missing; it never replaces an existing resource. See [native recovery](recovery.md).
+After a verified run Barectl queues discovery, and the run page links to the site's page once discovery observes it. A run that stopped after its first change is **partly applied**: what it created stays, and the run page names the stage it reached. Discovery reports the site as partly applied, from the server alone, so a fresh controller with an empty database sees the same site. Create refuses that identifier. Use **Remove site** in the site's **Settings**, which removes only what exists and asks for the primary domain when the site's Caddy file was never written, then create the site again. A WordPress install that stopped behind its maintenance gate is finished by a new Create review instead ([WordPress](wordpress.md#recovering-an-interrupted-install)). See [native recovery](recovery.md).
 
 ## Readiness
 
@@ -68,7 +68,7 @@ A site's Settings also holds its **PHP settings**. The form edits the pool tunab
 
 ## Removing a site
 
-Open the site's **Settings** section and use **Remove site**. The page states plainly that
+Open the site's **Settings** section and use **Remove site**. A partly applied site is removable too ([native recovery](recovery.md#after-a-change-stopped-partway)). The page states plainly that
 the site's files and database data are destroyed, and either that it has no backup or that
 its backups are kept. **Prepare removal review** queues a preparation and changes nothing
 on the server.
@@ -87,7 +87,7 @@ site's primary domain exactly; a request without that value changes nothing.
 Applying is one run: it rechecks the reviewed inventory under the native lock, first
 disables and removes the site's backup units, publishes the maintenance gate, validates the
 remaining Caddy tree, removes the site file and reloads Caddy, stops and disables the
-site's services, removes its FPM and HAProxy configuration, drops the database and
+site's services, removes its FPM and HAProxy configuration, restarts each running runtime master (`php-fpm@<runtime>`, which serves no site) so the next site change can verify it after systemd reloads ([runtimes](runtimes.md)), drops the database and
 principal, removes the stored certificate, deletes the site directory and its accounts,
 and verifies that nothing remains while the remaining sites serve. A failure reports **partly applied**; a fresh review names only what remains and
 finishes it. The database and all application data are not recoverable after the run.

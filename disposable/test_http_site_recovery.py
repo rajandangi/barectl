@@ -614,3 +614,68 @@ class ServerStoppedDuringBody(ControllerRecoveryMixin):
             )
             self.assertEqual(self.submissions(), before, "Recovery submitted the run again.")
             self.assertEqual(self.loaded_units(), [])
+
+
+@tag(SCENARIO_TAG)
+class StoppedCreationRemoved(ScenarioTestCase):
+    """A creation killed mid-body is removed and created again from server evidence (#578)."""
+
+    layer = "L1"
+    prefix = "s3"
+
+    def test_a_stopped_creation_is_removed_and_created_again(self) -> None:
+        from discovery.models import SiteState
+        from discovery.observations import collect
+        from operations.inputs import PreparationInputs
+        from sites import change as site_change
+        from sites import remove as remove_kind
+
+        from .change_testing import apply_change, submit_change, wait_result
+
+        identifier = "s3stopped"
+        domain = identifier + ".example.com"
+        inputs = PreparationInputs("php84", identifier, (domain,))
+        submitted = submit_change(self, site_change.CREATE_SITE, inputs)
+        unit = shlex.quote(submitted.unit)
+        # Kill the body once it reports the pool stage: the account and layout exist,
+        # and the site has no Caddy route yet.
+        self.native(
+            "deadline=$(( $(date +%s) + 60 )); "
+            "until journalctl --no-pager -o cat -u " + unit + " | grep -qx 'barectl-stage pool'; "
+            "do [ $(date +%s) -lt $deadline ] || exit 1; "
+            "systemctl is-active --quiet " + unit + " || "
+            '{ echo "the body ended before the pool stage"; exit 1; }; '
+            "sleep .02; done; "
+            "systemctl kill --kill-whom=all --signal=KILL " + unit + "; "
+            "while systemctl is-active --quiet " + unit + "; do sleep .1; done",
+            timeout=90,
+        )
+        self.assertNotIn("barectl-result", self.native(f"journalctl --no-pager -o cat -u {unit}"))
+
+        with self.shell() as shell:
+            sites = {site.identifier: site for site in collect(shell).sites.value}
+            self.assertEqual(sites[identifier].state, SiteState.PARTLY_APPLIED)
+            self.assertEqual(sites[identifier].server_names, ())
+            again = site_change.CREATE_SITE.review(
+                site_change.CREATE_SITE.inspect(shell, inputs), inputs
+            )
+        self.assertFalse(again.eligible)
+        self.assertIn(site_change.REMOVE_PARTIAL, again.refusals)
+
+        removal = submit_change(
+            self, remove_kind.REMOVE, PreparationInputs("", identifier, primary=domain)
+        )
+        self.assertEqual(removal.review.document["confirmation"], domain)
+        wait_result(self, removal, timeout=120)
+        self.assertEqual(self.native(remove_kind.presence_command(identifier)).strip(), "")
+        # Removal's daemon-reload unbinds the runtime master, so it restarts it for Create.
+        self.assertIn(
+            "barectl-restarted php-fpm@php84.service",
+            self.native(f"journalctl --no-pager -o cat -u {shlex.quote(removal.unit)}"),
+        )
+
+        apply_change(self, site_change.CREATE_SITE, inputs, timeout=120)
+        self.assertIn(
+            identifier,
+            self.native(f"curl --fail --silent -H 'Host: {domain}' http://127.0.0.1/"),
+        )
