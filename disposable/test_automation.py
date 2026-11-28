@@ -22,7 +22,7 @@ from automation.workers import WorkerDefinition
 from discovery import recorded, ssh
 from operations.inputs import PreparationInputs
 
-from .change_testing import apply_change
+from .change_testing import apply_change, apply_run
 from .scenario_testing import SCENARIO_TAG
 from .test_laravel_deploy import LaravelDeployCase
 from .test_wordpress_create import WordPressCreateCase
@@ -121,12 +121,23 @@ class WordPressServerCron(WordPressCreateCase):
 
     def test_2_turns_on_server_cron_and_page_loads_stop_running_it(self) -> None:
         self.wait_manageable()
-        apply_change(
+        listed = self.native(
+            "systemctl list-units --type=service --state=running --plain --no-legend "
+            "'php-fpm@*.service'"
+        )
+        masters = [line.split()[0] for line in listed.splitlines() if line.strip()]
+        self.assertTrue(masters)
+        submitted = apply_run(
             self,
             change.SET_WORDPRESS_SERVER_CRON,
             PreparationInputs("", IDENTIFIER, schedule_state="on"),
             timeout=180,
         )
+        # The publication's reload and the timer's enable restart each runtime master once
+        # (docs/runtimes.md#restarting-the-runtime-masters-after-a-systemd-reload).
+        journal = self.native(f"journalctl --no-pager -o cat -u {shlex.quote(submitted.unit)}")
+        for name in masters:
+            self.assertEqual(journal.count("barectl-restarted " + name), 1, journal)
         timer = timer_name(IDENTIFIER, "wpcron")
         service = service_name(IDENTIFIER, "wpcron")
         self.assertIn("active", self.property(timer, "ActiveState"))

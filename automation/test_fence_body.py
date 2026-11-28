@@ -7,6 +7,7 @@ restarts the runtime masters at most once (#586).
 
 import json
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -347,20 +348,22 @@ def _active(name):
 
 def restart_runtime_masters():
     sys.stdout.write("barectl-restarted php-fpm@php84.service\\n")
+    sys.stdout.flush()
 """
 
 
-def body_output(steps: str) -> list[str]:
-    """Run the assembled unit helpers and ``steps`` as one body; its printed lines."""
+def body_argv(steps: str) -> list[str]:
+    """The assembled unit helpers and ``steps`` as one body's argv."""
     program = "\n".join(
         (_PRELUDE, AUTOMATION_SOURCE, _STUBS, "document = json.loads(sys.argv[1])", steps)
     )
+    return [sys.executable, "-c", "import json\n" + program, json.dumps(document())]
+
+
+def body_output(steps: str) -> list[str]:
+    """Run the body built from ``steps``; its printed lines."""
     completed = subprocess.run(  # noqa: S603 - the test's own interpreter
-        [sys.executable, "-c", "import json\n" + program, json.dumps(document())],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
+        body_argv(steps), capture_output=True, text=True, timeout=30, check=False
     )
     return completed.stdout.splitlines()
 
@@ -388,6 +391,24 @@ class OneRestartPerBodyTests(SimpleTestCase):
     def test_a_body_that_fails_after_a_reload_still_restarts_the_masters_once(self) -> None:
         lines = body_output(f"daemon_reload()\nenable_timer({TIMER!r})\nraise ValueError")
         self.assertEqual(lines, ["barectl-restarted php-fpm@php84.service"])
+
+    def test_a_stopped_body_restarts_the_masters_once_and_still_dies_by_sigterm(self) -> None:
+        steps = (
+            f"daemon_reload()\nenable_timer({TIMER!r})\n"
+            'sys.stdout.write("ready\\n")\nsys.stdout.flush()\n'
+            f"import time\ntime.sleep(30)\n{RESULT}"
+        )
+        with subprocess.Popen(  # noqa: S603 - the test's own interpreter
+            body_argv(steps), stdout=subprocess.PIPE, text=True
+        ) as body:
+            if body.stdout is None:
+                self.fail("The body has no output pipe.")
+            self.assertEqual(body.stdout.readline(), "ready\n")
+            body.send_signal(signal.SIGTERM)
+            rest = body.stdout.read().splitlines()
+            returncode = body.wait(timeout=30)
+        self.assertEqual(returncode, -signal.SIGTERM)
+        self.assertEqual(rest, ["barectl-restarted php-fpm@php84.service"])
 
     def test_a_body_that_never_reloads_restarts_nothing(self) -> None:
         lines = body_output(f"load_state({TIMER!r})\n{RESULT}")
