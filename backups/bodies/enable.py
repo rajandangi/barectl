@@ -30,7 +30,7 @@ PARTIAL = 2
 
 if TYPE_CHECKING:
     # Assembled into this body by backups/change.py.
-    from runtimes.bodies.masters import restart_runtime_masters
+    from runtimes.bodies.masters import note_reload
 
     def check_mode(payload: str, location: str) -> None: ...
 
@@ -235,14 +235,16 @@ def install_check(value: object, identifier: str) -> None:  # noqa: C901 - one r
             partial("backup_check")
         if existing is None:
             write_private(path, text.encode(), mode=0o644)
-    if subprocess.run(
+    reloaded = subprocess.run(
         ["/usr/bin/systemctl", "daemon-reload"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         timeout=30,
         check=False,
-    ).returncode:
+    )
+    note_reload()
+    if reloaded.returncode:
         partial("backup_check")
     for role in ("check", "checkoffsite"):
         if subprocess.run(  # noqa: S603 - fixed native argv
@@ -254,7 +256,6 @@ def install_check(value: object, identifier: str) -> None:  # noqa: C901 - one r
             check=False,
         ).returncode:
             partial("backup_check")
-    restart_runtime_masters()
 
 
 def check_unit_path(identifier: str, key: str) -> str | None:

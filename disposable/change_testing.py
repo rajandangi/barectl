@@ -174,6 +174,22 @@ def apply_change(
     expected: str = "succeeded",
     reason: str = "",
 ) -> ChangeReview:
+    return apply_run(
+        test, kind, inputs, timeout=timeout, secret=secret, expected=expected, reason=reason
+    ).review
+
+
+def apply_run(
+    test: ScenarioTestCase,
+    kind: engine.ChangeKind,
+    inputs: PreparationInputs,
+    *,
+    timeout: float = 30,
+    secret: bytes | None = None,
+    expected: str = "succeeded",
+    reason: str = "",
+) -> Submitted:
+    """Apply one change as :func:`apply_change` does, keeping its run's unit."""
     submitted = submit_change(test, kind, inputs, secret=secret)
     if not submitted.no_changes:
         wait_result(test, submitted, timeout=timeout, expected=expected, reason=reason)
@@ -186,4 +202,4 @@ def apply_change(
                 time.sleep(0.5)
                 verified = kind.verify(shell, submitted.review)
             test.assertTrue(verified)
-    return submitted.review
+    return submitted
