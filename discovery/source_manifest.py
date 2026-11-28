@@ -100,6 +100,7 @@ SOURCES = (
     "operations/bodies/clear_runs.sh",
     "runtimes/bodies/add.sh",
     "runtimes/bodies/defaults.py",
+    "runtimes/bodies/masters.py",
     "runtimes/bodies/php-fpm@.service",
     "runtimes/bodies/probe.php",
     "runtimes/bodies/read.py",

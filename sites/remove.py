@@ -452,13 +452,6 @@ def _details(
             ),
         },
         {
-            "label": "PHP runtimes",
-            "value": (
-                "Each running runtime master restarts after systemd reloads, so the next site "
-                "change can verify it. It serves no site."
-            ),
-        },
-        {
             "label": "Other sites",
             "value": (
                 f"{len(other)} other site(s) keep serving; Caddy reloads the whole tree."
@@ -799,5 +792,6 @@ REMOVE: Final = ChangeKind(
         "sites/bodies/remove.py",
         "automation/convention.py",
         "automation/bodies/units.py",
+        "runtimes/bodies/masters.py",
     ),
 )

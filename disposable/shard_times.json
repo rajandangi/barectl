@@ -2,6 +2,7 @@
   "recorded": "hosted Native amd64, run 41343892143 at d5186fb, three native lanes and exact-key snapshot hits; first-shard stages from hosted run 41338468134 at 63205bd",
   "sources": {
     "disposable.test_automation.LaravelQueueWorkers": "hosted run 41343892143 at d5186fb, three lanes",
+    "disposable.test_automation.ReloadKeepsSitesCreatable": "local run 2026-11-28 capacity14",
     "disposable.test_automation.WordPressServerCron": "hosted run 41343892143 at d5186fb, three lanes",
     "disposable.test_backups.BackupFailure": "hosted run 41343892143 at d5186fb, three lanes",
     "disposable.test_backups.BackupLifecycle": "hosted run 41343892143 at d5186fb, three lanes",
@@ -113,6 +114,7 @@
   },
   "scenarios": {
     "disposable.test_automation.LaravelQueueWorkers": 137.9,
+    "disposable.test_automation.ReloadKeepsSitesCreatable": 41.7,
     "disposable.test_automation.WordPressServerCron": 175.9,
     "disposable.test_backups.BackupFailure": 111.5,
     "disposable.test_backups.BackupLifecycle": 135.2,

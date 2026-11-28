@@ -21,7 +21,7 @@ from typing import Final
 
 from django.utils import timezone as django_timezone
 
-from automation.bodies.source import AUTOMATION_SOURCE, without_imports
+from automation.bodies.source import AUTOMATION_SOURCE, MASTERS_SOURCE, without_imports
 from bootstrap.standing import Standing
 from databases import observation as database_observation
 from discovery.observations import collect
@@ -87,6 +87,8 @@ INTEGRITY_CORE: Final = without_imports(
 )
 ENABLE_SOURCE: Final = (
     importlib.resources.files("backups.bodies").joinpath("enable.py").read_text()
+    + "\n"
+    + MASTERS_SOURCE
     + "\n"
     + NATIVE_SOURCE
     + "\n"
@@ -1077,6 +1079,7 @@ ENABLE: Final = ChangeKind(
     reasons=ENABLE_REASONS,
     body_sources=(
         "backups/bodies/enable.py",
+        "runtimes/bodies/masters.py",
         "backups/bodies/native.py",
         "backups/bodies/integrity.py",
     ),

@@ -27,6 +27,7 @@ from databases.packages import (
 from discovery.root_read import run_root
 from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
+from operations import recovery
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import PreparationInputs
@@ -66,6 +67,7 @@ BODY_BYTES: Final = (
     .joinpath("automatic_updates.sh")
     .read_text()
     .replace("# SECURITY_DIGEST_FUNCTIONS", DIGEST_FUNCTIONS)
+    .replace("# RESTART_RUNTIME_MASTERS", recovery.runtime_masters_shell().rstrip("\n"))
     .rstrip("\n")
     .encode()
 )

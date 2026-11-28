@@ -32,6 +32,7 @@ from sites.configuration import PHP_RUNTIMES
 
 from . import convention, observation
 from .bodies.reasons import SCHEDULER_REASONS
+from .bodies.source import MASTERS_SOURCE
 from .change import presence_command
 from .status import STATUS_SENTENCE, ScheduleStatus
 
@@ -60,6 +61,7 @@ _IMPORTS: Final = (
     "sites.bodies.common",
     "automation.convention",
     "automation.bodies.units",
+    "runtimes.bodies.masters",
 )
 
 
@@ -81,6 +83,7 @@ def _without_imports(text: str) -> str:
 BODY_SOURCE: Final = "\n".join(
     (
         site_observation.COMMON_SOURCE,
+        MASTERS_SOURCE,
         importlib.resources.files("automation").joinpath("convention.py").read_text(),
         _without_imports(
             importlib.resources.files("automation.bodies").joinpath("units.py").read_text()

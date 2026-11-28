@@ -107,6 +107,9 @@ class FakeSystemd:
     def wait_slice_empty(self, name: str, budget: int) -> bool:
         return self.slice_empty
 
+    def restart_runtime_masters(self) -> None:
+        self.calls.append(["restart-runtime-masters"])
+
 
 class InstalledUnitsTests(SimpleTestCase):
     def test_backup_integrity_units_are_not_automation_units(self) -> None:
@@ -138,6 +141,7 @@ class FenceBodyTests(SimpleTestCase):
             "refuse_manual_start",
             "installed_units",
             "write_dropin",
+            "restart_runtime_masters",
             "clear_dropin",
         ):
             self.enterContext(mock.patch.object(units, name, getattr(self.fake, name)))
@@ -156,6 +160,7 @@ class FenceBodyTests(SimpleTestCase):
                 ["mask", "--runtime", SERVICE],
                 ["write-dropin", SERVICE],
                 ["daemon-reload"],
+                ["restart-runtime-masters"],
                 ["stop", TIMER],
                 ["stop", SERVICE],
                 ["stop", SLICE],
@@ -166,6 +171,8 @@ class FenceBodyTests(SimpleTestCase):
         self.assertTrue(units.fence(document(), SHOP, gate=True))
         self.assertIn(["disable", TIMER], self.verbs())
         self.assertLess(self.verbs().index(["disable", TIMER]), self.verbs().index(["stop", TIMER]))
+        # ``disable`` reloads systemd, so the runtime masters restart after it (#580).
+        self.assertEqual(self.verbs()[-1], ["restart-runtime-masters"])
 
     def test_a_gate_disables_boot_activation_for_every_reviewed_unit(self) -> None:
         self.fake.installed.add(WORKER)
@@ -236,8 +243,11 @@ class FenceBodyTests(SimpleTestCase):
                 ["unmask", "--runtime", SERVICE],
                 ["clear-dropin", SERVICE],
                 ["daemon-reload"],
+                ["restart-runtime-masters"],
                 ["enable", TIMER],
                 ["start", TIMER],
+                # ``enable`` reloads systemd too, so the masters restart after it (#580).
+                ["restart-runtime-masters"],
             ],
         )
 
@@ -282,5 +292,6 @@ class FenceBodyTests(SimpleTestCase):
                 ["unmask", "--runtime", SERVICE],
                 ["reset-failed", SERVICE],
                 ["daemon-reload"],
+                ["restart-runtime-masters"],
             ],
         )
