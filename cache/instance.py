@@ -33,6 +33,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from sites import observation as site_observation
 from sites.bodies.reasons import SITE_REASONS
+from sites.change import site_membership_command
 
 from . import convention, observation
 from .bodies.reasons import OBJECT_CACHE_REASONS
@@ -1128,13 +1129,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa:
         uptime_centiseconds=(
             int(str(evidence.value["uptime"])) if evidence.value is not None else None
         ),
-        sites_read=(
-            "find /etc/caddy/sites -maxdepth 1 -type f -name "
-            + shlex.quote(identifier + ".caddy")
-            + " -printf '%f\\n' | sed 's/\\.caddy$//'"
-        )
-        if site is not None
-        else "",
+        sites_read=(site_membership_command(identifier)) if site is not None else "",
         current_sites=(identifier,) if site is not None else None,
         document={**document, "note": note},
     )

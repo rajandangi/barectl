@@ -2,6 +2,7 @@
 
 import base64
 import gzip
+import hashlib
 import json
 from typing import cast
 from unittest import mock
@@ -18,10 +19,11 @@ from laravel.bodies.common import (
     environment_value,
 )
 from operations.engine import BodyContext, NativeBody
+from operations.fakes import sites_digest_on
 from operations.inputs import InputShape, PreparationInputs, decode_inputs
 from operations.views import _submitted_secret
 from sites.bodies.common import NativeState
-from sites.change import membership_command
+from sites.change import site_membership_command
 
 CANARY = "Barectl-Canary-8a3f1d20"
 DIGEST = "a" * 64
@@ -176,10 +178,18 @@ class EnvironmentReviewTests(SimpleTestCase):
         self.assertTrue(draft.writes_secrets)
         fields = cast(list[dict[str, object]], draft.document["secret_fields"])
         self.assertEqual([field["key"] for field in fields], ["APP_URL", "MAIL_PASSWORD"])
-        self.assertEqual(draft.sites_read, membership_command("php84"))
+        self.assertEqual(draft.sites_read, site_membership_command("shop"))
         self.assertEqual(draft.document["environment_digest"], "f" * 64)
         changes = cast(list[dict[str, object]], draft.document["changes"])
         self.assertEqual([change["action"] for change in changes], ["set", "set", "remove"])
+
+    def test_the_review_reads_only_its_own_site_among_others(self) -> None:
+        draft = settings.review(
+            evidence(), PreparationInputs("", "shop", settings_changes=(("OLD_KEY", "remove"),))
+        )
+        self.assertEqual(
+            sites_digest_on(draft, "alpha", "shop", "zeta"), hashlib.sha256(b"shop\n").hexdigest()
+        )
 
     def test_a_removal_only_edit_needs_no_confidential_value(self) -> None:
         draft = settings.review(

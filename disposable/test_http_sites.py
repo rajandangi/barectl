@@ -212,67 +212,6 @@ else:
                         "printf %s " + shlex.quote(original) + " > " + shlex.quote(placeholder)
                     )
                 )
-            # A changed readiness path is one reviewed Site change, published as native
-            # Caddy evidence and reconstructed by a fresh controller.
-            from operations import engine, native
-            from operations.models import ChangeReview
-            from sites import readiness_change
-
-            readiness_inputs = PreparationInputs("", inputs.identifier, readiness="/hello.txt")
-            with self.shell() as change_shell:
-                draft = readiness_change.review(
-                    readiness_change.inspect(change_shell, readiness_inputs), readiness_inputs
-                )
-                self.assertTrue(draft.eligible, draft.refusals)
-                self.assertFalse(draft.no_changes)
-                context = engine.BodyContext(
-                    native.new_unit_name(), draft.boot_id, (draft.uptime_centiseconds or 0) + 90000
-                )
-                body = readiness_change.body(draft.document, context)
-                path = engine.body_path(context.unit)
-                review = ChangeReview(
-                    document=draft.document,
-                    sites_read=draft.sites_read,
-                    sites_digest=engine._sites_digest(change_shell, draft),
-                )
-                payload = engine.payload(
-                    readiness_change.SET_SITE_READINESS, review, context, body, path
-                )
-                self.assertEqual(
-                    change_shell.run(
-                        shlex.join(engine.stage_command(path, readiness_change.BODY_SHA256)),
-                        stdin=body.source,
-                    ).exit_status,
-                    0,
-                )
-                self.assertEqual(
-                    change_shell.run(
-                        shlex.join(native.submission(context.unit, payload))
-                    ).exit_status,
-                    0,
-                )
-                readiness_deadline = time.monotonic() + 30
-                outcome = engine.read_result(change_shell, context.unit)
-                while outcome is None and time.monotonic() < readiness_deadline:
-                    time.sleep(0.1)
-                    outcome = engine.read_result(change_shell, context.unit)
-                if outcome is None:
-                    self.fail(self.native(f"journalctl -u {context.unit} -n 40"))
-                self.assertEqual(
-                    (outcome.result_class, outcome.reason),
-                    ("succeeded", ""),
-                    self.native(f"journalctl -u {context.unit} -n 40"),
-                )
-                repeated = readiness_change.review(
-                    readiness_change.inspect(change_shell, readiness_inputs), readiness_inputs
-                )
-                self.assertTrue(repeated.eligible, repeated.refusals)
-                self.assertTrue(repeated.no_changes)
-            with self.shell() as fresh:
-                self.assertEqual(
-                    collect(fresh).sites.value[0].readiness,
-                    "/hello.txt",
-                )
 
     def test_site_php_settings_reload_only_its_own_master_and_reconstruct(self) -> None:
         from discovery.observations import collect

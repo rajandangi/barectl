@@ -23,6 +23,7 @@ from runtimes.catalog import Architecture, architecture_of, load
 from . import observation
 from .bodies.common import NODE_INTERRUPTED, SiteNodeState
 from .bodies.reasons import SITE_REASONS
+from .change import site_membership_command
 
 CHOICES: Final = ("nodejs_22", "nodejs_24")
 SLUG: Final = "set_site_node"
@@ -185,13 +186,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 (inputs.identifier,),
             ),
         ),
-        sites_read=(
-            "find /etc/caddy/sites -maxdepth 1 -type f -name "
-            + shlex.quote(inputs.identifier + ".caddy")
-            + " -printf '%f\\n' | sed 's/\\.caddy$//'"
-        )
-        if state
-        else "",
+        sites_read=(site_membership_command(inputs.identifier)) if state else "",
         current_sites=(inputs.identifier,) if state else None,
         stages=("preflight", "links", "verify"),
         refusals=tuple(refusals),
