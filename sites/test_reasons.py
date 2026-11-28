@@ -62,7 +62,8 @@ class SharedSiteReasonTests(SimpleTestCase):
         sentence = engine.reason_text("refused", "automation_fence")
 
         self.assertIn("background work did not stop", sentence)
-        self.assertIn("stays paused", sentence)
+        self.assertIn("may stay paused", sentence)
+        self.assertIn("Scheduled tasks or Queue workers", sentence)
 
     def test_a_fence_that_stopped_after_a_mask_points_to_the_background_work_controls(
         self,

@@ -163,6 +163,22 @@ class PresentationTests(SimpleTestCase):
         self.assertEqual(view.headline, "The backup did not run.")
         self.assertIn("Scheduled tasks or Queue workers", view.detail)
 
+    def test_a_partial_capture_without_a_snapshot_is_no_recovery_point(self) -> None:
+        """#590: a Laravel deploy must not offer a point the capture never wrote."""
+        for snapshots, saved in ((0, False), (2, True)):
+            with self.subTest(snapshots=snapshots):
+                result = observation.BackupResult(
+                    "partial",
+                    "automation_restore",
+                    "full",
+                    "manual",
+                    "2026-10-27T11:00:00+00:00",
+                    "0123456789abcdef",
+                    snapshots,
+                    0,
+                )
+                self.assertEqual(result.succeeded, saved)
+
 
 def _line(value: dict[str, object], usec: int = 1_762_000_000_000_000) -> str:
     return json.dumps(
