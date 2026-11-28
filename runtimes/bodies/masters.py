@@ -1,14 +1,26 @@
-"""Restart the running runtime PHP masters after a body reloads systemd (#580).
+"""Restart the running runtime PHP masters once after a body reloads systemd (#580, #586).
 
 docs/runtimes.md#restarting-the-runtime-masters-after-a-systemd-reload. Assembled as source
 text into every Python body that reloads systemd; it imports only the standard library.
 """
 
+import atexit
 import re
 import subprocess
 import sys
 
 RUNTIME_MASTER = re.compile(r"php-fpm@php[0-9]{2}\.service")
+
+
+def note_reload() -> None:
+    """Restart the runtime masters when this body exits, once however often it reloaded.
+
+    A restart per reload step can exceed the masters' start limit across a few quick
+    changes. The exit path covers every outcome, including a refusal or an exception after
+    the reload; the controller reads a run only once its unit has ended.
+    """
+    atexit.unregister(restart_runtime_masters)
+    atexit.register(restart_runtime_masters)
 
 
 def restart_runtime_masters() -> None:

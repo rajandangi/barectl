@@ -1,10 +1,14 @@
 """The body-side fence and restore, against a simulated systemd (#395).
 
-The native suite proves the real stop/start; this layer proves the order, the refusals and
-that restore starts exactly the reviewed set and proves it active.
+The native suite proves the real stop/start; this layer proves the order, the refusals,
+that restore starts exactly the reviewed set and proves it active, and that one body
+restarts the runtime masters at most once (#586).
 """
 
+import json
 import pathlib
+import subprocess
+import sys
 import tempfile
 from typing import override
 from unittest import mock
@@ -12,6 +16,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from automation.bodies import units
+from automation.bodies.source import AUTOMATION_SOURCE
 
 SHOP = "shop"
 TIMER = "barectl-site-shop-wpcron.timer"
@@ -49,6 +54,7 @@ class FakeSystemd:
         # The site's installed unit files, independent of the loaded unit state.
         self.installed = {TIMER, SERVICE}
         self.slice_empty = True
+        self.reloads_noted = 0
 
     def systemctl(self, *arguments: str) -> str:
         self.calls.append(list(arguments))
@@ -107,8 +113,8 @@ class FakeSystemd:
     def wait_slice_empty(self, name: str, budget: int) -> bool:
         return self.slice_empty
 
-    def restart_runtime_masters(self) -> None:
-        self.calls.append(["restart-runtime-masters"])
+    def note_reload(self) -> None:
+        self.reloads_noted += 1
 
 
 class InstalledUnitsTests(SimpleTestCase):
@@ -141,7 +147,7 @@ class FenceBodyTests(SimpleTestCase):
             "refuse_manual_start",
             "installed_units",
             "write_dropin",
-            "restart_runtime_masters",
+            "note_reload",
             "clear_dropin",
         ):
             self.enterContext(mock.patch.object(units, name, getattr(self.fake, name)))
@@ -160,7 +166,6 @@ class FenceBodyTests(SimpleTestCase):
                 ["mask", "--runtime", SERVICE],
                 ["write-dropin", SERVICE],
                 ["daemon-reload"],
-                ["restart-runtime-masters"],
                 ["stop", TIMER],
                 ["stop", SERVICE],
                 ["stop", SLICE],
@@ -171,8 +176,9 @@ class FenceBodyTests(SimpleTestCase):
         self.assertTrue(units.fence(document(), SHOP, gate=True))
         self.assertIn(["disable", TIMER], self.verbs())
         self.assertLess(self.verbs().index(["disable", TIMER]), self.verbs().index(["stop", TIMER]))
-        # ``disable`` reloads systemd, so the runtime masters restart after it (#580).
-        self.assertEqual(self.verbs()[-1], ["restart-runtime-masters"])
+        # The masks, the reload and ``disable`` reload systemd, so the body restarts the
+        # runtime masters when it exits (#586).
+        self.assertGreater(self.fake.reloads_noted, 0)
 
     def test_a_gate_disables_boot_activation_for_every_reviewed_unit(self) -> None:
         self.fake.installed.add(WORKER)
@@ -220,6 +226,7 @@ class FenceBodyTests(SimpleTestCase):
         plan = document(services=[SERVICE, WORKER], resume=[TIMER])
         self.assertFalse(units.fence(plan, SHOP))
         self.assertEqual(self.verbs(), [], "A stale resume set must not mask or stop anything.")
+        self.assertEqual(self.fake.reloads_noted, 0)
 
     def test_a_unit_removed_after_the_review_refuses_with_nothing_changed(self) -> None:
         self.fake.installed.remove(SERVICE)
@@ -243,13 +250,11 @@ class FenceBodyTests(SimpleTestCase):
                 ["unmask", "--runtime", SERVICE],
                 ["clear-dropin", SERVICE],
                 ["daemon-reload"],
-                ["restart-runtime-masters"],
                 ["enable", TIMER],
                 ["start", TIMER],
-                # ``enable`` reloads systemd too, so the masters restart after it (#580).
-                ["restart-runtime-masters"],
             ],
         )
+        self.assertGreater(self.fake.reloads_noted, 0)
 
     def test_a_fenced_unit_refuses_a_manual_start(self) -> None:
         self.assertTrue(units.fence(document(), SHOP))
@@ -292,6 +297,98 @@ class FenceBodyTests(SimpleTestCase):
                 ["unmask", "--runtime", SERVICE],
                 ["reset-failed", SERVICE],
                 ["daemon-reload"],
-                ["restart-runtime-masters"],
             ],
         )
+        self.assertGreater(self.fake.reloads_noted, 0)
+
+
+# The assembled helpers with systemd replaced: every argv is recorded, every unit is loaded
+# and the restart prints its journal line, so the program's output is the body's journal.
+_PRELUDE = """
+class ReviewedPreimageChanged(Exception):
+    pass
+
+
+def run(args, text=None, *, check=True):
+    return ""
+
+
+def safe(path, *, directory):
+    return True
+
+
+def replace_site_file(path, text, expected):
+    pass
+"""
+_STUBS = """
+def load_state(name):
+    return "loaded"
+
+
+def resume_matches(plan, identifier):
+    return True
+
+
+def write_dropin(name):
+    pass
+
+
+def clear_dropin(name):
+    pass
+
+
+def wait_slice_empty(name, budget_seconds):
+    return True
+
+
+def _active(name):
+    return True
+
+
+def restart_runtime_masters():
+    sys.stdout.write("barectl-restarted php-fpm@php84.service\\n")
+"""
+
+
+def body_output(steps: str) -> list[str]:
+    """Run the assembled unit helpers and ``steps`` as one body; its printed lines."""
+    program = "\n".join(
+        (_PRELUDE, AUTOMATION_SOURCE, _STUBS, "document = json.loads(sys.argv[1])", steps)
+    )
+    completed = subprocess.run(  # noqa: S603 - the test's own interpreter
+        [sys.executable, "-c", "import json\n" + program, json.dumps(document())],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    return completed.stdout.splitlines()
+
+
+RESULT = 'sys.stdout.write("barectl-result {}\\n")'
+
+
+class OneRestartPerBodyTests(SimpleTestCase):
+    """The body restarts the runtime masters once, however often it reloaded (#586)."""
+
+    def test_a_body_that_fences_restores_and_enables_restarts_the_masters_once(self) -> None:
+        lines = body_output(
+            "\n".join(
+                (
+                    f"fence(document, {SHOP!r}, gate=True)",
+                    f"restore(document, {SHOP!r})",
+                    f"enable_timer({TIMER!r})",
+                    f"enable_service({WORKER!r})",
+                    RESULT,
+                )
+            )
+        )
+        self.assertEqual(lines, ["barectl-result {}", "barectl-restarted php-fpm@php84.service"])
+
+    def test_a_body_that_fails_after_a_reload_still_restarts_the_masters_once(self) -> None:
+        lines = body_output(f"daemon_reload()\nenable_timer({TIMER!r})\nraise ValueError")
+        self.assertEqual(lines, ["barectl-restarted php-fpm@php84.service"])
+
+    def test_a_body_that_never_reloads_restarts_nothing(self) -> None:
+        lines = body_output(f"load_state({TIMER!r})\n{RESULT}")
+        self.assertEqual(lines, ["barectl-result {}"])

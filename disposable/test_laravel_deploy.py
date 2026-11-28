@@ -28,7 +28,7 @@ from operations.models import ChangeReview
 from sites.observation import python_command
 
 from . import mirror
-from .change_testing import apply_change
+from .change_testing import apply_change, wait_inactive
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 MARIADB_SOCKET = "/run/mysqld/mysqld.sock"
@@ -382,6 +382,9 @@ class LaravelDeployCase(ScenarioTestCase):
                 line = engine.read_result(shell, unit)
             if line is None:
                 self.fail("No native outcome: " + self.native(f"journalctl -u {unit} -n 40"))
+            # The body restarts the runtime masters after its result line, as it exits; the
+            # worker closes a run only once its unit has ended, so the harness waits too.
+            wait_inactive(shell, unit)
         return line, unit, draft
 
     def deploy_inputs(self, *, migrations: bool = True) -> PreparationInputs:
