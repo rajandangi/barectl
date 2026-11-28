@@ -8,6 +8,7 @@ lock and before their own mutation. Nothing here takes the global mutation lock.
 import contextlib
 import pathlib
 import re
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -479,7 +480,8 @@ def restore(document: object, identifier: str) -> bool:
                 run(["/usr/bin/systemctl", "enable", name], check=False)
             systemctl("start", name)
         return all(_active(name) for name in plan.resume)
-    except OSError, ValueError, KeyError:
+    except OSError, ValueError, KeyError, subprocess.TimeoutExpired:
+        # The change already wrote: a timed-out step is a partial restore, not a refusal.
         return False
 
 

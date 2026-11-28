@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from typing import cast
 
 from automation.bodies.units import fence, restore
-from automation.bodies.worker_env import restart_workers
+from automation.bodies.worker_env import restart_unfenced_workers
 from cache.convention import (
     MAXMEMORY_MIB,
     config_shape,
@@ -493,27 +493,8 @@ def _connected(settings: dict[str, object], version: str) -> bool:
     return all(line in text for line in required) and f"Plugin Version: {version}" in text
 
 
-def _fenced_units(document: dict[str, object], identifier: str) -> bool:
-    """Whether the reviewed fence plan stops this site's own services.
-
-    A fenced cache change stops the site's workers before it edits the environment, so a
-    restart here would start a masked unit and fail; ``restore`` starts exactly the reviewed
-    work again, on the new environment, after the change verifies.
-    """
-    plan = document.get("automation_fence")
-    if not isinstance(plan, dict):
-        return False
-    for entry in plan.get("sites", []):
-        if isinstance(entry, dict) and entry.get("identifier") == identifier:
-            services = entry.get("services")
-            return isinstance(services, list) and bool(services)
-    return False
-
-
 def _restart_site_workers(document: dict[str, object], identifier: str) -> bool:
-    if _fenced_units(document, identifier):
-        return True
-    restarted, succeeded = restart_workers(identifier)
+    restarted, succeeded = restart_unfenced_workers(document, identifier)
     if restarted:
         stage("workers")
     return succeeded

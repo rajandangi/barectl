@@ -175,9 +175,11 @@ A Laravel site gets no plugin. Turning on, in this order:
 
    Laravel reads `REDIS_PORT=0` as "no TCP port" and the host as a Unix socket path;
 3. rebuild Laravel's cached configuration when `bootstrap/cache/config.php` is in use;
-4. gracefully restart the site's **running** queue workers (`systemctl restart`, so each
-   finishes its current job within its own stop budget); a deliberate Stop survives an
-   unrelated cache change.
+4. bring the site's **running** queue workers back on the new environment: the change's
+   fence stopped them, and restore starts them after verify
+   ([automation](automation.md#fencing-site-changes)); a worker the review did not fence restarts
+   gracefully (`systemctl restart`, so each finishes its current job within its own stop
+   budget). A deliberate Stop survives an unrelated cache change.
 
 While those keys name the site's own private connection they are **Barectl-managed**:
 `CACHE_STORE`, `REDIS_HOST` and `REDIS_PORT` show as read-only in Environment, their values

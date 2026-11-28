@@ -1,12 +1,15 @@
 """An environment change restarts the site's enabled queue workers, and nothing else."""
 
 import hashlib
+import subprocess
+from collections.abc import Callable
 from contextlib import ExitStack
+from typing import cast
 from unittest import mock
 
 from django.test import SimpleTestCase
 
-from automation.bodies import worker_env
+from automation.bodies import units, worker_env
 
 
 class RestartEnabledWorkersTests(SimpleTestCase):
@@ -53,41 +56,117 @@ class RestartEnabledWorkersTests(SimpleTestCase):
         self.assertEqual(restarted, ["barectl-site-shop-queue1.service"])
 
 
+class FencedWorkersTests(SimpleTestCase):
+    def test_only_the_site_s_fenced_worker_services_count(self) -> None:
+        plan: dict[str, object] = {
+            "automation_fence": {
+                "version": 1,
+                "sites": [
+                    {"identifier": "shop", "services": ["barectl-site-shop-queue1.service"]},
+                    {"identifier": "blog", "services": ["barectl-site-blog-schedule.service"]},
+                ],
+            }
+        }
+        self.assertTrue(worker_env.fenced_workers(plan, "shop"))
+        self.assertFalse(worker_env.fenced_workers(plan, "blog"))
+        self.assertFalse(worker_env.fenced_workers(plan, "other"))
+        self.assertFalse(worker_env.fenced_workers({}, "shop"))
+
+
+QUEUE1 = "barectl-site-shop-queue1.service"
+QUEUE2 = "barectl-site-shop-queue2.service"
+OLD = "QUEUE_CONNECTION=sync\n"
+NEW = "QUEUE_CONNECTION=database\n"
+
+
+class FakeSite:
+    """Queue1 enabled and running, queue2 deliberately stopped, under systemd's fence rules.
+
+    A fenced unit keeps its loaded ``enabled`` state but refuses a manual start, as the
+    fence's drop-in makes it do on a real server (automation/bodies/units.py).
+    """
+
+    def __init__(self) -> None:
+        self.environment = OLD
+        self.enabled = {QUEUE1: True, QUEUE2: False}
+        self.running: dict[str, str | None] = {QUEUE1: OLD, QUEUE2: None}
+        self.fenced = False
+        self.order: list[str] = []
+
+    def fence(self, document: dict[str, object], _identifier: str) -> bool:
+        self.order.append("fence")
+        if document.get("automation_fence"):
+            self.fenced = True
+            self.running = dict.fromkeys(self.running)
+        return True
+
+    def restore(self, document: dict[str, object], _identifier: str) -> bool:
+        self.order.append("restore")
+        if not document.get("automation_fence"):
+            return True
+        self.fenced = False
+        plan = cast("dict[str, list[dict[str, list[str]]]]", document["automation_fence"])
+        for name in plan["sites"][0]["resume"]:
+            self.running[name] = self.environment
+        return True
+
+    def write(self, *_args: object) -> None:
+        self.order.append("write")
+        self.environment = NEW
+
+    def config(self, _settings: object) -> bool:
+        self.order.append("config")
+        return True
+
+    def read(self, _identifier: str) -> str:
+        return self.environment
+
+    def systemctl(self, argv: list[str], **_kwargs: object) -> object:
+        name = argv[-1]
+        if argv[1] == "show":
+            state = "enabled" if self.enabled.get(name) else "disabled"
+            return mock.Mock(returncode=0, stdout=state + "\n", stderr="")
+        self.order.append(f"restart:{name}")
+        if self.fenced:
+            return mock.Mock(returncode=1, stdout="", stderr="Operation refused.")
+        self.running[name] = self.environment
+        return mock.Mock(returncode=0, stdout="", stderr="")
+
+
 class EnvironmentBodyTests(SimpleTestCase):
-    def test_the_environment_change_restarts_workers_between_config_and_verify(self) -> None:
+    def edit(
+        self,
+        site: FakeSite,
+        *,
+        fenced: bool,
+        restore: Callable[[dict[str, object], str], bool] | None = None,
+    ) -> list[str]:
         from laravel.bodies import settings as body
 
-        order: list[str] = []
-
-        def note(name: str) -> None:
-            order.append(name)
-
-        def config(_settings: object) -> bool:
-            note("config")
-            return True
-
-        def workers(_identifier: str) -> tuple[bool, bool]:
-            note("workers")
-            return True, True
-
-        def fence(*_args: object) -> bool:
-            note("fence")
-            return True
-
-        def restore(*_args: object) -> bool:
-            note("restore")
-            return True
-
-        document = {
+        document: dict[str, object] = {
             "identifier": "shop",
             "names": ["shop.example.com"],
             "selection": "php84",
             "https": True,
             "changes": [{"key": "QUEUE_CONNECTION", "action": "set", "digest": ""}],
             "secret_fields": [{"key": "QUEUE_CONNECTION", "secret": False}],
-            "environment_digest": hashlib.sha256(b"QUEUE_CONNECTION=sync\n").hexdigest(),
+            "environment_digest": hashlib.sha256(OLD.encode()).hexdigest(),
             "secret_path": "/run/barectl/secrets/" + "a" * 32,
         }
+        if fenced:
+            document["automation_fence"] = {
+                "version": 1,
+                "sites": [
+                    {
+                        "identifier": "shop",
+                        "slice": "barectl-site-shop.slice",
+                        "timers": [],
+                        "services": [QUEUE1, QUEUE2],
+                        "resume": [QUEUE1],
+                        "budget_seconds": 30,
+                    }
+                ],
+            }
         settings = mock.Mock(
             identifier="shop",
             names=["shop.example.com"],
@@ -97,35 +176,74 @@ class EnvironmentBodyTests(SimpleTestCase):
             directory="/var/www/shop",
         )
         with ExitStack() as stack:
-            stack.enter_context(mock.patch.object(body, "fence", fence, create=True))
-            stack.enter_context(mock.patch.object(body, "restore", restore, create=True))
+            stack.enter_context(mock.patch.object(body, "fence", site.fence, create=True))
+            stack.enter_context(
+                mock.patch.object(body, "restore", restore or site.restore, create=True)
+            )
+            stack.enter_context(
+                mock.patch("automation.bodies.worker_env.subprocess.run", site.systemctl)
+            )
             for name, value in {
                 "setting": lambda *_args, **_kwargs: settings,
                 "site_account": lambda _identifier: [1001, 1001, "/var/www/shop", ""],
                 "environment_path": lambda _identifier: "/var/www/shop/private/laravel.env",
                 "_private_file_ok": lambda *_args: True,
                 "open_site_lock": lambda _identifier: 9,
-                "read_environment": mock.Mock(
-                    side_effect=["QUEUE_CONNECTION=sync\n", "QUEUE_CONNECTION=database\n"]
-                ),
+                "read_environment": site.read,
                 "_changes": lambda _document: document["changes"],
                 "_values": lambda *_args: {"QUEUE_CONNECTION": "database"},
-                "apply_environment": lambda _before, _changes: "QUEUE_CONNECTION=database\n",
-                "_write_as_site": lambda *_args: None,
-                "_config": config,
-                "restart_workers": workers,
-                "stage": lambda name: order.append(f"stage:{name}"),
-                "result": lambda outcome, reason="": order.append(f"result:{outcome}:{reason}"),
+                "apply_environment": lambda _before, _changes: NEW,
+                "_write_as_site": site.write,
+                "_config": site.config,
+                "stage": lambda name: site.order.append(f"stage:{name}"),
+                "result": lambda outcome, reason="": site.order.append(
+                    f"result:{outcome}:{reason}"
+                ),
                 "os": mock.MagicMock(close=lambda _fd: None),
             }.items():
                 stack.enter_context(mock.patch.object(body, name, value))
             body.edit_environment(document)
-        self.assertIn("fence", order, order)
-        self.assertIn("config", order, order)
-        self.assertIn("workers", order, order)
-        self.assertIn("restore", order, order)
-        self.assertLess(order.index("fence"), order.index("config"))
-        self.assertLess(order.index("config"), order.index("workers"))
-        self.assertLess(order.index("workers"), order.index("stage:verify"))
-        self.assertLess(order.index("restore"), order.index("result:succeeded:"))
-        self.assertIn("result:succeeded:", order)
+        return site.order
+
+    def test_fenced_running_workers_come_back_on_the_new_environment(self) -> None:
+        """#587: a restart while the fence refuses manual starts would leave them stopped."""
+        site = FakeSite()
+        order = self.edit(site, fenced=True)
+        self.assertEqual(order[-1], "result:succeeded:", order)
+        self.assertNotIn(f"restart:{QUEUE1}", order)
+        self.assertEqual(site.running, {QUEUE1: NEW, QUEUE2: None})
+        self.assertFalse(site.fenced)
+
+    def test_unfenced_workers_restart_between_config_and_verify(self) -> None:
+        site = FakeSite()
+        order = self.edit(site, fenced=False)
+        self.assertEqual(order[-1], "result:succeeded:", order)
+        self.assertLess(order.index("config"), order.index(f"restart:{QUEUE1}"))
+        self.assertLess(order.index(f"restart:{QUEUE1}"), order.index("stage:verify"))
+        self.assertNotIn(f"restart:{QUEUE2}", order)
+        self.assertEqual(site.running, {QUEUE1: NEW, QUEUE2: None})
+
+    def test_a_restore_step_that_times_out_is_a_partial_restore(self) -> None:
+        """The environment is already written, so a timed-out start is not a refusal."""
+        site = FakeSite()
+
+        def systemctl(*arguments: str) -> str:
+            if arguments[0] == "start":
+                raise subprocess.TimeoutExpired(["/usr/bin/systemctl", *arguments], 20)
+            return ""
+
+        def restore(document: dict[str, object], identifier: str) -> bool:
+            site.order.append("restore")
+            with ExitStack() as stack:
+                for name, value in {
+                    "systemctl": systemctl,
+                    "run": lambda *_args, **_kwargs: "",
+                    "load_state": lambda _name: "masked",
+                    "clear_dropin": lambda _name: None,
+                    "note_reload": lambda: None,
+                }.items():
+                    stack.enter_context(mock.patch.object(units, name, value))
+                return units.restore(document, identifier)
+
+        order = self.edit(site, fenced=True, restore=restore)
+        self.assertEqual(order[-1], "result:partial:automation_restore", order)
