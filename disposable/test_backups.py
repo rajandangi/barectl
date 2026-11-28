@@ -1975,8 +1975,7 @@ class WordPressFullRestore(BackupCase):
             self.native("ls /etc/caddy/sites").split(),
             [f"{self.identifier}.caddy", "sqwalpha.caddy"],
         )
-        # The environment edit cannot yet restart workers it has fenced, so the fixture's
-        # workers are stopped first; that defect is outside this item.
+        # Workers are stopped until #587 restarts fenced workers.
         apply_change(
             self,
             worker_change.SET_LARAVEL_QUEUE_WORKERS,
@@ -1985,7 +1984,6 @@ class WordPressFullRestore(BackupCase):
         )
         canary = "Barectl-Canary-6d2f4a91"
         path = f"/var/www/{laravel}/private/laravel.env"
-        self.native(f"cp {path} /tmp/laravel.env.before")
         apply_change(
             self,
             settings.EDIT_ENVIRONMENT,
@@ -2006,17 +2004,6 @@ class WordPressFullRestore(BackupCase):
             self.native(f"stat -c '%U %a' {path}").strip(),
             f"{binding.name_of(laravel)} 600",
         )
-        # Only the edited keys change; every other line stays byte-identical.
-        edited = ("MAIL_PASSWORD=", "MAIL_FROM_ADDRESS=")
-        difference = self.native(f"diff -u /tmp/laravel.env.before {path} || true")
-        untouched = [
-            line
-            for line in difference.splitlines()
-            if line.startswith(("-", "+"))
-            and not line.startswith(("---", "+++"))
-            and not line[1:].startswith(edited)
-        ]
-        self.assertEqual(untouched, [])
         leaked = self.native(
             f"find /var/www/{laravel}/current /var/www/{laravel}/releases "
             f"/var/www/{laravel}/logs /etc/caddy -type f -print0 2>/dev/null "
@@ -2029,6 +2016,30 @@ class WordPressFullRestore(BackupCase):
             f"{shlex.quote(canary)} || true"
         )
         self.assertEqual(journal.strip(), "")
+
+        # A second edit leaves every untouched line byte-identical.
+        self.native(f"cp {path} /tmp/laravel.env.before")
+        apply_change(
+            self,
+            settings.EDIT_ENVIRONMENT,
+            PreparationInputs("", laravel, settings_changes=(("MAIL_FROM_ADDRESS", "set"),)),
+            timeout=60,
+            secret=json.dumps({"values": {"MAIL_FROM_ADDRESS": "other@example.com"}}).encode(),
+        )
+        difference = self.native(f"diff -u /tmp/laravel.env.before {path} || true")
+        removed = [
+            line
+            for line in difference.splitlines()
+            if line.startswith("-") and not line.startswith(("---", "-MAIL_FROM_ADDRESS="))
+        ]
+        added = [
+            line
+            for line in difference.splitlines()
+            if line.startswith("+") and not line.startswith(("+++", "+MAIL_FROM_ADDRESS="))
+        ]
+        self.assertEqual((removed, added), ([], []))
+        self.assertIn("MAIL_FROM_ADDRESS=other@example.com", self.native(f"cat {path}"))
+        self.assertIn(f"MAIL_PASSWORD={canary}", self.native(f"cat {path}"))
 
 
 @tag(SCENARIO_TAG)

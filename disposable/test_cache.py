@@ -432,12 +432,19 @@ class SiteObjectCache(ValkeyCase):
         # A changed readiness path on the plain site is published as native Caddy evidence
         # and reconstructed by a fresh controller.
         readiness = PreparationInputs("", self.other, readiness="/hello.txt")
+        with self.shell() as shell:
+            first = readiness_change.SET_SITE_READINESS.review(
+                readiness_change.SET_SITE_READINESS.inspect(shell, readiness), readiness
+            )
+        self.assertTrue(first.eligible, first.refusals)
+        self.assertFalse(first.no_changes)
         apply_change(self, readiness_change.SET_SITE_READINESS, readiness)
         with self.shell() as fresh:
             repeated = readiness_change.SET_SITE_READINESS.review(
                 readiness_change.SET_SITE_READINESS.inspect(fresh, readiness), readiness
             )
-            self.assertTrue(repeated.no_changes, repeated.refusals)
+            self.assertTrue(repeated.eligible, repeated.refusals)
+            self.assertTrue(repeated.no_changes)
             observed = {row.identifier: row for row in collect(fresh).sites.value}
         self.assertEqual(observed[self.other].readiness, "/hello.txt")
 
