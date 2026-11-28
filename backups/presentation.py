@@ -232,6 +232,14 @@ def result_view(  # noqa: C901 - one result
             _label(at),
             result.result_class,
         )
+    if result.result_class == "partial" and result.reason == "automation_fence":
+        return LastBackupView(
+            "The backup did not run.",
+            "Barectl stopped partway through pausing the site's background work, so some of "
+            "it may stay paused. Choose what runs in Scheduled tasks or Queue workers.",
+            _label(at),
+            result.result_class,
+        )
     if result.result_class == "partial":
         return LastBackupView(
             f"{scope} saved with warnings.",

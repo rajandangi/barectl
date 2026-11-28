@@ -206,8 +206,8 @@ def edit_environment(document: dict[str, object]) -> None:  # noqa: C901 - revie
             if action == "set" and key not in values:
                 result("refused", "settings_secret")
                 return
-        if not fence(document, settings.identifier):
-            result("refused", "automation_fence")
+        if failure := fence(document, settings.identifier):
+            result(failure, "automation_fence")
             return
         stage("write")
         reviewed: list[dict[str, object]] = [

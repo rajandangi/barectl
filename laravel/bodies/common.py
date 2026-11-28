@@ -1071,8 +1071,8 @@ def _deploy_release(
     # inside the maintenance window (Phase B #259), so the gate goes up before the
     # migration step whether or not migrations run. The fence goes up with it: workers stop
     # and boot activation is off while the gate is persistent (docs/adr/0036).
-    if not fence(document, identifier, gate=True):
-        return ("refused", "automation_fence")
+    if fenced := fence(document, identifier, gate=True):
+        return (fenced, "automation_fence")
     stage("gate")
     try:
         _publish_gate(settings, str(document["gate"]))
@@ -1133,8 +1133,8 @@ def _rollback_release(
     problem = _rollback_preflight(settings, identifier, document, descriptor)
     if problem:
         return ("refused", problem)
-    if not fence(document, identifier, gate=True):
-        return ("refused", "automation_fence")
+    if fenced := fence(document, identifier, gate=True):
+        return (fenced, "automation_fence")
     stage("gate")
     try:
         _publish_gate(settings, str(document["gate"]))

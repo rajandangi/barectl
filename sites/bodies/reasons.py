@@ -22,6 +22,11 @@ SITE_REASONS: Final = (
                 "stopped before changing anything and the site's background work stays "
                 "paused. Check the run's journal, then prepare a new review."
             ),
+            Result.PARTIAL: (
+                "Barectl stopped partway through pausing the site's background work, so some "
+                "of it may stay paused. Choose what runs in the site's Scheduled tasks or "
+                "Queue workers, then prepare a new review."
+            ),
         },
     ),
     ResultReason(

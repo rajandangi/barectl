@@ -144,6 +144,25 @@ class PresentationTests(SimpleTestCase):
         self.assertEqual(view.headline, "The backup did not run.")
         self.assertIn("dump failed", view.detail)
 
+    def test_a_full_capture_stopped_partway_through_its_fence_is_not_reported_as_saved(
+        self,
+    ) -> None:
+        """#590: the fence masked some work and nothing was captured."""
+        view = presentation.result_view(
+            observation.BackupResult(
+                "partial",
+                "automation_fence",
+                "full",
+                "manual",
+                "2026-10-27T11:00:00+00:00",
+                "",
+                0,
+                0,
+            )
+        )
+        self.assertEqual(view.headline, "The backup did not run.")
+        self.assertIn("Scheduled tasks or Queue workers", view.detail)
+
 
 def _line(value: dict[str, object], usec: int = 1_762_000_000_000_000) -> str:
     return json.dumps(

@@ -158,7 +158,7 @@ class FenceBodyTests(SimpleTestCase):
         return self.fake.calls
 
     def test_the_fence_masks_before_it_stops_and_stops_the_slice_last(self) -> None:
-        self.assertTrue(units.fence(document(), SHOP))
+        self.assertEqual(units.fence(document(), SHOP), "")
         self.assertEqual(
             self.verbs(),
             [
@@ -174,7 +174,7 @@ class FenceBodyTests(SimpleTestCase):
         )
 
     def test_a_maintenance_gate_also_removes_boot_activation(self) -> None:
-        self.assertTrue(units.fence(document(), SHOP, gate=True))
+        self.assertEqual(units.fence(document(), SHOP, gate=True), "")
         self.assertIn(["disable", TIMER], self.verbs())
         self.assertLess(self.verbs().index(["disable", TIMER]), self.verbs().index(["stop", TIMER]))
         # The masks, the reload and ``disable`` reload systemd, so the body restarts the
@@ -184,7 +184,7 @@ class FenceBodyTests(SimpleTestCase):
     def test_a_gate_disables_boot_activation_for_every_reviewed_unit(self) -> None:
         self.fake.installed.add(WORKER)
         plan = document(services=[SERVICE, WORKER], resume=[TIMER, WORKER])
-        self.assertTrue(units.fence(plan, SHOP, gate=True))
+        self.assertEqual(units.fence(plan, SHOP, gate=True), "")
         self.assertEqual(
             [call for call in self.verbs() if call[0] == "disable"],
             [["disable", TIMER], ["disable", SERVICE], ["disable", WORKER]],
@@ -197,7 +197,7 @@ class FenceBodyTests(SimpleTestCase):
     def test_a_gated_fence_restores_the_workers_boot_activation(self) -> None:
         self.fake.installed.add(WORKER)
         plan = document(services=[SERVICE, WORKER], resume=[WORKER, TIMER])
-        self.assertTrue(units.fence(plan, SHOP, gate=True))
+        self.assertEqual(units.fence(plan, SHOP, gate=True), "")
         self.assertTrue(units.restore(plan, SHOP))
         self.assertEqual(self.fake.file_state[WORKER], "enabled")
         self.assertEqual(self.fake.file_state[TIMER], "enabled")
@@ -212,30 +212,72 @@ class FenceBodyTests(SimpleTestCase):
         self.assertNotIn(["enable", WORKER], self.verbs())
 
     def test_a_fence_without_a_gate_leaves_boot_activation_alone(self) -> None:
-        self.assertTrue(units.fence(document(), SHOP))
+        self.assertEqual(units.fence(document(), SHOP), "")
         self.assertEqual([call for call in self.verbs() if call[0] == "disable"], [])
         self.assertEqual(self.fake.file_state[TIMER], "enabled")
         self.assertEqual(self.fake.file_state[WORKER], "enabled")
 
     def test_a_fence_that_cannot_drain_reports_failure(self) -> None:
         self.fake.slice_empty = False
-        self.assertFalse(units.fence(document(), SHOP))
+        self.assertEqual(units.fence(document(), SHOP), "refused")
+
+    def time_out(self, verb: str, name: str) -> None:
+        """Make one systemctl call time out, as ``run``'s 20 s bound raises it (#590)."""
+        systemctl = self.fake.systemctl
+
+        def bounded(*arguments: str) -> str:
+            if arguments[0] == verb and arguments[-1] == name:
+                raise subprocess.TimeoutExpired(["/usr/bin/systemctl", *arguments], 20)
+            return systemctl(*arguments)
+
+        self.enterContext(mock.patch.object(units, "systemctl", bounded))
+
+    def test_a_fence_that_times_out_before_its_first_mask_refuses(self) -> None:
+        def load_state(name: str) -> str:
+            raise subprocess.TimeoutExpired(["/usr/bin/systemctl", "show", name], 20)
+
+        self.enterContext(mock.patch.object(units, "load_state", load_state))
+        self.assertEqual(units.fence(document(), SHOP), "refused")
+        self.assertEqual([call for call in self.verbs() if call[0] == "mask"], [])
+        self.assertEqual(self.fake.fenced, set())
+
+    def test_a_first_mask_that_times_out_is_partial(self) -> None:
+        """A mask whose ``systemctl`` call timed out may still have applied."""
+        self.time_out("mask", TIMER)
+        self.assertEqual(units.fence(document(), SHOP), "partial")
+
+    def test_a_fence_that_times_out_after_a_mask_is_partial(self) -> None:
+        self.time_out("mask", SERVICE)
+        self.assertEqual(units.fence(document(), SHOP), "partial")
+        self.assertEqual(self.fake.state[TIMER], "masked")
+
+    def test_a_fence_that_times_out_while_stopping_is_partial(self) -> None:
+        self.time_out("stop", SERVICE)
+        self.assertEqual(units.fence(document(), SHOP), "partial")
+
+    def test_a_drain_check_that_times_out_refuses_with_the_work_paused(self) -> None:
+        def wait(_name: str, _budget: int) -> bool:
+            raise subprocess.TimeoutExpired(["/usr/bin/systemctl", "show"], 20)
+
+        self.enterContext(mock.patch.object(units, "wait_slice_empty", wait))
+        self.assertEqual(units.fence(document(), SHOP), "refused")
+        self.assertEqual(self.fake.fenced, {TIMER, SERVICE})
 
     def test_a_worker_enabled_after_the_review_refuses_with_nothing_changed(self) -> None:
         self.fake.installed.add(WORKER)
         self.fake.file_state[WORKER] = "enabled"
         plan = document(services=[SERVICE, WORKER], resume=[TIMER])
-        self.assertFalse(units.fence(plan, SHOP))
+        self.assertEqual(units.fence(plan, SHOP), "refused")
         self.assertEqual(self.verbs(), [], "A stale resume set must not mask or stop anything.")
         self.assertEqual(self.fake.reloads_noted, 0)
 
     def test_a_unit_removed_after_the_review_refuses_with_nothing_changed(self) -> None:
         self.fake.installed.remove(SERVICE)
-        self.assertFalse(units.fence(document(), SHOP))
+        self.assertEqual(units.fence(document(), SHOP), "refused")
         self.assertEqual(self.verbs(), [])
 
     def test_a_site_without_a_plan_needs_no_fence(self) -> None:
-        self.assertTrue(units.fence({}, SHOP))
+        self.assertEqual(units.fence({}, SHOP), "")
         self.assertTrue(units.restore({"automation_fence": {"version": 1, "sites": []}}, SHOP))
         self.assertEqual(self.verbs(), [])
 
@@ -258,7 +300,7 @@ class FenceBodyTests(SimpleTestCase):
         self.assertGreater(self.fake.reloads_noted, 0)
 
     def test_a_fenced_unit_refuses_a_manual_start(self) -> None:
-        self.assertTrue(units.fence(document(), SHOP))
+        self.assertEqual(units.fence(document(), SHOP), "")
         self.assertEqual(self.fake.fenced, {TIMER, SERVICE})
 
     def test_a_partial_restore_reports_failure_and_starts_nothing_else(self) -> None:
@@ -284,7 +326,7 @@ class FenceBodyTests(SimpleTestCase):
                 units.fence(plan, SHOP)
 
     def test_a_worker_reviewed_stop_budget_is_accepted(self) -> None:
-        self.assertTrue(units.fence(document(budget_seconds=915), SHOP))
+        self.assertEqual(units.fence(document(budget_seconds=915), SHOP), "")
 
     def test_a_forgotten_site_clears_its_masks_and_failed_state(self) -> None:
         units.forget(document(), SHOP)

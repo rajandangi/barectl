@@ -162,8 +162,8 @@ def edit_constants(document: dict[str, object]) -> None:  # noqa: C901 - reviewe
             if action == "set" and key not in values:
                 result("refused", "settings_secret")
                 return
-        if not fence(document, identifier):
-            result("refused", "automation_fence")
+        if failure := fence(document, identifier):
+            result(failure, "automation_fence")
             return
         stage("write")
         reviewed: list[dict[str, object]] = [

@@ -260,13 +260,19 @@ def main(argument: str | None = None) -> None:  # noqa: C901 - one reviewed capt
                 )
             )
             raise SystemExit(REFUSED)
-        if not fence(document, identifier, gate=True):
+        if failure := fence(document, identifier, gate=True):
+            # Nothing was captured, so a partial fence names no recovery point.
             emit_result(
                 document_result(
-                    document, "refused", "automation_fence", point=point, snapshots=0, size=0
+                    document,
+                    failure,
+                    "automation_fence",
+                    point=point if failure == "refused" else "",
+                    snapshots=0,
+                    size=0,
                 )
             )
-            raise SystemExit(REFUSED)
+            raise SystemExit(PARTIAL if failure == "partial" else REFUSED)
         stage("gate")
         try:
             gate_up = publish_gate(settings, document)

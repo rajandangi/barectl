@@ -783,8 +783,8 @@ def node_locked_change(  # noqa: C901 - reviewed stages
         if not safe(str(directory), directory=True) or not same_site_lock(descriptor, identifier):
             result("refused", "evidence")
             return
-        if not fence(document, identifier):
-            result("refused", "automation_fence")
+        if failure := fence(document, identifier):
+            result(failure, "automation_fence")
             return
         stage("links")
         with tempfile.TemporaryDirectory(prefix=".node-", dir=directory) as temporary:
@@ -2769,8 +2769,8 @@ def pool_locked_change(document: dict[str, object], descriptor: int) -> None:  #
         if native_state("observed", "", protections=False)["digest"] != before["digest"]:
             result("refused", "evidence")
             return
-        if not fence(document, identifier):
-            result("refused", "automation_fence")
+        if failure := fence(document, identifier):
+            result(failure, "automation_fence")
             return
         stage("pool")
         replace_site_file(path, candidate, preimage)

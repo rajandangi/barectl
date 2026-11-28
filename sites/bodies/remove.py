@@ -678,8 +678,8 @@ def remove(document: dict[str, object]) -> int:  # noqa: C901 - one reviewed seq
             return 1
     changed = False
     try:
-        if not fence(document, identifier):
-            result("refused", "automation_fence")
+        if failure := fence(document, identifier):
+            result(failure, "automation_fence")
             return 1
         # The site's own backup units go first among the removals and are never restored.
         stage("backups")
