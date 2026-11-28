@@ -69,7 +69,7 @@ BODY_SOURCE: Final = (
     + importlib.resources.files("laravel.bodies")
     .joinpath("settings.py")
     .read_text()
-    .replace("from automation.bodies.worker_env import restart_workers\n", "")
+    .replace("from automation.bodies.worker_env import restart_unfenced_workers\n", "")
     .replace(
         "from laravel.bodies.common import (\n"
         "    ENVIRONMENT_KEY,\n"

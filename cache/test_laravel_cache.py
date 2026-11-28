@@ -21,7 +21,6 @@ from operations.models import Consent
 
 from . import instance
 from . import laravel as laravel_convention
-from .bodies import instance as body
 from .test_site_cache import BOOT, DIGEST, collected, row, site, value, wordpress
 
 SHOP = "shop"
@@ -468,19 +467,3 @@ class LaravelObjectCacheDocumentTests(SimpleTestCase):
         stop = sequence.index('stage("stop")')
         self.assertLess(environment, workers)
         self.assertLess(workers, stop)
-
-    def test_a_fenced_cache_change_leaves_the_workers_to_restore(self) -> None:
-        plan: dict[str, object] = {
-            "automation_fence": {
-                "version": 1,
-                "sites": [
-                    {
-                        "identifier": "shop",
-                        "services": ["barectl-site-shop-queue1.service"],
-                    }
-                ],
-            }
-        }
-        self.assertTrue(body._fenced_units(plan, "shop"))
-        self.assertFalse(body._fenced_units(plan, "other"))
-        self.assertFalse(body._fenced_units({}, "shop"))

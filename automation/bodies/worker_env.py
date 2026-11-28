@@ -1,9 +1,10 @@
 """Gracefully restart a Laravel site's enabled queue workers after an environment change.
 
-Called from the Edit-settings body between its configuration rebuild and its verify stage.
-Only an enabled worker is restarted: a deliberate Stop must survive an unrelated
-environment change. ``systemctl restart`` sends SIGTERM, so each process finishes its
-current job within its own stop budget.
+Called from the bodies that edit a Laravel environment, between the configuration rebuild
+and the verify stage. Only an enabled worker is restarted: a deliberate Stop must survive an
+unrelated environment change. ``systemctl restart`` sends SIGTERM, so each process finishes
+its current job within its own stop budget. A worker the change's fence stopped is left to
+``restore``, which unmasks it and starts it on the new environment (docs/automation.md).
 """
 
 import subprocess
@@ -29,6 +30,27 @@ def _unit_file_state(name: str) -> str:
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
+def fenced_workers(document: object, identifier: str) -> bool:
+    """Whether the change's reviewed fence plan stops one of this site's worker services."""
+    plan = document.get("automation_fence") if isinstance(document, dict) else None
+    sites = plan.get("sites") if isinstance(plan, dict) else None
+    if not isinstance(sites, list):
+        return False
+    workers = {service_name(identifier, role) for role in WORKER_ROLES}
+    for entry in sites:
+        if isinstance(entry, dict) and entry.get("identifier") == identifier:
+            services = entry.get("services")
+            return isinstance(services, list) and bool(workers.intersection(services))
+    return False
+
+
+def restart_unfenced_workers(document: object, identifier: str) -> tuple[bool, bool]:
+    """:func:`restart_workers`, or nothing when the fence stopped them for ``restore``."""
+    if fenced_workers(document, identifier):
+        return False, True
+    return restart_workers(identifier)
+
+
 def restart_workers(identifier: str) -> tuple[bool, bool]:
     """``(any restarted, all restarts succeeded)`` for the site's enabled workers."""
     restarted = False
@@ -52,4 +74,4 @@ def restart_workers(identifier: str) -> tuple[bool, bool]:
     return restarted, True
 
 
-__all__ = ["ENABLED_STATES", "restart_workers"]
+__all__ = ["ENABLED_STATES", "fenced_workers", "restart_unfenced_workers", "restart_workers"]

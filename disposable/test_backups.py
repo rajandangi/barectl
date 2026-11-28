@@ -1962,11 +1962,49 @@ class WordPressFullRestore(BackupCase):
         self.assertEqual(len(safety), 1)
         self.assertEqual(safety[0]["scope"], "full")
 
+    def laravel_workers(self, laravel: str, path: str) -> tuple[int, dict[str, dict[str, str]]]:
+        """The environment file's mtime and each L5 worker's state, in one native read."""
+        units = " ".join(f"barectl-site-{laravel}-queue{index}.service" for index in (1, 2))
+        lines = self.native(
+            f'stat -c %Y {path}; for unit in {units}; do echo "Unit=$unit"; '
+            "systemctl show --timestamp=unix -p ActiveState -p LoadState -p UnitFileState "
+            '-p RefuseManualStart -p InvocationID -p ExecMainStartTimestamp "$unit"; done'
+        ).splitlines()
+        workers: dict[str, dict[str, str]] = {}
+        unit = ""
+        for line in lines[1:]:
+            key, _separator, value = line.partition("=")
+            if key == "Unit":
+                unit = value
+                workers[unit] = {}
+            else:
+                workers[unit][key] = value
+        return int(lines[0]), workers
+
+    def assert_workers_restarted(
+        self,
+        before: tuple[int, dict[str, dict[str, str]]],
+        after: tuple[int, dict[str, dict[str, str]]],
+    ) -> None:
+        written, workers = after
+        self.assertEqual(workers.keys(), before[1].keys())
+        for unit, values in workers.items():
+            self.assertEqual(before[1][unit]["ActiveState"], "active", unit)
+            self.assertEqual(
+                [values[key] for key in ("ActiveState", "LoadState", "UnitFileState")],
+                ["active", "loaded", "enabled"],
+                unit,
+            )
+            self.assertEqual(values["RefuseManualStart"], "no", unit)
+            self.assertNotEqual(values["InvocationID"], before[1][unit]["InvocationID"], unit)
+            # A queue worker reads the environment once, when its process starts.
+            started = values["ExecMainStartTimestamp"].removeprefix("@")
+            self.assertGreaterEqual(int(started), written, unit)
+
     def test_b_the_laravel_environment_edit_meets_the_wordpress_site(self) -> None:
         """L5's Laravel fixture and this item's WordPress site share the server, so the
         environment review reads only its own site's membership (#584).
         """
-        from automation import worker_change
         from databases import binding
         from laravel import settings
 
@@ -1975,15 +2013,9 @@ class WordPressFullRestore(BackupCase):
             self.native("ls /etc/caddy/sites").split(),
             [f"{self.identifier}.caddy", "sqwalpha.caddy"],
         )
-        # Workers are stopped until #587 restarts fenced workers.
-        apply_change(
-            self,
-            worker_change.SET_LARAVEL_QUEUE_WORKERS,
-            PreparationInputs("", laravel, worker_action="stop"),
-            timeout=60,
-        )
         canary = "Barectl-Canary-6d2f4a91"
         path = f"/var/www/{laravel}/private/laravel.env"
+        before = self.laravel_workers(laravel, path)
         apply_change(
             self,
             settings.EDIT_ENVIRONMENT,
@@ -2016,6 +2048,8 @@ class WordPressFullRestore(BackupCase):
             f"{shlex.quote(canary)} || true"
         )
         self.assertEqual(journal.strip(), "")
+        # The fixture's running workers come back unmasked on the new environment (#587).
+        self.assert_workers_restarted(before, self.laravel_workers(laravel, path))
 
         # A second edit leaves every untouched line byte-identical.
         self.native(f"cp {path} /tmp/laravel.env.before")

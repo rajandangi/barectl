@@ -123,7 +123,7 @@ BODY_SOURCE: Final = (
     + "\n"
     + _BODY_RESOURCE.read_text()
     .replace(
-        "from automation.bodies.worker_env import restart_workers\n",
+        "from automation.bodies.worker_env import restart_unfenced_workers\n",
         "",
     )
     .replace(
