@@ -26,6 +26,7 @@ from backups import change as backups_change
 from backups import restore as backups_restore
 from backups.bodies import full as full_body
 from backups.bodies import restore as restore_body
+from backups.bodies.native import PARTIAL, REFUSED
 from cache import instance as cache_instance
 from cache.bodies import instance as cache_body
 from laravel import change as laravel_change
@@ -101,6 +102,51 @@ class CallerTests(SimpleTestCase):
                 with self.assertRaises(FenceReached):
                     getattr(module, function)(*args())
 
+    def test_every_caller_reports_the_class_its_fence_returns(self) -> None:
+        """#590: a fence that stopped after a mask is partial, one before it is refused."""
+        for failure in ("partial", "refused"):
+            for slug, module, function, args, patches in CALLERS:
+                with self.subTest(slug=slug, failure=failure):
+                    printed, code = _fenced_outcome(module, function, args, patches, failure)
+                    if slug == "update_catalog":
+                        # The update has realised its builds, so its main reports partial.
+                        self.assertEqual(printed, [("", "automation_fence", "")])
+                        continue
+                    self.assertEqual(
+                        [line[:2] for line in printed], [(failure, "automation_fence")]
+                    )
+                    if module in (full_body, restore_body):
+                        expected = PARTIAL if failure == "partial" else REFUSED
+                        self.assertEqual(code, expected)
+                    if module is full_body:
+                        # A partial fence captured nothing, so it names no recovery point.
+                        point = "" if failure == "partial" else "0123456789abcdef"
+                        self.assertEqual(printed[0][2], point)
+
+    def test_removal_exits_with_the_class_its_fence_returns(self) -> None:
+        for failure, expected in (("partial", 2), ("refused", 1)):
+            with self.subTest(failure=failure):
+                printed, code = _fenced_outcome(
+                    remove_body,
+                    "remove",
+                    lambda: (
+                        {
+                            "identifier": "shop",
+                            "site_digest": "digest",
+                            "site_file_digest": "file",
+                        },
+                    ),
+                    lambda: {
+                        "inventory": lambda *args, **kwargs: {
+                            "digest": "digest",
+                            "site_file_digest": "file",
+                        }
+                    },
+                    failure,
+                )
+                self.assertEqual(printed, [(failure, "automation_fence", "")])
+                self.assertEqual(code, expected)
+
     def test_every_fenced_change_restores_except_removal(self) -> None:
         for slug, source in SOURCES.items():
             if slug == "remove_site":
@@ -127,6 +173,64 @@ class CallerTests(SimpleTestCase):
                     "site_file_digest": "file",
                 }
             )
+
+
+def _fenced_outcome(
+    module: ModuleType,
+    function: str,
+    args: Callable[[], tuple[object, ...]],
+    patches: Callable[[], dict[str, object]],
+    failure: str,
+) -> tuple[list[tuple[str, str, str]], int | None]:
+    """Drive one caller with a fence that returns ``failure``.
+
+    Returns every (class, reason, point) the caller printed or returned, and its exit code
+    where it exits with one.
+    """
+    printed: list[tuple[str, str, str]] = []
+
+    def result(outcome: str, reason: str = "") -> None:
+        printed.append((outcome, reason, ""))
+
+    def emit(value: dict[str, object]) -> None:
+        printed.append((str(value["class"]), str(value["reason"]), str(value["point"])))
+
+    code: int | None = None
+    with contextlib.ExitStack() as stack:
+        for name, value in patches().items():
+            stack.enter_context(mock.patch.object(module, name, value))
+        stack.enter_context(mock.patch.object(module, "fence", return_value=failure, create=True))
+        _patch_printers(stack, module, result, emit)
+        try:
+            returned = getattr(module, function)(*args())
+        except SystemExit as error:
+            code = cast("int", error.code)
+        except catalog_update_body.FenceStopped as error:
+            printed.append(("", error.reason, ""))
+        else:
+            code = _returned(returned, printed)
+    return printed, code
+
+
+def _patch_printers(
+    stack: contextlib.ExitStack,
+    module: ModuleType,
+    result: Callable[[str, str], None],
+    emit: Callable[[dict[str, object]], None],
+) -> None:
+    # The PHP switch prints through its staged ``common`` namespace.
+    common = getattr(module, "common", None)
+    printer = common if isinstance(common, SimpleNamespace) else module
+    for owner, name, value in ((printer, "result", result), (module, "emit_result", emit)):
+        if hasattr(owner, name):
+            stack.enter_context(mock.patch.object(owner, name, value))
+
+
+def _returned(value: object, printed: list[tuple[str, str, str]]) -> int | None:
+    """A step's returned (class, reason) joins ``printed``; a returned int is the exit code."""
+    if isinstance(value, tuple):
+        printed.append((str(value[0]), str(value[1]), ""))
+    return value if isinstance(value, int) else None
 
 
 def _switch_args() -> tuple[object, ...]:

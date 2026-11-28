@@ -65,6 +65,15 @@ PAUSE_REASONS: Final = frozenset(
 )
 
 
+def saved(result_class: str, snapshots: int) -> bool:
+    """Whether a capture left a recovery point.
+
+    A partial capture with no snapshot stopped before it copied anything, for example at
+    its fence or its maintenance gate, so it names no point to restore (#590).
+    """
+    return result_class == "succeeded" or (result_class == "partial" and snapshots > 0)
+
+
 @dataclass(frozen=True)
 class BackupResult:
     """One safe result line the unit printed, as discovery read it."""
@@ -89,7 +98,7 @@ class BackupResult:
 
     @property
     def succeeded(self) -> bool:
-        return self.result_class == "succeeded" or self.result_class == "partial"
+        return saved(self.result_class, self.snapshots)
 
 
 def stopped_by_pause(result: BackupResult | None) -> bool:
@@ -234,6 +243,10 @@ class BackupRun:
     @property
     def short_point(self) -> str:
         return self.point[:8]
+
+    @property
+    def saved(self) -> bool:
+        return saved(self.result_class, self.snapshots)
 
 
 @dataclass(frozen=True)

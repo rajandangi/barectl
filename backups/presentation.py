@@ -232,6 +232,13 @@ def result_view(  # noqa: C901 - one result
             _label(at),
             result.result_class,
         )
+    if result.result_class == "partial" and not result.succeeded:
+        return LastBackupView(
+            "The backup did not run.",
+            _result_reason(result.reason),
+            _label(at),
+            result.result_class,
+        )
     if result.result_class == "partial":
         return LastBackupView(
             f"{scope} saved with warnings.",
@@ -264,6 +271,15 @@ def result_view(  # noqa: C901 - one result
 def _result_reason(reason: str) -> str:
     return {
         "backup_dump": "The database dump failed, so nothing was saved.",
+        "automation_fence": (
+            "Barectl stopped partway through pausing the site's background work, so some of "
+            "it may stay paused and nothing was saved. Choose what runs in Scheduled tasks or "
+            "Queue workers."
+        ),
+        "automation_restore": (
+            "Barectl could not start the site's background work again, so it stays paused. "
+            "Choose what runs in Scheduled tasks or Queue workers."
+        ),
         "backup_files": "The site's files could not be copied, so the point is incomplete.",
         "backup_idle": "The site was still busy, so the full copy stopped before its files.",
         "backup_paused": "The site is paused because the full copy stopped partway.",

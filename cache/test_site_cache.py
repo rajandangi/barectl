@@ -427,7 +427,7 @@ class ObjectCacheFenceTests(SimpleTestCase):
         source = instance.BODY_SOURCE
         sequence = source[source.index("def apply(") : source.index('if __name__ == "__main__":')]
         self.assertLess(
-            sequence.index("if not fence(document, identifier):"),
+            sequence.index("if failure := fence(document, identifier):"),
             sequence.index('stage("instance")'),
         )
         verify = sequence.index('stage("verify")')

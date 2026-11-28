@@ -62,7 +62,17 @@ class SharedSiteReasonTests(SimpleTestCase):
         sentence = engine.reason_text("refused", "automation_fence")
 
         self.assertIn("background work did not stop", sentence)
-        self.assertIn("stays paused", sentence)
+        self.assertIn("may stay paused", sentence)
+        self.assertIn("Scheduled tasks or Queue workers", sentence)
+
+    def test_a_fence_that_stopped_after_a_mask_points_to_the_background_work_controls(
+        self,
+    ) -> None:
+        sentence = engine.reason_text("partial", "automation_fence")
+
+        self.assertIn("partway through pausing", sentence)
+        self.assertIn("Scheduled tasks or Queue workers", sentence)
+        self.assertNotIn("before changing anything", sentence)
 
     def test_creating_a_site_that_stops_partway_names_the_create_or_caddy_step(self) -> None:
         for reason, words in (

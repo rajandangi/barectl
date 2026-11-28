@@ -68,7 +68,8 @@ class WordPressReasonTests(SimpleTestCase):
         sentence = engine.reason_text("refused", "automation_fence")
 
         self.assertIn("background work did not stop", sentence)
-        self.assertIn("stays paused", sentence)
+        self.assertIn("may stay paused", sentence)
+        self.assertIn("Scheduled tasks or Queue workers", sentence)
 
     def test_no_partial_sentence_claims_nothing_changed(self) -> None:
         for declared in _DECLARATIONS:

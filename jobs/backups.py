@@ -262,7 +262,7 @@ def _run_row(backup: ObservedBackup, run: BackupRun, server: Server) -> BackupRu
         detail_lines=(
             ("Site", backup.identifier),
             ("Type of work", title),
-            ("Result class", _RESULT_LABELS.get(run.result_class, run.result_class)),
+            ("Result class", _result_label(run)),
             *((("Time", run.at),) if run.at else ()),
             *((("Recovery point", run.short_point),) if run.point else ()),
             *((("What happened", f"{headline} {detail}".strip()),) if needs_attention else ()),
@@ -325,12 +325,25 @@ def _sentences(backup: ObservedBackup, run: BackupRun) -> tuple[str, str]:
     return cleaned.headline, cleaned.detail
 
 
+def _unsaved_capture(run: BackupRun) -> bool:
+    """A partial capture that stopped before its first snapshot, as at its fence (#590)."""
+    return run.kind == "capture" and run.result_class == "partial" and not run.saved
+
+
+def _result_label(run: BackupRun) -> str:
+    if _unsaved_capture(run):
+        return "Not saved"
+    return _RESULT_LABELS.get(run.result_class, run.result_class)
+
+
 def _summary(run: BackupRun) -> str:
     if not run.result_class:
         return "Could not confirm"
     if run.kind == "capture":
         if run.result_class == "succeeded":
             return "Finished"
+        if _unsaved_capture(run):
+            return "Not saved"
         if run.result_class == "partial":
             return "Partly saved (some files unreadable)"
     if run.result_class == "succeeded":
@@ -352,7 +365,7 @@ def _findings(  # noqa: C901 - one run's findings
     if run.kind == "capture":
         onsite = (
             "Saved"
-            if run.result_class in ("succeeded", "partial")
+            if run.saved
             else ("Skipped" if run.result_class == "lock_busy" else "Not saved")
         )
         if run.point:

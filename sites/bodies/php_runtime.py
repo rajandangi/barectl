@@ -354,8 +354,8 @@ def switch_php(document: dict[str, object]) -> None:
             return
         settings = php_settings(identifier, before, selected)
         source = "php85" if selected == "php84" else "php84"
-        if not fence(document, identifier):
-            common.result("refused", "automation_fence")
+        if failure := fence(document, identifier):
+            common.result(failure, "automation_fence")
             return
         changed = True
         source_evidence = start_target_php(settings, before, source)

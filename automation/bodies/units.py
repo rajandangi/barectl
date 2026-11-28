@@ -407,7 +407,7 @@ def resume_matches(plan: SimpleNamespace, identifier: str) -> bool:
 
 def fence(  # noqa: C901 - one reviewed stop sequence
     document: object, identifier: str, *, gate: bool = False
-) -> bool:
+) -> str:
     """Stop a site's background work and prove its slice has no processes.
 
     Call it after the kind's site lock and before its own mutation. A runtime mask keeps the
@@ -415,20 +415,28 @@ def fence(  # noqa: C901 - one reviewed stop sequence
     reboot, so when the change enters a persistent maintenance gate, ``gate`` also removes
     boot activation for every reviewed unit — timers and worker services alike — so a reboot
     during the gate cannot restart work.
+
+    Returns ``""`` once the work is stopped, otherwise the result class the body reports
+    with ``automation_fence``: ``refused`` when nothing was masked, or every unit was masked
+    and stopped but the slice did not drain, and ``partial`` when the sequence stopped
+    after its first mask (docs/automation.md#fencing-site-changes, #590).
     """
     plan = _checked_plan(document, identifier)
     if plan is None:
-        return True
-    # A unit enabled, disabled, added or removed since the review would escape the
-    # declared resume set. Refuse before any mask, and leave the site exactly as it was.
-    if not resume_matches(plan, identifier):
-        return False
+        return ""
+    masked = False
     try:
+        # A unit enabled, disabled, added or removed since the review would escape the
+        # declared resume set. Refuse before any mask, and leave the site exactly as it was.
+        if not resume_matches(plan, identifier):
+            return "refused"
         # Each ``mask`` reloads systemd, so a stop that fails before the explicit reload
         # below still leaves the masters to restart.
         note_reload()
         for name in [*plan.timers, *plan.services]:
             if load_state(name) != "not-found":
+                # A mask that times out may still have applied.
+                masked = True
                 systemctl("mask", "--runtime", name)
                 write_dropin(name)
         # A loaded unit keeps its old unit-file state, and would start from the copy it
@@ -449,9 +457,13 @@ def fence(  # noqa: C901 - one reviewed stop sequence
                 systemctl("stop", name)
         if load_state(plan.slice) != "not-found":
             systemctl("stop", plan.slice)
-    except OSError, ValueError, KeyError:
-        return False
-    return wait_slice_empty(plan.slice, plan.budget_seconds)
+    except OSError, ValueError, KeyError, subprocess.TimeoutExpired:
+        return "partial" if masked else "refused"
+    try:
+        drained = wait_slice_empty(plan.slice, plan.budget_seconds)
+    except OSError, ValueError, KeyError, subprocess.TimeoutExpired:
+        drained = False
+    return "" if drained else "refused"
 
 
 def restore(document: object, identifier: str) -> bool:

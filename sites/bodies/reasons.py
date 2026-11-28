@@ -19,8 +19,14 @@ SITE_REASONS: Final = (
         {
             Result.REFUSED: (
                 "The site's background work did not stop within its budget, so the run "
-                "stopped before changing anything and the site's background work stays "
-                "paused. Check the run's journal, then prepare a new review."
+                "stopped before changing anything else and the site's background work may "
+                "stay paused. Choose what runs in the site's Scheduled tasks or Queue "
+                "workers, then prepare a new review."
+            ),
+            Result.PARTIAL: (
+                "Barectl stopped partway through pausing the site's background work, so some "
+                "of it may stay paused. Choose what runs in the site's Scheduled tasks or "
+                "Queue workers, then prepare a new review."
             ),
         },
     ),

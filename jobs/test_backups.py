@@ -87,6 +87,42 @@ class BackupJobsTests(TestCase):
                     self.assertEqual(row.summary, sentence)
                 self.assertEqual(row.result_class, result_class)
 
+    def test_a_capture_that_stopped_before_its_first_snapshot_is_not_saved(self) -> None:
+        """#590: a partial fence or a failed gate left no recovery point."""
+        for reason, point in (("automation_fence", ""), ("automation_restore", "0123456789abcdef")):
+            with self.subTest(reason=reason):
+                view = self.view(
+                    run(
+                        result_class="partial",
+                        reason=reason,
+                        scope="full",
+                        point=point,
+                        snapshots=0,
+                        size=0,
+                        at=self.now,
+                    )
+                )
+                row = self.recent(view)[0]
+                self.assertEqual(row.summary, "Not saved")
+                self.assertIn(("Result class", "Not saved"), row.detail_lines)
+                self.assertTrue(row.findings[0][1].startswith("Not saved"), row.findings)
+                self.assertIn("The backup did not run.", row.attention_sentence)
+                self.assertIn("Scheduled tasks or Queue workers", row.attention_sentence)
+
+    def test_a_capture_whose_restore_failed_after_its_snapshots_stays_saved(self) -> None:
+        view = self.view(
+            run(
+                result_class="partial",
+                reason="automation_restore",
+                scope="full",
+                snapshots=2,
+                at=self.now,
+            )
+        )
+        row = self.recent(view)[0]
+        self.assertEqual(row.summary, "Partly saved (some files unreadable)")
+        self.assertTrue(row.findings[0][1].startswith("Saved"), row.findings)
+
     def test_an_offsite_failure_keeps_the_onsite_finding_and_the_section_sentence(self) -> None:
         view = self.view(run(result_class="succeeded", offsite="failed", at=self.now))
         row = self.recent(view)[0]

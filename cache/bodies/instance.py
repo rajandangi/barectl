@@ -514,8 +514,8 @@ def _apply_laravel(  # noqa: C901 - one reviewed sequence
     ):
         return "refused", "evidence"
     before_wiring = laravel_wiring(identifier, _environment_entries(text))
-    if not fence(document, identifier):
-        return "refused", "automation_fence"
+    if failure := fence(document, identifier):
+        return failure, "automation_fence"
     changed = False
     if enabled:
         stage("instance")
@@ -656,8 +656,8 @@ def apply(document: dict[str, object]) -> None:  # noqa: C901 - one reviewed seq
         ):
             result("refused", "evidence")
             return
-        if not fence(document, identifier):
-            result("refused", "automation_fence")
+        if failure := fence(document, identifier):
+            result(failure, "automation_fence")
             return
         if enabled:
             stage("instance")

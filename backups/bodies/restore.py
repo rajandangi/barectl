@@ -988,8 +988,8 @@ def begin_pause(
     point: str,
 ) -> tuple[str, str] | None:
     """Fence, publish the gate and drain. Returns a failure result, or None when paused."""
-    if not fence(document, identifier, gate=True):
-        return ("refused", "automation_fence")
+    if failure := fence(document, identifier, gate=True):
+        return (failure, "automation_fence")
     stage("gate")
     try:
         gate_up = publish_gate(settings, document)

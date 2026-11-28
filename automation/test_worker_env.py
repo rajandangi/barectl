@@ -93,12 +93,12 @@ class FakeSite:
         self.fenced = False
         self.order: list[str] = []
 
-    def fence(self, document: dict[str, object], _identifier: str) -> bool:
+    def fence(self, document: dict[str, object], _identifier: str) -> str:
         self.order.append("fence")
         if document.get("automation_fence"):
             self.fenced = True
             self.running = dict.fromkeys(self.running)
-        return True
+        return ""
 
     def restore(self, document: dict[str, object], _identifier: str) -> bool:
         self.order.append("restore")
@@ -140,6 +140,7 @@ class EnvironmentBodyTests(SimpleTestCase):
         *,
         fenced: bool,
         restore: Callable[[dict[str, object], str], bool] | None = None,
+        fence: Callable[[dict[str, object], str], str] | None = None,
     ) -> list[str]:
         from laravel.bodies import settings as body
 
@@ -176,7 +177,7 @@ class EnvironmentBodyTests(SimpleTestCase):
             directory="/var/www/shop",
         )
         with ExitStack() as stack:
-            stack.enter_context(mock.patch.object(body, "fence", site.fence, create=True))
+            stack.enter_context(mock.patch.object(body, "fence", fence or site.fence, create=True))
             stack.enter_context(
                 mock.patch.object(body, "restore", restore or site.restore, create=True)
             )
@@ -247,3 +248,60 @@ class EnvironmentBodyTests(SimpleTestCase):
 
         order = self.edit(site, fenced=True, restore=restore)
         self.assertEqual(order[-1], "result:partial:automation_restore", order)
+
+    def fence_timing_out(
+        self, site: FakeSite, step: str
+    ) -> Callable[[dict[str, object], str], str]:
+        """The real fence, with one ``systemctl`` call timing out at ``run``'s 20 s bound.
+
+        ``step`` is ``show`` for the first unit's state read before any mask, or ``mask`` for
+        queue2's mask after queue1 is masked.
+        """
+
+        def timed_out(*arguments: str) -> subprocess.TimeoutExpired:
+            return subprocess.TimeoutExpired(["/usr/bin/systemctl", *arguments], 20)
+
+        def load_state(name: str) -> str:
+            if step == "show":
+                raise timed_out("show", name)
+            return "loaded"
+
+        def systemctl(*arguments: str) -> str:
+            if step == "mask" and arguments[0] == "mask" and arguments[-1] == QUEUE2:
+                raise timed_out(*arguments)
+            if arguments[0] == "mask":
+                site.order.append(f"mask:{arguments[-1]}")
+            return ""
+
+        def fence(document: dict[str, object], identifier: str) -> str:
+            site.order.append("fence")
+            with ExitStack() as stack:
+                for helper, value in {
+                    "systemctl": systemctl,
+                    "run": lambda *_args, **_kwargs: "",
+                    "load_state": load_state,
+                    "resume_matches": lambda _plan, _identifier: True,
+                    "write_dropin": lambda _name: None,
+                    "note_reload": lambda: None,
+                    "wait_slice_empty": lambda _name, _budget: True,
+                }.items():
+                    stack.enter_context(mock.patch.object(units, helper, value))
+                return units.fence(document, identifier)
+
+        return fence
+
+    def test_a_fence_that_times_out_before_its_first_mask_refuses(self) -> None:
+        """#590: nothing was masked, so the run truly changed nothing."""
+        site = FakeSite()
+        order = self.edit(site, fenced=True, fence=self.fence_timing_out(site, "show"))
+        self.assertEqual(order[-1], "result:refused:automation_fence", order)
+        self.assertNotIn(f"mask:{QUEUE1}", order)
+        self.assertNotIn("write", order)
+
+    def test_a_fence_that_times_out_after_a_mask_is_partial(self) -> None:
+        """#590: queue1 is masked, so a refusal would wrongly say nothing changed."""
+        site = FakeSite()
+        order = self.edit(site, fenced=True, fence=self.fence_timing_out(site, "mask"))
+        self.assertEqual(order[-1], "result:partial:automation_fence", order)
+        self.assertIn(f"mask:{QUEUE1}", order)
+        self.assertNotIn("write", order)

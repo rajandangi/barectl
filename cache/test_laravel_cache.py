@@ -448,7 +448,7 @@ class LaravelObjectCacheDocumentTests(SimpleTestCase):
         source = instance.BODY_SOURCE
         sequence = source[source.index("def _apply_laravel") : source.index("def apply(")]
         self.assertLess(
-            sequence.index("if not fence(document, identifier):"),
+            sequence.index("if failure := fence(document, identifier):"),
             sequence.index('stage("environment")'),
         )
         self.assertEqual(sequence.count("if not restore(document, identifier):"), 2)

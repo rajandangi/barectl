@@ -183,7 +183,7 @@ def move_site(identifier: str, target: str, document: dict[str, object]) -> None
             raise ValueError("A site's target runtime profile changed during the update.")
         if missing_php_modules(state, target):
             raise ValueError("A site's target runtime would lose a loaded optional module.")
-        if not fence(document, identifier):
+        if fence(document, identifier):
             raise FenceStopped("automation_fence")
         source = other_php(target)
         settings = php_settings(identifier, state, target)
